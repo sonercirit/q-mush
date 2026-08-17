@@ -19,7 +19,7 @@ import {
 function report(
   setup: SpawnedChildReference,
   now = TEST_NOW + 5,
-): "delivered" | "promoted" | "terminal" | undefined {
+): "deferred" | "delivered" | "promoted" | "terminal" | undefined {
   return setup.store.spawnedSessionCallbackDisposition(
     TEST_USER_ID,
     setup.childId,
@@ -229,7 +229,9 @@ describe("spawned session report generation fencing", () => {
         setup.parentGeneration,
       ),
     ).toEqual({ status: "queued", userId: TEST_USER_ID });
-    expect(childSummary(setup)?.parentExecutionGeneration).toBeNull();
+    expect(childSummary(setup)?.parentExecutionGeneration).toBe(
+      setup.parentGeneration,
+    );
     closeAfterParentAssertion(setup, (parent) => {
       expect(parent?.messages.at(-1)?.content).toBe("Child complete");
     });
@@ -268,7 +270,7 @@ describe("spawned session report generation fencing", () => {
   });
 
   test.each(["failed", "idle", "stopped"] as const)(
-    "consumes the callback for a terminal %s parent on the child transcript",
+    "persists the callback for a terminal %s parent",
     (status) => {
       const setup = spawnedChildSetup();
       if (status === "failed") {
@@ -301,9 +303,9 @@ describe("spawned session report generation fencing", () => {
         setup.store
           .get(TEST_USER_ID, setup.childId)
           ?.messages.some(({ role }) => role === "system"),
-      ).toBe(true);
+      ).toBe(false);
       closeAfterParentAssertion(setup, (parent) => {
-        expect(parentHasChildReport(parent)).toBe(false);
+        expect(parentHasChildReport(parent)).toBe(true);
         expect(parent?.pendingInputs).toEqual([]);
         expect(parent?.status).toBe(status);
       });
@@ -340,7 +342,7 @@ describe("spawned session report generation fencing", () => {
       setup.store.spawnedSessionChildren(TEST_USER_ID, setup.parentId),
     ).toEqual([setup.childId]);
     expect(childSummary(setup)).toMatchObject({
-      parentExecutionGeneration: null,
+      parentExecutionGeneration: setup.parentGeneration,
       parentSessionId: setup.parentId,
     });
     closeSetup(setup);

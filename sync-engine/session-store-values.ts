@@ -70,12 +70,6 @@ export function storedCompactionRequestValues(
   return storedNoteMessageValues(content, "compaction_request");
 }
 
-export function storedSystemMessageValues(
-  content: string,
-): StoredMessageValues {
-  return storedNoteMessageValues(content, "system");
-}
-
 export function storedUserMessageValues(
   content: string,
   images: readonly AgentImage[] = [],

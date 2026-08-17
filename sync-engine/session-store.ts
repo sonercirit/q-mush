@@ -6,7 +6,6 @@ import type {
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
@@ -83,6 +82,7 @@ import {
   type PendingSpawnedSession,
   type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   stopStoredSession,
   transitionSessionRuntime,
@@ -391,15 +391,14 @@ export class SessionStore extends SessionStoreRestarts {
    * Runtime code must use the generation-required methods above.
    */
   #currentGeneration(sessionId: string): number {
-    const current = this.#database
-      .select({ generation: agentSessions.executionGeneration })
-      .from(agentSessions)
-      .where(activeSessionCondition({ id: sessionId }))
-      .get();
+    const current = readStoredSessionGeneration({
+      condition: activeSessionCondition({ id: sessionId }),
+      database: this.#database,
+    });
     if (current === undefined) {
       throw new DOMException("The agent session was stopped", "AbortError");
     }
-    return current.generation;
+    return current;
   }
   #current(): CurrentSessionStore {
     return new CurrentSessionStore(this, (sessionId) =>

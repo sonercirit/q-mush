@@ -229,10 +229,7 @@ export class SessionAgentActions {
       userId,
     );
     if (reported !== undefined) {
-      this.#dependencies.notify(
-        userId,
-        reported.disposition === "terminal" ? detail.id : reported.parentId,
-      );
+      this.#dependencies.notify(userId, reported.parentId);
     }
     return reported;
   }
@@ -478,13 +475,16 @@ export class SessionAgentActions {
           ) {
             return createJsonResponse({ error: "server_restarting" }, 503);
           }
-          this.#dependencies.store.transitionRuntime(
+          this.#dependencies.store.settleRuntimeFailure(
             queued.detail.id,
-            "failed",
+            "Session failed: the child session could not be launched",
             this.#dependencies.now(),
             queued.detail.generation,
           );
+          const failed =
+            this.#dependencies.store.get(userId, sessionId) ?? queued.detail;
           this.#dependencies.notify(userId, sessionId);
+          this.reportOne(failed, userId);
           return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
         return this.#queuedResponse(userId, sessionId);
@@ -559,6 +559,9 @@ export class SessionAgentActions {
       authority,
       dependencies: this.#dependencies,
       input,
+      terminal: (detail) => {
+        this.reportOne(detail, userId);
+      },
       userId,
     });
   }

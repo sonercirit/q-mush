@@ -112,14 +112,14 @@ Living project memory.
   `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
-  resolution. Tool, skill, model, and effort choices persist per session;
-  pickers use canonical schemas. Bounded `read_session` spans transcript
-  categories and definitions; `get_session_options` pages spawn choices. Grouped
-  tools manage non-blocking owned children, report final messages, resume idle
-  parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists page by ten. Live sessions use
+  resolution. Choices persist with canonical schemas. `read_session` is bounded;
+  `get_session_options` pages choices. A durable generation ledger delivers one
+  sanitized terminal event per owned child attempt, including
+  continued/immediate failures; routes survive delivery, recreation, compaction,
+  and disconnects. Idle parents retain events until resumed. `parallel` has four
+  ordered workers, bounded output, and cancellation.
+  `solid/session-transcript.tsx` renders prompts, Markdown, code, JSON, diffs,
+  and results while preserving line breaks; lists page by ten. Live sessions use
   `solid/realtime-client.ts`, `solid/session-client.tsx`,
   `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events are immediate, unchanged snapshots suppress

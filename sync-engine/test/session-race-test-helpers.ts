@@ -1,4 +1,11 @@
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type { SessionAgentActionDependencies } from "../../sync-engine/session-agent-action-helpers.ts";
+import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import {
+  createTestProviderCredential,
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 
 export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   adaptiveThinking: null,
@@ -7,7 +14,7 @@ export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   providerPricing: null,
 } as const;
 
-export function sessionAgentActionDefaults() {
+function sessionAgentActionDefaults() {
   return {
     broker: new RunnerCommandBroker(),
     cleanupSession: () => undefined,
@@ -17,6 +24,57 @@ export function sessionAgentActionDefaults() {
     pendingRestart: () => undefined,
     runnerIsAvailable: () => true,
   };
+}
+
+export function inactiveSessionAgentActionDefaults() {
+  return {
+    ...sessionAgentActionDefaults(),
+    abortSession: () => undefined,
+    activeSession: () => false,
+    browseDirectories: () =>
+      Promise.resolve({ status: "runner_unavailable" as const }),
+    listOnlineRunners: () => [],
+  };
+}
+
+export function terminalEventActionSetup(
+  setup: Readonly<{
+    database: SessionAgentActionDependencies["database"];
+    store: SessionAgentActionDependencies["store"];
+  }>,
+  launchSession: SessionAgentActionDependencies["launchSession"],
+  notify: SessionAgentActionDependencies["notify"],
+): ConstructorParameters<typeof SessionAgentActions>[0] {
+  return {
+    ...inactiveSessionAgentActionDefaults(),
+    database: setup.database,
+    discoverSessionMetadata: () =>
+      Promise.resolve(EMPTY_SESSION_REQUEST_MODEL_METADATA),
+    launchSession,
+    notify,
+    now: () => TEST_NOW + 9,
+    readCredential: () => Promise.resolve(undefined),
+    store: setup.store,
+    withCredential: (_userId, selection, action) =>
+      Promise.resolve(
+        action(
+          createTestProviderCredential(selection.credentialId, "api_key", {
+            accountId: null,
+            secret: "unused",
+          }),
+        ),
+      ),
+  };
+}
+
+export function spawnedParentReports(
+  store: SessionAgentActionDependencies["store"],
+  parentId: string,
+): readonly string[] {
+  const parent = store.get(TEST_USER_ID, parentId);
+  const pending = parent?.pendingInputs.map(({ content }) => content) ?? [];
+  const messages = parent?.messages.map(({ content }) => content) ?? [];
+  return pending.concat(messages);
 }
 
 export interface PromiseGate<Value = undefined> {

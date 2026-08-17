@@ -2,7 +2,7 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_NOW } from "./authenticated-integration-test-helpers.ts";
-import { sessionAgentActionDefaults } from "./session-race-test-helpers.ts";
+import { inactiveSessionAgentActionDefaults } from "./session-race-test-helpers.ts";
 import { restartTestCredential } from "./session-restart-cpd-helpers.ts";
 
 export const CREDENTIAL = restartTestCredential(
@@ -18,15 +18,9 @@ export function orchestrationActions(
   database: AppDatabase,
   store: SessionStore,
 ): SessionAgentActions {
-  const defaults = sessionAgentActionDefaults();
+  const defaults = inactiveSessionAgentActionDefaults();
   return new SessionAgentActions({
     ...defaults,
-    abortSession: () => undefined,
-    activeSession: () => false,
-    browseDirectories: () =>
-      Promise.resolve(
-        Object.assign({}, { status: "runner_unavailable" as const }),
-      ),
     database,
     discoverSessionMetadata: () =>
       Promise.resolve(
@@ -41,7 +35,6 @@ export function orchestrationActions(
         ),
       ),
     launchSession: () => false,
-    listOnlineRunners: () => [],
     notify: () => undefined,
     now: () => TEST_NOW + 5,
     readCredential: () => Promise.resolve(void 0),

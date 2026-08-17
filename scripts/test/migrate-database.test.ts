@@ -130,12 +130,6 @@ function createMigrationJournal(
   }
 }
 
-async function applyInitialMigration(database: Database): Promise<void> {
-  const initialMigration = MIGRATIONS[0];
-  await applyMigrationFile(database, initialMigration.file);
-  createMigrationJournal(database, [initialMigration]);
-}
-
 async function createLegacyDatabase(
   directoryPrefix: string,
   file: string,
@@ -319,26 +313,16 @@ test("session migration preserves transcripts with foreign keys", async () => {
     ],
   );
   const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
-  expect(
-    upgradedDatabase
-      .select({
-        id: agentSessions.id,
-        parentExecutionGeneration: agentSessions.parentExecutionGeneration,
-        parentSessionId: agentSessions.parentSessionId,
-        runnerRequired: agentSessions.runnerRequired,
-        tools: agentSessions.tools,
-      })
-      .from(agentSessions)
-      .all(),
-  ).toEqual([
-    {
-      id: sessionId,
-      parentExecutionGeneration: null,
-      parentSessionId: null,
-      runnerRequired: false,
-      tools: CURRENT_AGENT_SESSION_TOOLS,
-    },
-  ]);
+  const migratedSessions = upgradedDatabase.select().from(agentSessions).all();
+  expect(migratedSessions).toHaveLength(1);
+  expect(migratedSessions[0]).toMatchObject({
+    id: sessionId,
+    parentExecutionGeneration: null,
+    parentReportedGeneration: -1,
+    parentSessionId: null,
+    runnerRequired: false,
+    tools: CURRENT_AGENT_SESSION_TOOLS,
+  });
   expect(
     upgradedDatabase
       .select({
@@ -564,10 +548,10 @@ test("preserves existing OpenRouter credentials", async () => {
 });
 
 test("preserves records from the initial schema", async () => {
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-upgrade-test-"));
-  const databasePath = join(temporaryDirectory, "legacy.sqlite");
-  const legacyDatabase = new Database(databasePath, { create: true });
-  await applyInitialMigration(legacyDatabase);
+  const { database: legacyDatabase, path: databasePath } =
+    await createLegacyDatabase("q-mush-upgrade-test-", "legacy.sqlite", [
+      MIGRATIONS[0],
+    ]);
 
   const legacyExpiry = 1_800_000_000_000;
   legacyDatabase.run(
