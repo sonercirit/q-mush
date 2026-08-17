@@ -225,7 +225,7 @@ describe("session agent tools", () => {
   });
 
   test("routes more than eight mixed session and runner recipients through parallel", async () => {
-    const toolUses = Array.from({ length: 20 }, (_, index) =>
+    const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
         ? { parameters: {}, recipient_name: "list_sessions" }
         : {
@@ -243,11 +243,11 @@ describe("session agent tools", () => {
     const { output, setup } = await completedToolOutput(model, "parallel");
     const results: unknown = JSON.parse(output ?? "null");
 
-    expect(results).toHaveLength(20);
+    expect(results).toHaveLength(10);
     expect(Array.isArray(results) ? results[0] : undefined).toMatchObject({
       recipient_name: "list_sessions",
     });
-    expect(Array.isArray(results) ? results[19] : undefined).toMatchObject({
+    expect(Array.isArray(results) ? results[9] : undefined).toMatchObject({
       recipient_name: "read_session",
     });
     expect(setup.runnerCommands).toEqual([]);

@@ -220,13 +220,14 @@ test("a directory deadline retains its abort reason", async () => {
     directoryRequest(() => true),
     controller.signal,
   );
-  const reason = new DOMException("Deadline reached", "AbortError");
+  const reason = new DOMException("Directory deadline", "TimeoutError");
 
   controller.abort(reason);
 
-  await expect(result).rejects.toMatchObject({
-    message: "Deadline reached",
-    name: "AbortError",
+  const failure = await result.catch((error: unknown) => error);
+  expect(failure).toMatchObject({
+    message: "Directory deadline",
+    name: "TimeoutError",
   });
   setup.close();
 });
@@ -278,7 +279,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
     readCredential: () => Promise.resolve(undefined),
     store,
     withCredential: () => Promise.resolve(new Response()),
-  }).actions(session.id, TEST_USER_ID, session.generation, signal);
+  }).actions(session.id, TEST_USER_ID, session.generation);
 
   await expect(
     actions.browseRunnerDirectories(
@@ -289,8 +290,8 @@ test("agent directory browsing passes parent identity, authorization, and signal
   ).resolves.toContain(`"path": "${WORKING_DIRECTORY}"`);
   expect(browse).toHaveBeenCalledOnce();
 
-  // A per-call deadline signal combines with the session signal: aborting
-  // the deadline aborts the dispatched browse without touching the session.
+  // The action layer forwards the per-call deadline directly; it no longer
+  // composes a redundant session signal.
   const deadline = new AbortController();
   const combinedSignals: AbortSignal[] = [];
   browse.mockImplementation((_request, receivedSignal) => {
@@ -314,6 +315,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
   if (combined === undefined) {
     throw new Error("The combined browse signal is unavailable");
   }
+  expect(combined).toBe(deadline.signal);
   expect(combined.aborted).toBe(false);
   deadline.abort(new Error("Deadline reached"));
   expect(combined.aborted).toBe(true);

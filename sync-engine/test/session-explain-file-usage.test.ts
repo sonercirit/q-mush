@@ -190,7 +190,7 @@ describe("explain file usage", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("bounds an oversized model explanation like any tool output", async () => {
+  test("bounds an oversized model explanation without a spill command", async () => {
     const oversized = `explained ${"x".repeat(60 * 1_024)} FINAL-TAIL-MARKER`;
     const model = scriptedModel([
       explainFileStep(),
@@ -206,18 +206,13 @@ describe("explain file usage", () => {
       "explain_file",
       JSON.stringify(ATTACHMENT),
     );
-    // The oversized explanation triggers the shared spill path.
-    await completeRunnerToolCommand(
-      setup,
-      "spill_tool_output",
-      "/tmp/explanation.txt",
-    );
     const detail = await completedParentDetail(setup, "idle");
 
     const explanation = isRecord(detail)
       ? JSON.stringify(detail["messages"])
       : "";
-    expect(explanation).toContain("saved to /tmp/explanation.txt");
+    expect(explanation).toContain("Tool output truncated");
+    expect(explanation).not.toContain("saved to");
     expect(explanation).not.toContain("FINAL-TAIL-MARKER");
     closeSessionTestDatabase(setup.database);
   });

@@ -1,4 +1,9 @@
 import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
+import { DEFAULT_TOOL_OUTPUT_CHARACTERS } from "../shared/tool-limits.ts";
+import {
+  unicodeCharacterCount,
+  unicodeCharacterPrefix,
+} from "../shared/tool-output-limits.ts";
 import {
   MAXIMUM_TOOL_STREAM_DELTA_BYTES,
   type RunnerCommandResult,
@@ -21,11 +26,10 @@ export interface RunnerProcessOptions {
   readonly onOutput?: (
     delta: Omit<RunnerCommandOutputDelta, "sequence">,
   ) => void;
+  readonly outputLimitCharacters?: number;
   readonly signal?: AbortSignal;
   readonly timeoutSeconds?: number;
 }
-
-const MAXIMUM_OUTPUT_BYTES = 256 * 1_024;
 
 export function throwIfRunnerCommandStopped(
   signal: AbortSignal | undefined,
@@ -47,51 +51,68 @@ wait "$command_pid"
 exit $?
 `;
 
+interface RunnerProcessCaptureBudget {
+  remainingCharacters: number;
+}
+
+function processCaptureBudget(
+  outputLimitCharacters = DEFAULT_TOOL_OUTPUT_CHARACTERS,
+): RunnerProcessCaptureBudget {
+  // One extra code point lets the engine distinguish an exact boundary from
+  // overflow before it adds the sole model-facing truncation notice.
+  return { remainingCharacters: outputLimitCharacters + 1 };
+}
+
 async function readStream(
   stream: ReadableStream<Uint8Array>,
-  maximumBytes: number,
   channel: RunnerCommandOutputDelta["channel"],
+  capture: RunnerProcessCaptureBudget,
   onOutput?: RunnerProcessOptions["onOutput"],
 ): Promise<string> {
+  // Both process channels share one retained-memory budget. Live deltas stay
+  // independently transport-bounded and do not consume model-facing output.
   const reader = stream.getReader();
-  const chunks: Uint8Array[] = [];
   const decoder = new TextDecoder();
-  let byteLength = 0;
-  let truncated = false;
-  const publish = (value: Uint8Array, final = false): void => {
-    let content = decoder.decode(value, { stream: !final });
-    while (content.length > 0) {
-      const chunk = utf8Prefix(content, MAXIMUM_TOOL_STREAM_DELTA_BYTES);
+  let output = "";
+  const publish = (content: string): void => {
+    let remaining = content;
+    while (remaining.length > 0) {
+      const chunk = utf8Prefix(remaining, MAXIMUM_TOOL_STREAM_DELTA_BYTES);
       if (chunk.length === 0) {
         return;
       }
       onOutput?.({ channel, content: chunk });
-      content = content.slice(chunk.length);
+      remaining = remaining.slice(chunk.length);
     }
+  };
+
+  const retain = (content: string): boolean => {
+    const available = capture.remainingCharacters;
+    const contentCharacters = unicodeCharacterCount(content);
+    const accepted = unicodeCharacterPrefix(content, available);
+    output += accepted;
+    const acceptedCharacters = unicodeCharacterCount(accepted);
+    capture.remainingCharacters -= acceptedCharacters;
+    return contentCharacters <= available;
   };
 
   for (;;) {
     const part = await reader.read();
     if (part.done) {
-      publish(new Uint8Array(), true);
+      const final = decoder.decode();
+      retain(final);
+      if (final.length > 0) publish(final);
       break;
     }
-    const remaining = maximumBytes - byteLength;
-    if (part.value.byteLength > remaining) {
-      const accepted = part.value.slice(0, Math.max(remaining, 0));
-      chunks.push(accepted);
-      publish(accepted, true);
-      truncated = true;
+    const content = decoder.decode(part.value, { stream: true });
+    publish(content);
+    if (!retain(content) || capture.remainingCharacters === 0) {
       await reader.cancel();
       break;
     }
-    chunks.push(part.value);
-    publish(part.value);
-    byteLength += part.value.byteLength;
   }
 
-  const output = Buffer.concat(chunks).toString("utf8");
-  return truncated ? `${output}\n[output truncated]` : output;
+  return output;
 }
 
 export async function runRunnerProcess(
@@ -139,28 +160,20 @@ export async function runRunnerProcess(
         }, options.timeoutSeconds * 1_000);
   options.signal?.addEventListener("abort", stop, { once: true });
 
+  const capture = processCaptureBudget(options.outputLimitCharacters);
   try {
     const [exitCode, standardError, standardOutput] = await Promise.all([
       child.exited,
-      readStream(
-        child.stderr,
-        MAXIMUM_OUTPUT_BYTES / 2,
-        "stderr",
-        options.onOutput,
-      ),
-      readStream(
-        child.stdout,
-        MAXIMUM_OUTPUT_BYTES / 2,
-        "stdout",
-        options.onOutput,
-      ),
+      readStream(child.stderr, "stderr", capture, options.onOutput),
+      readStream(child.stdout, "stdout", capture, options.onOutput),
     ]);
-    return {
+    const result = {
       exitCode,
       standardError,
       standardOutput,
       termination: state.termination,
     };
+    return result;
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);

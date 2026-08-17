@@ -9,16 +9,19 @@ import type {
   AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
-  AGENT_TOOLS,
-  selectedAgentTools,
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
 import { optionalSignal } from "../shared/validation.ts";
 import {
   completionMessages,
@@ -409,6 +412,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
+  readonly #toolSettings: ToolSettings;
   readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
@@ -433,10 +437,12 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
+    this.#toolSettings = options.toolSettings ?? DEFAULT_TOOL_SETTINGS;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
-    this.#tools = this.#dynamicToolCache
-      ? AGENT_TOOLS
-      : selectedAgentTools(this.#selectedTools);
+    this.#tools = selectedAgentTools(
+      this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
+      this.#toolSettings,
+    );
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 

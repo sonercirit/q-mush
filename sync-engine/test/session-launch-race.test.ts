@@ -372,12 +372,7 @@ function agentActionsSetup(
     runnerIsAvailable: () => true,
     store: setup.store,
     withCredential: credentialAction(credential),
-  }).actions(
-    parent.id,
-    TEST_USER_ID,
-    parent.generation,
-    new AbortController().signal,
-  );
+  }).actions(parent.id, TEST_USER_ID, parent.generation);
   return {
     ...setup,
     actions,

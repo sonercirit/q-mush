@@ -4,69 +4,33 @@ import {
   RunnerCommandSurvivalState,
   type RunnerCommandSurvivalOptions,
 } from "./runner-command-survival.ts";
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "./tool-stream.ts";
+import {
+  type DispatchRunnerToolCommand,
+  type RunnerCommandOutputDelta,
+  type RunnerCommandStream,
+  type RunnerCommandTransport,
+  type RunnerToolCommand,
+} from "./runner-command.ts";
+import type { RunnerCommandResult } from "./tool-stream.ts";
+import { errorFromUnknown } from "./validation.ts";
 
+export {
+  failedRunnerCommandResult,
+  readRunnerExecutionEnvironment,
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  type DispatchRunnerToolCommand,
+  type RunnerCommandArguments,
+  type RunnerExecutionEnvironment,
+  type RunnerToolCommand,
+} from "./runner-command.ts";
 export type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
 } from "./tool-stream.ts";
 
-export function failedRunnerCommandResult(
-  error: unknown,
-  maximumDetailLength: number,
-): RunnerCommandResult {
-  const detail = error instanceof Error ? error.message : String(error);
-  return {
-    output: `Error: ${detail.slice(0, maximumDetailLength)}`,
-    state: "failed",
-  };
-}
-
-export type RunnerExecutionEnvironment = "bare_metal" | "container";
-
-export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
-export const RUNNER_TERMINAL_CLEANUP_ARGUMENT = "terminal";
-export const RUNNER_TOOL_OUTPUT_SPILL_COMMAND = "spill_tool_output";
-export const RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT = "content";
-
-export function readRunnerExecutionEnvironment(
-  value: unknown,
-): RunnerExecutionEnvironment | undefined {
-  if (value === undefined || value === "bare_metal") {
-    return "bare_metal";
-  }
-  return value === "container" ? value : undefined;
-}
-
-export type RunnerCommandArguments = Readonly<Record<string, unknown>>;
-
-export interface RunnerToolCommand {
-  readonly arguments: RunnerCommandArguments;
-  readonly executionEnvironment: RunnerExecutionEnvironment;
-  readonly id: string;
-  readonly sessionId: string;
-  readonly tool: string;
-  readonly workingDirectory: string;
-}
-
-export interface DispatchRunnerToolCommand extends Omit<
-  RunnerToolCommand,
-  "id"
-> {
-  readonly authorize?: () => boolean;
-  readonly generation?: number;
-  readonly queueIfUnavailable?: boolean;
-  readonly runnerId: string;
-}
-
-interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
-  readonly cancel?: (runnerId: string, commandId: string) => void;
-  readonly commandId?: () => string;
-  readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
-}
+interface RunnerCommandBrokerOptions
+  extends RunnerCommandSurvivalOptions, RunnerCommandTransport {}
 
 export class RunnerDisconnectedError extends Error {
   constructor(message = "The runner disconnected before the command returned") {
@@ -85,7 +49,7 @@ interface PendingCommand {
   readonly resolve: (result: RunnerCommandResult) => void;
   readonly runnerId: string;
   readonly signal: AbortSignal | undefined;
-  readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
+  readonly stream: RunnerCommandStream | undefined;
   nextSequence: number;
   phase: "in_flight" | "queued";
   queuedAfterDisconnect: boolean;
@@ -135,7 +99,7 @@ export class RunnerCommandBroker {
   dispatch(
     input: DispatchRunnerToolCommand,
     signal?: AbortSignal,
-    stream?: (delta: RunnerCommandOutputDelta) => void,
+    stream?: RunnerCommandStream,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
       return Promise.reject(abortError("The agent session was stopped"));
@@ -144,9 +108,7 @@ export class RunnerCommandBroker {
     try {
       initiallyAuthorized = input.authorize?.() !== false;
     } catch (error) {
-      return Promise.reject(
-        error instanceof Error ? error : new Error(String(error)),
-      );
+      return Promise.reject(errorFromUnknown(error));
     }
     if (!initiallyAuthorized) {
       return Promise.reject(abortError("The agent session was stopped"));
@@ -163,7 +125,13 @@ export class RunnerCommandBroker {
     const command: RunnerToolCommand = {
       arguments: input.arguments,
       executionEnvironment: input.executionEnvironment,
+      ...(input.executionLimitSeconds === undefined
+        ? {}
+        : { executionLimitSeconds: input.executionLimitSeconds }),
       id,
+      ...(input.outputLimitCharacters === undefined
+        ? {}
+        : { outputLimitCharacters: input.outputLimitCharacters }),
       sessionId: input.sessionId,
       tool: input.tool,
       workingDirectory: input.workingDirectory,
@@ -246,10 +214,7 @@ export class RunnerCommandBroker {
   }
 
   #rejectUnknown(commandId: string, error: unknown): void {
-    this.#reject(
-      commandId,
-      error instanceof Error ? error : new Error(String(error)),
-    );
+    this.#reject(commandId, errorFromUnknown(error));
   }
 
   #requireAuthorization(pending: PendingCommand): boolean {

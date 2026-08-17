@@ -206,4 +206,15 @@ export class RealtimeHub {
   ): void {
     publish(this.#sockets("user", this.#userKey(userId, workspaceId)), payload);
   }
+
+  publishUserAllWorkspaces(userId: string, payload: RealtimePayload): void {
+    const sockets = new Set<RealtimeSocket>();
+    const prefix = `user:${userId}:`;
+    for (const [key, connected] of this.#connections.user) {
+      if (key.startsWith(prefix)) {
+        for (const socket of connected) sockets.add(socket);
+      }
+    }
+    publish(sockets, payload);
+  }
 }

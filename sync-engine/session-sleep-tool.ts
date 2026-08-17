@@ -1,26 +1,31 @@
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
 import { abortSignalError } from "../shared/validation.ts";
 
-// Sleep bypasses the generic wrapper and directly shares its authoritative bound.
-const MAXIMUM_SLEEP_DURATION_SECONDS = MAXIMUM_TOOL_EXECUTION_SECONDS;
+// Validation shares the per-run setting; the outer wrapper owns the deadline.
 const MILLISECONDS_PER_SECOND = 1_000;
 
 function requestedDuration(
   arguments_: Readonly<Record<string, unknown>>,
+  settings: ToolSettings,
 ): number {
   if (Object.keys(arguments_).length !== 1) {
     throw new Error("The sleep arguments are invalid");
   }
   const durationSeconds = arguments_["durationSeconds"];
+  const maximumDurationSeconds = toolExecutionLimitSeconds(settings);
   if (
     typeof durationSeconds !== "number" ||
     !Number.isSafeInteger(durationSeconds) ||
     durationSeconds <= 0 ||
-    durationSeconds > MAXIMUM_SLEEP_DURATION_SECONDS
+    durationSeconds > maximumDurationSeconds
   ) {
     throw new Error(
-      `Tool argument durationSeconds must be a positive integer no greater than ${String(MAXIMUM_SLEEP_DURATION_SECONDS)}`,
+      `Tool argument durationSeconds must be a positive integer no greater than ${String(maximumDurationSeconds)}`,
     );
   }
   return durationSeconds * MILLISECONDS_PER_SECOND;
@@ -43,8 +48,9 @@ export async function executeSessionSleepTool(
   hasPendingSteeringInput: () => boolean,
   waitForSteeringInput: (signal: AbortSignal) => Promise<void>,
   now: () => number = Date.now,
+  settings: ToolSettings = DEFAULT_TOOL_SETTINGS,
 ): Promise<string> {
-  const expectedMilliseconds = requestedDuration(arguments_);
+  const expectedMilliseconds = requestedDuration(arguments_, settings);
   const startedAt = now();
   throwIfAgentAborted(signal);
   const controller = new AbortController();

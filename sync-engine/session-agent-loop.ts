@@ -26,6 +26,9 @@ interface CompactingAgentLoopOptions {
   readonly autoCompact: boolean;
   readonly createCompactor: () => AgentConversationCompactor;
   readonly executeTool: Parameters<typeof runAgentLoop>[0]["executeTool"];
+  readonly finalizeToolResult?: Parameters<
+    typeof runAgentLoop
+  >[0]["finalizeToolResult"];
   readonly handoffRequested?: () => boolean;
   readonly initialContextTokens?: number;
   readonly initialMessages: readonly AgentConversationMessage[];
@@ -264,6 +267,9 @@ export async function runCompactingAgentLoop(
     };
     const final = await runAgentLoop({
       executeTool: options.executeTool,
+      ...(options.finalizeToolResult === undefined
+        ? {}
+        : { finalizeToolResult: options.finalizeToolResult }),
       ...(options.handoffRequested === undefined
         ? {}
         : { handoffRequested: options.handoffRequested }),

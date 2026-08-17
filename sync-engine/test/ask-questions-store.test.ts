@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AskQuestionAnswers } from "../../shared/ask-questions.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   AskQuestionsStore,
   type AskQuestionsPersistence,
@@ -190,6 +191,7 @@ function setup() {
     generateId: () => ids.shift() ?? "unexpected-id",
     persistence,
     systemActorId: "SYSTEM",
+    toolSettings: () => DEFAULT_TOOL_SETTINGS,
   });
   return { persistence, store };
 }

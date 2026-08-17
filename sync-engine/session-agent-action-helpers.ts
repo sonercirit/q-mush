@@ -230,7 +230,11 @@ export async function spawnAgentSession(options: {
     return notifiedResponse("spawned");
   }
   if (pool !== undefined && balanced) {
-    const credentials = await pool.candidates(options.userId, selection);
+    const credentials = await pool.candidates(
+      options.userId,
+      selection,
+      options.signal,
+    );
     if (credentials.length === 0) {
       return responseToolOutput(
         createJsonResponse({ error: "credential_unavailable" }, 409),

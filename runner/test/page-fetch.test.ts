@@ -173,7 +173,6 @@ describe("page_fetch", () => {
       title: CAPTURE.title,
       truncated: { links: false, metadata: false, output: false, text: false },
     });
-    expect(Buffer.byteLength(output)).toBeLessThanOrEqual(64 * 1_024);
   });
 
   test("times out and aborts the render without sleeping", async () => {

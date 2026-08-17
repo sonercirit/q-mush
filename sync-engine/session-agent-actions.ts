@@ -1,11 +1,13 @@
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import {
-  selectedAgentTools,
-  type SessionAgentToolName,
-} from "../shared/agent-tools.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
+import { type SessionAgentToolName } from "../shared/agent-tools.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
 import { throwIfSignalAborted } from "../shared/validation.ts";
 import { createJsonResponse } from "./http.ts";
 import {
@@ -95,7 +97,7 @@ export class SessionAgentActions {
     parentSessionId: string,
     userId: string,
     parentGeneration: number,
-    signal: AbortSignal,
+    toolSettings: ToolSettings = DEFAULT_TOOL_SETTINGS,
   ): SessionAgentToolActions {
     const authority: SessionExecutionAuthority = {
       generation: parentGeneration,
@@ -137,16 +139,12 @@ export class SessionAgentActions {
       }
       return sessionId;
     };
-    // The per-call deadline joins the session-wide signal so mutation and
-    // discovery stop when the tool time limit fires.
-    const withDeadline = (callSignal: AbortSignal): AbortSignal =>
-      AbortSignal.any([signal, callSignal]);
     return {
       compactSession: guardParent("compact_session", (sessionId, callSignal) =>
         this.#compact({
           authority: { ...authority, tool: "compact_session" },
           sessionId,
-          signal: withDeadline(callSignal),
+          signal: callSignal,
           userId,
           workspaceId: parentWorkspaceId(),
         }),
@@ -160,7 +158,7 @@ export class SessionAgentActions {
             authority,
             undefined,
             parentWorkspaceId(),
-            withDeadline(callSignal),
+            callSignal,
           ),
       ),
       browseRunnerDirectories: (runnerId, path, callSignal) =>
@@ -172,18 +170,13 @@ export class SessionAgentActions {
           () => currentParentTool("browse_runner_directories"),
           // Cancels the broker command at the limit; the wrapper still
           // reports timed-out even when an execution never settles.
-          withDeadline(callSignal),
+          callSignal,
           parentWorkspaceId(),
         ),
       getSessionOptions: guardParent(
         "get_session_options",
         (input, callSignal) =>
-          this.#options(
-            userId,
-            input,
-            parentWorkspaceId(),
-            withDeadline(callSignal),
-          ),
+          this.#options(userId, input, parentWorkspaceId(), callSignal),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
@@ -197,7 +190,7 @@ export class SessionAgentActions {
         ),
       ),
       readSession: guardParent("read_session", (input) =>
-        this.#read(userId, input, parentWorkspaceId()),
+        this.#read(userId, input, parentWorkspaceId(), toolSettings),
       ),
       reassignSession: guardParent(
         "reassign_session",
@@ -209,7 +202,7 @@ export class SessionAgentActions {
             runnerId,
             workingDirectory,
             parentWorkspaceId(),
-            withDeadline(callSignal),
+            callSignal,
           ),
       ),
       sendToSession: guardParent(
@@ -221,11 +214,11 @@ export class SessionAgentActions {
             authority,
             message,
             parentWorkspaceId(),
-            withDeadline(callSignal),
+            callSignal,
           ),
       ),
       spawnSession: guardParent("spawn_session", (input, callSignal) =>
-        this.#spawn(authority, userId, input, withDeadline(callSignal)),
+        this.#spawn(authority, userId, input, callSignal),
       ),
       steerSession: guardParent(
         "steer_session",
@@ -235,7 +228,7 @@ export class SessionAgentActions {
             sessionId,
             message,
             parentWorkspaceId(),
-            withDeadline(callSignal),
+            callSignal,
           ),
       ),
       stopSession: guardParent(
@@ -247,7 +240,7 @@ export class SessionAgentActions {
             sessionId,
             cascade,
             parentWorkspaceId(),
-            withDeadline(callSignal),
+            callSignal,
           ),
       ),
     };
@@ -351,6 +344,7 @@ export class SessionAgentActions {
     workspaceId: string,
   ): Promise<string> {
     const online = this.#onlineRunnerExists(userId, runnerId, workspaceId);
+    throwIfSignalAborted(signal, "Directory browsing was canceled");
     if (!online || !authorize()) {
       return runnerUnavailableOutput();
     }
@@ -366,6 +360,7 @@ export class SessionAgentActions {
         },
         signal,
       );
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return sessionToolOutput(
         result.status === "listed" ? result.listing : { error: result.status },
       );
@@ -411,6 +406,7 @@ export class SessionAgentActions {
     userId: string,
     input: ReadSessionToolInput,
     workspaceId: string,
+    toolSettings: ToolSettings,
   ): string {
     const selected = new Set(input.categories);
     const detail = readSessionSnapshot(this.#dependencies.database, {
@@ -434,8 +430,9 @@ export class SessionAgentActions {
       systemPrompt: createAgentSystemPrompt(
         detail.agentFile,
         detail.executionEnvironment,
+        toolSettings,
       ),
-      toolDefinitions: selectedAgentTools(detail.tools).map(
+      toolDefinitions: selectedAgentTools(detail.tools, toolSettings).map(
         ({ function: definition }) => definition,
       ),
     });

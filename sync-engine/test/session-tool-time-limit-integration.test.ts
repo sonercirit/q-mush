@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { MAXIMUM_TOOL_EXECUTION_MS } from "../../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitMilliseconds,
+} from "../../shared/tool-limits.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
 import {
@@ -63,7 +66,9 @@ async function advancePastLimit(dispatched: Promise<void>): Promise<void> {
   // Never move the fake clock until the runner has observably received the
   // actual tool call and its per-call deadline timer therefore exists.
   await dispatched;
-  await vi.advanceTimersByTimeAsync(MAXIMUM_TOOL_EXECUTION_MS);
+  await vi.advanceTimersByTimeAsync(
+    toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
+  );
 }
 
 async function expectTimedOutRunOutput(
@@ -76,7 +81,9 @@ async function expectTimedOutRunOutput(
     setup.detail.id,
   );
   expect(outputs).toHaveLength(1);
-  expect(outputs[0]).toContain("30-minute limit");
+  expect(outputs[0]).toContain(
+    `${String(DEFAULT_TOOL_SETTINGS.executionLimitMinutes)}-minute limit`,
+  );
 }
 
 function resolveOnTool(

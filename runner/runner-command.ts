@@ -4,25 +4,30 @@ import {
   RUNNER_AGENT_FILE_COMMAND,
   RUNNER_AGENT_FILE_PATH_ARGUMENT,
 } from "../shared/agent-file.ts";
-import { isRecord } from "../shared/auth-model.ts";
+import { isRunnerAgentToolName } from "../shared/agent-tools.ts";
 import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
-  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
-  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
   type RunnerCommandArguments,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
 import { RUNNER_DIRECTORY_COMMAND } from "../shared/runner-directory-model.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  MAXIMUM_TOOL_EXECUTION_MINUTES,
+  MAXIMUM_TOOL_OUTPUT_CHARACTERS,
+  MINIMUM_TOOL_OUTPUT_CHARACTERS,
+  toolExecutionLimitSeconds,
+} from "../shared/tool-limits.ts";
+import { retainToolResultOverflow } from "../shared/tool-output-limits.ts";
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
-import { readBoundedString } from "../shared/validation.ts";
+import { isRecord, readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { executeAttachmentCommand } from "./runner-attachments.ts";
 import { RunnerContainerManager } from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
-import { RunnerOutputSpills } from "./runner-output-spills.ts";
 import { runnerCommandResultFromOutput } from "./runner-process.ts";
 import {
   executeRunnerToolResult,
@@ -39,33 +44,64 @@ function recordString(
   key: string,
   maximumLength: number,
 ): string | undefined {
-  const value = record[key];
-  return readBoundedString(value, { maximumLength });
+  return readBoundedString(record[key], { maximumLength });
+}
+
+function commandInteger(
+  command: Readonly<Record<string, unknown>>,
+  key: string,
+  minimum: number,
+  maximum: number,
+  fallback: number,
+): number {
+  const value = command[key];
+  if (value === undefined) return fallback;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum ||
+    value > maximum
+  ) {
+    throw new Error("The server returned an invalid runner command");
+  }
+  return value;
 }
 
 export function readRunnerCommand(value: unknown): RunnerToolCommand {
   if (!isRecord(value) || !isRecord(value["command"])) {
     throw new Error("The server returned an invalid runner command");
   }
-
   const command = value["command"];
   const arguments_ = command["arguments"];
   const executionEnvironment = readRunnerExecutionEnvironment(
     command["executionEnvironment"],
   );
   const id = recordString(command, "id", MAXIMUM_IDENTIFIER_LENGTH);
+  const executionLimitSeconds = commandInteger(
+    command,
+    "executionLimitSeconds",
+    1,
+    MAXIMUM_TOOL_EXECUTION_MINUTES * 60,
+    toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
+  );
   const sessionId = recordString(
     command,
     "sessionId",
     MAXIMUM_IDENTIFIER_LENGTH,
   );
   const tool = recordString(command, "tool", MAXIMUM_TOOL_NAME_LENGTH);
+  const outputLimitCharacters = commandInteger(
+    command,
+    "outputLimitCharacters",
+    MINIMUM_TOOL_OUTPUT_CHARACTERS,
+    MAXIMUM_TOOL_OUTPUT_CHARACTERS,
+    DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+  );
   const workingDirectory = recordString(
     command,
     "workingDirectory",
     MAXIMUM_PATH_LENGTH,
   );
-
   if (
     !isRecord(arguments_) ||
     executionEnvironment === undefined ||
@@ -77,11 +113,12 @@ export function readRunnerCommand(value: unknown): RunnerToolCommand {
   ) {
     throw new Error("The server returned an invalid runner command");
   }
-
   return {
     arguments: arguments_,
     executionEnvironment,
+    executionLimitSeconds,
     id,
+    outputLimitCharacters,
     sessionId,
     tool,
     workingDirectory,
@@ -94,9 +131,7 @@ type RunnerContainerCommands = Pick<
 >;
 
 function mapContainerPath(root: string, path: string): string {
-  if (path === "/workspace") {
-    return root;
-  }
+  if (path === "/workspace") return root;
   return isAbsolute(path) && path.startsWith("/workspace/")
     ? resolve(root, relative("/workspace", path))
     : path;
@@ -131,26 +166,19 @@ export async function executeRunnerCommand(
 
 export class RunnerCommandExecutor {
   readonly #containers: RunnerContainerCommands;
-  readonly #outputSpills = new Map<string, RunnerOutputSpills>();
 
   constructor(containers?: RunnerContainerCommands) {
     this.#containers = containers ?? new RunnerContainerManager();
   }
 
-  #outputSpill(sessionId: string): RunnerOutputSpills {
-    const existing = this.#outputSpills.get(sessionId);
-    if (existing !== undefined) {
-      return existing;
-    }
-    const created = new RunnerOutputSpills();
-    this.#outputSpills.set(sessionId, created);
-    return created;
-  }
-
-  async #cleanupOutputSpill(sessionId: string): Promise<void> {
-    const spill = this.#outputSpills.get(sessionId);
-    this.#outputSpills.delete(sessionId);
-    await spill?.cleanup();
+  #toolSettings(command: RunnerToolCommand): {
+    readonly outputLimitCharacters: number;
+  } {
+    return {
+      outputLimitCharacters:
+        command.outputLimitCharacters ??
+        DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+    };
   }
 
   async executeResult(
@@ -158,6 +186,23 @@ export class RunnerCommandExecutor {
     signal?: AbortSignal,
     stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
   ): Promise<RunnerCommandResult> {
+    const result = await this.#executeResult(command, {
+      ...(signal === undefined ? {} : { signal }),
+      ...(stream === undefined ? {} : { stream }),
+    });
+    return isRunnerAgentToolName(command.tool)
+      ? retainToolResultOverflow(result, this.#toolSettings(command))
+      : result;
+  }
+
+  async #executeResult(
+    command: RunnerToolCommand,
+    options: {
+      readonly signal?: AbortSignal;
+      readonly stream?: NonNullable<RunnerToolExecutionOptions["stream"]>;
+    },
+  ): Promise<RunnerCommandResult> {
+    const { signal, stream } = options;
     try {
       if (command.tool === RUNNER_DIRECTORY_COMMAND) {
         return {
@@ -167,106 +212,109 @@ export class RunnerCommandExecutor {
           state: "completed",
         };
       }
-
       if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
-        const terminalCleanup =
+        const terminal =
           command.arguments[RUNNER_TERMINAL_CLEANUP_ARGUMENT] === true;
-        const cleanupOutputSpill = terminalCleanup
-          ? this.#cleanupOutputSpill(command.sessionId)
-          : Promise.resolve();
-        const cleanupContainer =
-          command.executionEnvironment === "container"
-            ? this.#containers.cleanupSession(command.sessionId)
-            : Promise.resolve();
-        await Promise.all([cleanupContainer, cleanupOutputSpill]);
+        if (command.executionEnvironment === "container") {
+          await this.#containers.cleanupSession(command.sessionId);
+        }
         return {
-          output: terminalCleanup
+          output: terminal
             ? "Session execution resources removed."
             : "Container execution environment removed.",
           state: "completed",
         };
       }
-
-      if (command.tool === RUNNER_TOOL_OUTPUT_SPILL_COMMAND) {
-        const content =
-          command.arguments[RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT];
-        if (typeof content !== "string") {
-          throw new Error("The tool output spill content is invalid");
-        }
-        return {
-          output: await this.#outputSpill(command.sessionId).spill(content),
-          state: "completed",
-        };
-      }
-
-      const attachmentResult = await executeAttachmentCommand(
+      const attachment = await executeAttachmentCommand(
         command.workingDirectory,
         command.tool,
         command.arguments,
       );
-      if (attachmentResult !== undefined) {
-        return { output: attachmentResult, state: "completed" };
+      if (attachment !== undefined) {
+        return { output: attachment, state: "completed" };
       }
-
       if (command.executionEnvironment === "container") {
-        const root = await resolveRunnerWorkspace(command.workingDirectory);
-        await this.#containers.prepare(command.sessionId, root, signal);
-        if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
-          return await agentFileResult(root, command.arguments, true);
-        }
-        const shell = async (
-          _workspace: string,
-          shellCommand: string,
-          timeoutSeconds: number,
-          shellSignal?: AbortSignal,
-          shellStream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
-        ): Promise<RunnerCommandResult> => {
-          const output = await this.#containers.executeShell(
-            command.sessionId,
-            root,
-            shellCommand,
-            timeoutSeconds,
-            shellSignal,
-            shellStream,
-          );
-          return runnerCommandResultFromOutput(output);
-        };
-        return await executeRunnerToolResult(
-          root,
-          command.tool,
-          command.arguments,
-          signal,
-          undefined,
-          {
-            containPaths: true,
-            mapAbsolutePath: (path) => mapContainerPath(root, path),
-            outputSpills: this.#outputSpill(command.sessionId),
-            shell,
-            ...(stream === undefined ? {} : { stream }),
-          },
-        );
+        return await this.#executeContainer(command, signal, stream);
       }
-
       if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
         return await agentFileResult(
           command.workingDirectory,
           command.arguments,
         );
       }
-
       return await executeRunnerToolResult(
         command.workingDirectory,
         command.tool,
         command.arguments,
         signal,
         undefined,
-        stream === undefined
-          ? { outputSpills: this.#outputSpill(command.sessionId) }
-          : { outputSpills: this.#outputSpill(command.sessionId), stream },
+        this.#toolOptions(command, stream),
       );
     } catch (error) {
-      return failedRunnerCommandResult(error, 1_000);
+      return failedRunnerCommandResult(error);
     }
+  }
+
+  async #executeContainer(
+    command: RunnerToolCommand,
+    signal: AbortSignal | undefined,
+    stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
+  ): Promise<RunnerCommandResult> {
+    const root = await resolveRunnerWorkspace(command.workingDirectory);
+    await this.#containers.prepare(command.sessionId, root, signal);
+    if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
+      return agentFileResult(root, command.arguments, true);
+    }
+    const shell: NonNullable<RunnerToolExecutionOptions["shell"]> = async (
+      _workspace,
+      shellCommand,
+      timeoutSeconds,
+      shellSignal,
+      shellStream,
+    ) =>
+      runnerCommandResultFromOutput(
+        await this.#containers.executeShell(
+          command.sessionId,
+          root,
+          shellCommand,
+          timeoutSeconds,
+          {
+            ...(shellStream === undefined ? {} : { publish: shellStream }),
+            outputLimitCharacters:
+              command.outputLimitCharacters ??
+              DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+            ...(shellSignal === undefined ? {} : { signal: shellSignal }),
+          },
+        ),
+      );
+    return executeRunnerToolResult(
+      root,
+      command.tool,
+      command.arguments,
+      signal,
+      undefined,
+      {
+        ...this.#toolOptions(command, stream),
+        containPaths: true,
+        mapAbsolutePath: (path) => mapContainerPath(root, path),
+        shell,
+      },
+    );
+  }
+
+  #toolOptions(
+    command: RunnerToolCommand,
+    stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
+  ): RunnerToolExecutionOptions {
+    return {
+      executionLimitSeconds:
+        command.executionLimitSeconds ??
+        toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
+      outputLimitCharacters:
+        command.outputLimitCharacters ??
+        DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+      ...(stream === undefined ? {} : { stream }),
+    };
   }
 
   async execute(

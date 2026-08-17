@@ -20,11 +20,9 @@ import {
   testRecord,
 } from "./session-agent-output-helpers.ts";
 
-const MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES = 24_000;
-
-const TRUNCATED_OPTION_METADATA = {
-  truncated: true,
-  truncation: { outputBytes: false, sourceFields: true },
+const COMPLETE_OPTION_METADATA = {
+  truncated: false,
+  truncation: { sourceFields: false },
 } as const;
 
 interface SessionCredentialOption extends Pick<
@@ -51,15 +49,6 @@ function parsed(
   source: Parameters<typeof sessionOptionsOutput>[1],
 ): Readonly<Record<string, unknown>> {
   return jsonRecord(sessionOptionsOutput(input, source));
-}
-
-function expectBoundedOutput(
-  serialized: string,
-): Readonly<Record<string, unknown>> {
-  expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
-    MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES,
-  );
-  return jsonRecord(serialized);
 }
 
 function numberedModels(length: number): readonly AgentModelOption[] {
@@ -111,7 +100,7 @@ describe("session option pagination", () => {
       totalItems: 11,
       totalPages: 2,
       truncated: false,
-      truncation: { outputBytes: false },
+      truncation: { sourceFields: false },
     });
     expect(testArray(read["items"])).toHaveLength(10);
     expect(JSON.stringify(read)).not.toContain("lastSeenAt");
@@ -445,22 +434,20 @@ describe("session option pagination", () => {
     ]);
   });
 
-  test("bounds serialized pages", () => {
-    const read = expectBoundedOutput(
-      modelOptionsOutput("x".repeat(3_000), false),
-    );
+  test("preserves serialized pages for the shared final character bound", () => {
+    const read = jsonRecord(modelOptionsOutput("x".repeat(3_000), false));
     expect(testArray(read["items"])).toHaveLength(10);
   });
 
-  test("bounds multibyte source fields by UTF-8 bytes", () => {
+  test("preserves multibyte source fields", () => {
     const serialized = modelOptionsOutput("😀".repeat(250), true);
-    const read = expectBoundedOutput(serialized);
+    const read = jsonRecord(serialized);
 
     expect(serialized).not.toContain("�");
-    expect(read).toMatchObject(TRUNCATED_OPTION_METADATA);
+    expect(read).toMatchObject(COMPLETE_OPTION_METADATA);
   });
 
-  test("reports bounded externally sourced fields", () => {
+  test("preserves externally sourced fields for the shared final bound", () => {
     const huge = "x".repeat(20_000);
     const runner: RunnerSummary = {
       architecture: huge,
@@ -506,10 +493,8 @@ describe("session option pagination", () => {
       ],
       [testSessionOptionsInput("tools"), testSessionOptionsSource({ tools })],
     ] as const) {
-      const parsedOutput = expectBoundedOutput(
-        sessionOptionsOutput(request, options),
-      );
-      expect(parsedOutput).toMatchObject(TRUNCATED_OPTION_METADATA);
+      const parsedOutput = jsonRecord(sessionOptionsOutput(request, options));
+      expect(parsedOutput).toMatchObject(COMPLETE_OPTION_METADATA);
     }
   });
 });

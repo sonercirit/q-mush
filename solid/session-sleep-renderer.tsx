@@ -1,16 +1,20 @@
 import type { JSX } from "solid-js";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import { formatSessionTime } from "../shared/session-timing.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../shared/tool-limits.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
 
 const MILLISECONDS_PER_SECOND = 1_000;
 // Display-only sanity bound: use whichever bound is larger. Transcripts
 // recorded before the schema maximum changed from 3,600s to the global
 // tool limit can legitimately contain hour-long sleeps.
+const HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS = 3_600;
 const MAXIMUM_SLEEP_DURATION_SECONDS = Math.max(
-  3_600,
-  MAXIMUM_TOOL_EXECUTION_SECONDS,
+  HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS,
+  toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
 );
 const MAXIMUM_SLEEP_DURATION_MILLISECONDS =
   MAXIMUM_SLEEP_DURATION_SECONDS * MILLISECONDS_PER_SECOND;

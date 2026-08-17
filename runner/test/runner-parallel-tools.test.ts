@@ -1,6 +1,9 @@
 import { expect, test } from "vitest";
 import { executeRunnerTool } from "../../runner/runner-tools.ts";
-import { createParallelToolUses } from "../../shared/test/parallel-fixtures.ts";
+import {
+  createParallelToolUses,
+  expectCompleteParallelPayload,
+} from "../../shared/test/parallel-fixtures.ts";
 import { observeRunnerRejection } from "./promise-test-helpers.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
@@ -63,7 +66,7 @@ test("runner parallel bounds simultaneous work without dropping calls", async ()
   expect(JSON.parse(output)).toEqual(expected);
 });
 
-test("runner parallel captures failures and truncates output", async () => {
+test("runner parallel captures failures without an independent output budget", async () => {
   const root = await workspace();
   const output = await executeParallelWrites(root, 20, undefined, {
     execute: (_root, toolUse) => {
@@ -77,14 +80,17 @@ test("runner parallel captures failures and truncates output", async () => {
   const item = (index: number): unknown =>
     Array.isArray(results) ? results[index] : undefined;
 
-  expect(Buffer.byteLength(output, "utf8")).toBeLessThan(262_145);
-  expect(output).toContain("[parallel output truncated]");
+  const largePayload = "x".repeat(60 * 1_024);
+  expectCompleteParallelPayload(output, largePayload);
   expect(results).toHaveLength(20);
   expect(item(3)).toEqual({
     error: "child failed",
     recipient_name: "write",
   });
-  expect(item(19)).toMatchObject({ recipient_name: "write" });
+  expect(item(19)).toEqual({
+    output: "x".repeat(60 * 1_024),
+    recipient_name: "write",
+  });
 });
 
 test("runner parallel stops scheduling queued calls after cancellation", async () => {

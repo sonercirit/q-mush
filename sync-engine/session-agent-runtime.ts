@@ -20,6 +20,11 @@ import type {
   AgentSessionDetail,
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
@@ -79,6 +84,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
   readonly store: SessionStore;
+  readonly toolSettings?: ToolSettings;
   readonly userId: string;
 }
 
@@ -91,8 +97,7 @@ function writeRuntime(
 }
 
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // Status- and generation-guarded: a racing stop or restart makes this
-  // write match zero rows instead of throwing.
+  // A racing stop or restart makes this guarded write match zero rows.
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
@@ -237,6 +242,7 @@ async function loadModels(
     ...(options.toolStream === undefined
       ? {}
       : { toolStream: options.toolStream }),
+    toolSettings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
     userId: runtime.userId,
   });
   return models;
@@ -294,17 +300,11 @@ function restartInterruptedToolResult(): RunnerCommandResult {
 
 function boundRuntimeToolOutput(
   runtime: SessionAgentRuntimeDependencies,
-  signal: AbortSignal,
   result: RunnerCommandResult,
-): Promise<RunnerCommandResult> {
+): RunnerCommandResult {
   return boundSessionToolOutput(
-    {
-      broker: runtime.broker,
-      detail: runtime.detail,
-      isCurrent: runtime.isCurrent,
-      signal,
-    },
     result,
+    runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
   );
 }
 
@@ -340,10 +340,9 @@ async function executeAgentTool(
       dispatch: dispatchTool,
       executeSkill: skills.executeResult,
       outerSignal: toolSignal,
+      settings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
       runtime,
       stepTools,
-      transformSkillResult: (result, signal) =>
-        boundRuntimeToolOutput(runtime, signal, result),
     });
   } catch (error) {
     if (isAskQuestionsPause(error)) {
@@ -410,7 +409,13 @@ export async function runSessionAgent(
               currentToolNames()?.some((candidate) => candidate === name) ===
               true,
             executionEnvironment: runtime.detail.executionEnvironment,
+            executionLimitSeconds: toolExecutionLimitSeconds(
+              runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+            ),
             generation: runtime.detail.generation,
+            outputLimitCharacters: (
+              runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS
+            ).outputLimitCharacters,
             runnerId: runtime.detail.runnerId,
             sessionId: runtime.detail.id,
             tool: name,
@@ -486,11 +491,10 @@ export async function runSessionAgent(
     if (usage !== undefined) {
       recordRuntimeUsage(runtime, usage);
     }
-    // Server-generated output bypassed the runner spill; bound it here.
-    return await boundRuntimeToolOutput(runtime, signal, {
+    return {
       output: explanation.content,
       state: "completed",
-    });
+    };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -510,6 +514,7 @@ export async function runSessionAgent(
           (sleepSignal) =>
             waitForSessionSteeringInput(runtime.detail.id, sleepSignal),
           runtime.now,
+          runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
         ).then((output) => ({ output, state: "completed" }));
       }
       return executeSessionAgentTool(
@@ -517,7 +522,7 @@ export async function runSessionAgent(
         name,
         toolArguments,
         signal,
-      ).then((result) => boundRuntimeToolOutput(runtime, signal, result));
+      );
     }
     return dispatchRunnerTool(name, toolArguments, signal, callId);
   };
@@ -548,6 +553,8 @@ export async function runSessionAgent(
     }
     return messages;
   };
+  const finalizeToolResult = (result: RunnerCommandResult) =>
+    boundRuntimeToolOutput(runtime, result);
   try {
     return await runCompactingAgentLoop({
       agentCost: (step) =>
@@ -565,6 +572,7 @@ export async function runSessionAgent(
           toolSignal,
           call,
         ),
+      finalizeToolResult,
       ...(runtime.detail.restartHandoff?.operation === "agent"
         ? { initialContextTokens: runtime.detail.currentContextTokens }
         : {}),

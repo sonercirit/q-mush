@@ -38,6 +38,12 @@ test("returns an HTTP response when directory browsing is canceled", async () =>
   controller.abort();
 
   const settled = await response;
+  expect(
+    broker.complete("runner-1", deliveredCommandId, {
+      output: JSON.stringify({ children: [], parent: null, path: "/late" }),
+      state: "completed",
+    }),
+  ).toBe(false);
   expect(settled.status).toBe(502);
   expect(await settled.json()).toEqual({ error: "directory_unavailable" });
   expect(canceledCommands).toEqual([deliveredCommandId]);

@@ -231,7 +231,7 @@ function message(arguments_: Readonly<Record<string, unknown>>): string {
 }
 
 function failedToolOutput(error: unknown): RunnerCommandResult {
-  return failedRunnerCommandResult(error, 500);
+  return failedRunnerCommandResult(error);
 }
 
 export function executeSessionAgentTool(

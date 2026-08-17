@@ -1,13 +1,20 @@
 import { expect, test } from "vitest";
+import { isRecord } from "../../shared/auth-model.ts";
+import { selectedAgentTools } from "../agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_OPTIONS,
   AGENT_TOOLS,
-  SESSION_AGENT_TOOL_NAMES,
   isBaseAgentToolName,
-  selectedAgentTools,
-} from "../../shared/agent-tools.ts";
-import { isRecord } from "../../shared/auth-model.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../tool-limits.ts";
+  SESSION_AGENT_TOOL_NAMES,
+} from "../agent-tools.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../tool-limits.ts";
+
+const DEFAULT_EXECUTION_LIMIT_SECONDS = toolExecutionLimitSeconds(
+  DEFAULT_TOOL_SETTINGS,
+);
 
 function expectParallelRecipients(
   tools: ReturnType<typeof selectedAgentTools>,
@@ -63,7 +70,7 @@ test("bounds the bash timeout by the global execution limit", () => {
     throw new Error("The bash tool definition is unavailable");
   }
   expect(bash.function.parameters.properties.timeout).toMatchObject({
-    maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+    maximum: DEFAULT_EXECUTION_LIMIT_SECONDS,
     minimum: 1,
     type: "integer",
   });
@@ -83,11 +90,28 @@ test("defines the sleep duration in bounded whole seconds", () => {
   const durationSeconds = properties.durationSeconds;
   expect(Object.keys(properties)).toEqual(["durationSeconds"]);
   expect(durationSeconds.description).toBe("Duration to sleep in seconds");
-  // The sleep exemption from the global wrapper is safe only while the
-  // sleep maximum equals the global limit; pin the relationship.
-  expect(durationSeconds.maximum).toBe(MAXIMUM_TOOL_EXECUTION_SECONDS);
+  // The schema default and the default global limit remain aligned.
+  expect(durationSeconds.maximum).toBe(DEFAULT_EXECUTION_LIMIT_SECONDS);
   expect(durationSeconds.minimum).toBe(1);
   expect(durationSeconds.type).toBe("integer");
+});
+
+test("patches bash and sleep schemas from one snapshot", () => {
+  const settings = { executionLimitMinutes: 7, outputLimitCharacters: 1_234 };
+  const tools = selectedAgentTools(["bash", "sleep"], settings);
+  const maximum = 7 * 60;
+  const bash = tools.find(
+    ({ function: definition }) => definition.name === "bash",
+  );
+  const sleep = tools.find(
+    ({ function: definition }) => definition.name === "sleep",
+  );
+  expect(bash?.function.parameters).toMatchObject({
+    properties: { timeout: { maximum } },
+  });
+  expect(sleep?.function.parameters).toMatchObject({
+    properties: { durationSeconds: { maximum } },
+  });
 });
 
 test("keeps sleep session-local and unavailable to parallel", () => {

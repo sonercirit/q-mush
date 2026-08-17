@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentQuestionRequests } from "../../shared/database/schema.ts";
+import { MINIMUM_TOOL_OUTPUT_CHARACTERS } from "../../shared/tool-limits.ts";
+import { unicodeCharacterCount } from "../../shared/tool-output-limits.ts";
 import { TEST_QUESTION_OPTIONS } from "./ask-questions-test-fixtures.ts";
 import {
   TEST_NOW,
@@ -24,26 +26,43 @@ const USER: AuthenticatedUser = {
   id: TEST_USER_ID,
   name: "Mush Room",
 };
-const QUESTION_CALL = {
-  arguments: JSON.stringify({
-    questions: [
-      {
-        id: "direction",
-        options: TEST_QUESTION_OPTIONS,
-        prompt: "What next?",
-        type: "single_choice",
-      },
-    ],
-  }),
-  id: "call-question",
-  name: "ask_questions",
-};
+function questionCall(freeText = false) {
+  return {
+    arguments: JSON.stringify({
+      questions: [
+        freeText
+          ? {
+              id: "direction",
+              maxLength: 4_000,
+              prompt: "What next?",
+              type: "free_text",
+            }
+          : {
+              id: "direction",
+              options: TEST_QUESTION_OPTIONS,
+              prompt: "What next?",
+              type: "single_choice",
+            },
+      ],
+    }),
+    id: "call-question",
+    name: "ask_questions",
+  };
+}
 
 function questionRequest(database: AppDatabase) {
   return database.select().from(agentQuestionRequests).get();
 }
 
-function answeringSetup(options: { readonly refuseLaunch?: boolean } = {}) {
+function answeringSetup(
+  options: {
+    readonly changedOutputLimitCharacters?: number;
+    readonly freeText?: boolean;
+    readonly outputLimitCharacters?: number;
+    readonly refuseLaunch?: boolean;
+  } = {},
+) {
+  let outputLimitCharacters = options.outputLimitCharacters ?? 20_000;
   let answerStarted = false;
   let answeredBeforeSettlement = false;
   let claimedBeforeResumedTurn = false;
@@ -52,7 +71,10 @@ function answeringSetup(options: { readonly refuseLaunch?: boolean } = {}) {
   const answer = Promise.withResolvers<unknown>();
   const model = new ScriptedAgentModel(
     [
-      { content: "I need a decision.", toolCalls: [QUESTION_CALL] },
+      {
+        content: "I need a decision.",
+        toolCalls: [questionCall(options.freeText)],
+      },
       { content: "Continuing with the answer.", toolCalls: [] },
     ],
     {
@@ -65,6 +87,16 @@ function answeringSetup(options: { readonly refuseLaunch?: boolean } = {}) {
     },
   );
   const setup = connectedSessionSetup(model, "api_key", undefined, {
+    ...(options.outputLimitCharacters === undefined
+      ? {}
+      : {
+          toolSettings: {
+            read: () => ({
+              executionLimitMinutes: 30,
+              outputLimitCharacters,
+            }),
+          },
+        }),
     onCredentialRead: () => {
       credentialReads += 1;
       if (options.refuseLaunch === true && credentialReads === 2) {
@@ -77,10 +109,18 @@ function answeringSetup(options: { readonly refuseLaunch?: boolean } = {}) {
         return;
       }
       answerStarted = true;
+      outputLimitCharacters =
+        options.changedOutputLimitCharacters ?? outputLimitCharacters;
       const command = setup.sessions.realtimeCommands.answerQuestionsForUser(
         USER,
         {
-          answers: [{ questionId: "direction", value: "proceed" }],
+          answers: [
+            {
+              questionId: "direction",
+              value:
+                options.freeText === true ? "proceed".repeat(100) : "proceed",
+            },
+          ],
           requestId: pending.id,
           sessionId,
           workspaceId: TEST_WORKSPACE_ID,
@@ -130,18 +170,61 @@ function expectQuestionClaimState(
   }
 }
 
+async function settleAnsweredRun(
+  testSetup: ReturnType<typeof answeringSetup>,
+): Promise<void> {
+  await startSessionAndCompleteAgentFile(testSetup.setup);
+  await expectAnsweredRequestState(testSetup, true);
+}
+
+async function finishResumedRun(
+  setup: ReturnType<typeof answeringSetup>["setup"],
+): Promise<void> {
+  await completeAgentFileLookup(setup);
+  await waitForSessionStatus(setup, "idle");
+}
+
 describe("answered question launch claims", () => {
   test("claims after the old runtime settles and before resumed launch", async () => {
     const testSetup = answeringSetup();
     const { setup } = testSetup;
 
-    await startSessionAndCompleteAgentFile(setup);
-    await expectAnsweredRequestState(testSetup, true);
-
-    await completeAgentFileLookup(setup);
-    await waitForSessionStatus(setup, "idle");
+    await settleAnsweredRun(testSetup);
+    await finishResumedRun(setup);
 
     expectQuestionClaimState(testSetup, true);
+    setup.database.$client.close();
+  });
+
+  test("bounds an answered question result with the paused run snapshot", async () => {
+    const testSetup = answeringSetup({
+      changedOutputLimitCharacters: 20_000,
+      freeText: true,
+      outputLimitCharacters: MINIMUM_TOOL_OUTPUT_CHARACTERS,
+    });
+    const { setup } = testSetup;
+
+    await settleAnsweredRun(testSetup);
+
+    const result = setup.sessions
+      .detailForUser(TEST_USER_ID, SESSION_ID)
+      ?.messages.find(
+        (message) =>
+          message.role === "tool" && message.toolName === "ask_questions",
+      )?.content;
+    expect(result).toContain("Tool output truncated");
+    expect(unicodeCharacterCount(result ?? "")).toBe(
+      MINIMUM_TOOL_OUTPUT_CHARACTERS,
+    );
+
+    await finishResumedRun(setup);
+    expect(setup.selectedSystemPrompts).toHaveLength(2);
+    expect(setup.selectedSystemPrompts[1]).toContain(
+      `${String(MINIMUM_TOOL_OUTPUT_CHARACTERS)} Unicode characters`,
+    );
+    expect(setup.selectedSystemPrompts[1]).not.toContain(
+      "20,000 Unicode characters",
+    );
     setup.database.$client.close();
   });
 

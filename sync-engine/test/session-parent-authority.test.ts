@@ -188,12 +188,7 @@ function authoritySetup(options: {
       }
       return action(credential);
     },
-  }).actions(
-    SESSION_ID,
-    TEST_USER_ID,
-    parent.generation,
-    new AbortController().signal,
-  );
+  }).actions(SESSION_ID, TEST_USER_ID, parent.generation);
 
   return {
     actions,

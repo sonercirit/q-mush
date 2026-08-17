@@ -1,11 +1,11 @@
 import { ANSWER_QUESTIONS_REALTIME_OPERATION } from "./ask-questions.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseJsonRecord } from "./json-record.ts";
+import { MAXIMUM_REALTIME_MESSAGE_BYTES } from "./realtime-limits.ts";
 import { utf8ByteLength } from "./utf8.ts";
 
-const MAXIMUM_REALTIME_MESSAGE_LENGTH = 128 * 1024 * 1024;
 export const USER_REALTIME_MAX_PAYLOAD_LENGTH =
-  MAXIMUM_REALTIME_MESSAGE_LENGTH + 1;
+  MAXIMUM_REALTIME_MESSAGE_BYTES + 1;
 const IDENTIFIER_PATTERN = /^[A-Za-z\d._:-]{1,200}$/u;
 const OPERATION_PATTERN = /^[a-z][a-z\d_]*(?:\.[a-z][a-z\d_]*){1,7}$/u;
 
@@ -72,7 +72,7 @@ function identifier(value: unknown): string | undefined {
 }
 
 export function readUserRealtimeCommand(message: string): UserRealtimeCommand {
-  if (utf8ByteLength(message) > MAXIMUM_REALTIME_MESSAGE_LENGTH) {
+  if (utf8ByteLength(message) > MAXIMUM_REALTIME_MESSAGE_BYTES) {
     throw new UserRealtimeProtocolError("The realtime command was too large");
   }
 

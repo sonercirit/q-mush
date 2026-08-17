@@ -1,46 +1,24 @@
-import { readFile, symlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
-  RunnerCommandExecutor,
   executeRunnerCommand,
   readRunnerCommand,
+  RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
-import { RunnerOutputSpills } from "../../runner/runner-output-spills.ts";
-import { executeRunnerToolResult } from "../../runner/runner-tools.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
-import {
-  RUNNER_EXECUTION_CLEANUP_COMMAND,
-  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
-  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
-  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
-  type RunnerToolCommand,
-} from "../../shared/runner-command-broker.ts";
+import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
-import type { RunnerCommandResult } from "../../shared/tool-stream.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  MAXIMUM_TOOL_EXECUTION_MINUTES,
+  MAXIMUM_TOOL_OUTPUT_CHARACTERS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
+import { unicodeCharacterCount } from "../../shared/tool-output-limits.ts";
 import { createTestAgentFileWorkspace } from "./agent-file-test-helpers.ts";
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const temporaryDirectory = useTemporaryDirectories("q-mush-command-test-");
-
-function shellCommand(
-  root: string,
-  command: string,
-  timeout: number,
-  signal?: AbortSignal,
-): Promise<string> {
-  return executeRunnerCommand(
-    {
-      arguments: { command, timeout },
-      executionEnvironment: "bare_metal",
-      id: "shell-command",
-      sessionId: "session-1",
-      tool: "bash",
-      workingDirectory: root,
-    },
-    signal,
-  );
-}
 
 interface SessionExecutor {
   readonly executor: RunnerCommandExecutor;
@@ -50,6 +28,7 @@ interface SessionExecutor {
 
 interface SessionToolInvocation {
   readonly arguments: Readonly<Record<string, unknown>>;
+  readonly outputLimitCharacters?: number;
   readonly session: SessionExecutor;
   readonly tool: string;
 }
@@ -58,7 +37,11 @@ function sessionCommand(options: SessionToolInvocation): RunnerToolCommand {
   return {
     arguments: options.arguments,
     executionEnvironment: "bare_metal",
+    executionLimitSeconds: toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
     id: `${options.session.sessionId}-${options.tool}`,
+    outputLimitCharacters:
+      options.outputLimitCharacters ??
+      DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
     sessionId: options.session.sessionId,
     tool: options.tool,
     workingDirectory: options.session.root,
@@ -78,16 +61,8 @@ async function sessionWithFile(
   content: string,
 ): Promise<SessionExecutor> {
   const root = await temporaryDirectory();
-  await writeFile(join(root, path), content, "utf8");
+  await Bun.write(join(root, path), content);
   return createSessionExecutor(root, sessionId);
-}
-
-function readLinesFixture(
-  sessionId: string,
-  path: string,
-  lines: readonly string[],
-): Promise<SessionExecutor> {
-  return sessionWithFile(sessionId, path, lines.join("\n"));
 }
 
 function readSession(fixture: {
@@ -98,413 +73,259 @@ function readSession(fixture: {
   return sessionWithFile(fixture.sessionId, fixture.path, fixture.content);
 }
 
-function executorOutput(
-  executor: RunnerCommandExecutor,
-  command: RunnerToolCommand,
-): Promise<string> {
-  return executor.execute(command);
-}
-
 function executeSession(
   session: SessionExecutor,
   tool: string,
   input: Readonly<Record<string, unknown>>,
+  outputLimitCharacters?: number,
 ): Promise<string> {
-  return executorOutput(
-    session.executor,
-    sessionCommand({ arguments: input, session, tool }),
+  return session.executor.execute(
+    sessionCommand({
+      arguments: input,
+      ...(outputLimitCharacters === undefined ? {} : { outputLimitCharacters }),
+      session,
+      tool,
+    }),
   );
 }
 
-function spillTestSession(sessionId: string): Promise<SessionExecutor> {
-  return readSession({
-    content: "workspace content",
-    path: "existing.txt",
-    sessionId,
+function parsedCommand(overrides: Partial<RunnerToolCommand> = {}) {
+  return readRunnerCommand({
+    command: testRunnerCommand({
+      arguments: { path: "missing.txt" },
+      workingDirectory: "/missing-workspace",
+      ...overrides,
+    }),
   });
 }
 
-function readSpillContinuation(
-  session: SessionExecutor,
-  path: string,
-): Promise<string> {
-  return executeSession(session, "read", { limit: 2, path });
-}
-
-async function expectSpillRemoved(path: string): Promise<void> {
-  expect(await Bun.file(path).exists()).toBe(false);
-}
-
-function cleanupSession(session: SessionExecutor): Promise<void> {
-  return executeSession(session, RUNNER_EXECUTION_CLEANUP_COMMAND, {
-    [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true,
-  }).then(() => undefined);
-}
-
-function spillPath(output: string): string {
-  const path = /saved to (.+)\. Use the read tool/u.exec(output)?.[1];
-  if (path === undefined) {
-    throw new Error("The tool output did not include a spill path");
-  }
-  return path;
-}
-
-interface SpillRead {
-  readonly content: string;
-  readonly path: string;
-}
-
-async function spilledOutput(
-  options: SessionToolInvocation,
-): Promise<SpillRead> {
-  const invocationOutput = await executeSession(
-    options.session,
-    options.tool,
-    options.arguments,
-  );
-  const path = spillPath(invocationOutput);
-  return { content: await readFile(path, "utf8"), path };
+function expectRawOverflow(output: string, maximum: number): void {
+  expect(unicodeCharacterCount(output)).toBe(maximum + 1);
+  expect(output).not.toContain("Tool output truncated");
 }
 
 describe("runner WebSocket protocol", () => {
-  test("validates commands before executing them", async () => {
-    const expected = testRunnerCommand({
-      arguments: { path: "missing.txt" },
-      workingDirectory: "/missing-workspace",
+  test("defaults legacy commands and preserves configured settings", () => {
+    expect(parsedCommand()).toMatchObject({
+      executionLimitSeconds: toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
+      outputLimitCharacters: DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
     });
-    const command = readRunnerCommand({ command: expected });
+    expect(
+      parsedCommand({
+        executionLimitSeconds: 420,
+        outputLimitCharacters: 12_345,
+      }),
+    ).toMatchObject({
+      executionLimitSeconds: 420,
+      outputLimitCharacters: 12_345,
+    });
+  });
 
-    expect(command).toEqual(expected);
-    const output = await executeRunnerCommand(command);
+  test.each([
+    { executionLimitSeconds: 0 },
+    { executionLimitSeconds: MAXIMUM_TOOL_EXECUTION_MINUTES * 60 + 1 },
+    { outputLimitCharacters: 0 },
+    { outputLimitCharacters: MAXIMUM_TOOL_OUTPUT_CHARACTERS + 1 },
+  ])("rejects invalid command settings %#", (settings) => {
+    expect(() => parsedCommand(settings)).toThrow("invalid runner command");
+  });
 
+  test("validates commands before executing them", async () => {
+    const output = await executeRunnerCommand(parsedCommand());
     expect(output.startsWith("Error:")).toBe(true);
   });
 
-  test("bounds each read independently without creating spill files", async () => {
-    const source = ["a".repeat(30_000), "b".repeat(30_000)].join("\n");
+  test("keeps positional read pagination without separate output budgets", async () => {
+    const lines = Array.from(
+      { length: 2_501 },
+      (_value, index) => `${String(index + 1).padStart(4, "0")}-line`,
+    );
+    const session = await sessionWithFile(
+      "session-many-lines",
+      "many-lines.txt",
+      lines.join("\n"),
+    );
+    const output = await executeSession(
+      session,
+      "read",
+      { limit: 3_000, path: "many-lines.txt" },
+      40_000,
+    );
+
+    expect(output).toContain(lines[0]);
+    expect(output).toContain(lines[2_500]);
+    expect(output).not.toContain("Tool output truncated");
+  });
+
+  test("uses offset and limit only to select a page", async () => {
+    const session = await readSession({
+      content: ["first", "second", "third", "fourth"].join("\n"),
+      path: "content.txt",
+      sessionId: "session-page",
+    });
+
+    await expect(
+      executeSession(session, "read", {
+        limit: 2,
+        offset: 2,
+        path: "content.txt",
+      }),
+    ).resolves.toBe(
+      "second\nthird\n\n[Showing lines 2-3 of 4. Use offset=4 to continue.]",
+    );
+  });
+
+  test("keeps output unchanged at the exact Unicode boundary", async () => {
+    const source = "😀".repeat(120);
     const session = await readSession({
       content: source,
-      path: "large.txt",
-      sessionId: "session-read-calls",
+      path: "content.txt",
+      sessionId: "session-unicode-boundary",
     });
-    const read = (offset: number) =>
-      executeSession(session, "read", {
-        limit: 1,
-        offset,
-        path: "large.txt",
-      });
 
-    const first = await read(1);
-    const second = await read(2);
-
-    expect(first).toContain("a".repeat(30_000));
-    expect(first).toContain("Use offset=2 to continue");
-    expect(second).toBe("b".repeat(30_000));
-    expect(first).not.toContain("saved to");
-    expect(second).not.toContain("saved to");
+    await expect(
+      executeSession(session, "read", { path: "content.txt" }, 120),
+    ).resolves.toBe(source);
   });
 
-  test("limits a read call to 2,000 lines on the same file", async () => {
-    const lines = Array.from({ length: 2_001 }, (_value, index) => {
-      const lineNumber = String(index + 1).padStart(4, "0");
-      return `${lineNumber}-line`;
-    });
-    const manyLinesPath = "many-lines.txt";
-    const session = await readLinesFixture(
-      "session-many-lines",
-      manyLinesPath,
-      lines,
-    );
-
-    const output = await executeSession(session, "read", {
-      limit: 10_000,
-      path: manyLinesPath,
-    });
-
-    expect(output).toContain(lines[1_999]);
-    expect(output).not.toContain(lines[2_000]);
-    expect(output).toContain(
-      "[Showing lines 1-2000 of 2001. Use offset=2001 to continue.]",
-    );
-    expect(output).not.toContain("saved to");
-  });
-
-  test("limits read bytes per call and continues by offset on the same file", async () => {
-    const lines = Array.from({ length: 600 }, (_value, index) => {
-      const prefix = String(index + 1).padStart(4, "0");
-      return `${prefix}-${"x".repeat(95)}`;
-    });
-    const wideLinesPath = "wide-lines.txt";
-    const session = await readLinesFixture(
-      "session-read-bytes",
-      wideLinesPath,
-      lines,
-    );
-
-    const output = await executeSession(session, "read", {
-      path: wideLinesPath,
-    });
-    const continuation = /Use offset=(\d+) to continue/u.exec(output)?.[1];
-    const nextOffset = Number(continuation);
-
-    expect(Buffer.byteLength(output)).toBeLessThan(52 * 1_024);
-    expect(nextOffset).toBeGreaterThan(1);
-    expect(nextOffset).toBeLessThan(lines.length);
-    expect(output).not.toContain("saved to");
-    expect(
-      await executeSession(session, "read", {
-        limit: 1,
-        offset: nextOffset,
-        path: wideLinesPath,
-      }),
-    ).toContain(lines[nextOffset - 1]);
-  });
-
-  test("does not spill a single oversized read line", async () => {
-    const oversizedLine = "oversized-content-".repeat(4_000);
+  test("retains one raw overflow code point for the engine finalizer", async () => {
+    const maximum = 200;
     const session = await readSession({
-      content: oversizedLine,
-      path: "oversized.txt",
-      sessionId: "session-oversized-line",
+      content: "😀".repeat(500),
+      path: "content.txt",
+      sessionId: "session-unicode-overflow",
     });
+    const output = await executeSession(
+      session,
+      "read",
+      { path: "content.txt" },
+      maximum,
+    );
 
-    const output = await executeSession(session, "read", {
-      path: "oversized.txt",
-    });
-
-    expect(output).toContain("exceeds the 50KB read limit");
-    expect(output).toContain("same file");
+    expectRawOverflow(output, maximum);
+    expect(output).not.toContain("does not fit");
     expect(output).not.toContain("saved to");
+    expect(output).not.toContain("�");
   });
 
-  test("spills oversized bash output per call and cleans it up terminally", async () => {
-    const session = await spillTestSession("session-bash-spill");
-    const command =
-      "yes xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx | head -n 2000";
-
-    const commandArguments = { command, timeout: 5 };
-    const first = await spilledOutput({
-      arguments: commandArguments,
+  test("retains failed runner-tool overflow without adding a notice", async () => {
+    const maximum = 180;
+    const session = createSessionExecutor(
+      await temporaryDirectory(),
+      "session-failure-bound",
+    );
+    const output = await executeSession(
       session,
-      tool: "bash",
-    });
-    const second = await spilledOutput({
-      arguments: commandArguments,
-      session,
-      tool: "bash",
-    });
-
-    expect(first.content).toContain("stdout:\nxxxxxxxx");
-    expect(first.content).toContain("Exit code: 0");
-    expect(second.path).not.toBe(first.path);
-    expect(await readSpillContinuation(session, first.path)).toContain(
-      "Use offset=3 to continue",
-    );
-    const initialPaths = [first.path, second.path];
-    for (const path of initialPaths) {
-      expect(await Bun.file(path).exists()).toBe(true);
-    }
-
-    await cleanupSession(session);
-    while (initialPaths.length > 0) {
-      await expectSpillRemoved(initialPaths.pop() ?? "");
-    }
-  });
-
-  test("writes server-routed spills that read can continue and cleanup removes", async () => {
-    const session = await spillTestSession("session-routed-spill");
-    const content = Array.from(
-      { length: 2_500 },
-      (_value, index) => `routed-${String(index + 1)}`,
-    ).join("\n");
-    const path = await executeSession(
-      session,
-      RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
-      {
-        [RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT]: content,
-      },
+      "read",
+      { path: `${"missing".repeat(100)}.txt` },
+      maximum,
     );
 
-    expect(await readFile(path, "utf8")).toBe(content);
-    expect(await readSpillContinuation(session, path)).toContain(
-      "Use offset=3 to continue",
-    );
-    await cleanupSession(session);
-    await expectSpillRemoved(path);
+    expectRawOverflow(output, maximum);
   });
 
-  async function expectCompletedSpillRead(
-    execution: Promise<RunnerCommandResult>,
-    spills: RunnerOutputSpills,
-    expected: string,
-  ): Promise<void> {
-    const result = await execution;
-    expect(result.state).toBe("completed");
-    expect(result.output).toContain(expected);
-    await spills.cleanup();
-  }
-
-  test("reads a contained spill under a symlinked temporary directory", async () => {
-    const realTemporary = await temporaryDirectory();
-    const linkedTemporary = join(await temporaryDirectory(), "tmp-link");
-    await symlink(realTemporary, linkedTemporary);
-    const originalTmpdir = process.env["TMPDIR"];
-    process.env["TMPDIR"] = linkedTemporary;
-    try {
-      const spills = new RunnerOutputSpills();
-      const path = await spills.spill("contained spill body\n");
-      const root = await temporaryDirectory();
-
-      await expectCompletedSpillRead(
-        executeRunnerToolResult(root, "read", { path }, undefined, undefined, {
-          containPaths: true,
-          outputSpills: spills,
-        }),
-        spills,
-        "contained spill body",
-      );
-    } finally {
-      if (originalTmpdir === undefined) delete process.env["TMPDIR"];
-      else process.env["TMPDIR"] = originalTmpdir;
-    }
-  });
-
-  test("reads a spill larger than the plain-file byte limit", async () => {
-    const spills = new RunnerOutputSpills();
-    const oversized = "spilled line\n".repeat(200_000);
-    expect(oversized.length).toBeGreaterThan(1_024 * 1_024);
-    await expectCompletedSpillRead(
-      executeRunnerToolResult(
-        await temporaryDirectory(),
-        "read",
-        { offset: 199_999, path: await spills.spill(oversized) },
-        undefined,
-        undefined,
-        { outputSpills: spills },
-      ),
-      spills,
-      "spilled line",
-    );
-  });
-
-  test("spills an oversized page fetch result", async () => {
-    const root = await temporaryDirectory();
-    const spills = new RunnerOutputSpills();
-    const fullOutput = "rendered-page-".repeat(5_000);
-
-    const result = await executeRunnerToolResult(
-      root,
-      "page_fetch",
-      { url: "https://example.com" },
-      undefined,
-      undefined,
-      {
-        outputSpills: spills,
-        pageFetch: () => Promise.resolve(fullOutput),
-      },
-    );
-    const path = spillPath(result.output);
-
-    expect(result.state).toBe("completed");
-    expect(await readFile(path, "utf8")).toBe(fullOutput);
-    await spills.cleanup();
-  });
-
-  test("spills an oversized parallel result without losing child output", async () => {
-    const session = await readSession({
-      content: "parallel workspace",
-      path: "parallel.txt",
-      sessionId: "session-parallel-spill",
-    });
-    const child = (value: string) => ({
-      parameters: {
-        command: `printf '%s' ${JSON.stringify(value.repeat(30_000))}`,
-        timeout: 5,
-      },
-      recipient_name: "bash",
-    });
-
-    const spilled = await spilledOutput({
-      arguments: { tool_uses: [child("a"), child("b")] },
-      session,
-      tool: "parallel",
-    });
-
-    expect(spilled.content).not.toContain("[parallel output truncated]");
-    expect(spilled.content).toContain('"recipient_name": "bash"');
-    expect(spilled.content).toContain("a".repeat(30_000));
-    expect(spilled.content).toContain("b".repeat(30_000));
-    await cleanupSession(session);
-  });
-
-  test("loads the preferred workspace agent file for the server", async () => {
+  test("does not truncate internal agent-file or directory payloads", async () => {
+    const instructions = "Keep complete instructions. ".repeat(20);
     const root = await createTestAgentFileWorkspace(temporaryDirectory, {
-      "AGENTS.md": "Preferred instructions",
-      "CLAUDE.md": "Ignored instructions",
+      "AGENTS.md": instructions,
     });
+    const session = createSessionExecutor(root, "session-internal-payloads");
+    const agentFile = await executeSession(
+      session,
+      RUNNER_AGENT_FILE_COMMAND,
+      {},
+      120,
+    );
+    const directory = await executeSession(
+      session,
+      "list_directories",
+      {},
+      120,
+    );
 
-    const output = await executeRunnerCommand({
-      arguments: {},
-      executionEnvironment: "bare_metal",
-      id: "agent-file-command",
-      sessionId: "session-1",
-      tool: RUNNER_AGENT_FILE_COMMAND,
-      workingDirectory: root,
-    });
-
-    expect(JSON.parse(output)).toEqual({
-      content: "Preferred instructions",
+    expect(JSON.parse(agentFile)).toEqual({
+      content: instructions,
       name: "AGENTS.md",
     });
-  });
-
-  test("executes directory-browser commands outside an agent workspace", async () => {
-    const output = await executeRunnerCommand({
-      arguments: {},
-      executionEnvironment: "bare_metal",
-      id: "directory-command",
-      sessionId: "directory-picker",
-      tool: "list_directories",
-      workingDirectory: process.cwd(),
-    });
-    const listing: unknown = await new Response(output).json();
-
-    expect(listing).toMatchObject({
-      parent: dirname(process.cwd()),
-      path: process.cwd(),
-      truncated: false,
-    });
+    expect(JSON.parse(directory)).toMatchObject({ path: root });
   });
 
   test("preserves normal shell completion and exit reporting", async () => {
-    const result = await shellCommand(
+    const session = createSessionExecutor(process.cwd(), "session-shell");
+    const output = await executeSession(session, "bash", {
+      command: "printf completed; exit 7",
+      timeout: 5,
+    });
+
+    expect(output).toBe("stdout:\ncompleted\nExit code: 7");
+  });
+
+  test("distinguishes exact shell output from one-code-point overflow", async () => {
+    const contentCharacters = 120;
+    const outputLimit = unicodeCharacterCount(
+      `stdout:\n${"😀".repeat(contentCharacters)}\nExit code: 0`,
+    );
+    const session = createSessionExecutor(
       process.cwd(),
-      "printf completed; exit 7",
-      5,
+      "session-shell-boundary",
+    );
+    const shell = (characters: number) =>
+      executeSession(
+        session,
+        "bash",
+        { command: `printf '${"😀".repeat(characters)}'`, timeout: 5 },
+        outputLimit,
+      );
+    const exact = await shell(contentCharacters);
+    const overflow = await shell(contentCharacters + 1);
+
+    expect(exact).toContain("😀".repeat(contentCharacters));
+    expect(exact).not.toContain("Tool output truncated");
+    expectRawOverflow(overflow, outputLimit);
+    expect(overflow).not.toContain("�");
+  });
+
+  test("shares one raw capture budget across stdout and stderr", async () => {
+    const outputLimit = 160;
+    const session = createSessionExecutor(
+      process.cwd(),
+      "session-shell-shared",
+    );
+    const result = await session.executor.executeResult(
+      sessionCommand({
+        arguments: {
+          command:
+            "printf '%*s' 400 '' | tr ' ' o; printf '%*s' 400 '' | tr ' ' e >&2",
+          timeout: 5,
+        },
+        outputLimitCharacters: outputLimit,
+        session,
+        tool: "bash",
+      }),
     );
 
-    expect(result).toBe("stdout:\ncompleted\nExit code: 7");
+    expectRawOverflow(result.output, outputLimit);
+    expect(unicodeCharacterCount(result.output)).toBeLessThan(outputLimit * 2);
   });
 
   test("streams shell channels and reports explicit terminal states", async () => {
     const streamed: unknown[] = [];
-    const executor = new RunnerCommandExecutor();
-    const command = (shell: string, id: string) => ({
-      arguments: { command: shell, timeout: 5 },
-      executionEnvironment: "bare_metal" as const,
-      id,
-      sessionId: "session-stream",
-      tool: "bash",
-      workingDirectory: process.cwd(),
-    });
-
-    const completed = await executor.executeResult(
-      command("printf out; printf err >&2", "stream-output"),
+    const session = createSessionExecutor(process.cwd(), "session-stream");
+    const completed = await session.executor.executeResult(
+      sessionCommand({
+        arguments: { command: "printf out; printf err >&2", timeout: 5 },
+        session,
+        tool: "bash",
+      }),
       undefined,
       (delta) => streamed.push(delta),
     );
-    const failed = await executor.executeResult(
-      command("printf failed; exit 7", "stream-failed"),
+    const failed = await session.executor.executeResult(
+      sessionCommand({
+        arguments: { command: "printf failed; exit 7", timeout: 5 },
+        session,
+        tool: "bash",
+      }),
     );
 
     expect(streamed).toHaveLength(2);

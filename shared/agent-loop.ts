@@ -147,6 +147,9 @@ export interface AgentLoopOptions {
   readonly executeTool: (
     call: ParsedAgentToolCall,
   ) => Promise<RunnerCommandResult | string>;
+  readonly finalizeToolResult?: (
+    result: RunnerCommandResult,
+  ) => Promise<RunnerCommandResult> | RunnerCommandResult;
   readonly handoffRequested?: () => boolean;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
@@ -367,6 +370,7 @@ export async function runAgentLoop(
         throw error;
       }
       throwIfAgentAborted(options.signal);
+      result = (await options.finalizeToolResult?.(result)) ?? result;
       const toolMessage: AgentConversationMessage = {
         content: result.output,
         role: "tool",

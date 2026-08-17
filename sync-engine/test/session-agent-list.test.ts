@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   DEFAULT_LIST_SESSIONS_PAGE_SIZE,
   MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
@@ -124,6 +125,7 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
   closeToolSession(setup);
 
   const maximumText = "\u0000".repeat(100);
+  const maximumOutputCharacters = 100_000;
   const maxModel = scriptedModel([
     {
       content: "Inspect the largest session-list page.",
@@ -136,7 +138,14 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
     },
     { content: "Largest page checked.", toolCalls: [] },
   ]);
-  const maxSetup = await startToolSession(maxModel);
+  const maxSetup = await startToolSession(maxModel, {
+    toolSettings: {
+      read: () => ({
+        ...DEFAULT_TOOL_SETTINGS,
+        outputLimitCharacters: maximumOutputCharacters,
+      }),
+    },
+  });
   maxSetup.database
     .insert(agentSessions)
     .values(
@@ -172,7 +181,7 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
     MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
   );
   expect(Buffer.byteLength(maxOutput ?? "", "utf8")).toBeLessThanOrEqual(
-    48_000,
+    maximumOutputCharacters,
   );
   closeToolSession(maxSetup);
 });

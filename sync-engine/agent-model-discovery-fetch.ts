@@ -1,4 +1,5 @@
 import { executeWithAbortSignal } from "../shared/validation.ts";
+import { cancelableResponseReader } from "./cancelable-response-reader.ts";
 import { isProviderCredentialRejection } from "./provider-error.ts";
 
 const MAXIMUM_RESPONSE_LENGTH = 5 * 1024 * 1024;
@@ -40,35 +41,27 @@ export function safeAgentModelDiscoveryError(error: unknown): string {
     : "Model discovery failed because the provider is unavailable";
 }
 
-function cancelReader(reader: ReadableStreamDefaultReader<Uint8Array>): void {
-  void reader.cancel().catch(() => undefined);
-}
-
 function nextResponseChunk(
   reader: ReadableStreamDefaultReader<Uint8Array>,
   signal: AbortSignal,
+  cancellation: ReturnType<typeof cancelableResponseReader>,
 ): ReturnType<ReadableStreamDefaultReader<Uint8Array>["read"]> {
   return executeWithAbortSignal(
     signal,
-    {
-      abortMessage: "Model discovery was canceled",
-      onAbort: () => {
-        cancelReader(reader);
-      },
-    },
+    cancellation.options("Model discovery was canceled"),
     () => reader.read(),
   );
 }
 
-function appendResponseChunk(
-  reader: ReadableStreamDefaultReader<Uint8Array>,
+async function appendResponseChunk(
+  cancel: () => Promise<void>,
   target: Uint8Array,
   offset: number,
   value: Uint8Array,
-): number {
+): Promise<number> {
   const nextOffset = offset + value.byteLength;
   if (nextOffset > MAXIMUM_RESPONSE_LENGTH) {
-    cancelReader(reader);
+    await cancel();
     throw modelDiscoveryError(MODEL_CATALOG_TOO_LARGE);
   }
   target.set(value, offset);
@@ -95,19 +88,25 @@ async function readProviderResponse(
   }
   const reader = response.body?.getReader();
   if (reader === undefined) return null;
+  const responseReader = cancelableResponseReader(reader);
   const bytes = Buffer.allocUnsafe(MAXIMUM_RESPONSE_LENGTH);
   let length = 0;
   let reading = true;
   try {
     while (reading) {
-      const part = await nextResponseChunk(reader, signal);
+      const part = await nextResponseChunk(reader, signal, responseReader);
       reading = !part.done;
       if (!part.done) {
-        length = appendResponseChunk(reader, bytes, length, part.value);
+        length = await appendResponseChunk(
+          responseReader.cancel,
+          bytes,
+          length,
+          part.value,
+        );
       }
     }
   } finally {
-    reader.releaseLock();
+    responseReader.release(signal);
   }
   try {
     const body = new TextDecoder("utf-8", { fatal: true }).decode(

@@ -12,6 +12,10 @@ import {
 import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
+import {
+  abortAndObserveCanceledReader,
+  stalledResponseReaderFixture,
+} from "./discovery-cancellation-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 
@@ -52,14 +56,23 @@ async function capturedDiscovery(
   return { catalog: discovered, request: capture.request };
 }
 
-function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
-  const response = new Response(body, {
-    headers: { "content-type": "application/json" },
-  });
+function openAiDiscovery(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<AgentModelCatalog> {
   return discoverAgentModelsWithFetch(
     "openai",
     credential("api_key", "sk-openai-secret"),
     () => Promise.resolve(response),
+    signal,
+  );
+}
+
+function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
+  return openAiDiscovery(
+    new Response(body, {
+      headers: { "content-type": "application/json" },
+    }),
   );
 }
 
@@ -265,6 +278,13 @@ describe("agent model discovery", () => {
 
     await expect(captured).resolves.toBe(reason);
     await expect(canceled.promise).resolves.toBeUndefined();
+  });
+
+  test("settles abort promptly while body cancellation finishes later", async () => {
+    const fixture = stalledResponseReaderFixture();
+    const { captured, controller } = fixture.start(openAiDiscovery);
+
+    await abortAndObserveCanceledReader(fixture, captured, controller);
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {

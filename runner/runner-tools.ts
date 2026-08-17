@@ -1,5 +1,5 @@
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, relative, sep } from "node:path";
 import {
   agentAttachmentMediaTypeFromName,
   MAXIMUM_AGENT_ATTACHMENT_BYTES,
@@ -18,8 +18,10 @@ import {
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
 import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../shared/tool-limits.ts";
-import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../shared/tool-limits.ts";
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import {
   createPageFetchRunnerTool,
@@ -28,15 +30,12 @@ import {
 } from "./page-fetch.ts";
 import { attachmentPathFromReference } from "./runner-attachments.ts";
 import {
-  readContinuation,
-  type RunnerOutputSpills,
-} from "./runner-output-spills.ts";
-import {
   formatRunnerProcessResult,
   runnerCommandResultFromOutput,
   runRunnerProcess,
   throwIfRunnerCommandStopped,
 } from "./runner-process.ts";
+import { readContinuation } from "./runner-read-continuation.ts";
 import {
   optionalInteger,
   requiredInteger,
@@ -51,7 +50,7 @@ import {
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const DEFAULT_READ_LINES = MAXIMUM_TOOL_OUTPUT_LINES;
+const DEFAULT_READ_LINES = 2_000;
 const MAXIMUM_EDITS = 100;
 
 function throwIfRunnerToolStopped(signal: AbortSignal | undefined): void {
@@ -72,10 +71,11 @@ type RunnerShellExecutor = (
 ) => Promise<RunnerCommandResult | string>;
 
 export interface RunnerToolExecutionOptions {
+  readonly executionLimitSeconds?: number;
   /** Container sessions confine host-side file tools to the workspace. */
   readonly containPaths?: boolean;
   readonly mapAbsolutePath?: (path: string) => string;
-  readonly outputSpills?: RunnerOutputSpills;
+  readonly outputLimitCharacters?: number;
   readonly pageFetch?: PageFetchRunnerTool;
   readonly shell?: RunnerShellExecutor;
   readonly stream?: RunnerToolStream;
@@ -93,7 +93,6 @@ function pathResolutionOptions(
 }
 
 interface PathArgumentOptions {
-  readonly allowedExternalPath?: (path: string) => boolean;
   readonly containPaths?: boolean;
   readonly mapAbsolutePath?: (path: string) => string;
   readonly mayNotExist?: boolean;
@@ -112,13 +111,6 @@ async function pathArgument(
   }
   if (options.containPaths !== true) {
     return resolveRunnerPath(root, mapped, options.mayNotExist);
-  }
-  if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
-    const canonical = await realpath(mapped);
-    // Re-check after canonicalization so a symlink swap cannot widen access.
-    if (options.allowedExternalPath(canonical)) {
-      return canonical;
-    }
   }
   return containedRunnerPath(root, mapped, options.mayNotExist);
 }
@@ -183,16 +175,12 @@ function resolvedFileToolArguments(
 async function readTool(
   ...[root, arguments_, , options]: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const ownedSpillPath = (candidate: string): boolean =>
-    options?.outputSpills?.ownsPath(candidate) === true;
-  const path = await pathArgument(root, arguments_, {
-    allowedExternalPath: ownedSpillPath,
-    ...pathResolutionOptions(options),
-  });
-  const content = await readTextFile(
-    path,
-    ownedSpillPath(path) ? undefined : MAX_FILE_BYTES,
+  const path = await pathArgument(
+    root,
+    arguments_,
+    pathResolutionOptions(options),
   );
+  const content = await readTextFile(path, MAX_FILE_BYTES);
   const lineBounds = { maximum: 1_000_000_000, minimum: 1 };
   const offset = optionalInteger(arguments_, "offset", 1, lineBounds);
   const limit = optionalInteger(
@@ -375,6 +363,8 @@ async function editTool(
     updated = `${updated.slice(0, edit.start)}${edit.newText}${updated.slice(edit.end)}`;
   }
 
+  // Replacement construction may be substantial; fence the actual write too.
+  throwIfRunnerToolStopped(context.signal);
   await writeFile(context.path, updated, "utf8");
   return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(context.root, context.path)}.`;
 }
@@ -387,7 +377,9 @@ async function bashTool(
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
   const timeoutSeconds = requiredInteger(arguments_, "timeout", {
-    maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+    maximum:
+      options?.executionLimitSeconds ??
+      toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
     minimum: 1,
   });
   if (options?.shell !== undefined) {
@@ -405,6 +397,9 @@ async function bashTool(
     cwd: root,
     executable: "/bin/sh",
     ...(options?.stream === undefined ? {} : { onOutput: options.stream }),
+    ...(options?.outputLimitCharacters === undefined
+      ? {}
+      : { outputLimitCharacters: options.outputLimitCharacters }),
     ...(signal === undefined ? {} : { signal }),
     timeoutSeconds,
   });
@@ -537,17 +532,7 @@ async function parallelToolResult(
       ),
     signal,
   );
-  const aggregate = aggregateParallelToolResults(results);
-  return options?.outputSpills === undefined
-    ? aggregate
-    : {
-        ...aggregate,
-        output: JSON.stringify(
-          results.map(({ canonical }) => canonical),
-          null,
-          2,
-        ),
-      };
+  return aggregateParallelToolResults(results);
 }
 
 interface ResolvedRunnerTool {
@@ -642,22 +627,11 @@ export async function executeRunnerToolResult(
 ): Promise<RunnerCommandResult> {
   const resolved = await resolvedRunnerTool(parameters);
   throwIfRunnerToolStopped(resolved.signal);
-  const spills = resolved.options?.outputSpills;
   if (resolved.name === "parallel") {
-    const result = await parallelToolResult(...parallelArguments(resolved));
-    if (spills !== undefined) {
-      return { ...result, output: await spills.apply(result.output) };
-    }
-    return result;
+    return parallelToolResult(...parallelArguments(resolved));
   }
   const output = await executeResolvedRunnerTool(resolved);
-  const result =
-    resolved.name === "bash"
-      ? runnerCommandResultFromOutput(output)
-      : { output, state: "completed" as const };
-  return spills !== undefined &&
-    resolved.name !== "read" &&
-    resolved.name !== "explain_file"
-    ? { ...result, output: await spills.apply(result.output) }
-    : result;
+  return resolved.name === "bash"
+    ? runnerCommandResultFromOutput(output)
+    : { output, state: "completed" as const };
 }

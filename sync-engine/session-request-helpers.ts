@@ -132,6 +132,7 @@ export class SessionRequestHelpers {
         },
         signal,
       );
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       const value: unknown = JSON.parse(result.output);
       return {
         listing: readRunnerDirectoryListing(value),

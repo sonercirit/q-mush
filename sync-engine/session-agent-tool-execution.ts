@@ -1,4 +1,5 @@
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import type { AgentSkills } from "./agent-skills.ts";
 import { pauseForAskQuestions } from "./ask-questions-pause.ts";
@@ -11,17 +12,12 @@ interface RuntimeToolExecution {
   readonly name: string;
 }
 
-type ToolResultTransform = (
-  result: RunnerCommandResult,
-  signal: AbortSignal,
-) => Promise<RunnerCommandResult>;
-
 interface ToolExecutionOptions {
   readonly call: RuntimeToolExecution;
   readonly dispatch: AgentSkillDispatcher;
   readonly executeSkill: AgentSkills["executeResult"];
   readonly outerSignal: AbortSignal;
-  readonly transformSkillResult: ToolResultTransform;
+  readonly settings: ToolSettings;
 }
 
 type AgentSkillDispatcher = (
@@ -82,33 +78,23 @@ export function executeAuthorizedRuntimeTool(
     : Promise.resolve(questionResult);
 }
 
-/**
- * Schema-bounded sleep deliberately avoids an equal deadline that could race
- * its completion timer.
- */
 function executeRuntimeTool(
   options: ToolExecutionOptions,
 ): Promise<RunnerCommandResult> {
-  const { call } = options;
-  if (call.name === "sleep") {
-    return options.dispatch(
-      call.name,
-      call.arguments,
-      options.outerSignal,
-      call.id,
-    );
-  }
-  return executeToolWithinTimeLimit(async (signal) => {
-    const skillOutput = options.executeSkill(
-      call.name,
-      call.arguments,
-      signal,
-      call.id,
-    );
-    const result = await (skillOutput ??
-      options.dispatch(call.name, call.arguments, signal, call.id));
-    return skillOutput === undefined
-      ? result
-      : await options.transformSkillResult(result, signal);
-  }, options.outerSignal);
+  return executeToolWithinTimeLimit(
+    async (signal) => {
+      const { call } = options;
+      const skillOutput = options.executeSkill(
+        call.name,
+        call.arguments,
+        signal,
+        call.id,
+      );
+      const result = await (skillOutput ??
+        options.dispatch(call.name, call.arguments, signal, call.id));
+      return result;
+    },
+    options.outerSignal,
+    options.settings,
+  );
 }

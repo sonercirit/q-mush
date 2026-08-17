@@ -8,10 +8,8 @@ import {
 } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import {
-  selectedAgentTools,
-  type AgentSessionToolName,
-} from "../shared/agent-tools.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
+import { type AgentSessionToolName } from "../shared/agent-tools.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,

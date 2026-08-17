@@ -64,7 +64,10 @@ export type RestartHandoffSettlement =
   | { readonly status: "completed" | "idle" }
   | { readonly error: string; readonly status: "failed" };
 
-type RestartHandoffStoreOptions = SessionStoreWriteResources & {
+type RestartHandoffStoreOptions = Pick<
+  SessionStoreWriteResources,
+  "database" | "generateId" | "read"
+> & {
   readonly interruptUnknownTools?: (
     database: Pick<AppDatabase, "insert" | "select" | "update">,
     sessionId: string,
@@ -307,6 +310,7 @@ export class RestartHandoffStore {
       previousExecutionGeneration: options.authority.generation,
       segment: session.segment,
       sessionId: options.authority.sessionId,
+      toolSettings: "inherit",
       userId: session.userId,
     });
   }

@@ -1,11 +1,18 @@
 import { describe, expect, test, vi } from "vitest";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
 import { executeSessionSleepTool } from "../session-sleep-tool.ts";
 import {
   notifySessionSteeringInput,
   waitForSessionSteeringInput,
 } from "../session-steering-wakeup.ts";
 import { expectNoTimers } from "./timer-test-helpers.ts";
+
+const DEFAULT_EXECUTION_LIMIT_SECONDS = toolExecutionLimitSeconds(
+  DEFAULT_TOOL_SETTINGS,
+);
 
 async function advance(milliseconds: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(milliseconds);
@@ -93,7 +100,7 @@ describe("session sleep tool", () => {
 
   test("completes a maximum-duration sleep inside the global tool limit", async () => {
     await withFakeTimers(async () => {
-      const maximum = startSleep(MAXIMUM_TOOL_EXECUTION_SECONDS, "maximum");
+      const maximum = startSleep(DEFAULT_EXECUTION_LIMIT_SECONDS, "maximum");
       await vi.runAllTimersAsync();
 
       await expect(maximum).resolves.toMatch(/Slept for the full duration/);
@@ -111,7 +118,7 @@ describe("session sleep tool", () => {
       Number.NaN,
       Number.POSITIVE_INFINITY,
       1.5,
-      MAXIMUM_TOOL_EXECUTION_SECONDS + 1,
+      DEFAULT_EXECUTION_LIMIT_SECONDS + 1,
     ]) {
       await expect(
         executeSessionSleepTool(

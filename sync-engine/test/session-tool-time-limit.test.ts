@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
-import { MAXIMUM_TOOL_EXECUTION_MS } from "../../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  MINIMUM_TOOL_OUTPUT_CHARACTERS,
+  toolExecutionLimitMilliseconds,
+} from "../../shared/tool-limits.ts";
+import {
+  boundToolResult,
+  unicodeCharacterCount,
+} from "../../shared/tool-output-limits.ts";
+import { executeSessionSleepTool } from "../session-sleep-tool.ts";
+import { waitForSessionSteeringInput } from "../session-steering-wakeup.ts";
 import { executeToolWithinTimeLimit } from "../session-tool-time-limit.ts";
 import { expectNoTimers } from "./timer-test-helpers.ts";
 
@@ -26,18 +36,77 @@ function nonCooperativeExecute(): Promise<never> {
   });
 }
 
+function signalCapture() {
+  return vi.fn<(signal: AbortSignal) => void>();
+}
+
+function lastCapturedSignal(
+  capture: ReturnType<typeof signalCapture>,
+): AbortSignal {
+  const signal = capture.mock.lastCall?.[0];
+  if (signal === undefined)
+    throw new TypeError("The tool signal was not captured");
+  return signal;
+}
+
+async function advanceToToolDeadline(
+  settings = DEFAULT_TOOL_SETTINGS,
+): Promise<void> {
+  await vi.advanceTimersByTimeAsync(
+    toolExecutionLimitMilliseconds(settings) - 1,
+  );
+}
+
 async function expectTimedOutRun(
   execute: Parameters<typeof executeToolWithinTimeLimit>[0],
   outer: AbortController,
 ): Promise<void> {
   const result = executeToolWithinTimeLimit(execute, outer.signal);
-  await vi.advanceTimersByTimeAsync(MAXIMUM_TOOL_EXECUTION_MS);
+  await vi.advanceTimersByTimeAsync(
+    toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
+  );
   await expect(result).resolves.toMatchObject({ state: "timed-out" });
 }
 
 function timedOutOuterController(): AbortController {
   vi.useFakeTimers();
   return new AbortController();
+}
+
+function deadlineSettlement(result: Promise<unknown>): () => boolean {
+  let settled = false;
+  void result.then(() => {
+    settled = true;
+  });
+  return () => settled;
+}
+
+function oneMinuteSettings(
+  outputLimitCharacters = DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+) {
+  return { executionLimitMinutes: 1, outputLimitCharacters };
+}
+
+async function expectPending(result: Promise<unknown>): Promise<void> {
+  const settled = deadlineSettlement(result);
+  await Promise.resolve();
+  expect(settled()).toBe(false);
+}
+
+function expectTimeoutResult(
+  result: { readonly output: string; readonly state: string },
+  outputFragment: string,
+): void {
+  expect(result.state).toBe("timed-out");
+  expect(result.output).toContain(outputFragment);
+}
+
+async function advanceAndReadTimeout<Result>(
+  result: Promise<Result>,
+  milliseconds: number,
+): Promise<Result> {
+  await vi.advanceTimersByTimeAsync(milliseconds);
+  return result;
 }
 
 describe("global tool time limit", () => {
@@ -52,24 +121,108 @@ describe("global tool time limit", () => {
     ).resolves.toEqual({ output: "done", state: "completed" });
   });
 
+  test("lets an exact-boundary sleep complete through the deadline wrapper", async () => {
+    vi.useFakeTimers();
+    const settings = oneMinuteSettings(1_000);
+    const result = executeToolWithinTimeLimit(
+      async (signal) => ({
+        output: await executeSessionSleepTool(
+          { durationSeconds: 60 },
+          signal,
+          () => false,
+          (waitSignal) =>
+            waitForSessionSteeringInput("exact-boundary", waitSignal),
+          Date.now,
+          settings,
+        ),
+        state: "completed",
+      }),
+      new AbortController().signal,
+      settings,
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const completed = await result;
+    expect(completed.state).toBe("completed");
+    expect(completed.output).toContain("Slept for the full duration");
+    expectNoTimers();
+  });
+
+  test("bounds generated timeout output through the finalizer", async () => {
+    vi.useFakeTimers();
+    const outer = new AbortController();
+    const settings = oneMinuteSettings(MINIMUM_TOOL_OUTPUT_CHARACTERS);
+    const result = executeToolWithinTimeLimit(
+      hangingExecute,
+      outer.signal,
+      settings,
+    ).then((toolResult) => boundToolResult(toolResult, settings));
+
+    const timedOut = await advanceAndReadTimeout(result, 60_000);
+    expectTimeoutResult(timedOut, "Tool output truncated");
+    expect(unicodeCharacterCount(timedOut.output)).toBe(
+      MINIMUM_TOOL_OUTPUT_CHARACTERS,
+    );
+  });
+
+  test("uses the configured deadline and message", async () => {
+    vi.useFakeTimers();
+    const settings = { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 7 };
+    const deadlineSignal = new AbortController().signal;
+    const result = executeToolWithinTimeLimit(
+      hangingExecute,
+      deadlineSignal,
+      settings,
+    );
+    await advanceToToolDeadline(settings);
+    await expectPending(result);
+    const timedOut = await advanceAndReadTimeout(result, 1);
+    expectTimeoutResult(timedOut, "global 7-minute limit");
+    expectNoTimers();
+  });
+
+  test("keeps one snapshotted deadline when live settings change", async () => {
+    vi.useFakeTimers();
+    let liveSettings = {
+      ...DEFAULT_TOOL_SETTINGS,
+      executionLimitMinutes: 7,
+    };
+    const snapshot = liveSettings;
+    const result = executeToolWithinTimeLimit(
+      hangingExecute,
+      new AbortController().signal,
+      snapshot,
+    );
+
+    liveSettings = oneMinuteSettings(liveSettings.outputLimitCharacters);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await expectPending(result);
+    const timedOut = await advanceAndReadTimeout(result, 6 * 60_000);
+
+    expect(timedOut).toMatchObject({ state: "timed-out" });
+    expect(liveSettings.executionLimitMinutes).toBe(1);
+    expectNoTimers();
+  });
+
   test("fails a hung tool call at the limit and aborts its signal", async () => {
     const outer = timedOutOuterController();
-    let callSignal: AbortSignal | undefined;
+    const callSignal = signalCapture();
 
     const result = executeToolWithinTimeLimit((signal) => {
-      callSignal = signal;
+      callSignal(signal);
       return hangingExecute(signal);
     }, outer.signal);
-    await vi.advanceTimersByTimeAsync(MAXIMUM_TOOL_EXECUTION_MS - 1);
-    expect(callSignal?.aborted).toBe(false);
+    await advanceToToolDeadline();
+    expect(lastCapturedSignal(callSignal).aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
 
-    await expect(result).resolves.toEqual({
-      output:
-        "Error: the tool call was canceled after exceeding the global 30-minute limit. Cancellation is best-effort after a filesystem mutation begins, so verify its result before retrying.",
+    const timedOut = await result;
+    expect(timedOut).toEqual({
+      output: `Error: the tool call was canceled after reaching the global ${String(DEFAULT_TOOL_SETTINGS.executionLimitMinutes)}-minute limit. Cancellation is best-effort after a filesystem mutation begins, so verify its result before retrying.`,
       state: "timed-out",
     });
-    expect(callSignal?.aborted).toBe(true);
+    expect(lastCapturedSignal(callSignal).aborted).toBe(true);
     expectNoTimers();
   });
 
@@ -150,18 +303,18 @@ describe("global tool time limit", () => {
   });
 
   test("a normal completion aborts the call signal it handed out", async () => {
+    const callSignal = signalCapture();
     const outer = new AbortController();
-    let callSignal: AbortSignal | undefined;
 
     await executeToolWithinTimeLimit((signal) => {
-      callSignal = signal;
+      callSignal(signal);
       return Promise.resolve({ output: "done", state: "completed" });
     }, outer.signal);
 
     // A straggler still listening on the call signal must not retain
     // the long-lived session signal after its call settled; settle()
     // aborts the composite to release it.
-    expect(callSignal?.aborted).toBe(true);
+    expect(lastCapturedSignal(callSignal).aborted).toBe(true);
     expect(outer.signal.aborted).toBe(false);
   });
 

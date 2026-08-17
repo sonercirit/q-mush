@@ -6,12 +6,15 @@ import {
 } from "./ask-questions-tool.ts";
 import { PAGE_FETCH_TOOL_DEFINITION } from "./page-fetch.ts";
 import { MODEL_PROVIDER_IDS } from "./provider-id.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "./tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "./tool-limits.ts";
 
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
 const WHOLE_SECONDS = {
-  maximum: MAXIMUM_TOOL_EXECUTION_SECONDS,
+  maximum: toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
   minimum: 1,
   type: "integer",
 } as const;
@@ -85,7 +88,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Execute a bash command from the workspace directory. Returns bounded stdout, stderr, and the exit status.",
+      "Execute a bash command from the workspace directory. Returns stdout, stderr, and the exit status.",
     name: "bash",
     properties: {
       command: {
@@ -413,7 +416,7 @@ const SESSION_AGENT_TOOLS = [
   }),
 ] as const;
 
-const PARALLEL_TOOL = toolDefinition({
+export const PARALLEL_TOOL = toolDefinition({
   description:
     "Run multiple independent tool or skill calls with bounded concurrency. The number of accepted calls has no application-defined maximum, but only a small worker pool runs simultaneously. Do not use this when one call depends on another call's result.",
   name: "parallel",
@@ -560,63 +563,9 @@ export function readAgentSessionToolNames(
   return selected;
 }
 
-function selectedParallelTool(
-  selectedTools: readonly AgentToolDefinition[],
-): AgentToolDefinition {
-  return {
-    ...PARALLEL_TOOL,
-    function: {
-      ...PARALLEL_TOOL.function,
-      parameters: {
-        ...PARALLEL_TOOL.function.parameters,
-        properties: {
-          ...PARALLEL_TOOL.function.parameters.properties,
-          tool_uses: {
-            ...PARALLEL_TOOL.function.parameters.properties.tool_uses,
-            items: {
-              ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items,
-              properties: {
-                ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items
-                  .properties,
-                recipient_name: {
-                  ...PARALLEL_TOOL.function.parameters.properties.tool_uses
-                    .items.properties.recipient_name,
-                  enum: selectedTools
-                    .map(({ function: definition }) => definition.name)
-                    .filter(
-                      (name) =>
-                        name !== PARALLEL_TOOL.function.name &&
-                        name !== ASK_QUESTIONS_TOOL_NAME &&
-                        name !== "sleep",
-                    ),
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  };
-}
-
-export function selectedAgentTools(
-  names: readonly AgentSessionToolName[],
-): readonly AgentToolDefinition[] {
-  const isSelected = (name: AgentSessionToolName): boolean =>
-    names.includes(name);
-  const selectedTools = AGENT_TOOLS.filter(({ function: definition }) =>
-    isSelected(definition.name),
-  );
-  return selectedTools.map((tool) =>
-    tool.function.name === PARALLEL_TOOL.function.name
-      ? selectedParallelTool(selectedTools)
-      : tool,
-  );
-}
-
 export { type BaseAgentToolName };
 
-type RunnerAgentToolName =
+export type RunnerAgentToolName =
   | BaseAgentToolName
   | typeof PAGE_FETCH_TOOL_DEFINITION.function.name
   | typeof PARALLEL_TOOL.function.name;

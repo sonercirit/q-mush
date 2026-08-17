@@ -54,7 +54,9 @@ async function singleCredential(
 ): Promise<readonly ProviderCredentialAccess[]> {
   let credential;
   try {
+    throwIfSignalAborted(signal, "Model option discovery was canceled");
     credential = await dependencies.readCredential(userId, selection);
+    throwIfSignalAborted(signal, "Model option discovery was canceled");
   } catch {
     throwIfSignalAborted(signal, "Model option discovery was canceled");
     return [];

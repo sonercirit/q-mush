@@ -15,6 +15,7 @@ import {
   requireRecord,
 } from "../shared/validation.ts";
 import { agentProviderRequestHeaders } from "./agent-model.ts";
+import { cancelableResponseReader } from "./cancelable-response-reader.ts";
 import { ProviderCredentialRejectionError } from "./provider-error.ts";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -175,20 +176,21 @@ async function responseBody(
   if (reader === undefined) {
     return new Uint8Array();
   }
+  const responseReader = cancelableResponseReader(reader);
   const bytes = new Uint8Array(MAXIMUM_RESPONSE_BYTES);
   let length = 0;
   try {
     for (;;) {
       const part = await executeWithAbortSignal(
         signal,
-        { abortMessage: "The operation was aborted" },
+        responseReader.options("The operation was aborted"),
         () => reader.read(),
       );
       if (part.done) {
         return bytes.subarray(0, length);
       }
       if (length + part.value.byteLength > MAXIMUM_RESPONSE_BYTES) {
-        void reader.cancel().catch(() => undefined);
+        await responseReader.cancel();
         throw new Error(
           "The OpenRouter serving-provider response was too large",
         );
@@ -197,7 +199,7 @@ async function responseBody(
       length += part.value.byteLength;
     }
   } finally {
-    reader.releaseLock();
+    responseReader.release(signal);
   }
 }
 

@@ -14,7 +14,10 @@ import { executeRunnerTool } from "../../runner/runner-tools.ts";
 import { openSecureRunnerPath } from "../../runner/runner-workspace.ts";
 import { MAXIMUM_AGENT_ATTACHMENT_BYTES } from "../../shared/agent-attachments.ts";
 import { AGENT_TOOLS } from "../../shared/agent-tools.ts";
-import { MAXIMUM_TOOL_EXECUTION_SECONDS } from "../../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
 import {
   observeRunnerRejection,
   requireRunnerError,
@@ -22,6 +25,9 @@ import {
 import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const workspace = useTemporaryDirectories("q-mush-tools-test-");
+const DEFAULT_EXECUTION_LIMIT_SECONDS = toolExecutionLimitSeconds(
+  DEFAULT_TOOL_SETTINGS,
+);
 
 function executeBash(
   root: string,
@@ -337,14 +343,14 @@ describe("runner tools", () => {
     const root = await workspace();
     const error = await captureToolError(root, "bash", {
       command: "printf completed",
-      timeout: MAXIMUM_TOOL_EXECUTION_SECONDS + 1,
+      timeout: DEFAULT_EXECUTION_LIMIT_SECONDS + 1,
     });
 
     expect(error.message).toBe(
-      `Tool argument timeout must be an integer from 1 to ${String(MAXIMUM_TOOL_EXECUTION_SECONDS)}`,
+      `Tool argument timeout must be an integer from 1 to ${String(DEFAULT_EXECUTION_LIMIT_SECONDS)}`,
     );
     await expect(
-      executeBash(root, "printf completed", MAXIMUM_TOOL_EXECUTION_SECONDS),
+      executeBash(root, "printf completed", DEFAULT_EXECUTION_LIMIT_SECONDS),
     ).resolves.toContain("Exit code: 0");
   });
 
