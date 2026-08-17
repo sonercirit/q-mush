@@ -23,11 +23,18 @@ export interface RestartDrainProgress {
 }
 
 export interface RestartDrainSettlement {
+  readonly persistence: Promise<unknown>;
   readonly settled: Promise<unknown>;
 }
 
 const BLOCKED_RUNNER_RESTART = Symbol("blocked runner restart");
 type RunnerRestartGate = RestartRequest | typeof BLOCKED_RUNNER_RESTART;
+
+interface PendingRestartPersistence {
+  readonly durable: boolean;
+  readonly forcePark: boolean;
+  readonly promise: Promise<void>;
+}
 
 interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
@@ -35,6 +42,7 @@ interface ActiveSessionRuntime {
   readonly generation: number;
   restartRequestedAt: number | undefined;
   persistRestart: RestartRequestPersistence | undefined;
+  pendingPersistence: PendingRestartPersistence[];
   forceParked: boolean;
   restartDurable: boolean;
   restartRequest: RestartRequest | undefined;
@@ -49,6 +57,28 @@ interface SessionRuntimeContext extends SessionRestartRequester {
 }
 
 type SessionRuntime = (context: SessionRuntimeContext) => Promise<void>;
+
+interface RestartRequestOutcome {
+  readonly affected: readonly ActiveSessionRuntime[];
+  readonly persistence: Promise<void>;
+}
+
+function trackRestartPersistence(
+  runtime: ActiveSessionRuntime,
+  result: Promise<void> | void,
+  durable: boolean,
+  forcePark: boolean,
+): Promise<void> | undefined {
+  if (result === undefined) return undefined;
+  const pending = { durable, forcePark, promise: Promise.resolve(result) };
+  runtime.pendingPersistence.push(pending);
+  const settled = () => {
+    const index = runtime.pendingPersistence.indexOf(pending);
+    if (index >= 0) runtime.pendingPersistence.splice(index, 1);
+  };
+  void pending.promise.then(settled, settled);
+  return pending.promise;
+}
 
 function scopeIncludes(scope: RestartScope, runnerId: string): boolean {
   return scope.kind === "server" || scope.runnerId === runnerId;
@@ -85,6 +115,16 @@ function assertCompatibleRestart(
 
 export function isValidRestartId(restartId: string): boolean {
   return restartId.trim().length > 0 && restartId.length <= 200;
+}
+
+function applyRequest(
+  scope: RestartScope,
+  request: RestartRequest,
+  server: (request: RestartRequest) => void,
+  runner: (runnerId: string, request: RestartRequest) => void,
+): void {
+  if (scope.kind === "server") server(request);
+  else runner(scope.runnerId, request);
 }
 
 export class SessionRuntimes {
@@ -124,24 +164,39 @@ export class SessionRuntimes {
   // Force-parks the runtimes a drain still waits on. Persistence is invoked
   // immediately beforehand with the force-park flag so a runner-scoped drain
   // can keep its normal boundary semantics but still become crash-durable.
-  async forcePark(scope: RestartScope): Promise<readonly string[]> {
+  async forcePark(
+    scope: RestartScope,
+    initialPersistence: Promise<unknown> = Promise.resolve(),
+  ): Promise<readonly string[]> {
     const candidates = [...this.#active.entries()].filter(
       ([, runtime]) =>
         runtime.restartRequest !== undefined &&
         scopeIncludes(scope, runtime.runnerId),
     );
-    await Promise.all(
-      candidates.flatMap(([, runtime]) => {
-        const request = runtime.restartRequest;
-        const needsDurablePersistence = !runtime.restartDurable;
+    const persistence: Promise<void>[] = [];
+    for (const [, runtime] of candidates) {
+      const request = runtime.restartRequest;
+      if (request !== undefined) {
+        const needsForceParkPersistence =
+          !runtime.restartDurable ||
+          runtime.pendingPersistence.some(
+            ({ durable, forcePark }) => durable && !forcePark,
+          );
         runtime.restartDurable = true;
-        const persisted =
-          request === undefined || !needsDurablePersistence
-            ? undefined
-            : runtime.persistRestart?.(request, true, true);
-        return persisted === undefined ? [] : [persisted];
-      }),
-    );
+        const persisted = !needsForceParkPersistence
+          ? undefined
+          : (runtime.pendingPersistence.find(({ forcePark }) => forcePark)
+              ?.promise ??
+            trackRestartPersistence(
+              runtime,
+              runtime.persistRestart?.(request, true, true),
+              true,
+              true,
+            ));
+        if (persisted !== undefined) persistence.push(persisted);
+      }
+    }
+    await Promise.all([initialPersistence, ...persistence]);
     const parked: string[] = [];
     for (const [sessionId, runtime] of candidates) {
       if (runtime.restartRequest === undefined) continue;
@@ -224,11 +279,11 @@ export class SessionRuntimes {
     );
   }
 
-  async #request(
+  #request(
     scope: RestartScope,
     restartId: string,
     durable: boolean,
-  ): Promise<readonly ActiveSessionRuntime[]> {
+  ): RestartRequestOutcome {
     assertRestartId(restartId);
     const existing =
       scope.kind === "server"
@@ -237,11 +292,16 @@ export class SessionRuntimes {
     assertCompatibleRestart(existing, restartId);
     const request = existing ?? restartRequest(scope, restartId);
     if (existing === undefined) {
-      if (scope.kind === "server") {
-        this.#drainingServer = request;
-      } else {
-        this.#drainingRunners.set(scope.runnerId, request);
-      }
+      applyRequest(
+        scope,
+        request,
+        (value) => {
+          this.#drainingServer = value;
+        },
+        (runnerId, value) => {
+          this.#drainingRunners.set(runnerId, value);
+        },
+      );
     }
     const affected = [...this.#active.values()].filter(({ runnerId }) =>
       scopeIncludes(scope, runnerId),
@@ -254,39 +314,49 @@ export class SessionRuntimes {
       runtime.restartRequestedAt ??= this.#now();
       runtime.restartDurable ||= durable;
     }
-    await Promise.all(
-      affected.flatMap((runtime) => {
-        const persisted = runtime.persistRestart?.(
+    const persistence = affected.flatMap((runtime) => {
+      const pending = trackRestartPersistence(
+        runtime,
+        runtime.persistRestart?.(
           runtime.restartRequest ?? request,
           runtime.restartDurable,
-        );
-        return persisted === undefined ? [] : [persisted];
-      }),
-    );
-    return affected;
+        ),
+        runtime.restartDurable,
+        false,
+      );
+      return pending === undefined ? [] : [pending];
+    });
+    return {
+      affected,
+      persistence: Promise.all(persistence).then(() => undefined),
+    };
   }
 
-  async mark(scope: RestartScope, restartId: string): Promise<void> {
-    await this.#request(scope, restartId, true);
+  mark(scope: RestartScope, restartId: string): Promise<void> {
+    const outcome = this.#request(scope, restartId, true);
+    return outcome.persistence;
   }
 
   // Requests the drain and hands back the settlement wait so callers can bound
   // it; the request itself, including durable persistence, always completes.
   // The wait is wrapped because awaiting a returned promise would flatten it
   // and reintroduce the unbounded wait.
-  async requestDrain(
+  requestDrain(
     scope: RestartScope,
     restartId: string,
     durable: boolean,
-  ): Promise<RestartDrainSettlement> {
-    const affected = await this.#request(scope, restartId, durable);
+  ): RestartDrainSettlement {
+    const { affected, persistence } = this.#request(scope, restartId, durable);
     return {
-      settled: Promise.allSettled(affected.map(({ settled }) => settled)),
+      persistence,
+      settled: persistence.then(() =>
+        Promise.allSettled(affected.map(({ settled }) => settled)),
+      ),
     };
   }
 
   async drain(scope: RestartScope, restartId: string): Promise<void> {
-    const { settled } = await this.requestDrain(scope, restartId, false);
+    const { settled } = this.requestDrain(scope, restartId, false);
     await settled;
   }
 
@@ -320,6 +390,7 @@ export class SessionRuntimes {
       controller,
       forceParked: false,
       generation,
+      pendingPersistence: [],
       persistRestart: undefined,
       restartDurable: false,
       restartRequest: undefined,
@@ -337,7 +408,12 @@ export class SessionRuntimes {
             if (persist !== undefined) {
               runtime.persistRestart = persist;
               if (runtime.restartRequest !== undefined) {
-                void persist(runtime.restartRequest, runtime.restartDurable);
+                void trackRestartPersistence(
+                  runtime,
+                  persist(runtime.restartRequest, runtime.restartDurable),
+                  runtime.restartDurable,
+                  false,
+                );
               }
             }
             return runtime.restartRequest;

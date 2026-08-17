@@ -298,7 +298,9 @@ async function connectRunner(
 
   for (;;) {
     const socket = runnerWebSocket(configuration);
-    const startupConnection = startupRestart.connection();
+    const startupConnection = runnerRestart.connectionContext(
+      startupRestart.connection(),
+    );
 
     try {
       await waitForSocket(socket);
@@ -555,7 +557,11 @@ async function run(): Promise<void> {
   }
 
   const configurationPath = readConfigurationPath();
-  const startupRestart = new RunnerStartupRestart(readRestartId());
+  const runnerRestartId = readRestartId();
+  const startupRestart = new RunnerStartupRestart(runnerRestartId);
+  if (runnerRestartId !== undefined) {
+    runnerRestart.restore(runnerRestartId);
+  }
   const activationReceipt = readActivationReceipt();
   const activationReceiptPhase = readActivationReceiptPhase();
   if (activationReceipt === undefined && activationReceiptPhase !== undefined) {

@@ -372,7 +372,7 @@ describe("agent sessions", () => {
   });
 
   test("browses directories through an owned online runner", async () => {
-    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const setup = connectedSessionSetup(new ScriptedAgentModel([]), "api_key");
     const browseResponse = setup.sessions.directories(
       createAuthenticatedRequest(
         runnerDirectoriesPath(RUNNER_ID),

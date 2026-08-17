@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { countRestartProgressTools } from "./restart-progress-tools.ts";
+import type { RestartProgressTool } from "./restart-progress.ts";
 import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
 import {
   type DispatchRunnerToolCommand,
@@ -418,6 +420,12 @@ export class RunnerCommandBroker {
     );
   }
 
+  pendingToolProgress(sessionId: string): readonly RestartProgressTool[] {
+    return countRestartProgressTools(
+      this.#sessionPending(sessionId).map(({ command }) => command.tool),
+    );
+  }
+
   sessionCommandPhase(
     sessionId: string,
   ): "in_flight" | "queued" | "runner_disconnected" | undefined {
@@ -431,16 +439,6 @@ export class RunnerCommandBroker {
     return commands.every(({ phase }) => phase === "in_flight")
       ? "in_flight"
       : "queued";
-  }
-
-  // Tool names a session still has outstanding, deduplicated for progress
-  // reporting when parallel calls invoke the same tool.
-  sessionPendingTools(sessionId: string): readonly string[] {
-    return [
-      ...new Set(
-        this.#sessionPending(sessionId).map(({ command }) => command.tool),
-      ),
-    ];
   }
 
   #settleAuthorized(

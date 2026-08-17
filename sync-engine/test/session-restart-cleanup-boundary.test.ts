@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { RestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RunnerCommandBroker,
@@ -7,6 +8,31 @@ import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+
+function expectCleanupInactive(broker: RunnerCommandBroker): void {
+  expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-command")).toBe(
+    false,
+  );
+}
+
+function containerCleanup(cleanup: SessionExecutionCleanup): Promise<void> {
+  return cleanup.cleanup({
+    ...TEST_SESSION_DETAIL,
+    executionEnvironment: "container",
+  });
+}
+
+function finishCleanupCommand(
+  broker: RunnerCommandBroker,
+  commandId: string,
+): void {
+  expectCleanupInactive(broker);
+  expect(commandId).toBe("cleanup-command");
+}
+
+function drainExpired(cleanup: SessionExecutionCleanup): Promise<void> {
+  return cleanup.drainPending(new RestartDeadline(0, () => 0));
+}
 
 async function pendingCleanup() {
   const dispatched = Promise.withResolvers<undefined>();
@@ -21,12 +47,13 @@ async function pendingCleanup() {
   };
   const broker = new RunnerCommandBroker(brokerOptions);
   const cleanup = new SessionExecutionCleanup(broker);
-  const promise = cleanup.cleanup({
-    ...TEST_SESSION_DETAIL,
-    executionEnvironment: "container",
-  });
+  const promise = containerCleanup(cleanup);
   await dispatched.promise;
   return { broker, cleanup, promise };
+}
+
+function pendingCleanupWithBroker() {
+  return pendingCleanup();
 }
 
 test("development restart cancels pending execution cleanup without waiting", async () => {
@@ -38,13 +65,25 @@ test("development restart cancels pending execution cleanup without waiting", as
   );
 
   await restart.drainServer();
-  const draining = cleanup.drainPending(0);
+  const draining = drainExpired(cleanup);
 
   await draining;
   await expect(promise).resolves.toBeUndefined();
-  expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-command")).toBe(
-    false,
-  );
+  finishCleanupCommand(broker, "cleanup-command");
+});
+
+test("development drain prevents chained terminal cleanup from dispatching", async () => {
+  const { broker, cleanup, promise } = await pendingCleanupWithBroker();
+  const terminal = cleanup.cleanupTerminal({
+    ...TEST_SESSION_DETAIL,
+    executionEnvironment: "container",
+  });
+
+  await drainExpired(cleanup);
+  await promise;
+  await terminal;
+
+  expectCleanupInactive(broker);
 });
 
 test("final shutdown can still await pending execution cleanup", async () => {

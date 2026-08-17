@@ -12,7 +12,11 @@ const progress: DevelopmentRestartProgressMessage = {
       elapsedMs: 12_500,
       runnerId: "runner-1",
       sessionId: "session-1",
-      tools: ["sleep", "brave_search"],
+      tools: [
+        { count: 1, name: "sleep" },
+        { count: 2, name: "brave_search" },
+      ],
+      totalTools: 4,
     },
   ],
   type: DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
@@ -29,7 +33,7 @@ describe("development restart progress", () => {
       throw new Error("The restart progress event was not decoded");
     }
     expect(restartProgressNotice(decoded.progress)).toContain(
-      "session-1: sleep, brave_search (13s)",
+      "session-1: sleep, brave_search ×2, +1 more (13s)",
     );
   });
 
@@ -37,7 +41,9 @@ describe("development restart progress", () => {
     expect(() =>
       readRealtimeServerEvent(
         JSON.stringify({
-          progress: [{ ...progress.progress[0], tools: [1] }],
+          progress: [
+            { ...progress.progress[0], tools: [{ count: 0, name: "sleep" }] },
+          ],
           type: DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
         }),
       ),

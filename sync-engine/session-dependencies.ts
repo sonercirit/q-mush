@@ -1,3 +1,4 @@
+import type { ClockedTimeoutOptions } from "../shared/clocked-timeout.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
@@ -27,8 +28,7 @@ interface SessionLivenessOptions {
   readonly testScan?: (scan: () => void) => void;
 }
 
-interface SessionRestartTimingOptions {
-  readonly clearTimeout: (id: RestartTimer) => void;
+interface SessionRestartTimingOptions extends ClockedTimeoutOptions<RestartTimer> {
   readonly setTimeout: RestartSetTimeout;
 }
 

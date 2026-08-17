@@ -12,6 +12,7 @@ import {
 import {
   addRunnerSocketFailureListeners,
   parseSocketJsonRecord,
+  RunnerRegistrationRejectedError,
 } from "./runner-socket.ts";
 import type { RunnerStartupConnection } from "./runner-update.ts";
 
@@ -322,6 +323,7 @@ export function completeRunnerRegistration(
       ) {
         const message = parseRunnerRegistrationMessage(event.data);
         if (message?.["type"] === "registration_rejected") {
+          settle(new RunnerRegistrationRejectedError());
           return;
         }
         if (message === undefined) {

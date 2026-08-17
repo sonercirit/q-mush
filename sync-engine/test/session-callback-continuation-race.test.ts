@@ -5,6 +5,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 import {
   spawnedChildSetup,
   type SpawnedChildReference,
@@ -46,16 +47,14 @@ function finisherCallbackContent(): string {
       Promise.reject(new Error("Unexpected model discovery")),
     discoverSessionMetadata: () =>
       Promise.reject(new Error("Unexpected metadata discovery")),
-    draining: () => false,
     launchSession: () => false,
-    notify: () => undefined,
     now: () => TEST_NOW + 5,
-    pendingRestart: () => undefined,
     readCredential: () => Promise.resolve(undefined),
-    runnerIsAvailable: () => true,
+    ...sessionAgentActionRuntimeDefaults(),
     store: setup.store,
-    withCredential: () =>
-      Promise.reject(new Error("Unexpected credential access")),
+    withCredential: () => {
+      throw new Error("Unexpected credential access");
+    },
   };
 
   expect(

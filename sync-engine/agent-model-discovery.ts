@@ -50,10 +50,16 @@ const INCOMPATIBLE_OPENAI_MODEL_MARKERS = [
 
 export type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 
+interface AgentModelDiscoveryInput {
+  readonly credential: ProviderCredentialAccess;
+  readonly provider: ProviderId;
+  readonly signal?: AbortSignal;
+}
+
 export type AgentModelDiscoverer = (
-  provider: ProviderId,
-  credential: ProviderCredentialAccess,
-  signal?: AbortSignal,
+  provider: AgentModelDiscoveryInput["provider"],
+  credential: AgentModelDiscoveryInput["credential"],
+  signal?: AgentModelDiscoveryInput["signal"],
 ) => Promise<AgentModelCatalog>;
 
 interface PrioritizedModel {

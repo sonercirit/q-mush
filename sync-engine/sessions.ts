@@ -107,6 +107,7 @@ class DrizzleSessionIntegration
   readonly #failureReconciler = new SessionFailureReconciler();
   readonly #runners: RunnerIntegration;
   readonly #runtimes = new SessionRuntimes(() => this.#now());
+  readonly #restartController = new AbortController();
   readonly #restart;
   readonly #restartGate: SessionRestartCoordinator;
   readonly #removal: RunnerRemovalCoordinator;
@@ -167,6 +168,7 @@ class DrizzleSessionIntegration
       now: this.#now,
       providers: this.#providers,
       requests: this.#requests,
+      restartSignal: () => this.#restartController.signal,
     });
     this.#cleanup = new SessionExecutionCleanup(this.#broker);
     this.#removal = new RunnerRemovalCoordinator({
@@ -180,7 +182,11 @@ class DrizzleSessionIntegration
       this.#runtimes,
       () => createUuidV7(this.#now()),
       {
-        pendingTools: (sessionId) => this.#activeTools.names(sessionId),
+        pendingTools: (sessionId) => [
+          ...this.#activeTools.progress(sessionId, false),
+          ...this.#broker.pendingToolProgress(sessionId),
+        ],
+        now: this.#now,
         ...dependencies.restartTiming,
       },
     );
@@ -191,6 +197,7 @@ class DrizzleSessionIntegration
       discoverModels: this.#models,
       discoverOpenRouterProviders: this.#discoverProviders,
       launch: (...parameters) => this.#launch(...parameters),
+      restartSignal: () => this.#restartController.signal,
       readCredential: this.#readCredential,
       requests: this.#requests,
       runners: this.#runners,
@@ -258,6 +265,7 @@ class DrizzleSessionIntegration
       providers: this.#providers,
       questions: this.#questions,
       runnerIsAvailable: this.#runnerAvailable,
+      restartSignal: () => this.#restartController.signal,
       toolUpdates: this.#sessionMutationControl(),
       ...this.#launchBoundary(),
     });
@@ -355,6 +363,7 @@ class DrizzleSessionIntegration
         ),
       requests: this.#requests,
       restart: this.#restart,
+      restartController: this.#restartController,
       restartCoordinator: this.#restartGate,
       runnerRemoval: this.#removal,
       runtimes: this.#runtimes,
@@ -409,6 +418,7 @@ class DrizzleSessionIntegration
     return {
       broker: this.#broker,
       now: this.#now,
+      restartSignal: () => this.#restartController.signal,
       runtimes: this.#runtimes,
     };
   }
@@ -484,6 +494,7 @@ class DrizzleSessionIntegration
     return modelsForUser({
       discoverModels: this.#models,
       request,
+      signal: this.#restartController.signal,
       user,
       withCredential: this.#withCredential,
       workspaces: this.#workspaces,
@@ -497,6 +508,7 @@ class DrizzleSessionIntegration
       discoverModels: this.#models,
       discoverOpenRouterProviders: this.#discoverProviders,
       launchBoundary: () => this.#launchBoundary(),
+      restartSignal: () => this.#restartController.signal,
       runnerIsAvailable: this.#runnerAvailable,
       withCredential: this.#withCredential,
     };

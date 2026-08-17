@@ -1,4 +1,5 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
+import type { RestartDeadline } from "../shared/restart-deadline.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -39,13 +40,15 @@ export interface SessionIntegration extends SessionDetailReader {
   runnerConnectionGeneration(runnerId: string): number;
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void;
   acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean;
-  cancelBoundedRunnerDrains(): void;
   runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
   escalateDrain(): boolean;
-  drain(): Promise<void>;
+  drain(deadline?: RestartDeadline): Promise<void>;
   drainFinal(): Promise<void>;
-  drainProgress(): readonly RestartDrainSessionProgress[];
+  readonly drainProgress: (
+    userId?: string,
+    workspaceId?: string,
+  ) => readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
   hasPendingDatabaseWrites(): boolean;
   reconcileDatabaseWrites(): boolean;
@@ -66,6 +69,7 @@ export interface SessionIntegration extends SessionDetailReader {
   onChange(listener: (userId: string, sessionId: string) => void): void;
   reassign(request: Request, sessionId: string): Promise<Response>;
   drainRunner(runnerId: string, restartId: string): Promise<void>;
+  escalateRunnerDrain(runnerId: string, restartId: string): boolean;
   runnerConnected(runnerId: string): void;
   runnerDisconnected(runnerId: string): void;
   streamRunnerCommand(

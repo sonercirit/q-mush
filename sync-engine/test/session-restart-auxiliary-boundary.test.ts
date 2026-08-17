@@ -19,6 +19,7 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { escalateAndCloseDrain } from "./session-restart-test-helpers.ts";
 
 const ATTACHMENT = {
   data: "AQ==",
@@ -85,6 +86,56 @@ test("a deferred explain_file discovery cannot start its auxiliary model after d
   closeSessionTestDatabase(setup.database);
 });
 
+test("restart progress counts parallel wrapper and runner calls exactly once", async () => {
+  let commandId = 0;
+  const model = scriptedModel([
+    providerStep("Read both files in parallel.", {
+      toolCalls: [
+        toolCall("parallel", {
+          tool_uses: [
+            { parameters: { path: "one.txt" }, recipient_name: "read" },
+            { parameters: { path: "two.txt" }, recipient_name: "read" },
+          ],
+        }),
+      ],
+    }),
+    providerStep("Both reads completed."),
+  ]);
+  const setup = connectedSessionSetup(model, "api_key", undefined, {
+    commandId: () =>
+      commandId++ === 0
+        ? "agent-command-1"
+        : `parallel-progress-${String(commandId)}`,
+  });
+  await startToolSessionSetup(setup);
+  await waitForSessionValue(
+    () => setup.runnerCommands.filter(({ tool }) => tool === "read").length,
+    (count) => count === 2,
+  );
+
+  const drain = setup.sessions.drain();
+  const progress = await waitForSessionValue(
+    setup.sessions.drainProgress.bind(setup.sessions),
+    (value) =>
+      Array.isArray(value) &&
+      value.some(
+        (entry: unknown) => isRecord(entry) && entry["totalTools"] === 3,
+      ),
+  );
+  expect(progress).toEqual([
+    expect.objectContaining({
+      sessionId: SESSION_ID,
+      tools: [
+        { count: 1, name: "parallel" },
+        { count: 2, name: "read" },
+      ],
+      totalTools: 3,
+    }),
+  ]);
+
+  await escalateAndCloseDrain(setup, drain);
+});
+
 test("restart progress tracks an in-process sleep tool", async () => {
   const steps = [
     providerStep("Wait inside the engine.", {
@@ -111,14 +162,15 @@ test("restart progress tracks an in-process sleep tool", async () => {
     return value.some((entry: unknown) => {
       if (!isRecord(entry)) return false;
       const tools = entry["tools"];
-      return Array.isArray(tools) && tools.includes("sleep");
+      return (
+        Array.isArray(tools) &&
+        tools.some((tool) => isRecord(tool) && tool["name"] === "sleep")
+      );
     });
   };
   await waitForSessionValue(
     setup.sessions.drainProgress.bind(setup.sessions),
     reportsSleep,
   );
-  setup.sessions.escalateDrain();
-  await drain;
-  closeSessionTestDatabase(setup.database);
+  await escalateAndCloseDrain(setup, drain);
 });

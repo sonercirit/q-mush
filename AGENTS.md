@@ -52,14 +52,14 @@ Living project memory.
   source and local `.env`, coalescing bursts into the ignored restart trigger;
   `dev:restart` writes it, while plain `dev` restarts only from it.
   `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, serves `/runner/executable`. Development restarts use
-  supervisor/engine IPC (not SIGTERM to initiate the drain), reject new steps
-  and auxiliary requests, report every active tool to logs/IPC/UI, and after 120
-  seconds (or explicit escalation) force-park stragglers with durable handoffs;
-  live markers are fenced from liveness recovery, cleanup is bounded, while
-  final shutdown stays unbounded after its marker. Text handlers precompress
-  once, negotiating zstd, Brotli, gzip, deflate; `/favicon.svg` revalidates
-  separately with ETag.
+  caches in memory, serves `/runner/executable`. Development restarts use one
+  supervisor-issued absolute 120-second deadline, reject new steps and
+  provider/auxiliary requests, report scoped active-tool counts, force-park
+  stragglers only after durable handoffs, then use bounded cleanup/termination;
+  repeated requests escalate immediately. Final shutdown promotes any live
+  restart and stays unbounded after its durable marker; live markers are fenced
+  from liveness recovery. Text handlers precompress once, negotiating zstd,
+  Brotli, gzip, deflate; `/favicon.svg` revalidates separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.

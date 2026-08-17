@@ -239,7 +239,6 @@ test("agent directory browsing passes parent identity, authorization, and signal
     database,
     discoverSessionMetadata: () =>
       Promise.resolve(EMPTY_SESSION_REQUEST_MODEL_METADATA),
-    draining: () => false,
     launchSession: () => true,
     listOnlineRunners: () => [
       {

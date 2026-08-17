@@ -16,6 +16,8 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
+
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
 const FORK_DETAIL = { ...TEST_SESSION_DETAIL, id: "fork-session" };
@@ -79,6 +81,7 @@ function forkDependencies(
     modelCredentialPool: modelCredentialPool ?? singleCredentialPool(),
     notify: vi.fn(),
     now: () => TEST_NOW,
+    restartSignal: () => new AbortController().signal,
     store: { fork: storeFork },
   };
 }
@@ -151,6 +154,22 @@ describe("balanced session forks", () => {
     });
     expect(setup.storeFork).not.toHaveBeenCalled();
     setup.database.$client.close();
+  });
+
+  test("returns server_restarting without writing when discovery is canceled", async () => {
+    const canceled = restartCanceledDiscovery();
+    const storeFork = vi.fn(() => FORKED_RESULT);
+    const dependencies = forkDependencies(
+      canceled.discover,
+      undefined,
+      storeFork,
+    );
+    dependencies.restartSignal = () => canceled.controller.signal;
+
+    await expect(fork(dependencies)).rejects.toMatchObject({
+      code: "server_restarting",
+    });
+    expect(storeFork).not.toHaveBeenCalled();
   });
 
   test("preserves explicit credential metadata fallback", async () => {

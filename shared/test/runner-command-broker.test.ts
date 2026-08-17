@@ -143,6 +143,27 @@ test("pushes cancellation for an in-flight WebSocket command", async () => {
 });
 
 describe("runner command broker", () => {
+  test("reports duplicate pending runner tool counts", async () => {
+    let commandId = 0;
+    const broker = deliveredBroker(() => `progress-${String(++commandId)}`);
+    const first = broker.dispatch(brokerRunnerCommand({ tool: "read" }));
+    const second = broker.dispatch(brokerRunnerCommand({ tool: "read" }));
+    const third = broker.dispatch(
+      brokerRunnerCommand({ tool: "brave_search" }),
+    );
+
+    const progress = broker.pendingToolProgress(SESSION_ID);
+    expect(progress).toHaveLength(2);
+    expect(progress.find(({ name }) => name === "read")?.count).toBe(2);
+    expect(progress.find(({ name }) => name === "brave_search")?.count).toBe(1);
+    broker.cancelSessionCommands(SESSION_ID);
+    await Promise.all([
+      expectUnauthorizedRunnerCommand(first),
+      expectUnauthorizedRunnerCommand(second),
+      expectUnauthorizedRunnerCommand(third),
+    ]);
+  });
+
   test("rejects a queued command when authorization is revoked before take", async () => {
     const dispatch = revocableRunnerDispatch("revoked-take");
 
@@ -574,21 +595,6 @@ describe("runner command broker", () => {
     const settled = await settledResults;
     expect(commands.every((command) => command !== undefined)).toBe(true);
     expect(settled.every(({ status }) => status === "fulfilled")).toBe(true);
-  });
-
-  test("deduplicates parallel same-tool names in pending progress", async () => {
-    let command = 0;
-    const broker = new RunnerCommandBroker({
-      commandId: () => `parallel-read-${String((command += 1))}`,
-    });
-    const results = [
-      broker.dispatch(brokerRunnerCommand({ tool: "read" })),
-      broker.dispatch(brokerRunnerCommand({ tool: "read" })),
-    ];
-
-    expect(broker.sessionPendingTools(SESSION_ID)).toEqual(["read"]);
-    broker.cancelSessionCommands(SESSION_ID);
-    await Promise.all(results.map((result) => captureBrokerRejection(result)));
   });
 
   test("removes queued and in-flight commands when a session is stopped", async () => {

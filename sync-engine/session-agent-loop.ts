@@ -1,3 +1,4 @@
+import { optionalAbortSignal } from "../shared/abort-signal.ts";
 import {
   runAgentLoop,
   throwIfAgentAborted,
@@ -329,7 +330,7 @@ export async function runCompactingAgentLoop(
           }
         }
       },
-      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...optionalAbortSignal(options.signal),
       ...(options.takeSteeringMessages === undefined
         ? {}
         : { takeSteeringMessages: options.takeSteeringMessages }),

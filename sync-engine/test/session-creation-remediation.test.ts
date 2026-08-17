@@ -79,6 +79,7 @@ function setupCreation(options: {
     notify: vi.fn(),
     now: () => 20,
     onCreated: vi.fn(),
+    restartSignal: () => new AbortController().signal,
     runtimes: {
       accepts: () => true,
       pendingRestart: () => undefined,

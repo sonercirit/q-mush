@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { platform } from "node:os";
+import { abortSignalIsAborted } from "../shared/abort-signal.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
 import { writePrivateJsonFile } from "./runner-private-file.ts";
@@ -94,10 +95,6 @@ async function runContainerProcess(
       { cause: error },
     );
   }
-}
-
-function signalIsAborted(signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true;
 }
 
 function processOptions(
@@ -324,11 +321,11 @@ export class RunnerContainerManager {
     signal?: AbortSignal,
     onOutput?: (delta: Omit<RunnerCommandOutputDelta, "sequence">) => void,
   ): Promise<string> {
-    if (signalIsAborted(signal)) {
+    if (abortSignalIsAborted(signal)) {
       throw new Error("The runner command was stopped");
     }
     const container = await this.#container(sessionId, root, signal);
-    if (signalIsAborted(signal)) {
+    if (abortSignalIsAborted(signal)) {
       await this.cleanupSession(sessionId);
       throw new Error("The runner command was stopped");
     }
@@ -348,7 +345,7 @@ export class RunnerContainerManager {
         processOptions(signal, timeoutSeconds, onOutput),
       );
     } catch (error) {
-      if (signalIsAborted(signal)) {
+      if (abortSignalIsAborted(signal)) {
         await this.cleanupSession(sessionId);
       }
       throw error;
@@ -426,7 +423,7 @@ export class RunnerContainerManager {
         );
       }
     }
-    if (signalIsAborted(signal)) {
+    if (abortSignalIsAborted(signal)) {
       throw new Error("The runner command was stopped");
     }
     return this.#createContainer({ root, sessionId, signal });
@@ -518,7 +515,7 @@ export class RunnerContainerManager {
         processOptions(signal),
       );
     } catch (error) {
-      if (signalIsAborted(signal)) {
+      if (abortSignalIsAborted(signal)) {
         return this.#stoppedDuringStart(sessionId, starting, error);
       }
       this.#forgetSession(sessionId);
@@ -527,7 +524,7 @@ export class RunnerContainerManager {
         { cause: error },
       );
     }
-    if (signalIsAborted(signal) || result.termination === "stopped") {
+    if (abortSignalIsAborted(signal) || result.termination === "stopped") {
       return this.#stoppedDuringStart(sessionId, starting);
     }
     if (result.exitCode !== 0) {

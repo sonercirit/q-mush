@@ -56,8 +56,20 @@ export function handleRunnerRestartRequest(
     socket.close(1008, "Conflicting runner restart ID");
     return;
   }
-  if (event.type === "restart_escalate" && current === undefined) {
-    socket.close(1008, "No runner restart is pending");
+  if (event.type === "restart_escalate") {
+    if (current === undefined) {
+      socket.close(1008, "No runner restart is pending");
+      return;
+    }
+    const escalated = options.sessions.escalateRunnerDrain(
+      runnerId,
+      event.restartId,
+    );
+    if (!escalated && !current.settled) {
+      socket.close(1008, "No matching runner restart drain is pending");
+    } else if (current.settled) {
+      sendRunnerRestartReady(context, current);
+    }
     return;
   }
   const restart =
@@ -71,9 +83,6 @@ export function handleRunnerRestartRequest(
       restarts.set(runnerId, created);
       return created;
     })();
-  if (event.type === "restart_escalate") {
-    void options.sessions.drainRunner(runnerId, event.restartId);
-  }
   void restart.promise.then(
     () => {
       restart.settled = true;

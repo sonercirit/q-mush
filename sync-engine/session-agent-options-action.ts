@@ -43,6 +43,7 @@ interface SessionAgentOptionDependencies {
   };
   readonly modelCredentialPool?: ModelCredentialPool;
   readonly readCredential: SessionAgentActionDependencies["readCredential"];
+  readonly restartSignal: () => AbortSignal;
 }
 
 async function singleCredential(
@@ -103,9 +104,15 @@ async function modelOptions(
   let failure: unknown;
   for (const credential of credentials) {
     try {
-      return (await dependencies.discoverModels(selection.provider, credential))
-        .models;
+      return (
+        await dependencies.discoverModels(
+          selection.provider,
+          credential,
+          dependencies.restartSignal(),
+        )
+      ).models;
     } catch (error) {
+      if (dependencies.restartSignal().aborted) throw error;
       failure = error;
     }
   }

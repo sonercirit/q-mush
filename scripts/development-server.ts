@@ -3,6 +3,8 @@ import { appendFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   DEVELOPMENT_RESTART_ESCALATE_MESSAGE,
+  DEVELOPMENT_RESTART_FORCE_KILL_MS,
+  DEVELOPMENT_RESTART_LIFECYCLE_MS,
   DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
   DEVELOPMENT_RESTART_READY_MESSAGE,
   DEVELOPMENT_RESTART_REQUEST_MESSAGE,
@@ -10,11 +12,13 @@ import {
   FINAL_SHUTDOWN_REQUEST_MESSAGE,
   isDevelopmentRestartProgressMessage,
 } from "../shared/development-shutdown.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import { restartProgressReport } from "../shared/restart-progress.ts";
 
-const DEFAULT_SHUTDOWN_FORCE_MILLISECONDS = 1_000;
+const DEFAULT_SHUTDOWN_FORCE_MILLISECONDS = DEVELOPMENT_RESTART_FORCE_KILL_MS;
 const DEFAULT_SHUTDOWN_GRACE_MILLISECONDS = 10_000;
-const DEFAULT_SHUTDOWN_PREPARATION_MILLISECONDS = 30_000;
+const DEFAULT_SHUTDOWN_PREPARATION_MILLISECONDS =
+  DEVELOPMENT_RESTART_LIFECYCLE_MS;
 
 interface DevelopmentServerOptions {
   readonly command: readonly string[];
@@ -123,7 +127,9 @@ export function startDevelopmentServer(
     }
   };
 
-  const sendChild = (message: string): boolean => {
+  const sendChild = (
+    message: string | Readonly<Record<string, unknown>>,
+  ): boolean => {
     if (child.exitCode !== null) {
       return false;
     }
@@ -154,21 +160,32 @@ export function startDevelopmentServer(
     });
   };
 
+  const terminateChild = async (waitMilliseconds: number): Promise<void> => {
+    signalChild("SIGTERM");
+    if (await childSettledWithin(waitMilliseconds)) return;
+    signalChild("SIGKILL");
+    if (!(await childSettledWithin(forceMilliseconds))) {
+      child.unref();
+      throw new Error("The development server did not terminate after SIGKILL");
+    }
+  };
+
   const drainChild = async (): Promise<void> => {
-    sendChild(DEVELOPMENT_RESTART_REQUEST_MESSAGE);
-    const ready = await settledWithin(
-      Promise.race([restartReady.promise, child.exited]),
-      preparationMilliseconds,
+    const restartDeadline = new RestartDeadline(
+      Date.now() + preparationMilliseconds,
     );
-    if (!ready) {
-      signalChild("SIGTERM");
-      await child.exited;
-      return;
-    }
-    if (child.exitCode === null) {
-      signalChild("SIGTERM");
-    }
-    await child.exited;
+    sendChild({
+      deadlineAt: restartDeadline.at,
+      type: DEVELOPMENT_RESTART_REQUEST_MESSAGE,
+    });
+    const restartReadyOrExited = await settledWithin(
+      Promise.race([restartReady.promise, child.exited]),
+      restartDeadline.remaining(),
+    );
+    if (child.exitCode !== null) return;
+    await terminateChild(
+      restartReadyOrExited ? restartDeadline.remaining() : 0,
+    );
   };
 
   const preparationFinishedWithin = async (): Promise<boolean> => {
@@ -191,26 +208,18 @@ export function startDevelopmentServer(
       signalChild("SIGTERM");
     }
     const prepared = await preparationFinishedWithin();
-    if (child.exitCode !== null) {
-      return;
-    }
+    if (child.exitCode !== null) return;
     // Compatibility for non-Bun children and fixtures: give the production
     // engine's IPC request first ownership of final shutdown, and use SIGTERM
     // only when IPC was unavailable or the child did not acknowledge it.
-    if (!prepared && requested) {
-      signalChild("SIGTERM");
-    }
+    if (!prepared && requested) signalChild("SIGTERM");
     if (
       !forceRequested &&
       (await childSettledWithin(graceMilliseconds, forced.promise))
     ) {
       return;
     }
-    signalChild("SIGKILL");
-    if (!(await childSettledWithin(forceMilliseconds))) {
-      child.unref();
-      throw new Error("The development server did not terminate after SIGKILL");
-    }
+    await terminateChild(0);
   };
 
   const scheduleRestart = (): void => {

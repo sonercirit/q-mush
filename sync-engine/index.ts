@@ -3,11 +3,12 @@ import {
   DEVELOPMENT_RESTART_ESCALATE_MESSAGE,
   DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
   DEVELOPMENT_RESTART_READY_MESSAGE,
-  DEVELOPMENT_RESTART_REQUEST_MESSAGE,
   FINAL_SHUTDOWN_PREPARED_MESSAGE,
   FINAL_SHUTDOWN_REQUEST_MESSAGE,
+  isDevelopmentRestartRequestMessage,
   RESTART_PROGRESS_INTERVAL_MS,
 } from "../shared/development-shutdown.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -191,7 +192,6 @@ function errorMessage(error: unknown): string {
 
 let shutdownKind: "development_restart" | "final" | undefined;
 let developmentRestart: Promise<void> | undefined;
-let developmentTermination: Promise<void> | undefined;
 
 function stopMaintenance(): void {
   clearInterval(recoveryTimer);
@@ -201,25 +201,34 @@ function stopMaintenance(): void {
   }
 }
 
-function publishRestartProgress(): void {
-  const progress = sessions.drainProgress();
-  const message = {
+function restartProgressMessage(
+  progress: ReturnType<typeof sessions.drainProgress>,
+) {
+  return {
     progress,
     type: DEVELOPMENT_RESTART_PROGRESS_MESSAGE,
   } as const;
+}
+
+function publishRestartProgress(): void {
+  const progress = sessions.drainProgress();
+  const message = restartProgressMessage(progress);
   console.log(
     `Q Mush development restart is draining ${String(progress.length)} session(s)`,
   );
   process.send?.(message);
   for (const userId of realtimeHub.userIds()) {
-    realtimeHub.publishUser(userId, message);
     for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
-      realtimeHub.publishUser(userId, message, workspaceId);
+      realtimeHub.publishUser(
+        userId,
+        restartProgressMessage(sessions.drainProgress(userId, workspaceId)),
+        workspaceId,
+      );
     }
   }
 }
 
-function restartDevelopment(): Promise<void> {
+function restartDevelopment(deadlineAt = Date.now()): Promise<void> {
   if (shutdownKind === "final") {
     return Promise.resolve();
   }
@@ -236,8 +245,9 @@ function restartDevelopment(): Promise<void> {
     RESTART_PROGRESS_INTERVAL_MS,
   );
   progressTimer.unref();
+  const deadline = new RestartDeadline(deadlineAt);
   developmentRestart = sessions
-    .drain()
+    .drain(deadline)
     .then(() => {
       publishRestartProgress();
       process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
@@ -248,28 +258,8 @@ function restartDevelopment(): Promise<void> {
   return developmentRestart;
 }
 
-function terminateDevelopmentRestart(): Promise<void> {
-  developmentTermination ??= (async () => {
-    sessions.escalateDrain();
-    try {
-      await developmentRestart;
-    } catch (error) {
-      console.error(
-        `Q Mush development restart drain failed: ${errorMessage(error)}`,
-      );
-    }
-    await Promise.all([server.stop(true), callbackServer?.stop(true)]);
-    writeResilience.close();
-    database.$client.close();
-    if (process.connected) {
-      process.disconnect?.();
-    }
-  })();
-  return developmentTermination;
-}
-
 async function shutDown(): Promise<void> {
-  if (shutdownKind !== undefined) {
+  if (shutdownKind === "final") {
     return;
   }
 
@@ -289,8 +279,8 @@ async function shutDown(): Promise<void> {
 }
 
 process.on("message", (message) => {
-  if (message === DEVELOPMENT_RESTART_REQUEST_MESSAGE) {
-    void restartDevelopment();
+  if (isDevelopmentRestartRequestMessage(message)) {
+    void restartDevelopment(message.deadlineAt);
   } else if (message === DEVELOPMENT_RESTART_ESCALATE_MESSAGE) {
     sessions.escalateDrain();
   } else if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) {
@@ -301,11 +291,7 @@ process.on("SIGINT", () => {
   void shutDown();
 });
 process.on("SIGTERM", () => {
-  if (shutdownKind === "development_restart") {
-    void terminateDevelopmentRestart();
-  } else {
-    void shutDown();
-  }
+  void shutDown();
 });
 startDatabaseRetryFixture(database, health, Bun.env);
 

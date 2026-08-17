@@ -1,6 +1,7 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { RESTART_CLEANUP_LIMIT_MS } from "../shared/development-shutdown.ts";
+import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../shared/development-shutdown.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
@@ -89,6 +90,7 @@ export interface SessionIntegrationApiResources {
   ) => Promise<Response>;
   readonly requests: SessionRequestHelpers;
   readonly restart: SessionRestartControl;
+  readonly restartController: AbortController;
   readonly restartCoordinator: SessionRestartCoordinator;
   readonly runnerRemoval: RunnerRemovalCoordinator;
   readonly runtimes: SessionRuntimes;
@@ -246,16 +248,18 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
   }
 
-  cancelBoundedRunnerDrains(): void {
-    this.resources.restart.cancelBoundedRunnerDrains();
-  }
-
-  async drain(): Promise<void> {
-    this.resources.shutdownInterrupted.beginLiveDrain();
-    await this.resources.restart.drainServer();
-    await this.resources.executionCleanup.drainPending(
-      RESTART_CLEANUP_LIMIT_MS,
+  async drain(
+    deadline = new RestartDeadline(
+      this.resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
+      this.resources.now,
+    ),
+  ): Promise<void> {
+    this.resources.restartController.abort(
+      new DOMException("The server is restarting", "RestartHandoff"),
     );
+    this.resources.shutdownInterrupted.beginLiveDrain();
+    await this.resources.restart.drainServer(deadline);
+    await this.resources.executionCleanup.drainPending(deadline);
   }
 
   async drainFinal(): Promise<void> {
@@ -267,19 +271,31 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.restart.escalateServerDrain();
   }
 
-  drainProgress(): readonly RestartDrainSessionProgress[] {
-    return this.resources.restart.drainProgress();
+  drainProgress(
+    userId?: string,
+    workspaceId?: string,
+  ): readonly RestartDrainSessionProgress[] {
+    if (userId === undefined) return this.resources.restart.drainProgress();
+    const visible = new Set(
+      this.resources.store.list(userId, workspaceId).map(({ id }) => id),
+    );
+    return this.resources.restart.drainProgress(undefined, (sessionId) =>
+      visible.has(sessionId),
+    );
   }
 
   async prepareFinalShutdown(): Promise<void> {
     this.resources.stopLivenessScans();
     this.resources.shutdownInterrupted.enableRecovery();
     await this.resources.restart.prepareServerShutdown();
-    this.resources.restart.cancelBoundedRunnerDrains();
   }
 
   drainRunner(runnerId: string, restartId: string): Promise<void> {
     return this.resources.restart.drainRunner(runnerId, restartId);
+  }
+
+  escalateRunnerDrain(runnerId: string, restartId: string): boolean {
+    return this.resources.restart.escalateRunnerDrain(runnerId, restartId);
   }
 
   #authenticatedWorkspace(
@@ -367,6 +383,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
         discover: this.resources.discoverOpenRouterProviders,
         pool: this.resources.modelCredentialPool,
         request,
+        signal: this.resources.restartController.signal,
         user,
         withCredential: this.resources.withCredentialAccess,
       }),

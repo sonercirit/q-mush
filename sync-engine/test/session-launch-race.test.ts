@@ -20,6 +20,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 import {
   closeSessionTestDatabase,
   expectedRestartHandoff,
@@ -361,15 +362,12 @@ function agentActionsSetup(
     discoverModels: testModelCatalog,
     discoverSessionMetadata: () =>
       Promise.resolve().then(() => EMPTY_SESSION_REQUEST_MODEL_METADATA),
-    draining: () => false,
     launchSession: (_credential, detail) => launch.fail(detail),
     listOnlineRunners: () => [],
-    listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-    notify: () => undefined,
+    ...sessionAgentActionRuntimeDefaults(),
     now,
     pendingRestart: (runnerId) => launch.runtimes.pendingRestart(runnerId),
     readCredential: () => Promise.resolve(credential),
-    runnerIsAvailable: () => true,
     store: setup.store,
     withCredential: credentialAction(credential),
   }).actions(
@@ -497,6 +495,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
         launch: (detail) => launch.fail(detail),
         notify: () => undefined,
         now,
+        restartSignal: () => new AbortController().signal,
         runtimes: launch.runtimes,
         store: setup.store,
       },

@@ -29,6 +29,7 @@ import {
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
+import { activeToolTracker } from "./session-active-tool-tracking.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
 import {
@@ -219,11 +220,13 @@ async function executeAgentTool(
   if (isRestartHandoffError(toolSignal.reason)) {
     return restartInterruptedToolResult();
   }
-  const finishTracking = runtime.activeTools.begin(
-    runtime.detail.id,
-    call.id,
-    call.name,
-  );
+  const trackOuterCall =
+    call.name === "brave_search" ||
+    call.name === "parallel" ||
+    (isAgentSessionToolName(call.name) && isSessionAgentToolName(call.name));
+  const finishOuterTracking = trackOuterCall
+    ? runtime.activeTools.begin(runtime.detail.id, call.id, call.name)
+    : () => undefined;
   try {
     if (
       !isAgentSessionToolName(call.name) ||
@@ -286,7 +289,7 @@ async function executeAgentTool(
     }
     throw error;
   } finally {
-    finishTracking();
+    finishOuterTracking();
   }
 }
 
@@ -326,6 +329,7 @@ export async function runSessionAgent(
     const tools = readAgentSessionToolNames(currentToolNames());
     return tools === undefined ? undefined : new Set(tools);
   };
+  const trackTool = activeToolTracker(runtime.activeTools, runtime.detail.id);
   const dispatchRunnerTool = async (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
@@ -362,63 +366,74 @@ export async function runSessionAgent(
     if (name !== "explain_file" || result.state !== "completed") {
       return result;
     }
-    const promptValue = toolArguments["prompt"];
-    if (
-      promptValue !== undefined &&
-      (typeof promptValue !== "string" || promptValue.length > 4_000)
-    ) {
-      throw new Error(
-        "Tool argument prompt must be a string of at most 4000 characters",
-      );
-    }
-    let attachment: AgentAttachment | undefined;
+    const finishExplanationTracking = trackTool(
+      callId ?? createUuidV7(),
+      name,
+      { runnerCommand: false },
+    );
     try {
-      attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
-    } catch {
-      attachment = undefined;
-    }
-    if (attachment === undefined) {
-      throw new Error("The runner returned invalid file attachment data");
-    }
-    throwIfRestartRequested(runtime);
-    const currentModel = await discoverCurrentSessionModel(runtime, signal);
-    throwIfRestartRequested(runtime);
-    if (currentModel === undefined) {
-      throw new Error("The session model is unavailable for file explanation");
-    }
-    const explanation = await explainAttachment(
-      {
-        attachment,
-        currentCredential: runtime.credential,
-        currentModel,
-        currentModelId: runtime.detail.model,
-        currentProvider: runtime.detail.provider,
-        currentProviderPricing: runtime.detail.providerPricing,
-        currentProviderTag: runtime.detail.openRouterProviderTag,
-        factory: runtime.modelFactory,
-        onStepStart: () => {
-          markSessionStepStart(runtime);
+      const promptValue = toolArguments["prompt"];
+      if (
+        promptValue !== undefined &&
+        (typeof promptValue !== "string" || promptValue.length > 4_000)
+      ) {
+        throw new Error(
+          "Tool argument prompt must be a string of at most 4000 characters",
+        );
+      }
+      let attachment: AgentAttachment | undefined;
+      try {
+        attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
+      } catch {
+        attachment = undefined;
+      }
+      if (attachment === undefined) {
+        throw new Error("The runner returned invalid file attachment data");
+      }
+      throwIfRestartRequested(runtime);
+      const currentModel = await discoverCurrentSessionModel(runtime, signal);
+      throwIfRestartRequested(runtime);
+      if (currentModel === undefined) {
+        throw new Error(
+          "The session model is unavailable for file explanation",
+        );
+      }
+      const explanation = await explainAttachment(
+        {
+          attachment,
+          currentCredential: runtime.credential,
+          currentModel,
+          currentModelId: runtime.detail.model,
+          currentProvider: runtime.detail.provider,
+          currentProviderPricing: runtime.detail.providerPricing,
+          currentProviderTag: runtime.detail.openRouterProviderTag,
+          factory: runtime.modelFactory,
+          onStepStart: () => {
+            markSessionStepStart(runtime);
+          },
+          prompt: typeof promptValue === "string" ? promptValue : null,
+          resources: runtime,
+          restartRequested: runtime.restartHandoffRequested,
+          userId: runtime.userId,
+          workspaceId: runtime.detail.workspaceId,
         },
-        prompt: typeof promptValue === "string" ? promptValue : null,
-        resources: runtime,
-        restartRequested: runtime.restartHandoffRequested,
-        userId: runtime.userId,
-        workspaceId: runtime.detail.workspaceId,
-      },
-      signal,
-    );
-    const usage = agentStepUsage(
-      { contextTokens: null, ...explanation.usage },
-      (step) =>
-        estimateAgentStepCost(
-          { providerPricing: explanation.providerPricing },
-          step.tokenUsage,
-        ),
-    );
-    if (usage !== undefined) {
-      recordRuntimeUsage(runtime, usage);
+        signal,
+      );
+      const usage = agentStepUsage(
+        { contextTokens: null, ...explanation.usage },
+        (step) =>
+          estimateAgentStepCost(
+            { providerPricing: explanation.providerPricing },
+            step.tokenUsage,
+          ),
+      );
+      if (usage !== undefined) {
+        recordRuntimeUsage(runtime, usage);
+      }
+      return { output: explanation.content, state: "completed" };
+    } finally {
+      finishExplanationTracking();
     }
-    return { output: explanation.content, state: "completed" };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -452,6 +467,8 @@ export async function runSessionAgent(
     braveSearch: runtime.braveSearch,
     currentTools: currentToolNames,
     executeTool: dispatchTool,
+    trackTool: (callId, name, runnerCommand) =>
+      trackTool(callId ?? createUuidV7(), name, { runnerCommand }),
     tools: runtime.detail.tools,
     userId: runtime.userId,
     workspaceId: runtime.detail.workspaceId,

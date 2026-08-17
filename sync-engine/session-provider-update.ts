@@ -1,32 +1,32 @@
-import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   sessionProviderSelectionMatches,
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
-import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import {
   readSessionCredential,
   type SessionCredentialReaders,
 } from "./session-credential-access.ts";
+import type { SessionGenerationInterruptionDependencies } from "./session-generation-interruption.ts";
+import type { RestartAwareSessionModelDiscoveryDependencies } from "./session-model-discovery-dependencies.ts";
 import {
+  discoverRequiredSessionMetadata,
   optionalCredentialRejection,
-  requireSessionMetadata,
-  sessionMetadataFromDependencies,
 } from "./session-provider-selection.ts";
 import { updateStoredSessionProvider } from "./session-provider-update-store.ts";
-import type { SessionRuntimes } from "./session-runtime.ts";
+import {
+  restartSignalIsAborted,
+  throwIfServerRestarting,
+  withRestartErrorTranslation,
+} from "./session-restart-gate.ts";
 
-export interface SessionProviderUpdateDependencies {
-  readonly broker: Pick<RunnerCommandBroker, "cancelSessionGeneration">;
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
-  readonly now: () => number;
+export interface SessionProviderUpdateDependencies
+  extends
+    RestartAwareSessionModelDiscoveryDependencies,
+    SessionGenerationInterruptionDependencies {
   readonly providers: SessionCredentialReaders;
   readonly rejectCredentialErrors?: boolean;
-  readonly runtimes: Pick<SessionRuntimes, "abortForGeneration">;
   readonly store: {
     readonly database: Parameters<typeof updateStoredSessionProvider>[0];
     readonly read: (
@@ -52,19 +52,25 @@ async function targetMetadata(
       workspaceId: input.workspaceId,
     });
   } catch {
+    if (restartSignalIsAborted(dependencies.restartSignal)) {
+      throwIfServerRestarting(dependencies.restartSignal());
+    }
     throw new RealtimeCommandError("credential_refresh_failed");
   }
   if (credential === undefined) {
     throw new RealtimeCommandError("credential_unavailable");
   }
-  return requireSessionMetadata(
-    await sessionMetadataFromDependencies({
-      credential,
-      dependencies,
-      input,
-      ownerId: userId,
-      ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
-    }),
+  return withRestartErrorTranslation(
+    dependencies.restartSignal,
+    async (signal) =>
+      discoverRequiredSessionMetadata({
+        credential,
+        dependencies,
+        input,
+        ownerId: userId,
+        signal,
+        ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
+      }),
   );
 }
 
@@ -91,7 +97,9 @@ export async function applySessionProviderUpdate(
     throw new RealtimeCommandError("cache_warning_required");
   }
 
+  throwIfServerRestarting(dependencies.restartSignal());
   const metadata = await targetMetadata(dependencies, userId, input);
+  throwIfServerRestarting(dependencies.restartSignal());
   const result = updateStoredSessionProvider(
     dependencies.store.database,
     dependencies.store.read,

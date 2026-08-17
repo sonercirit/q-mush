@@ -53,7 +53,7 @@ test("a second restart request force-parks sessions stuck in long tool calls", a
         (progress) =>
           progress.runnerId === RUNNER_ID &&
           ids.includes(progress.sessionId) &&
-          progress.tools.includes("bash"),
+          progress.tools.some(({ name }) => name === "bash"),
       ),
   ).toBe(true);
 

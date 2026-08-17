@@ -29,6 +29,7 @@ interface SessionAgentActionsResources extends Pick<
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly launch: SessionLaunchBoundary["launch"];
   readonly requests: SessionRequestHelpers;
+  readonly restartSignal: () => AbortSignal;
   readonly runnerIsAvailable: AgentActionsDependencies["runnerIsAvailable"];
   readonly runners: RunnerIntegration;
   readonly runtimes: SessionRuntimes;
@@ -54,6 +55,7 @@ export function createSessionAgentActions(
       credential,
       userId,
       rejectCredentialErrors,
+      signal,
     ) =>
       discoverSessionAgentMetadata(
         {
@@ -64,8 +66,8 @@ export function createSessionAgentActions(
         credential,
         userId,
         rejectCredentialErrors,
+        signal,
       ),
-    draining: () => resources.runtimes.draining,
     launchSession: (credential, detail, userId, operation) =>
       resources.launch(detail, credential, userId, operation),
     listOnlineRunners: (userId, workspaceId) =>
@@ -85,6 +87,7 @@ export function createSessionAgentActions(
     now: resources.now,
     pendingRestart: (runnerId) => resources.runtimes.pendingRestart(runnerId),
     readCredential: resources.readCredential,
+    restartSignal: resources.restartSignal,
     runnerIsAvailable: resources.runnerIsAvailable,
     runtimes: resources.runtimes,
     settled: resources.runtimes.cleared.bind(resources.runtimes),

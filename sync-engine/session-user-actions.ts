@@ -20,6 +20,10 @@ import {
   type PromptInput,
 } from "./session-input.ts";
 import { queueSessionForUser } from "./session-queue.ts";
+import {
+  restartSignalIsAborted,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 export interface SessionUserActionDependencies {
@@ -29,6 +33,7 @@ export interface SessionUserActionDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly launchBoundary: () => SessionLaunchBoundary;
+  readonly restartSignal: () => AbortSignal;
   readonly runnerIsAvailable: SessionRunnerAvailability;
   readonly withCredential: (
     userId: string,
@@ -55,6 +60,9 @@ function createValidatedSessionForUser(
   input: CreateSessionInput,
   workspaceId: string,
 ): Promise<Response> {
+  if (restartSignalIsAborted(dependencies.restartSignal)) {
+    return Promise.resolve(serverRestartingResponse());
+  }
   const scopedInput = { ...input, workspaceId };
   const available = dependencies.runnerIsAvailable(
     user.id,
@@ -69,6 +77,7 @@ function createValidatedSessionForUser(
       {
         discoverModels: dependencies.discoverModels,
         discoverOpenRouterProviders: dependencies.discoverOpenRouterProviders,
+        restartSignal: dependencies.restartSignal,
         ...dependencies.launchBoundary(),
       },
       user,

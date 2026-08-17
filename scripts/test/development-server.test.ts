@@ -175,7 +175,7 @@ if (eventsPath === undefined) throw new Error("Missing events path");
 const record = (event) => appendFileSync(eventsPath, event + "\\n");
 record("started");
 process.on("message", (message) => {
-  if (message === "q-mush:development-restart-request") record("development-request");
+  if (typeof message === "object" && message?.type === "q-mush:development-restart-request" && typeof message.deadlineAt === "number") record("development-request");
   if (message === "q-mush:development-restart-escalate") {
     record("development-escalate");
     process.send?.("q-mush:development-restart-ready");
@@ -213,6 +213,44 @@ setInterval(() => {}, 1_000);
       ]);
       await server.stop();
       await waitForFileContent(eventsPath, "final-request");
+    },
+  );
+});
+
+test("development restart bounds the complete pre-kill lifecycle to one deadline", async () => {
+  await useDevelopmentServer(
+    "q-mush-dev-lifecycle-bound-test-",
+    async (directory, triggerPath) => {
+      const childPath = join(directory, "bounded-child.ts");
+      const startsPath = join(directory, "bounded-starts.txt");
+      await Bun.write(
+        childPath,
+        `import { appendFileSync } from "node:fs";
+const startsPath = process.argv[2];
+if (startsPath === undefined) throw new Error("Missing starts path");
+appendFileSync(startsPath, "started\\n");
+process.on("SIGTERM", () => undefined);
+setInterval(() => undefined, 1_000);
+`,
+      );
+      const serverOptions = {
+        command: [process.execPath, childPath, startsPath],
+        cwd: directory,
+        restartDelayMilliseconds: 10,
+        restartTriggerPath: triggerPath,
+        shutdownForceMilliseconds: 40,
+        shutdownPreparationMilliseconds: 100,
+      } as const;
+      const server = startDevelopmentServer(serverOptions);
+      try {
+        await waitForStartCount(startsPath, 1);
+        const startedAt = performance.now();
+        await triggerDevelopmentRestart(triggerPath);
+        await waitForStartCount(startsPath, 2);
+        expect(performance.now() - startedAt).toBeLessThan(500);
+      } finally {
+        await server.stop();
+      }
     },
   );
 });

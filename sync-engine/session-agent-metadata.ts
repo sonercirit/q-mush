@@ -1,3 +1,4 @@
+import { optionalAbortSignal } from "../shared/abort-signal.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
@@ -16,6 +17,7 @@ export async function discoverSessionAgentMetadata(
   credential: ProviderCredentialAccess,
   ownerId: string,
   rejectCredentialErrors: boolean,
+  signal?: AbortSignal,
 ): Promise<
   Pick<
     AgentSessionDetail,
@@ -32,6 +34,7 @@ export async function discoverSessionAgentMetadata(
     input,
     ownerId,
     rejectCredentialErrors,
+    ...optionalAbortSignal(signal),
   });
   if ("error" in metadata) {
     throw new Error(

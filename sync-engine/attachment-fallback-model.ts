@@ -79,6 +79,7 @@ export async function explainAttachment(
           ...selection,
           workspaceId: options.workspaceId,
         });
+  throwIfAttachmentRestartRequested(options.restartRequested);
   if (credential === undefined) {
     throw new Error(
       `The global ${modality} fallback credential is unavailable`,
@@ -91,6 +92,7 @@ export async function explainAttachment(
       credential,
       signal,
     );
+    throwIfAttachmentRestartRequested(options.restartRequested);
     const fallbackModel = catalog?.models.find(
       ({ id }) => id === selection.model,
     );

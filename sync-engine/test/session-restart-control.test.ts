@@ -80,13 +80,16 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     return Promise.resolve(this.forceParked);
   }
 
-  async requestDrain(
+  requestDrain(
     scope: RestartScope,
     restartId: string,
-  ): Promise<{ readonly settled: Promise<unknown> }> {
+  ): {
+    readonly persistence: Promise<unknown>;
+    readonly settled: Promise<unknown>;
+  } {
     this.requestedDrains += 1;
-    await this.drain(scope, restartId);
-    return { settled: Promise.resolve() };
+    const persistence = this.drain(scope, restartId);
+    return { persistence, settled: persistence };
   }
 
   drainRequest(scope: RestartScope): RestartRequest | undefined {
@@ -220,6 +223,19 @@ describe("session restart control", () => {
       { restartId: "server-1", scope: { kind: "server" } },
       { restartId: "server-1", scope: { kind: "server" } },
     ]);
+  });
+
+  test("escalates a pending runner drain through its dedicated boundary", async () => {
+    const { restart } = control();
+    const pending = restart.drainRunner("runner-1", "runner-restart");
+
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      true,
+    );
+    await pending;
+    expect(restart.escalateRunnerDrain("runner-1", "stale-restart")).toBe(
+      false,
+    );
   });
 
   test("releases only the exact acknowledged runner restart", async () => {

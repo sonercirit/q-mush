@@ -1,3 +1,4 @@
+import type { RestartDeadline } from "../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
@@ -7,10 +8,15 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 
 export class SessionExecutionCleanup {
   readonly #broker: RunnerCommandBroker;
+  #draining = false;
   readonly #offline = new Set<string>();
   readonly #pending = new Map<
     string,
-    { readonly promise: Promise<void>; readonly terminal: boolean }
+    {
+      readonly controller: AbortController;
+      readonly promise: Promise<void>;
+      readonly terminal: boolean;
+    }
   >();
 
   constructor(broker: RunnerCommandBroker) {
@@ -22,26 +28,38 @@ export class SessionExecutionCleanup {
   }
 
   cancelPending(): void {
-    for (const sessionId of this.#pending.keys()) {
+    for (const [sessionId, pending] of this.#pending) {
+      pending.controller.abort(
+        new DOMException("The server is restarting", "RestartHandoff"),
+      );
       this.#broker.cancelSessionCommands(sessionId);
     }
   }
 
-  async drainPending(milliseconds: number): Promise<void> {
+  async drainPending(deadline: RestartDeadline): Promise<void> {
+    this.#draining = true;
     const pending = [...this.pending];
     if (pending.length === 0) return;
-    const timedOut = Promise.withResolvers<boolean>();
-    const timer = setTimeout(() => {
+    if (deadline.expired()) {
       this.cancelPending();
-      timedOut.resolve(true);
-    }, milliseconds);
-    const completed = Promise.allSettled(pending).then(() => false);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<false>((resolve) => {
+      timer = setTimeout(() => {
+        resolve(false);
+      }, deadline.remaining());
+    });
     try {
-      if (await Promise.race([completed, timedOut.promise])) {
-        await completed;
+      const completed = await Promise.race([
+        Promise.allSettled(pending).then(() => true),
+        expired,
+      ]);
+      if (!completed) {
+        this.cancelPending();
       }
     } finally {
-      clearTimeout(timer);
+      if (timer !== undefined) clearTimeout(timer);
     }
   }
 
@@ -65,30 +83,38 @@ export class SessionExecutionCleanup {
   }
 
   #dispatch(detail: AgentSessionDetail, terminal: boolean): Promise<void> {
-    if (this.#offline.delete(detail.id)) {
+    if (this.#offline.delete(detail.id) || this.#draining) {
       return Promise.resolve();
     }
     const existing = this.#pending.get(detail.id);
     if (existing !== undefined && (!terminal || existing.terminal)) {
       return existing.promise;
     }
-    const dispatch = () =>
-      this.#broker
-        .dispatch({
-          arguments: terminal
-            ? { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true }
-            : {},
-          executionEnvironment: detail.executionEnvironment,
-          runnerId: detail.runnerId,
-          sessionId: detail.id,
-          tool: RUNNER_EXECUTION_CLEANUP_COMMAND,
-          workingDirectory: detail.workingDirectory,
-        })
-        .then(() => undefined)
-        .catch(() => undefined);
+    const dispatch = (signal: AbortSignal) =>
+      this.#draining
+        ? Promise.resolve()
+        : this.#broker
+            .dispatch(
+              {
+                arguments: terminal
+                  ? { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true }
+                  : {},
+                executionEnvironment: detail.executionEnvironment,
+                runnerId: detail.runnerId,
+                sessionId: detail.id,
+                tool: RUNNER_EXECUTION_CLEANUP_COMMAND,
+                workingDirectory: detail.workingDirectory,
+              },
+              signal,
+            )
+            .then(() => undefined)
+            .catch(() => undefined);
+    const controller = new AbortController();
     const cleanup =
-      existing === undefined ? dispatch() : existing.promise.then(dispatch);
-    const pending = { promise: cleanup, terminal };
+      existing === undefined
+        ? dispatch(controller.signal)
+        : existing.promise.then(() => dispatch(controller.signal));
+    const pending = { controller, promise: cleanup, terminal };
     this.#pending.set(detail.id, pending);
     void cleanup.then(() => {
       if (this.#pending.get(detail.id) === pending) {

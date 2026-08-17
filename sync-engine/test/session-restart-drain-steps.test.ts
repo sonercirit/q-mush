@@ -4,7 +4,7 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { RESTART_DRAIN_LIMIT_MS } from "../../shared/development-shutdown.ts";
+import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutdown.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
@@ -115,6 +115,14 @@ interface DeadlineSession {
   readonly setup: RestartStepSetup;
 }
 
+function sessionRestartTiming(clock: SessionRestartTestClock) {
+  return {
+    clearTimeout: clock.clearTimeout,
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+  };
+}
+
 async function deadlineSession(
   model: AgentModel,
   commandPrefix: string,
@@ -123,10 +131,7 @@ async function deadlineSession(
   const setup = connectedSessionSetup(model, "api_key", undefined, {
     now: clock.now,
     commandId: nextCommandId(commandPrefix),
-    restartTiming: {
-      clearTimeout: clock.clearTimeout,
-      setTimeout: clock.setTimeout,
-    },
+    restartTiming: sessionRestartTiming(clock),
   });
   const ids = await createRestartSessions(setup, 1);
   const id = ids.at(0);
@@ -143,7 +148,7 @@ async function forceDrainAtDeadline(
 ): Promise<void> {
   const drained = drain();
   await waitForRestartDrainCount(setup.sessions, 1);
-  clock.advance(RESTART_DRAIN_LIMIT_MS);
+  clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
   await drained;
 }
 
@@ -192,10 +197,7 @@ test("a forced runner drain persists and resumes its runner handoff", async () =
       commandId: nextCommandId("runner-resumed-command"),
       database: setup.database,
       now: clock.now,
-      restartTiming: {
-        setTimeout: clock.setTimeout,
-        clearTimeout: clock.clearTimeout,
-      },
+      restartTiming: sessionRestartTiming(clock),
     },
   );
   recreated.runners.seen({ id: RUNNER_ID, userId: TEST_USER_ID });

@@ -8,6 +8,10 @@ import { AttachmentFallbackApi } from "./attachment-fallback-api.ts";
 import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-access.ts";
+import {
+  discoverCredentialModels,
+  selectDiscoveredModel,
+} from "./session-model-discovery-dependencies.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
 
 export function createAttachmentFallbackIntegration(options: {
@@ -18,6 +22,7 @@ export function createAttachmentFallbackIntegration(options: {
   readonly now: () => number;
   readonly providers: SessionCredentialReaders;
   readonly requests: SessionRequestHelpers;
+  readonly restartSignal: () => AbortSignal;
 }): {
   readonly api: AttachmentFallbackApi;
   readonly store: AttachmentFallbackStore;
@@ -38,11 +43,13 @@ export function createAttachmentFallbackIntegration(options: {
         return false;
       }
       try {
-        const catalog = await options.discoverModels(
+        const catalog = await discoverCredentialModels(
+          options.discoverModels,
           selection.provider,
           credential,
+          options.restartSignal(),
         );
-        const model = catalog.models.find(({ id }) => id === selection.model);
+        const model = selectDiscoveredModel(catalog, selection.model);
         if (
           model === undefined ||
           !modelSupportsAttachmentModality(
@@ -60,7 +67,7 @@ export function createAttachmentFallbackIntegration(options: {
           user.id,
           credential,
           selection.model,
-          { force: true },
+          { force: true, signal: options.restartSignal() },
         );
         return providers.providers.some(({ tag }) => tag === routing.tag);
       } catch {

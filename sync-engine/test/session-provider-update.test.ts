@@ -15,6 +15,7 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 function createProviderUpdateSession(
@@ -92,6 +93,7 @@ function setup(userContextTokenCap?: number) {
       openai: { readCredential: () => undefined },
       openrouter: { readCredential },
     },
+    restartSignal: () => new AbortController().signal,
     runtimes: { abortForGeneration },
     store: {
       database,
@@ -304,6 +306,21 @@ describe("session provider update", () => {
       expect(error).toMatchObject({ code });
     }
   };
+
+  test("returns server_restarting without mutating when discovery is canceled", async () => {
+    const setupValue = setup();
+    const canceled = restartCanceledDiscovery();
+    setupValue.dependencies.restartSignal = () => canceled.controller.signal;
+    setupValue.dependencies.discoverOpenRouterProviders = canceled.discover;
+
+    await expect(applyUpdate(setupValue)).rejects.toMatchObject({
+      code: "server_restarting",
+    });
+    expect(sessionRow(setupValue)).toMatchObject({
+      generation: 0,
+      provider: "openai",
+    });
+  });
 
   test("requires confirmation before changing the provider", async () => {
     const setupValue = setup();

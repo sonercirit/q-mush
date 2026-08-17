@@ -1,14 +1,11 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
@@ -18,6 +15,10 @@ import {
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
+import {
+  restartSignalIsAborted,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -29,13 +30,10 @@ type SessionAgentCredentialSelection = Pick<
 export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
-  readonly discoverModels: (
-    provider: ProviderId,
-    credential: ProviderCredentialAccess,
-  ) => Promise<AgentModelCatalog>;
+  readonly discoverModels: AgentModelDiscoverer;
   readonly store: SessionStore;
   readonly now: () => number;
-  readonly draining: () => boolean;
+  readonly restartSignal: () => AbortSignal;
   readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
@@ -48,6 +46,7 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
+    signal?: AbortSignal,
   ) => Promise<SessionRequestModelMetadata>;
   readonly readCredential: (
     userId: string,
@@ -172,7 +171,11 @@ export async function spawnAgentSession(options: {
       credential,
       options.userId,
       balanced,
+      options.dependencies.restartSignal(),
     );
+    if (restartSignalIsAborted(options.dependencies.restartSignal)) {
+      return serverRestartingResponse();
+    }
     const created = options.dependencies.store.create(
       {
         ...input,
@@ -192,7 +195,7 @@ export async function spawnAgentSession(options: {
       options.dependencies.notify(options.userId, child.id);
       return sessionLaunchResponse(child.id, status);
     };
-    if (options.dependencies.draining()) {
+    if (restartSignalIsAborted(options.dependencies.restartSignal)) {
       return notifiedResponse("queued");
     }
     const launch = options.dependencies.launchSession(

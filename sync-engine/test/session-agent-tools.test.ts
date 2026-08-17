@@ -250,7 +250,7 @@ describe("session agent tools", () => {
     expect(Array.isArray(results) ? results[19] : undefined).toMatchObject({
       recipient_name: "read_session",
     });
-    expect(setup.runnerCommands).toEqual([]);
+    expect(setup.runnerCommands.length).toBe(0);
     closeSessionTestDatabase(setup.database);
   });
 
