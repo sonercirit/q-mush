@@ -1,5 +1,5 @@
-import type { RealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
 import { RealtimeConnection } from "../../solid/realtime-client.ts";
+import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
 import { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
 
 const LOCATION = {
@@ -8,7 +8,7 @@ const LOCATION = {
 };
 
 interface RealtimeTestSetupOptions {
-  readonly listener?: (event: RealtimeServerEvent) => void;
+  readonly listener?: (event: RealtimeClientEvent) => void;
   readonly requestFrame?: (callback: () => void) => number;
 }
 

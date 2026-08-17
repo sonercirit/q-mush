@@ -9,6 +9,7 @@ import {
   type ProviderCredential,
 } from "../provider-credential-model.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
@@ -112,7 +113,7 @@ function toolDelta(
 
 function applySessionEvent(
   controller: SessionController,
-  event: RealtimeServerEvent,
+  event: RealtimeClientEvent,
 ): boolean {
   if (event.type === "session") {
     controller.applyDetail(event.session);

@@ -4,49 +4,54 @@ Living project memory.
 
 ## Project Snapshot
 
-- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
-  the homepage; `/app` is the app.
+- Strict-TypeScript ESM Bun/SolidJS project; tests live under `test/`, no `src`.
+  `/` is the homepage, `/app` the app.
 
 ## Working Agreements
 
-- Research provider docs with Brave Search; probe APIs.
-- Don't call capabilities impossible without excluding evidence; otherwise
-  record an open question.
+- Research online: use brave-search on provider docs/trackers, then probe APIs,
+  schemas, usage metrics.
+- Call capabilities impossible only with excluding evidence; otherwise record an
+  open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
   docs, performance, security, and DX. Ship small improvements now.
-- TDD: fail first, implement, refactor green. DRY/KISS: authoritative logic, no
-  premature abstraction.
+- TDD: fail first, implement, refactor green.
+- DRY/KISS: authoritative logic, no premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- Never weaken tests, special-case checks, or claim unperformed verification;
-  disclose gaps. Fix defects on sight, including pre-existing ones; if a fix is
-  harmful, codify why in a test.
+- No reward hacking: never weaken tests, special-case checks, or claim
+  unperformed verification; disclose unverified work. Fix defects on sight,
+  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
+  in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
   justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun failures.
+  captured, then rerun the narrowest failure.
 - Never commit secrets, generated artifacts, or env files.
+
+## Setup, Commands
+
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
-- Test: `bun run test` (unit + Chromium); `test:watch` omits browsers;
-  `test:browser` needs bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
-  fails for `./`/absolute paths. It pins headless and sets `PWDEBUG=0` before
-  real Chromium.
-- `bun run check` runs all static checks, each also runnable standalone;
-  `format`/`lint:fix` write fixes.
-- `.github/workflows/checks.yml` uses Bun 1.3.14 and a frozen lockfile, with
-  tests, static-check, build, and whitespace jobs.
+- Migrations: `bun run db:generate` / `db:migrate`
+- Test: `bun run test` (DOM/server + Chromium); `test:watch` omits browsers.
+  `test:browser` uses bare `scripts/test-browser.ts` (Bun no-orphans rejects
+  `./`/absolute paths), pins headless, and clears `PWDEBUG`.
+- `bun run check` runs every static check, each standalone too; `bun run format`
+  / `lint:fix` write fixes.
+- CI (`.github/workflows/checks.yml`): tests, static checks, build, and
+  whitespace checks on Bun 1.3.14 with a frozen lockfile.
 
 ## Architecture and Conventions
 
-- Four production workspaces: `solid` owns browser UI, `sync-engine` server
-  integrations, `runner` the standalone runner, `shared` cross-workspace code.
-  The first three import only themselves and `shared`; `shared` imports no other
-  workspace; only `scripts` may import `scripts`.
+- Four enforced production workspaces: `solid` owns browser UI, `sync-engine`
+  the Bun server/integrations, `runner` the standalone runner, `shared`
+  cross-workspace code. The first three import only themselves and `shared`;
+  `shared` imports no other workspace; only `scripts` may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
@@ -59,7 +64,9 @@ Living project memory.
   revalidates separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
-  from `solid/client.tsx`; routes live in `shared/routes.ts`.
+  from `solid/client.tsx`; routes live in `shared/routes.ts`. Browser tests use
+  real Chromium/Tailwind and production mutations, never synthetic layout or
+  CSS-only assertions; CI rejects `.only` and zero tests.
 - `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
   - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
     discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
@@ -70,9 +77,7 @@ Living project memory.
     `sync-engine/index.ts` injects the persistent connection; the auth factory
     falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
     live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
-    use real Chromium/Tailwind and production state/UI mutations, never
-    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
+    reads `/api/auth/session`, gates the app, posts logout.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -116,27 +121,27 @@ Living project memory.
   propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
   definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
   preserving user line breaks; session lists page by ten. Live sessions use
-  `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  `solid/session-controller.ts`: model deltas combine once per frame per
-  session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
-  scroll anchor, and only bottom-pinned transcripts follow live output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else the first) and credential, first
-  discovered model, latest working directory, top reported effort. Unknown
-  modalities imply no attachment support; choices show provider and Q Mush
-  modalities. `solid/custom-select.tsx` shares search normalization, paginates
-  past ten items, owns accessible keyboard/focus. Focus mode fills the app
-  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
-  overlays on desktop, becomes a drawer, collapses on selection, closing with
-  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display; reasoning summaries persist as `thinking` messages omitted
-  from replay. Session and transcript rows sit in `agent_sessions` and
-  `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer); interrupted processes mark active
-  sessions failed for resumption; rebuilds add interrupted tool errors on
+  `realtime-client.ts`/`realtime-stream-buffer.ts`: model/tool fragments
+  coalesce; frames apply one update in arrival order. Resets supersede buffered
+  models; barriers flush before stream-scoped snapshots/final state; stale ones
+  cannot revive terminal tools. Other events stay immediate; no-op snapshots
+  suppress notifications; keyed messages rerender only changes. The long-lived
+  Solid root preserves focus/scroll; session detail disables document anchoring
+  and only bottom-pinned transcripts follow output. `agent-model-discovery.ts`
+  queries metadata, signal-cancelable; `shared/agent-configuration.ts` owns
+  catalog types/validation. New sessions take the default online runner (else
+  the first) and credential, first discovered model, latest working directory,
+  top reported effort. Unknown modalities imply no attachment support; choices
+  show provider and Q Mush modalities. `solid/custom-select.tsx` shares search
+  normalization, paginates past ten items, owns accessible keyboard/focus. Focus
+  mode fills the app viewport (not browser Fullscreen), keeping drafts and
+  scroll; its rail overlays on desktop, becomes a drawer, collapses on
+  selection, closing with Escape first. `shared/agent-prompt.ts` builds the
+  model system prompt and transcript display; reasoning summaries persist as
+  `thinking` messages omitted from replay. Session and transcript rows sit in
+  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
+  clears with `activeStartedAt` (live Step timer); interrupted processes mark
+  active sessions failed for resumption; rebuilds add interrupted tool errors on
   resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
@@ -195,7 +200,7 @@ Living project memory.
   production and browser-test imports of `solid/styles.css`) are rejected.
   First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
   and HTML-like `Response` bodies; HTML-like data and TSX pass.
-- Knip checks every issue type and entry export in separate test and production
+- Knip checks every issue type and entry export in separate test/production
   graphs; shipped browser scripts are production roots, tests cannot keep
   production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
@@ -203,9 +208,9 @@ Living project memory.
   Native-token and complete-function alpha matches of ≥20 tokens spanning a line
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
-- Repository policy scans tracked files: 20,000-code-point maximum (`bun.lock`,
-  `drizzle/` excepted), tests only under `test`, no app HTML outside
-  `test`/`fixtures`.
+- Repository policy scans tracked, unignored files: 20,000-code-point maximum
+  (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
+  outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 
@@ -292,5 +297,6 @@ Living project memory.
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
   outside compaction, providers replay the conversation without a timeout.
-- Add roots to Knip; exclude tests from production. Pin Playwright 1.62.1/
-  Vitest 4.1.10: probes couple to Playwright `<launching>` and Vitest launch.
+- Add Knip roots for runtime/standalone entries; exclude tests from production.
+  Pin Playwright 1.62.1/Vitest 4.1.10: probes couple to Playwright `<launching>`
+  and Vitest launch.

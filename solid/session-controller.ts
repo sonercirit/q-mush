@@ -39,7 +39,10 @@ import {
   showNewestSessionHistory,
 } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
-import type { SessionToolUpdateResult } from "./session-controller-options.ts";
+import type {
+  SessionStreamBatch,
+  SessionToolUpdateResult,
+} from "./session-controller-options.ts";
 import {
   SessionPendingInputController,
   type PendingInputTimer,
@@ -161,6 +164,10 @@ export class SessionController {
       this.#live.applyDelta(event);
     });
   }
+  applyStreamBatch(event: SessionStreamBatch): void {
+    if (this.#view.value.history.page !== undefined) return;
+    this.#live.applyStreamBatch(event);
+  }
   applyQuestions(
     event: Extract<RealtimeServerEvent, { type: "session_questions" }>,
   ): void {
@@ -210,12 +217,6 @@ export class SessionController {
   }
   get transport(): SessionCommandTransport | undefined {
     return this.#transport;
-  }
-  get currentDraft() {
-    return this.#view.value.draft;
-  }
-  get detail() {
-    return this.#view.value.detail;
   }
   addImages(files: readonly File[], follow: boolean) {
     return addSessionImages({ files, follow, view: this.#view });

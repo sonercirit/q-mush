@@ -1,7 +1,7 @@
 import { REALTIME_PATH } from "../shared/routes.ts";
 import {
-  type SESSION_REALTIME_OPERATIONS,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
+  type SESSION_REALTIME_OPERATIONS,
 } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
@@ -9,6 +9,11 @@ import {
   readRealtimeServerEvent,
   type RealtimeServerEvent,
 } from "./realtime-client-codec.ts";
+import {
+  RealtimeStreamBuffer,
+  type RealtimeClientEvent,
+  type RealtimeStreamBatch,
+} from "./realtime-stream-buffer.ts";
 
 interface BrowserWebSocket extends EventTarget {
   readonly readyState: number;
@@ -18,13 +23,7 @@ interface BrowserWebSocket extends EventTarget {
 
 type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
 type FrameCallback = (callback: () => void) => number;
-type RealtimeListener = (event: RealtimeServerEvent) => void;
-type SessionDelta = Extract<
-  RealtimeServerEvent,
-  { readonly type: "session_delta" }
->;
-type ToolDelta = Extract<RealtimeServerEvent, { readonly type: "tool_stream" }>;
-type CoalescedDelta = SessionDelta | ToolDelta;
+type RealtimeListener = (event: RealtimeClientEvent) => void;
 type DeferredStateEvent = Extract<
   RealtimeServerEvent,
   {
@@ -113,7 +112,7 @@ export class RealtimeConnection {
   readonly #deferredStateEvents = new Map<string, DeferredStateEvent>();
   readonly #deferredStateWaiters: ((available: boolean) => void)[] = [];
   #sessionDeltaGeneration = 0;
-  #sessionDeltas = new Map<string, CoalescedDelta[]>();
+  readonly #streamBuffer = new RealtimeStreamBuffer();
   #sessionDeltaFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
   readonly #toolSnapshotRequests = new Map<
@@ -200,7 +199,7 @@ export class RealtimeConnection {
     this.#discardDeferredStateEvents();
     this.#sessionDeltaGeneration += 1;
     this.#sessionDeltaFrame = undefined;
-    this.#sessionDeltas.clear();
+    this.#streamBuffer.clear();
     this.#toolSnapshotRequests.clear();
     socket?.close();
   }
@@ -384,66 +383,48 @@ export class RealtimeConnection {
     });
   }
 
-  #flushSessionDelta(key?: string): void {
-    if (key === undefined) {
-      this.#sessionDeltaFrame = undefined;
-      const deltas = [...this.#sessionDeltas.values()].flat();
-      this.#sessionDeltas.clear();
-      if (this.#stopped) {
-        return;
-      }
-      for (const delta of deltas) {
-        this.#listener(delta);
-      }
-      return;
-    }
-
-    const deltas = this.#sessionDeltas.get(key);
-    this.#sessionDeltas.delete(key);
-    for (const delta of deltas ?? []) {
-      this.#listener(delta);
-    }
+  #deliver(event: RealtimeClientEvent): void {
+    this.#listener(event);
   }
 
-  #queueSessionDelta(event: CoalescedDelta): void {
-    const key =
-      event.type === "session_delta"
-        ? `session:${event.sessionId}`
-        : `tool:${event.sessionId}:${event.streamId}:${String(event.index)}`;
-    const queued =
-      event.type === "session_delta" && event.reset
-        ? []
-        : (this.#sessionDeltas.get(key) ?? []);
-    const previous = queued.at(-1);
-    let combined: CoalescedDelta = event;
-    if (
-      event.type === "session_delta" &&
-      previous?.type === "session_delta" &&
-      previous.streamId === event.streamId
-    ) {
-      combined = {
-        ...event,
-        ...(previous.reset === true ? { reset: true } : {}),
-        content: previous.content + event.content,
-        thinking: previous.thinking + event.thinking,
-      };
-    }
-    this.#sessionDeltas.set(
-      key,
-      previous === undefined || combined === event
-        ? [...queued, event]
-        : [...queued.slice(0, -1), combined],
-    );
-    if (this.#sessionDeltaFrame !== undefined) {
+  #deliverStreamBatch(batch: RealtimeStreamBatch | undefined): void {
+    if (batch !== undefined) this.#deliver(batch);
+  }
+
+  #flushSessionDelta(sessionId?: string): void {
+    if (sessionId === undefined) {
+      this.#sessionDeltaFrame = undefined;
+      if (!this.#stopped) {
+        this.#deliverStreamBatch(this.#streamBuffer.takeNext());
+        this.#scheduleSessionDelta();
+      }
       return;
     }
+    this.#deliverStreamBatch(
+      this.#streamBuffer.takeSessionKind(sessionId, "model"),
+    );
+  }
 
+  #scheduleSessionDelta(): void {
+    if (this.#sessionDeltaFrame !== undefined || !this.#streamBuffer.pending) {
+      return;
+    }
     const generation = this.#sessionDeltaGeneration;
     this.#sessionDeltaFrame = this.#requestFrame(() => {
       if (generation === this.#sessionDeltaGeneration) {
         this.#flushSessionDelta();
       }
     });
+  }
+
+  #queueSessionDelta(
+    event: Extract<
+      RealtimeServerEvent,
+      { readonly type: "session_delta" | "tool_stream" }
+    >,
+  ): void {
+    this.#streamBuffer.queue(event);
+    this.#scheduleSessionDelta();
   }
 
   #rejectPendingCommands(code: string): void {
@@ -532,12 +513,12 @@ export class RealtimeConnection {
           listener();
         }
       }
-      this.#listener(event);
+      this.#deliver(event);
       return;
     }
     if (event.type === "command_success" || event.type === "command_error") {
       this.#settleCommand(event);
-      this.#listener(event);
+      this.#deliver(event);
       return;
     }
     if (event.type === "health") {
@@ -548,8 +529,8 @@ export class RealtimeConnection {
       event.type === "session_compaction_request" ||
       event.type === "session_compaction_settled"
     ) {
-      this.#flushSessionDelta(`session:${event.sessionId}`);
-      this.#listener(event);
+      this.#flushSessionDelta(event.sessionId);
+      this.#deliver(event);
       return;
     }
     if (event.type === "session_delta" || event.type === "tool_stream") {
@@ -559,19 +540,24 @@ export class RealtimeConnection {
 
     if (event.type === "tool_stream_snapshot") {
       this.#queueStreamEvent(event);
-      this.#flushToolDeltas(event.sessionId);
-      this.#listener(event);
+      const bufferedTools = this.#streamBuffer.takeSessionKind(
+        event.sessionId,
+        "tool",
+      );
+      this.#deliverStreamBatch(bufferedTools);
+      const snapshot = this.#streamBuffer.applyToolSnapshot(event);
+      this.#deliver(snapshot);
       return;
     }
     if (event.type === "session") {
-      const key = `session:${event.session.id}`;
-      this.#flushSessionDelta(key);
-      this.#flushToolDeltas(event.session.id);
+      const sessionId = event.session.id;
+      this.#deliverStreamBatch(this.#streamBuffer.takeSession(sessionId));
       if (
         event.session.status !== "queued" &&
         event.session.status !== "running"
       ) {
         this.#toolSnapshotRequests.delete(event.session.id);
+        this.#streamBuffer.clearToolSession(event.session.id);
       } else {
         this.syncTools(event.session.id);
       }
@@ -592,14 +578,6 @@ export class RealtimeConnection {
     );
     if (event.type !== "tool_stream_snapshot") {
       this.#queueSessionDelta(event);
-    }
-  }
-
-  #flushToolDeltas(sessionId: string): void {
-    for (const key of [...this.#sessionDeltas.keys()]) {
-      if (key.startsWith(`tool:${sessionId}:`)) {
-        this.#flushSessionDelta(key);
-      }
     }
   }
 

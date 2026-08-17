@@ -309,11 +309,8 @@ function App(): JSX.Element {
       case "session_compaction_settled":
         agentSessions.applyCompaction(event);
         break;
-      case "session_delta":
-        agentSessions.applyDelta(event);
-        break;
-      case "tool_stream":
-        agentSessions.applyToolDelta(event);
+      case "stream_batch":
+        agentSessions.applyStreamBatch(event);
         break;
       case "tool_stream_snapshot":
         agentSessions.applyToolSnapshot(event);

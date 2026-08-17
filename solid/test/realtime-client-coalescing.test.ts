@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { RealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
 import { RealtimeConnection } from "../../solid/realtime-client.ts";
+import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 class CoalescingSocket extends EventTarget {
@@ -23,22 +24,24 @@ class CoalescingSocket extends EventTarget {
   }
 }
 
-function expectFramesAndLatest(
-  events: readonly RealtimeServerEvent[],
-  frames: readonly (() => void)[],
-  frameCount: number,
-  frameIndex: number,
-  eventCount: number,
-  expected: Readonly<Record<string, unknown>>,
-): void {
-  expect(frames).toHaveLength(frameCount);
-  frames[frameIndex]?.();
-  expect(events).toHaveLength(eventCount);
-  expect(events.at(-1)).toMatchObject(expected);
+function streamedEvents(
+  events: readonly RealtimeClientEvent[],
+): readonly RealtimeServerEvent[] {
+  return events.flatMap((event) =>
+    event.type === "stream_batch"
+      ? event.updates.filter((update) => update.type !== "tool_update")
+      : [],
+  );
 }
 
-test("coalesces session deltas into one update per animation frame", () => {
-  const events: RealtimeServerEvent[] = [];
+function latestStreamedEvent(
+  events: readonly RealtimeClientEvent[],
+): RealtimeServerEvent | undefined {
+  return streamedEvents(events).at(-1);
+}
+
+test("coalesces session deltas while preserving reset and snapshot order", () => {
+  const events: RealtimeClientEvent[] = [];
   const frames: (() => void)[] = [];
   const socket = new CoalescingSocket();
   const connection = new RealtimeConnection((event) => events.push(event), {
@@ -55,51 +58,52 @@ test("coalesces session deltas into one update per animation frame", () => {
   socket.receive({ instanceId: "instance-1", type: "ready" });
   events.length = 0;
 
-  for (const event of [
-    {
-      content: "Hello",
-      sessionId: "session-1",
-      thinking: "Considering",
-      type: "session_delta",
-    },
-    {
-      content: " world",
-      sessionId: "session-1",
-      thinking: " carefully",
-      type: "session_delta",
-    },
-  ] as const) {
-    socket.receive(event);
-  }
+  socket.receive({
+    content: "Hello",
+    sessionId: "session-1",
+    streamId: "stream-original",
+    thinking: "Considering",
+    type: "session_delta",
+  });
+  socket.receive({
+    content: " world",
+    sessionId: "session-1",
+    streamId: "stream-original",
+    thinking: " carefully",
+    type: "session_delta",
+  });
   socket.receive({ sessions: [], type: "sessions" });
 
   expect(events).toHaveLength(0);
   expect(frames).toHaveLength(2);
   frames[1]?.();
-  expect(events).toHaveLength(1);
-  expect(events[0]?.type).toBe("sessions");
+  expect(events.map(({ type }) => type)).toEqual(["sessions"]);
+
   socket.receive({
     content: "Replacement",
     reset: true,
     sessionId: "session-1",
+    streamId: "stream-replacement",
     thinking: "Reconsidering",
     type: "session_delta",
   });
   socket.receive({
     content: " response",
     sessionId: "session-1",
+    streamId: "stream-replacement",
     thinking: " from scratch",
     type: "session_delta",
   });
   frames[0]?.();
-  expect(events.at(-1)).toMatchObject({
+  expect(latestStreamedEvent(events)).toMatchObject({
     content: "Replacement response",
     reset: true,
+    streamId: "stream-replacement",
     thinking: "Reconsidering from scratch",
   });
 
   socket.receive({
-    content: "!",
+    content: "before snapshot",
     sessionId: TEST_SESSION_DETAIL.id,
     thinking: "",
     type: "session_delta",
@@ -111,7 +115,10 @@ test("coalesces session deltas into one update per animation frame", () => {
     type: "session_delta",
   });
   socket.receive({ session: TEST_SESSION_DETAIL, type: "session" });
-  expect(events.at(-1)).toMatchObject({ content: "!", thinking: "" });
+  expect(latestStreamedEvent(events)).toMatchObject({
+    content: "before snapshot",
+    sessionId: TEST_SESSION_DETAIL.id,
+  });
   expect(frames).toHaveLength(4);
   frames[3]?.();
   expect(events.at(-1)).toEqual({
@@ -119,8 +126,7 @@ test("coalesces session deltas into one update per animation frame", () => {
     type: "session",
   });
   frames[2]?.();
-  expect(events).toHaveLength(5);
-  expect(events.at(-1)).toMatchObject({
+  expect(latestStreamedEvent(events)).toMatchObject({
     content: "other",
     sessionId: "session-other",
   });
@@ -131,7 +137,9 @@ test("coalesces session deltas into one update per animation frame", () => {
     thinking: "",
     type: "session_delta",
   });
-  expectFramesAndLatest(events, frames, 5, 4, 6, {
+  expect(frames).toHaveLength(5);
+  frames[4]?.();
+  expect(latestStreamedEvent(events)).toMatchObject({
     content: "fresh",
     thinking: "",
   });
@@ -145,5 +153,5 @@ test("coalesces session deltas into one update per animation frame", () => {
   expect(frames).toHaveLength(6);
   connection.stop();
   frames[5]?.();
-  expect(events).toHaveLength(6);
+  expect(latestStreamedEvent(events)).toMatchObject({ content: "fresh" });
 });
