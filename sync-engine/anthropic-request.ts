@@ -11,7 +11,6 @@ import {
   type AnthropicReplayBlock,
 } from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
-import { anthropicReplayIdentityInput } from "./anthropic-replay-identity-input.ts";
 import {
   anthropicReplayIdentityFrom,
   type AnthropicReplayIdentity,
@@ -56,9 +55,8 @@ interface AnthropicMessage {
   readonly role: "assistant" | "user";
 }
 
-interface ConvertedAnthropicMessage extends AnthropicMessage {
-  readonly sourceIndex: number;
-}
+const UNSAFE_TOOL_REPLAY =
+  "The Anthropic assistant tool turn cannot be replayed safely";
 
 // Anthropic accepts images and PDF documents; other attachment modalities
 // reach the model through the attachment fallback instead.
@@ -86,8 +84,10 @@ function matchingReplay(
   identity: AnthropicReplayIdentity,
 ): AnthropicAssistantReplay | undefined {
   const replay = message.providerReplay;
-  const resolvedModel = identity.resolvedModel ?? identity.model;
-  return replay?.model === resolvedModel &&
+  const resolvedModel = identity.resolvedModel;
+  return resolvedModel !== undefined &&
+    replay?.model === resolvedModel &&
+    (replay.requestModel ?? replay.model) === identity.model &&
     replay.provenance === identity.provenance &&
     anthropicReplayMatchesAssistant(replay, message.content, message.toolCalls)
     ? replay
@@ -155,11 +155,57 @@ function anthropicMessage(
   }
 }
 
+function continuationReplay(
+  messages: readonly AgentConversationMessage[],
+  assistantIndex: number,
+  identity: AnthropicReplayIdentity,
+): AnthropicAssistantReplay | undefined {
+  const assistant = messages[assistantIndex];
+  if (assistant?.role !== "assistant") return undefined;
+  const results: Extract<
+    AgentConversationMessage,
+    { readonly role: "tool" }
+  >[] = [];
+  let index = assistantIndex + 1;
+  for (;;) {
+    const result = messages[index];
+    if (result?.role !== "tool") break;
+    results.push(result);
+    index += 1;
+  }
+  if (results.length === 0) return undefined;
+  const expectedIds = assistant.toolCalls.map(({ id }) => id);
+  const resultIds = results.map(({ toolCallId }) => toolCallId);
+  const replay = matchingReplay(assistant, identity);
+  if (
+    replay === undefined ||
+    expectedIds.length === 0 ||
+    expectedIds.length !== resultIds.length ||
+    new Set(expectedIds).size !== expectedIds.length ||
+    new Set(resultIds).size !== resultIds.length ||
+    expectedIds.some((id, callIndex) => id !== resultIds[callIndex])
+  ) {
+    throw new Error(UNSAFE_TOOL_REPLAY);
+  }
+  return replay;
+}
+
+export function assertAnthropicContinuationReplays(
+  messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
+): void {
+  for (const [index, message] of messages.entries()) {
+    if (message.role === "assistant" && messages[index + 1]?.role === "tool") {
+      continuationReplay(messages, index, identity);
+    }
+  }
+}
+
 // A trailing assistant replay is sent back verbatim to continue a paused
 // turn, and merging joins every trailing assistant message into it, so no
 // breakpoint may mark any block of that final merged message.
 function preservedTrailingAssistantIndex(
-  messages: readonly ConvertedAnthropicMessage[],
+  messages: readonly AnthropicMessage[],
 ): number {
   if (messages.at(-1)?.replayBlocks === undefined) {
     return messages.length;
@@ -172,7 +218,7 @@ function preservedTrailingAssistantIndex(
 }
 
 function applyAnthropicMessageBreakpoint(
-  messages: ConvertedAnthropicMessage[],
+  messages: AnthropicMessage[],
   start: number,
   preservedFromIndex: number,
 ): void {
@@ -200,25 +246,24 @@ function anthropicMessages(
   identity: AnthropicReplayIdentity,
 ): readonly unknown[] {
   const breakpoints = promptCacheBreakpoints(messages);
-  const converted: ConvertedAnthropicMessage[] = [];
+  const converted: AnthropicMessage[] = [];
+  const convertedAtOrBeforeSource: number[] = [];
 
   for (const [sourceIndex, message] of messages.entries()) {
     const result = anthropicMessage(message, identity);
     if (result !== undefined) {
-      converted.push({ ...result, sourceIndex });
+      converted.push(result);
     }
+    convertedAtOrBeforeSource[sourceIndex] = converted.length - 1;
   }
 
   const preservedFromIndex = preservedTrailingAssistantIndex(converted);
   for (const sourceIndex of breakpoints) {
-    let index = converted.length - 1;
-    while (
-      index >= 0 &&
-      (converted[index]?.sourceIndex ?? Number.NEGATIVE_INFINITY) > sourceIndex
-    ) {
-      index -= 1;
-    }
-    applyAnthropicMessageBreakpoint(converted, index, preservedFromIndex);
+    applyAnthropicMessageBreakpoint(
+      converted,
+      convertedAtOrBeforeSource[sourceIndex] ?? -1,
+      preservedFromIndex,
+    );
   }
 
   const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
@@ -241,8 +286,15 @@ function continuationContainer(
   identity: AnthropicReplayIdentity,
 ): string | undefined {
   const last = messages.at(-1);
-  if (last?.role !== "assistant") return undefined;
-  return matchingReplay(last, identity)?.container;
+  if (last?.role === "assistant") {
+    return matchingReplay(last, identity)?.container;
+  }
+  if (last?.role !== "tool") return undefined;
+  let assistantIndex = messages.length - 1;
+  while (messages[assistantIndex]?.role === "tool") {
+    assistantIndex -= 1;
+  }
+  return continuationReplay(messages, assistantIndex, identity)?.container;
 }
 
 function anthropicTools(
@@ -289,9 +341,8 @@ export function anthropicRequestBody(
             ? {}
             : { thinking: { display: "summarized", type: "adaptive" } }),
         };
-  const identity = anthropicReplayIdentityFrom(
-    anthropicReplayIdentityInput(options),
-  );
+  const identity = anthropicReplayIdentityFrom(options);
+  assertAnthropicContinuationReplays(options.messages, identity);
   const container = continuationContainer(options.messages, identity);
   return {
     ...(options.maxOutputTokens === null

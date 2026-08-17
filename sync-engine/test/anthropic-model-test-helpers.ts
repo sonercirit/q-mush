@@ -103,8 +103,6 @@ export const SIGNED_ANTHROPIC_REPLAY: AnthropicAssistantReplay = {
   provenance: ANTHROPIC_TEST_PROVENANCE,
 };
 
-export const ANTHROPIC_READ_REPLAY_BLOCK = anthropicReadReplayBlock();
-
 export const JSON_RESPONSE_REPLAY_BLOCKS = [
   thinkingReplayBlock("omitted-signature"),
   redactedReplayBlock("redacted-data"),

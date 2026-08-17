@@ -53,6 +53,37 @@ function expectCombinedUsage(
   });
 }
 
+function continuationBody(
+  content: readonly unknown[],
+  container = "container-1",
+) {
+  return {
+    container,
+    messages: [{ role: "user" }, { content, role: "assistant" }],
+  };
+}
+
+type PauseContinuationCase = Readonly<{
+  blocks: readonly Readonly<Record<string, unknown>>[];
+  container?: unknown;
+  stream: boolean;
+}>;
+
+async function replayedRequestBody(
+  options: PauseContinuationCase,
+): Promise<unknown> {
+  const harness = anthropicHarness([
+    anthropicPauseTurnResponse(
+      options.blocks,
+      options.stream,
+      options.container,
+    ),
+    doneAnthropicEvents(),
+  ]);
+  await harness.complete();
+  return harness.requestBody(1);
+}
+
 describe("Anthropic pause_turn", () => {
   test.each([true, false])(
     "continues a %s-streamed pause_turn with the assistant blocks unchanged",
@@ -146,20 +177,43 @@ describe("Anthropic pause_turn", () => {
         expires_at: "2099-01-01T00:00:00Z",
         id: "container-1",
       };
-      const harness = anthropicHarness([
-        anthropicPauseTurnResponse([serverToolCall], stream, container),
-        doneAnthropicEvents(),
-      ]);
-
-      await harness.complete();
-
-      await expect(harness.requestBody(1)).resolves.toMatchObject({
-        container: "container-1",
-        messages: [
-          { role: "user" },
-          { content: [serverToolCall], role: "assistant" },
-        ],
+      const body = await replayedRequestBody({
+        blocks: [serverToolCall],
+        container,
+        stream,
       });
+
+      expect(body).toMatchObject(continuationBody([serverToolCall]));
+    },
+  );
+
+  test.each([true, false])(
+    "trims every trailing text block beside signed thinking, server tools, and a %s-streamed container",
+    async (stream) => {
+      const thinking = {
+        signature: "signed-thinking",
+        thinking: "Inspect.",
+        type: "thinking" as const,
+      };
+      const answer = { text: "Answer. ", type: "text" as const };
+      const serverToolCall = serverCall("code_execution", {
+        code: "print('hi')",
+      });
+      const whitespace = { text: "  ", type: "text" as const };
+      const tab = { text: "\t", type: "text" as const };
+      const body = await replayedRequestBody({
+        blocks: [thinking, answer, serverToolCall, whitespace, tab],
+        container: { id: "container-1" },
+        stream,
+      });
+
+      expect(body).toMatchObject(
+        continuationBody([
+          thinking,
+          { text: "Answer.", type: "text" },
+          serverToolCall,
+        ]),
+      );
     },
   );
 

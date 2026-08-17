@@ -29,15 +29,16 @@ import {
   usesAnthropicFormat,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
-  type AgentProviderDiscoveryCredential,
 } from "./agent-model-options.ts";
 import { agentModelRequestBody } from "./agent-model-request.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
 import { resolveAnthropicModel } from "./anthropic-model-resolution.ts";
+import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
+  assertAnthropicContinuationReplays,
 } from "./anthropic-request.ts";
 import {
   genericProviderEndpoint,
@@ -74,20 +75,16 @@ export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptio
   readonly webSocket?: ProviderWebSocketFactory;
 }
 
-export interface AgentProviderRequestCredential extends AgentProviderDiscoveryCredential {
-  readonly id?: string;
-}
-
 function usesCodexOAuth(
   provider: ProviderId,
-  credential: AgentProviderRequestCredential,
+  credential: Pick<AgentProviderCredential, "source">,
 ): boolean {
   return provider === "openai" && credential.source === "oauth";
 }
 
 function endpoint(
   provider: ProviderId,
-  credential: AgentProviderRequestCredential,
+  credential: Pick<AgentProviderCredential, "apiFormat" | "baseUrl" | "source">,
 ): string {
   if (usesCodexOAuth(provider, credential)) {
     return OPENAI_CODEX_RESPONSES_URL;
@@ -110,7 +107,7 @@ function endpoint(
 
 function accessToken(
   provider: ProviderId,
-  credential: AgentProviderRequestCredential,
+  credential: Pick<AgentProviderCredential, "secret" | "source">,
 ): string {
   return provider === "openai" && credential.source === "oauth"
     ? readOpenAiOAuthCredential(credential.secret).access
@@ -140,7 +137,10 @@ function promptCacheKeyHeader(
 
 export function agentProviderRequestHeaders(
   provider: ProviderId,
-  credential: AgentProviderRequestCredential,
+  credential: Pick<
+    AgentProviderCredential,
+    "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
+  >,
   options: AgentProviderRequestHeaderOptions,
 ): Headers {
   const headers = new Headers({
@@ -249,6 +249,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #promptCacheKey: string | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
+  readonly #resolvedModel: string | null | undefined;
+  #resolvedModelPromise: Promise<string | undefined> | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
   readonly #selectedTools: readonly AgentSessionToolName[];
@@ -274,6 +276,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#promptCacheKey = options.promptCacheKey;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
+    this.#resolvedModel = options.resolvedModel;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
@@ -444,6 +447,46 @@ export class ChatCompletionsAgentModel implements AgentModel {
     });
   }
 
+  #anthropicResolvedModel(
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (this.#resolvedModel !== undefined) {
+      return Promise.resolve(this.#resolvedModel ?? undefined);
+    }
+    this.#resolvedModelPromise ??= resolveAnthropicModel({
+      credential: this.#credential,
+      fetch: this.#fetch,
+      model: this.#model,
+      provider: this.#provider,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    return this.#resolvedModelPromise;
+  }
+
+  #anthropicReplayIdentity(
+    resolvedModel: string | undefined,
+  ): ReturnType<typeof anthropicReplayIdentityFrom> {
+    const options = {
+      credential: this.#credential,
+      credentialFingerprint: this.#credentialFingerprint,
+      model: this.#model,
+      provider: this.#provider,
+    };
+    return resolvedModel === undefined
+      ? anthropicReplayIdentityFrom(options)
+      : anthropicReplayIdentityFrom({ ...options, resolvedModel });
+  }
+
+  #assertAnthropicContinuationReplays(
+    messages: readonly AgentConversationMessage[],
+    resolvedModel: string | undefined,
+  ): void {
+    assertAnthropicContinuationReplays(
+      messages,
+      this.#anthropicReplayIdentity(resolvedModel),
+    );
+  }
+
   async #httpRequest(
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
@@ -452,14 +495,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<AgentModelStep> {
     const resolvedModel =
       protocol === "anthropic"
-        ? await resolveAnthropicModel({
-            credential: this.#credential,
-            fetch: this.#fetch,
-            model: this.#model,
-            provider: this.#provider,
-            ...(signal === undefined ? {} : { signal }),
-          })
+        ? await this.#anthropicResolvedModel(signal)
         : undefined;
+    if (protocol === "anthropic") {
+      this.#assertAnthropicContinuationReplays(messages, resolvedModel);
+    }
     return completeProviderHttp(
       {
         body: this.#requestBody(messages, protocol, true, resolvedModel),
@@ -489,6 +529,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
   ): Promise<AgentModelStep> {
     const protocol = this.#httpProtocol();
     const input = completionInput(parameters, this.#model);
+    if (protocol === "anthropic") {
+      const resolvedModel = await this.#anthropicResolvedModel(input.signal);
+      this.#assertAnthropicContinuationReplays(parameters[0], resolvedModel);
+    }
     const step = await this.#httpRequest(
       input.messages,
       protocol,

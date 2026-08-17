@@ -10,7 +10,6 @@ import {
   type ModelRequestSleep,
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
-import { anthropicReplayIdentityInput } from "./anthropic-replay-identity-input.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import {
@@ -114,9 +113,7 @@ function streamFailure(
 function anthropicStreamOptions(
   options: ProviderHttpOptions,
 ): AnthropicEventStreamOptions {
-  const identity = anthropicReplayIdentityFrom(
-    anthropicReplayIdentityInput(options),
-  );
+  const identity = anthropicReplayIdentityFrom(options);
   return options.onDelta === undefined
     ? { identity }
     : { identity, onDelta: options.onDelta };

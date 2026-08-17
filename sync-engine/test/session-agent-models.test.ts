@@ -46,6 +46,13 @@ function modelSelections(): {
   return { factory: recordingFactory(selections), selections };
 }
 
+function sessionModelsWithOptions(
+  factory: AgentModelFactory,
+  overrides: Partial<Parameters<typeof createSessionAgentModels>[0]>,
+) {
+  return createSessionAgentModels(sessionModelOptions(factory, overrides));
+}
+
 function connectedRealtime(
   hub: RealtimeHub,
   socket: RecordingRealtimeSocket,
@@ -177,6 +184,19 @@ describe("session agent models", () => {
     expect(selections[0]).toMatchObject({
       openRouterProviderRouting: { sort: "exacto", type: "sort" },
     });
+  });
+
+  test("passes one resolved model to every session model", () => {
+    const { factory, selections } = modelSelections();
+    const models = sessionModelsWithOptions(factory, {
+      resolvedModel: "claude-snapshot",
+    });
+
+    models.createCompactor();
+    const resolved = selections.map((selection) => selection.resolvedModel);
+
+    expect(resolved).toEqual(["claude-snapshot", "claude-snapshot"]);
+    expect(models.resolvedModel).toBe("claude-snapshot");
   });
 
   test("streams provider thinking and response to the workspace socket", () => {

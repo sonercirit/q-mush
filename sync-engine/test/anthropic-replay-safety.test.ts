@@ -1,6 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
-import { runAgentLoop, type AgentModelStep } from "../../shared/agent-loop.ts";
+import {
+  runAgentLoop,
+  type AgentConversationMessage,
+  type AgentModelStep,
+} from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { resolveAnthropicModel } from "../../sync-engine/anthropic-model-resolution.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
   ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
@@ -143,20 +148,67 @@ interface CapturedRequests {
   readonly resolution: Request;
 }
 
+function modelRequestCount(
+  requests: readonly Request[],
+  method: "GET" | "POST",
+): number {
+  return requests.filter((request) => request.method === method).length;
+}
+
+function modelOptions(fetch: (request: Request) => Promise<Response>) {
+  return {
+    credential: ANTHROPIC_TEST_CREDENTIAL,
+    credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+    fetch,
+    maxOutputTokens: null,
+    model: REQUEST_ALIAS,
+    provider: "generic" as const,
+  };
+}
+
 function testModel(
   response: (request: Request) => Response,
   requests: Request[],
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
-    credential: ANTHROPIC_TEST_CREDENTIAL,
-    credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
-    fetch: (request) => {
+  return new ChatCompletionsAgentModel(
+    modelOptions((request) => {
       requests.push(request);
       return Promise.resolve(response(request));
+    }),
+  );
+}
+
+function aliasReplayMessage(): AgentConversationMessage {
+  return {
+    content: "Answer.",
+    providerReplay: {
+      blocks: [SIGNED_THINKING, { text: "Answer.", type: "text" }],
+      model: FIRST_SNAPSHOT,
+      protocol: "anthropic",
+      provenance: ANTHROPIC_TEST_PROVENANCE,
+      requestModel: REQUEST_ALIAS,
     },
-    maxOutputTokens: null,
-    model: REQUEST_ALIAS,
-    provider: "generic",
+    role: "assistant",
+    toolCalls: [],
+  };
+}
+
+function modelCompletion(
+  model: string,
+  blocks: readonly Readonly<Record<string, unknown>>[] = [
+    { text: "Done.", type: "text" },
+  ],
+): Response {
+  return anthropicJsonResponse({ blocks, model });
+}
+
+function preResolvedModel(requests: Request[]): ChatCompletionsAgentModel {
+  return new ChatCompletionsAgentModel({
+    ...modelOptions((request) => {
+      requests.push(request);
+      return Promise.resolve(modelCompletion(FIRST_SNAPSHOT));
+    }),
+    resolvedModel: FIRST_SNAPSHOT,
   });
 }
 
@@ -176,32 +228,13 @@ async function resolvedReplayRequest(
   const requests: Request[] = [];
   const respond = (request: Request): Response =>
     providerResponse(request, resolvedModel, () =>
-      anthropicJsonResponse({
-        blocks: [{ text: "Done.", type: "text" }],
-        model: resolvedModel,
-      }),
+      modelCompletion(resolvedModel),
     );
   const model = testModel(respond, requests);
   await model.complete([
     { content: "Inspect", role: "user" },
-    {
-      content: "",
-      providerReplay: {
-        blocks: signedToolBlocks(),
-        model: FIRST_SNAPSHOT,
-        protocol: "anthropic",
-        provenance: ANTHROPIC_TEST_PROVENANCE,
-        requestModel: REQUEST_ALIAS,
-      },
-      role: "assistant",
-      toolCalls: [{ arguments: "{}", id: CALL_ID, name: "read" }],
-    },
-    {
-      content: "Setup",
-      role: "tool",
-      toolCallId: CALL_ID,
-      toolName: "read",
-    },
+    aliasReplayMessage(),
+    { content: "Continue", role: "user" },
   ]);
   const resolution = requests.find(({ method }) => method === "GET");
   const completion = requests.find(({ method }) => method === "POST");
@@ -283,6 +316,57 @@ describe("Anthropic replay safety", () => {
     });
   });
 
+  test.each([
+    [
+      "a missing retrieve route",
+      () => new Response("missing", { status: 404 }),
+    ],
+    ["a malformed retrieve response", () => Response.json({ type: "model" })],
+  ] as const)(
+    "continues Messages requests after %s and caches the unresolved result",
+    async (_label, unresolvedResponse) => {
+      const requests: Request[] = [];
+      const model = testModel((request) => {
+        if (request.method === "GET") return unresolvedResponse();
+        return modelCompletion(FIRST_SNAPSHOT);
+      }, requests);
+
+      await model.complete([{ content: "First", role: "user" }]);
+      await model.complete([{ content: "Second", role: "user" }]);
+
+      expect(modelRequestCount(requests, "GET")).toBe(1);
+      expect(modelRequestCount(requests, "POST")).toBe(2);
+    },
+  );
+
+  test("propagates a caller abort while resolving an alias", async () => {
+    const controller = new AbortController();
+    const resolution = resolveAnthropicModel({
+      credential: ANTHROPIC_TEST_CREDENTIAL,
+      fetch: () => {
+        controller.abort();
+        return Promise.resolve(new Response("missing", { status: 404 }));
+      },
+      model: REQUEST_ALIAS,
+      provider: "generic",
+      signal: controller.signal,
+    });
+
+    await expect(resolution).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  test("uses a pre-resolved model without retrieving the alias again", async () => {
+    const requests: Request[] = [];
+    const model = preResolvedModel(requests);
+
+    const messages: readonly AgentConversationMessage[] = [
+      { content: "Inspect", role: "user" },
+    ];
+    await model.complete(messages);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.method).toBe("POST");
+  });
+
   test("does not follow up an unsafe pause_turn internally", async () => {
     const requests: Request[] = [];
     const paused = () =>
@@ -296,12 +380,16 @@ describe("Anthropic replay safety", () => {
       requests,
     );
 
-    const step = await model.complete([{ content: "Inspect", role: "user" }]);
-
+    const step = await model.complete([
+      { content: "Inspect unsafe pause", role: "user" },
+    ]);
     expect({
       continuation: step.providerContinuation,
-      posts: requests.filter(({ method }) => method === "POST").length,
-    }).toEqual({ continuation: "anthropic_replay_unavailable", posts: 1 });
+      requestCount: requests.length,
+    }).toEqual({
+      continuation: "anthropic_replay_unavailable",
+      requestCount: 2,
+    });
   });
 
   test("fails closed when the response model is unavailable", async () => {

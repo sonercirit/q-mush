@@ -29,23 +29,6 @@ type AnthropicReplayBlockType =
   | "web_fetch_tool_result"
   | "web_search_tool_result";
 
-const REPLAY_BLOCK_KEYS = {
-  bash_code_execution_tool_result: ["content", "tool_use_id", "type"],
-  code_execution_tool_result: ["content", "tool_use_id", "type"],
-  container_upload: ["file_id", "type"],
-  redacted_thinking: ["data", "type"],
-  server_tool_use: ["caller", "id", "input", "name", "type"],
-  text: ["citations", "text", "type"],
-  text_editor_code_execution_tool_result: ["content", "tool_use_id", "type"],
-  thinking: ["signature", "thinking", "type"],
-  tool_search_tool_result: ["content", "tool_use_id", "type"],
-  tool_use: ["caller", "id", "input", "name", "type"],
-  web_fetch_tool_result: ["caller", "content", "tool_use_id", "type"],
-  web_search_tool_result: ["caller", "content", "tool_use_id", "type"],
-} as const satisfies Readonly<
-  Record<AnthropicReplayBlockType, readonly string[]>
->;
-
 export type AnthropicReplayBlock = ReplayFields &
   (
     | {
@@ -163,22 +146,12 @@ export function projectAnthropicReplayFields(
   value: Readonly<Record<string, unknown>>,
   type: AnthropicReplayBlockType,
 ): AnthropicReplayObject | undefined {
-  const projected = Object.fromEntries(
-    REPLAY_BLOCK_KEYS[type]
-      .filter((key) => key in value)
-      .map((key) => [key, value[key]]),
-  );
-  return projected["type"] === type && isAnthropicReplayObject(projected)
-    ? projected
+  // Replay is an exact provider artifact. Validate every value as JSON-safe,
+  // but retain additive fields so a newer provider block is never persisted
+  // or replayed as a lossy projection.
+  return value["type"] === type && isAnthropicReplayObject(value)
+    ? value
     : undefined;
-}
-
-function hasOnlyReplayBlockKeys(
-  value: Readonly<Record<string, unknown>>,
-  type: AnthropicReplayBlockType,
-): boolean {
-  const allowed = new Set<string>(REPLAY_BLOCK_KEYS[type]);
-  return Object.keys(value).every((key) => allowed.has(key));
 }
 
 export function readAnthropicReplayBlockType(
@@ -246,10 +219,7 @@ export function isAnthropicReplayBlock(
   if (type === undefined) {
     return false;
   }
-  if (
-    !hasOnlyReplayBlockKeys(value, type) ||
-    !isValidReplayOptionalFields(value, type)
-  ) {
+  if (!isValidReplayOptionalFields(value, type)) {
     return false;
   }
   switch (type) {
@@ -381,15 +351,22 @@ export function anthropicReplayBlocksForRequest(
   );
 }
 
+export function anthropicReplayAssistantText(
+  blocks: readonly AnthropicReplayBlock[],
+): string {
+  return blocks.reduce(
+    (content, block) =>
+      block.type === "text" ? content + block.text : content,
+    "",
+  );
+}
+
 export function anthropicReplayMatchesAssistant(
   replay: AnthropicAssistantReplay,
   content: string,
   toolCalls: readonly ReplayToolCall[],
 ): boolean {
-  const replayText = replay.blocks
-    .filter((block) => block.type === "text")
-    .map((block) => block.text)
-    .join("");
+  const replayText = anthropicReplayAssistantText(replay.blocks);
   const replayCalls = replay.blocks.filter(
     (block) => block.type === "tool_use",
   );

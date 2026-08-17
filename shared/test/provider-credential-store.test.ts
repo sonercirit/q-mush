@@ -7,7 +7,10 @@ import {
 import { createDatabase } from "../../shared/database.ts";
 import { users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  DuplicateProviderCredentialError,
+  ProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000051";
@@ -130,6 +133,53 @@ const ENDPOINT = {
   label: "Gateway",
 } as const;
 
+function addEndpointCredential(
+  store: ProviderCredentialStore,
+  secret: string,
+  label: string,
+): void {
+  store.add(
+    TEST_USER_ID,
+    secret,
+    { ...ENDPOINT, label },
+    "api_key",
+    TEST_NOW + 1,
+  );
+}
+
+function createFirstCredential(store: ProviderCredentialStore): void {
+  store.add(TEST_USER_ID, "first-secret", ENDPOINT, "api_key", TEST_NOW);
+}
+
+function addCredentialPair(
+  store: ProviderCredentialStore,
+  siblingSecret: string,
+  siblingLabel: string,
+): void {
+  createFirstCredential(store);
+  addEndpointCredential(store, siblingSecret, siblingLabel);
+}
+
+function createCollisionSetup(
+  siblingSecret: string,
+  siblingLabel: string,
+): ReturnType<typeof createProviderStore> {
+  const setup = createProviderStore();
+  addCredentialPair(setup.store, siblingSecret, siblingLabel);
+  return setup;
+}
+
+function expectRotationCollision(
+  store: ProviderCredentialStore,
+  secret: string,
+  now: number,
+): void {
+  expect(() =>
+    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, now),
+  ).toThrow(DuplicateProviderCredentialError);
+  expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe("first-secret");
+}
+
 function rotateSecret(store: ProviderCredentialStore, secret: string): void {
   expect(
     store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, TEST_NOW + 1),
@@ -177,28 +227,30 @@ describe("provider credential agent access", () => {
   });
 
   test("rejects a secret rotation that collides with a sibling identity", () => {
-    const { close, store } = createProviderStore();
-    store.add(TEST_USER_ID, "first-secret", ENDPOINT, "api_key", TEST_NOW);
-    store.add(
-      TEST_USER_ID,
-      "sibling-secret",
-      { ...ENDPOINT, label: "Sibling" },
-      "api_key",
-      TEST_NOW + 1,
-    );
+    const { close, store } = createCollisionSetup("sibling-secret", "Sibling");
 
-    expect(
-      store.updateSecret(
-        TEST_USER_ID,
-        CREDENTIAL_ID,
-        "sibling-secret",
-        TEST_NOW + 2,
-      ),
-    ).toBe(false);
-    expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe("first-secret");
+    expectRotationCollision(store, "sibling-secret", TEST_NOW + 2);
     expect(store.readSecret(TEST_USER_ID, SECOND_CREDENTIAL_ID)).toBe(
       "sibling-secret",
     );
+    close();
+  });
+
+  test("rejects a secret rotation colliding with a soft-deleted identity", () => {
+    const { close, store } = createCollisionSetup("retired-secret", "Retired");
+    expect(store.remove(TEST_USER_ID, SECOND_CREDENTIAL_ID, TEST_NOW + 2)).toBe(
+      true,
+    );
+
+    expectRotationCollision(store, "retired-secret", TEST_NOW + 3);
+    expect(
+      store.updateSecret(
+        TEST_USER_ID,
+        "missing-credential",
+        "unused-secret",
+        TEST_NOW + 4,
+      ),
+    ).toBe(false);
     close();
   });
 

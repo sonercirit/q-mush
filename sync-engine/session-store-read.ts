@@ -81,7 +81,11 @@ function storedProviderReplay(
       return parseAnthropicAssistantReplay(value);
     } catch {
       // Replay is private optimization metadata. Corruption must not make the
-      // public transcript, session continuation, or fork unreadable.
+      // public transcript, session continuation, or fork unreadable, but it
+      // must remain observable for repair instead of disappearing silently.
+      console.warn(
+        "Ignored corrupt Anthropic replay metadata on a stored assistant message",
+      );
       return undefined;
     }
   }

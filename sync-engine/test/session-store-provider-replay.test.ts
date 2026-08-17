@@ -51,24 +51,21 @@ describe("stored provider replay", () => {
     expect(selectedFields).not.toContain("providerReplay");
   });
 
-  test("rejects unrecognized fields in persisted blocks", () => {
-    const serialized = JSON.stringify({
+  test("preserves JSON-safe additive fields in persisted blocks", () => {
+    const replay = {
+      ...REPLAY,
       blocks: [
         {
           signature: "signed",
           thinking: "",
-          type: "thinking",
-          unexpected: "field",
+          type: "thinking" as const,
+          unexpected: { opaque: [true, 2] },
         },
       ],
-      model: "claude-test",
-      protocol: "anthropic",
-      provenance: "test-provenance",
-    });
+    };
+    const serialized = JSON.stringify(replay);
 
-    expect(() => parseAnthropicAssistantReplay(serialized)).toThrow(
-      "Anthropic assistant replay data is invalid",
-    );
+    expect(parseAnthropicAssistantReplay(serialized)).toEqual(replay);
     expect(() =>
       parseAnthropicAssistantReplay(
         JSON.stringify({ ...REPLAY, unexpected: "field" }),
@@ -110,12 +107,17 @@ describe("stored provider replay", () => {
     expect(JSON.stringify(detail)).not.toContain("private-signature");
 
     setStoredReplay(database, "assistant", "not-json");
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const conversation = store.conversation.bind(
       store,
       STORE_SESSION_ID,
       replayIdentity(REPLAY.model, REPLAY.provenance),
     );
     expect(conversation()[1]).not.toHaveProperty("providerReplay");
+    expect(warn).toHaveBeenCalledWith(
+      "Ignored corrupt Anthropic replay metadata on a stored assistant message",
+    );
+    warn.mockRestore();
     setStoredReplay(database, "user", JSON.stringify(REPLAY));
     const user = conversation().find(({ role }) => role === "user");
     expect({

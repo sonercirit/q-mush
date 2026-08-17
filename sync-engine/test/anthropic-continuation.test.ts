@@ -56,6 +56,16 @@ function textStep(content: string, options?: Partial<AgentModelStep>) {
   return stepWithContinuation(content, options ?? {});
 }
 
+function replayToolBlocks(
+  content: string,
+  callId: string,
+): readonly AnthropicReplayBlock[] {
+  return [
+    { text: content, type: "text" },
+    toolReplayBlock({ id: callId, input: {}, name: "read" }),
+  ];
+}
+
 function replayToolStep(
   content: string,
   callId: string,
@@ -63,10 +73,7 @@ function replayToolStep(
 ): AgentModelStep {
   const call = emptyProviderToolCall(callId, "read");
   return textStep(content, {
-    providerReplay: replay([
-      { text: content, type: "text" },
-      toolReplayBlock({ id: call.id, input: {}, name: call.name }),
-    ]),
+    providerReplay: replay(replayToolBlocks(content, callId)),
     toolCalls: [call],
     ...options,
   });
@@ -90,6 +97,20 @@ function scriptedCompletion(
   const complete = vi.fn<Completion>();
   for (const step of steps) complete.mockResolvedValueOnce(step);
   return complete;
+}
+
+function continuationResult(
+  complete: ReturnType<typeof scriptedCompletion>,
+): AgentConversationMessage | undefined {
+  return complete.mock.calls[0]?.[0].at(-1);
+}
+
+async function runTrimmedContinuation(
+  step: AgentModelStep,
+  complete: ReturnType<typeof scriptedCompletion>,
+): Promise<AgentConversationMessage | undefined> {
+  await completeAnthropicPauseTurns(INITIAL_MESSAGES, step, complete);
+  return continuationResult(complete);
 }
 
 function pauseAssistant(
@@ -193,12 +214,9 @@ test.each([
 ] as const)(
   "right-trims %s only in the final preserved pause assistant",
   async (_label, text, expectedText) => {
-    const first = pausedTextStep(text);
     const complete = scriptedCompletion(textStep("Done."));
-
-    await completeAnthropicPauseTurns(INITIAL_MESSAGES, first, complete);
-
-    const continuation = complete.mock.calls[0]?.[0].at(-1);
+    const first = pausedTextStep(text);
+    const continuation = await runTrimmedContinuation(first, complete);
     expect(continuation).toMatchObject({ content: expectedText });
     if (continuation?.role !== "assistant") {
       throw new Error("The continuation assistant was not captured");
@@ -212,6 +230,48 @@ test.each([
     expect(first.providerReplay?.blocks).toEqual([{ text, type: "text" }]);
   },
 );
+
+test("right-trims every trailing text block from content and replay together", async () => {
+  const serverBlock: AnthropicReplayBlock = {
+    id: "server-call",
+    input: { query: "news" },
+    name: "web_search",
+    type: "server_tool_use",
+  };
+  const source = replay(
+    [
+      { signature: "signed-thinking", thinking: "Inspect.", type: "thinking" },
+      { text: "Answer. ", type: "text" },
+      serverBlock,
+      { text: "  ", type: "text" },
+      { text: "\t", type: "text" },
+    ],
+    { container: "container-1" },
+  );
+  const complete = scriptedCompletion(textStep("Done."));
+  const continuation = await runTrimmedContinuation(
+    pausedTextStep("Answer.   \t", { providerReplay: source }),
+    complete,
+  );
+  expect(continuation).toEqual({
+    content: "Answer.",
+    providerReplay: replay(
+      [
+        {
+          signature: "signed-thinking",
+          thinking: "Inspect.",
+          type: "thinking",
+        },
+        { text: "Answer.", type: "text" },
+        serverBlock,
+      ],
+      { container: "container-1" },
+    ),
+    role: "assistant",
+    toolCalls: [],
+  });
+  expect(source.blocks).toHaveLength(5);
+});
 
 test("keeps the accumulated container when a later pause omits it", async () => {
   const first = containedPauseStep();
@@ -286,6 +346,66 @@ function containedPauseStep(
   });
 }
 
+function replayIdentityOptions(options: {
+  readonly container?: string;
+  readonly model?: string;
+}): { readonly container?: string; readonly model?: string } {
+  const identity: { container?: string; model?: string } = {};
+  if (options.container !== undefined) identity.container = options.container;
+  if (options.model !== undefined) identity.model = options.model;
+  return identity;
+}
+
+function terminalToolStep(options: {
+  readonly container?: string;
+  readonly content?: string;
+  readonly model?: string;
+  readonly replay?: boolean;
+  readonly replayContent?: string;
+}): AgentModelStep {
+  const content = options.content ?? "Use the tool.";
+  const call = emptyProviderToolCall("call-unsafe", "read");
+  if (options.replay === false) {
+    return providerStep(content, { toolCalls: [call] });
+  }
+  return replayToolStep(content, call.id, {
+    providerReplay: replay(
+      replayToolBlocks(options.replayContent ?? content, call.id),
+      replayIdentityOptions(options),
+    ),
+  });
+}
+
+async function completeFinalStep(
+  step: AgentModelStep,
+): Promise<AgentModelStep> {
+  return completeAnthropicPauseTurns(
+    INITIAL_MESSAGES,
+    containedPauseStep(),
+    () => Promise.resolve(step),
+  );
+}
+
+async function expectCompletedWithoutReplay(
+  step: AgentModelStep,
+): Promise<void> {
+  const combined = await completeFinalStep(step);
+  expect(combined).toMatchObject({
+    content: "First. Second.",
+    thinking: "Think one. Think two.",
+  });
+  expect(combined).not.toHaveProperty("providerReplay");
+}
+
+async function expectUnsafeFinalTool(step: AgentModelStep): Promise<void> {
+  const combined = await completeFinalStep(step);
+  expect(combined.providerContinuation).toBe("anthropic_replay_unavailable");
+  expect(combined.toolCalls).toEqual([
+    emptyProviderToolCall("call-unsafe", "read"),
+  ]);
+  expect(combined).not.toHaveProperty("providerReplay");
+}
+
 const SECOND_REPLAY_VARIANTS = {
   "a changed replay container": { container: "container-2" },
   "a foreign replay identity": { model: "claude-other" },
@@ -350,17 +470,31 @@ test.each([
 ])(
   "completes a final continuation step carrying %s without replay",
   async (_label, finalStep: () => AgentModelStep) => {
-    const combined = await completeAnthropicPauseTurns(
-      INITIAL_MESSAGES,
-      containedPauseStep(),
-      () => Promise.resolve(finalStep()),
-    );
+    await expectCompletedWithoutReplay(finalStep());
+  },
+);
 
-    expect(combined).toMatchObject({
-      content: "First. Second.",
-      thinking: "Think one. Think two.",
-    });
-    expect(combined).not.toHaveProperty("providerReplay");
+test.each([
+  [
+    "an unusable replay",
+    (): AgentModelStep => terminalToolStep({ replay: false }),
+  ],
+  [
+    "a mismatched replay",
+    (): AgentModelStep => terminalToolStep({ replayContent: "Other." }),
+  ],
+  [
+    "a foreign replay identity",
+    (): AgentModelStep => terminalToolStep({ model: "claude-other" }),
+  ],
+  [
+    "a changed replay container",
+    (): AgentModelStep => terminalToolStep({ container: "container-2" }),
+  ],
+])(
+  "marks final client tools with %s unavailable before execution",
+  async (_label, finalStep: () => AgentModelStep) => {
+    await expectUnsafeFinalTool(finalStep());
   },
 );
 

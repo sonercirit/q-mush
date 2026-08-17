@@ -8,7 +8,6 @@ import {
 } from "../../sync-engine/agent-model.ts";
 import {
   ANTHROPIC_READ_CALL,
-  ANTHROPIC_READ_REPLAY_BLOCK,
   ANTHROPIC_TEST_BASE_URL,
   ANTHROPIC_TEST_CREDENTIAL,
   ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
@@ -16,7 +15,6 @@ import {
   anthropicHarness,
   doneAnthropicEvents,
   KNOWN_ANTHROPIC_MODEL,
-  textReplayBlock,
 } from "./anthropic-model-test-helpers.ts";
 import {
   anthropicAssistant,
@@ -35,6 +33,8 @@ import { providerStep } from "./provider-step-fixtures.ts";
 
 const KNOWN_MODEL = KNOWN_ANTHROPIC_MODEL;
 const SIGNED_REPLAY = SIGNED_ANTHROPIC_REPLAY;
+const UNSAFE_TOOL_REPLAY_ERROR =
+  "The Anthropic assistant tool turn cannot be replayed safely";
 
 function readAssistant(providerReplay?: typeof SIGNED_REPLAY) {
   return anthropicAssistant(providerReplay);
@@ -170,6 +170,40 @@ function officialAnthropicCredential() {
   };
 }
 
+async function expectRejectedReplay(
+  messages: readonly AgentConversationMessage[],
+): Promise<void> {
+  const harness = signedReplayHarness();
+  await expect(harness.complete(messages)).rejects.toThrow(
+    UNSAFE_TOOL_REPLAY_ERROR,
+  );
+  expect(harness.requests).toHaveLength(0);
+}
+
+function replayWithoutClientTool() {
+  return { ...SIGNED_REPLAY, blocks: SIGNED_REPLAY.blocks.slice(0, 3) };
+}
+
+function staleReplayConversation() {
+  return replayConversation({
+    providerReplay: { ...SIGNED_REPLAY, model: "claude-other" },
+    toolContent: "Setup",
+  });
+}
+
+function containedReplayConversation(
+  toolCallId: string = ANTHROPIC_READ_CALL.id,
+) {
+  return replayConversation({
+    providerReplay: { ...SIGNED_REPLAY, container: "container-1" },
+    toolContent: "Setup",
+  })
+    .slice(0, -1)
+    .map((message) =>
+      message.role === "tool" ? { ...message, toolCallId } : message,
+    );
+}
+
 async function replayContentForIdentity(
   options: Pick<
     NonNullable<Parameters<typeof anthropicHarness>[1]>,
@@ -177,12 +211,17 @@ async function replayContentForIdentity(
   >,
 ): Promise<unknown> {
   const harness = anthropicHarness([doneAnthropicEvents()], options);
-  await harness.complete(
-    replayConversation({
-      providerReplay: SIGNED_REPLAY,
-      toolContent: "Setup",
-    }),
-  );
+  const replay = replayWithoutClientTool();
+  await harness.complete([
+    { content: "Hello", role: "user" },
+    {
+      content: "Reading.",
+      providerReplay: replay,
+      role: "assistant",
+      toolCalls: [],
+    },
+    { content: "Continue", role: "user" },
+  ]);
   return assistantContent(harness);
 }
 
@@ -239,7 +278,7 @@ describe("anthropic-format generic provider", () => {
 
     const step = await harness.complete([
       { content: "Hello", role: "user" },
-      readAssistant(),
+      readAssistant(SIGNED_REPLAY),
       readToolResult("# Q Mush setup"),
     ]);
 
@@ -290,7 +329,7 @@ describe("anthropic-format generic provider", () => {
     expect(body["messages"]).toEqual([
       cachedTextMessage("user", "Hello"),
       {
-        content: [textReplayBlock("Reading."), ANTHROPIC_READ_REPLAY_BLOCK],
+        content: SIGNED_REPLAY.blocks,
         role: "assistant",
       },
       {
@@ -403,26 +442,12 @@ describe("anthropic-format generic provider", () => {
     expect(JSON.stringify(content)).toContain("omitted-signature");
   });
 
-  test("omits stale signed replay after a model change", async () => {
-    const { content } = await completeReplayRequest({
-      providerReplay: { ...SIGNED_REPLAY, model: "claude-other" },
-      toolContent: "Setup",
-    });
-
-    expectUnsignedReplay(content);
-    expect(content).toEqual([
-      textReplayBlock("Reading."),
-      {
-        ...ANTHROPIC_READ_REPLAY_BLOCK,
-        cache_control: TEST_PROMPT_CACHE_CONTROL,
-      },
-    ]);
+  test("fails stale signed tool replay closed after a model change", async () => {
+    await expectRejectedReplay(staleReplayConversation());
   });
 
-  test("drops signed replay when tool-call sanitization changes the assistant", async () => {
-    const harness = signedReplayHarness();
-
-    await harness.complete([
+  test("fails closed when tool-call sanitization changes the assistant", async () => {
+    await expectRejectedReplay([
       { content: "Hello", role: "user" },
       {
         ...readAssistant(SIGNED_REPLAY),
@@ -432,11 +457,6 @@ describe("anthropic-format generic provider", () => {
       },
       readToolResult("Setup"),
     ]);
-
-    const serialized = JSON.stringify(await harness.requestBody(0));
-    expect(serialized).not.toContain("omitted-signature");
-    expect(serialized).not.toContain("providerReplay");
-    expect(serialized).toContain("OTHER.md");
   });
 
   test("keeps private replay metadata out of OpenAI-format requests", async () => {
@@ -444,6 +464,44 @@ describe("anthropic-format generic provider", () => {
 
     expect(JSON.stringify(body)).not.toContain("providerReplay");
     expect(JSON.stringify(body)).not.toContain("omitted-signature");
+  });
+
+  test("fails a durable client-tool continuation closed without exact replay", async () => {
+    await expectRejectedReplay(
+      replayConversation({
+        toolContent: "Setup",
+      }),
+    );
+  });
+
+  test("fails a stale durable client-tool continuation closed", async () => {
+    await expectRejectedReplay(staleReplayConversation());
+  });
+
+  test("recovers a continuation container through trailing tool results", async () => {
+    const harness = signedReplayHarness();
+    await harness.complete(containedReplayConversation());
+
+    await expect(harness.requestBody(0)).resolves.toMatchObject({
+      container: "container-1",
+    });
+  });
+
+  test("rejects a continuation container when the result IDs do not match", async () => {
+    await expectRejectedReplay(containedReplayConversation("different-call"));
+  });
+
+  test("does not recover a container across a non-tool intervening turn", async () => {
+    const harness = signedReplayHarness();
+    await harness.complete([
+      ...containedReplayConversation(),
+      { content: "Later question", role: "user" },
+      readToolResult("Late result"),
+    ]);
+
+    await expect(harness.requestBody(0)).resolves.not.toHaveProperty(
+      "container",
+    );
   });
 
   test("maps a selected reasoning effort to output_config and thinking", async () => {

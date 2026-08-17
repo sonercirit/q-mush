@@ -13,7 +13,6 @@ import {
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
-import { anthropicResolvedModel } from "./anthropic-replay-identity-input.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { sessionToolCacheCapability } from "./session-tool-capability.ts";
 import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
@@ -85,6 +84,7 @@ function modelOptions(
   detail: AgentSessionDetail,
   credential: ProviderCredentialAccess,
   systemPrompt: string,
+  resolvedModel: string | undefined,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
 ): AgentModelFactoryOptions {
@@ -108,9 +108,28 @@ function modelOptions(
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
+    resolvedModel: resolvedModel ?? null,
     systemPrompt,
     tools: detail.tools,
   };
+}
+
+function createConfiguredModel(
+  options: Parameters<typeof createSessionAgentModels>[0],
+  systemPrompt: string,
+  onDelta: AgentModelFactoryOptions["onDelta"],
+  onStepStart: AgentModelFactoryOptions["onStepStart"],
+): AgentModel {
+  return options.factory(
+    modelOptions(
+      options.detail,
+      options.credential,
+      systemPrompt,
+      options.resolvedModel,
+      onDelta,
+      onStepStart,
+    ),
+  );
 }
 
 export function createSessionAgentModels(options: {
@@ -200,34 +219,24 @@ export function createSessionAgentModels(options: {
   const publishCompactionSettled = (): void => {
     publishCompaction({ type: "settled" });
   };
+  const resolvedModel = options.resolvedModel;
   return {
-    agent: options.factory(
-      modelOptions(
-        options.detail,
-        options.credential,
-        systemPrompt,
-        onDelta,
-        startStep,
-      ),
-    ),
+    agent: createConfiguredModel(options, systemPrompt, onDelta, startStep),
     createCompactor: () => {
       streamId = id();
       return new ModelConversationCompactor(
-        options.factory(
-          modelOptions(
-            options.detail,
-            options.credential,
-            systemPrompt,
-            onDelta,
-            // The compactor stream ID is already fresh; its step start only
-            // needs the persistence hook, not another stream reset.
-            options.onStepStart,
-          ),
+        createConfiguredModel(
+          options,
+          systemPrompt,
+          onDelta,
+          // The compactor stream ID is already fresh; its step start only
+          // needs the persistence hook, not another stream reset.
+          options.onStepStart,
         ),
         publishCompactionRequest,
       );
     },
     publishCompactionSettled,
-    ...anthropicResolvedModel(options),
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
   };
 }

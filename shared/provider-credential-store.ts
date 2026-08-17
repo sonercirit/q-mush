@@ -455,7 +455,7 @@ export class ProviderCredentialStore {
       fingerprint,
     );
     if (collision !== undefined && collision.id !== credentialId) {
-      return false;
+      throw new DuplicateProviderCredentialError();
     }
     const updated = this.#database
       .update(providerCredentials)

@@ -4,6 +4,7 @@ import type {
   AgentTokenUsage,
 } from "../shared/agent-loop.ts";
 import {
+  anthropicReplayAssistantText,
   anthropicReplayMatchesAssistant,
   createAnthropicAssistantReplay,
   type AnthropicAssistantReplay,
@@ -67,9 +68,14 @@ function addCost(total: number | null, current: number | null): number | null {
   return total === null || current === null ? null : total + current;
 }
 
-function trimmedContinuationReplay(
+interface TrimmedContinuation {
+  readonly content: string;
+  readonly replay: AnthropicAssistantReplay;
+}
+
+function trimmedContinuation(
   replay: AnthropicAssistantReplay,
-): AnthropicAssistantReplay {
+): TrimmedContinuation {
   const blocks = [...replay.blocks];
   for (let index = blocks.length - 1; index >= 0; index -= 1) {
     const trailing = blocks[index];
@@ -77,27 +83,34 @@ function trimmedContinuationReplay(
     const text = trailing.text.trimEnd();
     if (text.length === 0) {
       blocks.splice(index, 1);
-    } else if (text !== trailing.text) {
+      continue;
+    }
+    if (text !== trailing.text) {
       blocks[index] = { ...trailing, text };
     }
     break;
   }
-  return createAnthropicAssistantReplay(blocks, replay, replay.container);
+  return {
+    content: anthropicReplayAssistantText(blocks),
+    replay: createAnthropicAssistantReplay(blocks, replay, replay.container),
+  };
 }
 
 function continuationAssistant(
-  step: AgentModelStep,
   replay: AnthropicAssistantReplay,
   container: string | undefined,
 ): AgentConversationMessage {
-  const trimmed = trimmedContinuationReplay(replay);
-  const content = step.content.trimEnd();
+  const trimmed = trimmedContinuation(replay);
   return {
-    content,
+    content: trimmed.content,
     providerReplay:
-      container === undefined || trimmed.container === container
-        ? trimmed
-        : createAnthropicAssistantReplay(trimmed.blocks, trimmed, container),
+      container === undefined || trimmed.replay.container === container
+        ? trimmed.replay
+        : createAnthropicAssistantReplay(
+            trimmed.replay.blocks,
+            trimmed.replay,
+            container,
+          ),
     role: "assistant",
     toolCalls: [],
   };
@@ -182,6 +195,13 @@ export async function completeAnthropicPauseTurns(
         identity === undefined
           ? undefined
           : combinableReplay(step, identity, container);
+      const completed =
+        replay === undefined && step.toolCalls.length > 0
+          ? {
+              ...step,
+              providerContinuation: "anthropic_replay_unavailable" as const,
+            }
+          : step;
       return completedStep({
         content,
         costUsd,
@@ -193,7 +213,7 @@ export async function completeAnthropicPauseTurns(
                 identity,
                 container ?? replay.container,
               ),
-        step,
+        step: completed,
         thinking,
         tokenUsage,
       });
@@ -220,7 +240,7 @@ export async function completeAnthropicPauseTurns(
       throw new Error(ANTHROPIC_PAUSE_LIMIT);
     }
     continuations += 1;
-    messages = [...messages, continuationAssistant(step, replay, container)];
+    messages = [...messages, continuationAssistant(replay, container)];
     step = await complete(messages, { content, thinking });
   }
 }

@@ -4,46 +4,39 @@ Living project memory.
 
 ## Project Snapshot
 
-- Strict-TypeScript ESM Bun/SolidJS project; tests live under `test/`, no `src`.
-  `/` is the homepage, `/app` the app.
+- Strict-TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
+  the homepage, `/app` the app.
 
 ## Working Agreements
 
-- Research online: use brave-search on provider docs/trackers, then probe APIs,
-  schemas, usage metrics.
-- Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
+- Research provider docs/trackers with brave-search, then probe APIs, schemas,
+  and metrics. Call capabilities impossible only with excluding evidence;
+  otherwise note an open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now.
-- TDD: fail first, implement, refactor green.
-- DRY/KISS: authoritative logic, no premature abstraction.
-- Never invent tunables: probe omission, prefer provider defaults, else use
-  metadata or docs.
-- Integrate completely the first time: wire every session capability to each
-  protocol's native control, recording what a protocol lacks.
+  docs, performance, security, DX. Ship small now. Integrate every session
+  capability with each protocol's native control, recording gaps.
+- TDD: fail, implement, refactor green. DRY/KISS: authoritative logic, no
+  premature abstraction. Never invent tunables: probe omission, prefer provider
+  defaults, else use metadata or docs.
 - No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight,
-  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
-  in a test.
-- Record new decisions, gotchas, and lessons here in the same change, unprompted
-  — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size cap. When evidence overturns a recorded finding, fix the code it
-  justified and every stale record in that change; act, don't ask.
-- Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failure.
+  unperformed verification; disclose gaps. Fix defects on sight, including
+  pre-existing/out-of-scope ones; if harmful, codify why in a test.
+- Record decisions, gotchas, and lessons here in the same change; repeated user
+  instructions mean a rule is missing. Condense to fit the cap. When evidence
+  overturns a finding, fix its code and stale records; act, don't ask.
+- Keep workflows local-first: narrow checks per change, broad suites once, then
+  rerun the narrowest failure.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
 
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
-- Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
-  `bun run test:browser` for Chromium alone.
+- Migrations: `bun run db:generate` / `db:migrate`; tests: `bun run test`
+  (DOM/server + Chromium) / `test:watch`; `bun run test:browser` for Chromium.
 - `bun run check` runs every static check, each standalone too; `bun run format`
-  / `lint:fix` write fixes.
-- CI (`.github/workflows/checks.yml`): tests, static checks, build, and
-  whitespace checks on Bun 1.3.14 with a frozen lockfile.
+  / `lint:fix` write fixes. CI runs tests, checks, build, and whitespace on Bun
+  1.3.14 with a frozen lockfile.
 
 ## Architecture and Conventions
 
@@ -51,65 +44,51 @@ Living project memory.
   the Bun server/integrations, `runner` the standalone runner, `shared`
   cross-workspace code. The first three import only themselves and `shared`;
   `shared` imports no other workspace; only `scripts` may import `scripts`.
-- `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
-  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
-  sessions, and runner work; no polling/SSE. `dev:watch` watches production
-  source and local `.env`, coalescing bursts into the ignored restart trigger;
-  `dev:restart` writes it, while plain `dev` restarts only from it.
-  `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, serves `/runner/executable`. Restarts drain active steps and
-  queue new work, so sessions may request their own restart. Text handlers
-  precompress once, negotiating zstd, Brotli, gzip, deflate; `/favicon.svg`
-  revalidates separately with ETag.
+- `server.ts` serves in-memory Vite JS/Tailwind CSS. Authenticated WebSockets at
+  `/api/realtime` and `/api/runner/realtime` handle browser/session/runner work;
+  no polling/SSE. `dev:watch` coalesces source/local `.env` changes into the
+  ignored trigger that `dev:restart` writes; plain `dev` restarts from it.
+  `runner-executable.ts` fingerprints, privately builds, caches, and serves
+  `/runner/executable`. Restarts drain active steps and queue new work. Text
+  handlers precompress once (zstd/Brotli/gzip/deflate); favicon ETags.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
-- `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
-    discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
-    SQLite to upsert users and persist seven-day sessions. Primary keys are
-    UUIDv7; Google subjects and session cookie tokens are separate unique
-    fields; every table has created/updated timestamps, actor IDs, `isDeleted`.
-    `shared/database.ts` applies committed `drizzle/` migrations on open;
-    `sync-engine/index.ts` injects the persistent connection; the auth factory
-    falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
-    live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
-    use real Chromium/Tailwind and production state/UI mutations, never
-    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
-- `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
-  active registration per machine fingerprint, one default per user.
-  `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
-  management and token-authenticated callback APIs, deriving installer commands
-  from the request origin. `sync-engine/runner-installer.ts` emits the
-  macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
-  downloaded standalone executable under `~/.q-mush/runner`; no Bun needed.
-  Runners report metadata and 15-second heartbeats over authenticated
-  WebSockets, check updates at startup and five-minute intervals, recheck via
-  handshake version after restarts, replacing an older socket on reconnect.
-  Updates use a source/compiler ETag and SHA-256 digest, atomically replace and
-  restart the executable; development restarts drain active sessions first.
-  Reinstalling for the same user and machine rotates the registration to its new
-  token instead of adding a runner; other registrations stay protected; tokens
-  never appear in lists.
+- `auth.ts` implements Google OIDC code + PKCE with HttpOnly state/verifier
+  cookies, fetching the basic profile and discarding provider tokens.
+  `auth-store.ts` uses Drizzle/Bun SQLite for users and seven-day sessions.
+  Primary keys are UUIDv7; Google subjects/session tokens are separate unique
+  fields; tables carry timestamps, actor IDs, `isDeleted`. `shared/database.ts`
+  applies migrations; `index.ts` injects persistence, with in-memory fallback.
+  Shared PKCE/provider parsing/redirects live in `oauth.ts`, HTTP helpers in
+  `http.ts`; `solid/client.tsx` gates the app via `/api/auth/session` and
+  logout. Browser regressions use real Chromium/Tailwind and production state/UI
+  mutations, never synthetic layout or CSS-only assertions.
+- `runner-store.ts` persists one active runner per machine fingerprint and one
+  default per user. `runners.ts` owns authenticated management and opaque hashed
+  setup-token callbacks; install commands use request origin.
+  `runner-installer.ts` selects x64/ARM64 glibc/musl and runs a standalone
+  executable under `~/.q-mush/runner` without Bun. Authenticated WebSockets
+  carry metadata and 15-second heartbeats; runners check updates at
+  startup/five-minute intervals and by handshake version, replacing older
+  sockets. Source/compiler ETag plus SHA-256 updates replace atomically and
+  restart; dev drains sessions first. Reinstalling the same user/machine rotates
+  its token; others stay protected; tokens never list.
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` byte-bounds transcript messages,
   assistant calls, the system prompt, tool definitions.
-- `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
-  messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
-  Sessions record active time, cost, token usage, and context limit; reported
-  charges win. Auto-compaction defaults on at 95%; truncation enters only its
-  immediate compactor context, including persisted manual/idle compaction, so
-  partial output stays unfinished without marking a retry. Idle sessions compact
-  manually or, opted in, at 30 idle minutes; compaction soft-deletes messages
-  into a replayable handoff; replays say deliver drafts, don't re-verify. The
-  composer stays mounted across statuses, explaining unavailable actions,
-  keeping drafts; draft fields echo a local signal debounced into the shared
-  draft — submit paths flush first; local prefs filter transcript categories.
-  Provider secrets never reach browser or runner work payloads. The directory
-  field opens `solid/directory-picker-client.tsx`
-  (`/api/runners/:id/directories`). Each run, `read_agent_file` loads exact-root
-  `AGENTS.md` (else `CLAUDE.md`).
+- `sessions.ts`/`session-store.ts` persist coding sessions; messages accept
+  eight 10 MB PNG/JPEG/GIF/WebP images. Sessions track active time, cost, usage,
+  context limit; reported charges win. Auto-compaction defaults to 95%; only the
+  immediate compactor sees truncation, including persisted manual/idle runs, so
+  partial output stays unfinished without retry. Idle sessions compact manually
+  or optionally after 30 minutes, soft-deleting into a replayable handoff that
+  says deliver drafts, don't re-verify. The always-mounted composer explains
+  disabled actions and keeps drafts; local fields debounce to shared state and
+  submit flushes first; prefs filter transcript categories. Secrets never reach
+  browser/runner payloads. The directory picker uses
+  `/api/runners/:id/directories`; each run loads exact-root `AGENTS.md`, else
+  `CLAUDE.md`.
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
@@ -152,9 +131,8 @@ Living project memory.
   native blocks). Credentials live in `provider_credentials` with per-record
   AES-256-GCM encryption and a shared fingerprint over secret, endpoint, and API
   format; API responses expose only metadata; one credential may be the user's
-  default across providers. Shared behavior:
-  `provider-credentials.ts`, `connected-account-oauth.ts`, the
-  `solid/provider-*` client modules.
+  default across providers. Shared behavior: `provider-credentials.ts`,
+  `connected-account-oauth.ts`, the `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
   land late and 128-token blocks hide small growth. Codex sockets stay open per
@@ -189,8 +167,8 @@ Living project memory.
   provider APIs.
 - `tsconfig.json` configures strict, no-emit, bundler-style checking with unused
   and unreachable code diagnostics. Library declaration checking is off —
-  Drizzle publishes optional cross-dialect declarations that fail here; app
-  source stays fully checked; re-enable after an upstream Drizzle fix.
+  Drizzle's optional cross-dialect declarations fail here; app source stays
+  fully checked; re-enable after an upstream fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, enforces exhaustive
   switches and canonical named imports (one declaration per module with inline
@@ -213,9 +191,9 @@ Living project memory.
 
 ## Decisions and Gotchas
 
-- HTTP port 12345 (`PORT` overrides).
-- Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
-  `GOOGLE_REDIRECT_URI`; the two appear together; register the callback
+- HTTP port 12345 (`PORT` overrides). Google login reads `GOOGLE_CLIENT_ID`,
+  `GOOGLE_CLIENT_SECRET`, and optional `GOOGLE_REDIRECT_URI`; the two appear
+  together; register the callback
   `http://localhost:12345/api/auth/google/callback` on the OAuth client. Never
   expose the client secret to browser code.
 - `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/`
@@ -233,13 +211,15 @@ Living project memory.
   `OPENAI_CLIENT_ID` disables that loopback and must allow the configured or
   request-origin callback. OpenRouter OAuth needs no client credentials,
   yielding a user-controlled key. Credential removal soft-deletes the audit
-  record and clears the payload; provider-side access stays.
+  record and clears the payload; provider-side access stays. Fingerprint
+  uniqueness includes soft-deleted rows; secret updates throw the duplicate
+  error on collision and leave the existing secret intact.
 - `shared/ids.ts` owns UUIDv7 generation and defines the `SYSTEM` audit actor;
   user actions use the internal user UUID. Never hard-delete records: set
   `isDeleted`, `updatedAt`, and `updatedById`, excluding soft-deleted rows from
   active queries. Audit actor fields are not foreign keys — `SYSTEM` is not a
   user row.
-- Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
+- Keep HTTP `deflate` zlib-wrapped; Bun's is raw. `page_fetch` proxy upstream
   connects bound at 10s, subordinate to the tool deadline.
 - Knip severities alone do not activate default-off issue types; keep the
   included-issue list complete. Do not run the full test suite parallel to lint
@@ -281,24 +261,28 @@ Living project memory.
   sends neither for `none` and maps `minimal` to `low`. Adaptive-only models
   (Fable) ignore `enabled`; newer models default `display` to `omitted` — empty
   thinking text plus a signature while thinking tokens bill. Anthropic replay
-  binds the response model (resolving aliases before reuse), credential
-  fingerprint, format, and endpoint; incomplete, unsupported, or unsigned
-  client-tool turns fail closed before tool execution. Only empty text drops
-  (whitespace stays but is withheld from requests); corrupt stored replay is
-  absent. `cache_control` marks only text/client `tool_use`, scanning backward;
-  trailing replay resent verbatim. `pause_turn` validates only resent blocks,
-  replays them/container without duplicate UI, sums usage, caps at five
-  continuations, and drops an unusable terminal replay. The local proxy
-  tolerates unsigned tool-loop replay; strict endpoints may not. Reasoning
-  deltas group by output/summary index; separate summary parts with paragraphs
-  since completed responses may omit them. OpenAI's WebSocket Mode has a
-  60-minute limit; the canonical `websocket_connection_limit_reached` and
-  observed underscore-free variant replace the socket once per step, then bound
-  retries, replaying only an unpersisted step. Other WebSocket/accepted HTTP
-  interruptions or provider errors retry before persistence; replays reset
-  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
-  and aborts do not retry; terminal failures persist as non-replayed `error`
-  messages.
+  binds the response model (resolving aliases once per run when supported),
+  credential fingerprint, format, and endpoint. Retrieve failures leave aliases
+  unresolved and omit replay without aborting Messages. Exact JSON-safe blocks,
+  including additive fields, persist; corrupt metadata warns but leaves the
+  transcript readable. Durable client-tool continuations require matching replay
+  and result IDs; missing, stale, incomplete, unsupported, or unsigned turns
+  fail closed before tool execution. Only empty text drops (whitespace stays but
+  is withheld from requests); pause trimming derives content and replay together
+  across every trailing text block. `cache_control` marks only text/client
+  `tool_use`, scanning backward; trailing replay is resent verbatim.
+  `pause_turn` validates resent blocks, replays them/container without duplicate
+  UI, sums usage, caps at five continuations, and fails terminal client tools
+  closed when replay cannot combine. The local proxy tolerates unsigned
+  tool-loop replay; strict endpoints may not. Reasoning deltas group by
+  output/summary index; separate summary parts with paragraphs since completed
+  responses may omit them. OpenAI's WebSocket Mode has a 60-minute limit; the
+  canonical `websocket_connection_limit_reached` and observed underscore-free
+  variant replace the socket once per step, then bound retries, replaying only
+  an unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
+  errors retry before persistence; replays reset partial UI deltas and exhausted
+  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
+  terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

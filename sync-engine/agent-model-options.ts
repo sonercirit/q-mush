@@ -50,6 +50,7 @@ export interface AgentModelRequestOptions {
   readonly promptCacheKey?: string;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
+  readonly resolvedModel?: string | null;
   readonly systemPrompt?: string;
   readonly tools?: readonly AgentSessionToolName[];
 }

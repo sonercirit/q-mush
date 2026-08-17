@@ -11,28 +11,28 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 
 interface MutableThinkingBlock {
+  readonly fields: AnthropicReplayObject;
   readonly signature: string;
   readonly thinking: string;
-  readonly type: "thinking";
+  readonly type: "streamed_thinking";
 }
 
 interface MutableRedactedBlock {
   readonly data: string;
-  readonly type: "redacted_thinking";
+  readonly fields: AnthropicReplayObject;
+  readonly type: "streamed_redacted_thinking";
 }
 
 interface MutableTextBlock {
-  readonly citations?: null | readonly AnthropicReplayObject[];
+  readonly fields: AnthropicReplayObject;
   readonly text: string;
-  readonly type: "text";
+  readonly type: "streamed_text";
 }
 
 interface MutableToolBlock {
   readonly arguments: string;
-  readonly caller?: AnthropicReplayObject;
-  readonly id: string;
+  readonly fields: AnthropicReplayObject;
   readonly initialInput: AnthropicReplayObject;
-  readonly name: string;
   readonly type: "streamed_tool_use";
 }
 
@@ -45,10 +45,8 @@ type MutableReplayBlock =
   | AnthropicReplayBlock;
 
 interface MutableServerToolBlock {
-  readonly caller?: AnthropicReplayObject;
-  readonly id: string;
+  readonly fields: AnthropicReplayObject;
   readonly initialInput: unknown;
-  readonly name: string;
   readonly partialInput: string;
   readonly type: "streamed_server_tool_use";
 }
@@ -87,20 +85,15 @@ function initialTextBlock(
 ): MutableTextBlock | undefined {
   const text = optionalBlockString(block["text"]);
   const citations = fields["citations"];
-  if (text === undefined) {
+  if (
+    text === undefined ||
+    (citations !== undefined &&
+      citations !== null &&
+      replayObjectArray(citations) === undefined)
+  ) {
     return undefined;
   }
-  if (citations === undefined || citations === null) {
-    return {
-      ...(citations === null ? { citations } : {}),
-      text,
-      type: "text",
-    };
-  }
-  const citationObjects = replayObjectArray(citations);
-  return citationObjects === undefined
-    ? undefined
-    : { citations: citationObjects, text, type: "text" };
+  return { fields, text, type: "streamed_text" };
 }
 
 interface StreamedToolIdentity {
@@ -138,7 +131,7 @@ function initialToolBlock(
   }
   return {
     arguments: "",
-    ...identity,
+    fields,
     initialInput: candidateInput,
     type: "streamed_tool_use",
   };
@@ -154,7 +147,7 @@ function initialServerToolBlock(
     return undefined;
   }
   return {
-    ...identity,
+    fields,
     initialInput: input,
     partialInput: "",
     type: "streamed_server_tool_use",
@@ -176,11 +169,13 @@ function initialReplayBlock(
     const signature = optionalBlockString(block["signature"]);
     return thinking === undefined || signature === undefined
       ? undefined
-      : { signature, thinking, type };
+      : { fields, signature, thinking, type: "streamed_thinking" };
   }
   if (type === "redacted_thinking") {
     const data = optionalBlockString(block["data"]);
-    return data === undefined ? undefined : { data, type };
+    return data === undefined
+      ? undefined
+      : { data, fields, type: "streamed_redacted_thinking" };
   }
   return isAnthropicReplayBlock(fields) ? fields : undefined;
 }
@@ -198,21 +193,19 @@ function completedToolFields<Input>(
   block: MutableToolBlock | MutableServerToolBlock,
   input: Input,
 ) {
-  return {
-    ...(block.caller === undefined ? {} : { caller: block.caller }),
-    id: block.id,
-    input,
-    name: block.name,
-  };
+  return { ...block.fields, input };
+}
+
+function completedCandidate(value: unknown): ReplayCompletion {
+  return isAnthropicReplayBlock(value)
+    ? { block: value, valid: true }
+    : { valid: false };
 }
 
 function completedToolBlock(block: MutableToolBlock): ReplayCompletion {
   const input = completedJsonInput(block.initialInput, block.arguments);
   return isAnthropicReplayObject(input)
-    ? {
-        block: { ...completedToolFields(block, input), type: "tool_use" },
-        valid: true,
-      }
+    ? completedCandidate({ ...block.fields, input, type: "tool_use" })
     : { valid: false };
 }
 
@@ -220,49 +213,44 @@ function completedServerToolBlock(
   block: MutableServerToolBlock,
 ): ReplayCompletion {
   const input = completedJsonInput(block.initialInput, block.partialInput);
-  const completed = {
+  return completedCandidate({
     ...completedToolFields(block, input),
-    type: "server_tool_use" as const,
-  };
-  return isAnthropicReplayBlock(completed)
-    ? { block: completed, valid: true }
-    : { valid: false };
+    type: "server_tool_use",
+  });
 }
 
 function completedStringBlock(
   block: MutableThinkingBlock | MutableRedactedBlock,
   value: string,
 ): ReplayCompletion {
-  return value.length === 0
-    ? { valid: false }
-    : { block: { ...block }, valid: true };
+  const completed =
+    block.type === "streamed_thinking"
+      ? {
+          ...block.fields,
+          signature: block.signature,
+          thinking: block.thinking,
+        }
+      : { ...block.fields, data: block.data };
+  return value.length === 0 ? { valid: false } : completedCandidate(completed);
 }
 
 function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
   switch (block.type) {
-    case "thinking":
+    case "streamed_thinking":
       return completedStringBlock(block, block.signature);
-    case "redacted_thinking":
+    case "streamed_redacted_thinking":
       return completedStringBlock(block, block.data);
-    case "text": {
-      const citations = block.citations;
-      // Empty text carries no assistant content; whitespace-only text does,
-      // so it stays in the replay and is withheld only from requests.
-      return block.text.length === 0
-        ? { valid: true }
-        : {
-            block: {
-              ...(citations === undefined ? {} : { citations }),
-              text: block.text,
-              type: "text",
-            },
-            valid: true,
-          };
+    case "streamed_text": {
+      if (block.text.length === 0) return { valid: true };
+      return completedCandidate({ ...block.fields, text: block.text });
     }
     case "streamed_tool_use":
       return completedToolBlock(block);
     case "streamed_server_tool_use":
       return completedServerToolBlock(block);
+    case "redacted_thinking":
+    case "thinking":
+    case "text":
     case "bash_code_execution_tool_result":
     case "code_execution_tool_result":
     case "container_upload":
@@ -406,17 +394,22 @@ function appendCitation(
   block: MutableReplayBlock,
   citation: unknown,
 ): MutableTextBlock | undefined {
+  if (block.type !== "streamed_text" || !isAnthropicReplayObject(citation)) {
+    return undefined;
+  }
+  const citations = block.fields["citations"];
   if (
-    block.type !== "text" ||
-    !isAnthropicReplayObject(citation) ||
-    (block.citations !== undefined &&
-      block.citations !== null &&
-      !replayObjectArray(block.citations))
+    citations !== undefined &&
+    citations !== null &&
+    !replayObjectArray(citations)
   ) {
     return undefined;
   }
-  const citations = replayObjectArray(block.citations) ?? [];
-  return { ...block, citations: [...citations, citation] };
+  const existing = replayObjectArray(citations) ?? [];
+  return {
+    ...block,
+    fields: { ...block.fields, citations: [...existing, citation] },
+  };
 }
 
 function appendServerToolInput(
@@ -432,15 +425,17 @@ function updatedReplayBlock(
 ): MutableReplayBlock | undefined {
   switch (delta["type"]) {
     case "text_delta":
-      return block.type === "text" && typeof delta["text"] === "string"
+      return block.type === "streamed_text" && typeof delta["text"] === "string"
         ? { ...block, text: block.text + delta["text"] }
         : undefined;
     case "thinking_delta":
-      return block.type === "thinking" && typeof delta["thinking"] === "string"
+      return block.type === "streamed_thinking" &&
+        typeof delta["thinking"] === "string"
         ? { ...block, thinking: block.thinking + delta["thinking"] }
         : undefined;
     case "signature_delta":
-      return block.type === "thinking" && typeof delta["signature"] === "string"
+      return block.type === "streamed_thinking" &&
+        typeof delta["signature"] === "string"
         ? { ...block, signature: block.signature + delta["signature"] }
         : undefined;
     case "citations_delta":

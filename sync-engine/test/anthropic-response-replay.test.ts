@@ -41,6 +41,45 @@ import {
 } from "./anthropic-response-event-fixtures.ts";
 import { emptyProviderToolCall } from "./provider-step-fixtures.ts";
 
+const ADDITIVE_TOOL_BLOCK = {
+  caller: { type: "direct" },
+  future_tool_field: { token: "opaque" },
+  id: "call-additive",
+  input: { path: "additive-provider-field.md" },
+  name: "read_additive_field",
+  type: "tool_use" as const,
+};
+
+function additiveReplayBlocks() {
+  return [
+    {
+      signature: "signed-thinking",
+      thinking: "Inspect.",
+      type: "thinking" as const,
+      vendor_metadata: { revision: 2 },
+    },
+    {
+      future_text_field: ["opaque", { enabled: true }],
+      text: "Ready.",
+      type: "text" as const,
+    },
+    ADDITIVE_TOOL_BLOCK,
+  ] as const;
+}
+
+function streamedToolDelta(
+  index: number,
+  input: Readonly<Record<string, unknown>>,
+): readonly unknown[] {
+  return [
+    anthropicBlockDelta(index, {
+      partial_json: JSON.stringify(input),
+      type: "input_json_delta",
+    }),
+    anthropicBlockStop(index),
+  ];
+}
+
 function thinkingBlockStart(index: number) {
   return anthropicBlockStart(index, { thinking: "", type: "thinking" });
 }
@@ -493,39 +532,55 @@ describe("Anthropic response replay", () => {
     },
   );
 
-  test("projects supported streamed fields and preserves tool caller", async () => {
-    const harness = anthropicHarness([
+  test("preserves additive JSON-safe provider fields exactly", async () => {
+    const expected = additiveReplayBlocks();
+    const [additiveThinking, additiveText, additiveTool] = expected;
+
+    const json = await anthropicHarness([
+      anthropicJsonResponse({
+        blocks: [additiveThinking, additiveText, additiveTool],
+      }),
+    ]).complete();
+    const streamed = await anthropicHarness([
       stoppedAnthropicEvents([
-        anthropicBlockStart(0, {
-          future_text_field: "ignored",
-          text: "",
-          type: "text",
-        }),
-        anthropicBlockDelta(0, { text: "Ready.", type: "text_delta" }),
+        anthropicBlockStart(0, additiveThinking),
         anthropicBlockStop(0),
         anthropicBlockStart(1, {
-          ...replayTool({ type: "direct" }),
-          future_tool_field: "ignored",
+          ...additiveText,
+          text: "",
         }),
-        anthropicBlockDelta(1, {
-          partial_json: '{"path":"README.md"}',
-          type: "input_json_delta",
-        }),
+        anthropicBlockDelta(1, { text: "Ready.", type: "text_delta" }),
         anthropicBlockStop(1),
+        anthropicBlockStart(2, {
+          ...additiveTool,
+          input: {},
+        }),
+        ...streamedToolDelta(2, additiveTool.input),
+      ]),
+    ]).complete();
+
+    expect(json.providerReplay?.blocks).toEqual(expected);
+    expect(streamed.providerReplay?.blocks).toEqual(expected);
+    const serialized = serializeAnthropicAssistantReplay(json.providerReplay);
+    expect(parseAnthropicAssistantReplay(serialized)).toEqual(
+      json.providerReplay,
+    );
+  });
+
+  test("captures supported streamed fields and preserves tool caller", async () => {
+    const [, additiveText, additiveTool] = additiveReplayBlocks();
+    const harness = anthropicHarness([
+      stoppedAnthropicEvents([
+        anthropicBlockStart(0, { ...additiveText, text: "" }),
+        anthropicBlockDelta(0, { text: additiveText.text, type: "text_delta" }),
+        anthropicBlockStop(0),
+        anthropicBlockStart(1, { ...additiveTool, input: {} }),
+        ...streamedToolDelta(1, additiveTool.input),
       ]),
     ]);
 
     const step = await harness.complete();
-    expect(step.providerReplay?.blocks).toEqual([
-      { text: "Ready.", type: "text" },
-      {
-        caller: { type: "direct" },
-        id: "call-1",
-        input: { path: "README.md" },
-        name: "read",
-        type: "tool_use",
-      },
-    ]);
+    expect(step.providerReplay?.blocks).toEqual([additiveText, additiveTool]);
   });
 
   for (const stopReason of [

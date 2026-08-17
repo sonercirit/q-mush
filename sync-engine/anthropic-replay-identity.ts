@@ -1,9 +1,15 @@
 import { createHash } from "node:crypto";
-import {
-  anthropicResolvedModel,
-  type AnthropicReplayIdentityInput,
-} from "./anthropic-replay-identity-input.ts";
+import type { ProviderId } from "../shared/provider-credential-store.ts";
+import type { AgentProviderCredential } from "./agent-model-options.ts";
 import { normalizeGenericProviderBaseUrl } from "./generic-provider-url.ts";
+
+export interface AnthropicReplayIdentityInput {
+  readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint: string;
+  readonly model: string;
+  readonly provider: ProviderId;
+  readonly resolvedModel?: string | undefined;
+}
 
 export interface AnthropicReplayIdentity {
   readonly model: string;
@@ -15,9 +21,10 @@ export function anthropicReplayIdentityFrom(
   options: AnthropicReplayIdentityInput,
 ): AnthropicReplayIdentity {
   const { credential, credentialFingerprint, model, provider } = options;
+  const resolvedModel = options.resolvedModel;
   return {
     model,
-    ...anthropicResolvedModel(options),
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
     provenance: createHash("sha256")
       .update(
         JSON.stringify([

@@ -194,13 +194,15 @@ async function loadModels(
     },
     runtime.signal,
   );
-  const resolvedModel = await resolveAnthropicModel({
-    credential: runtime.credential,
-    fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
-    model: runtime.detail.model,
-    provider: runtime.detail.provider,
-    signal: runtime.signal,
-  });
+  const resolvedModel = await executeForSession(runtime, () =>
+    resolveAnthropicModel({
+      credential: runtime.credential,
+      fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
+      model: runtime.detail.model,
+      provider: runtime.detail.provider,
+      signal: runtime.signal,
+    }),
+  );
   const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
@@ -211,7 +213,7 @@ async function loadModels(
       markSessionStepStart(runtime);
     },
     realtime: runtime.realtime,
-    resolvedModel,
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
     ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
     ...(options.toolStream === undefined
       ? {}
