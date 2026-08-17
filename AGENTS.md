@@ -77,11 +77,11 @@ Living project memory.
   one-liner selecting x64/ARM64 glibc/musl and starting a standalone executable
   under `~/.q-mush/runner`; Bun is unnecessary. Runners send metadata and
   15-second heartbeats by authenticated WebSocket, check updates at startup and
-  every five minutes, and replace older sockets on reconnect. Updates use a
-  source/compiler ETag and SHA-256, replace atomically, and restart; development
-  restarts first drain sessions. Reinstalling the same user's machine rotates
-  its registration token; other registrations stay protected and lists never
-  expose tokens.
+  every five minutes, recheck via handshake version after restarts, and replace
+  older sockets on reconnect. Updates use a source/compiler ETag and SHA-256,
+  replace atomically, and restart; development restarts first drain sessions.
+  Reinstalling the same user's machine rotates its registration token; other
+  registrations stay protected and lists never expose tokens.
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` byte-bounds transcript messages,
   assistant calls, the system prompt, tool definitions.
@@ -105,26 +105,26 @@ Living project memory.
   tool, skill, model and effort choices persist; pickers use canonical schemas.
   Bounded `read_session` covers transcript categories/definitions;
   `get_session_options` pages spawn choices. Grouped tools own non-blocking
-  children, report finals and resume idle parents; four ordered `parallel`
-  workers bound output and propagate cancellation. `session-transcript.tsx`
-  renders prompts, definitions, details, Markdown, code/JSON, diffs and
-  contextual results while preserving user line breaks; lists page by ten. Live
-  clients frame-coalesce model deltas, dispatch other events, suppress unchanged
-  snapshots and keyed-rerender only changed messages. The long-lived Solid root
-  preserves focus/scroll; changing session detail is not a document scroll
-  anchor, and only bottom-pinned transcripts follow output. Model discovery is
-  cancelable; `shared/agent-configuration.ts` validates catalogs. New sessions
-  choose the default online runner (else first), default credential, first
-  model, latest directory and highest reported effort. Unknown modalities mean
-  no attachments; choices show provider/Q Mush modalities. `custom-select.tsx`
-  shares normalized search/pagination and accessible keyboard focus. Focus mode
-  fills the viewport; its desktop overlay becomes a drawer, collapses on
-  selection and closes first on Escape while preserving drafts/scroll.
-  `shared/agent-prompt.ts` builds system/display prompts; persisted reasoning
-  summaries aren't replayed. `agent_sessions`/`agent_messages` hold
-  sessions/transcripts; `step_started_at` drives the Step timer and clears with
-  `activeStartedAt`. Interrupted active sessions fail for resumption; rebuilds
-  add interrupted-tool errors.
+  children, report finals and resume idle parents; `parallel` takes 2+ calls on
+  four ordered workers, bounds output and propagates cancellation.
+  `session-transcript.tsx` renders prompts, definitions, details, Markdown,
+  code/JSON, diffs and contextual results while preserving user line breaks;
+  lists page by ten. Live clients frame-coalesce model deltas, dispatch other
+  events, suppress unchanged snapshots and keyed-rerender only changed messages.
+  The long-lived Solid root preserves focus/scroll; changing session detail is
+  not a document scroll anchor, and only bottom-pinned transcripts follow
+  output. Model discovery is cancelable; `shared/agent-configuration.ts`
+  validates catalogs. New sessions choose the default online runner (else
+  first), default credential, first model, latest directory and highest reported
+  effort. Unknown modalities mean no attachments; choices show provider/Q Mush
+  modalities. `custom-select.tsx` shares normalized search/pagination and
+  accessible keyboard focus. Focus mode fills the app viewport (not browser
+  Fullscreen); its desktop overlay becomes a drawer, collapses on selection and
+  closes first on Escape, preserving drafts and scroll. `shared/agent-prompt.ts`
+  builds system/display prompts; persisted reasoning summaries aren't replayed.
+  `agent_sessions`/`agent_messages` hold sessions/transcripts; `step_started_at`
+  drives the Step timer and clears with `activeStartedAt`. Interrupted active
+  sessions fail for resumption; rebuilds add interrupted-tool errors.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -246,40 +246,44 @@ Living project memory.
   output first; concurrent refreshes coalesce because refresh tokens rotate. A
   second 401 stops. Terminal refresh rejection persists re-login-required state,
   excludes balanced pools, and tells the session/UI to reconnect; API keys
-  bypass this path. Native attachments share the session refresher; distinct
-  fallbacks bind their selected credential's refresher. OpenRouter and generic
-  endpoints stream chat completions, Anthropic-format endpoints Messages events.
-  OpenAI OAuth refreshes its token bundle before expiry. Session creation needs
-  an explicit model ID. Catalogs: OpenAI `/v1/models`, OpenRouter
-  `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic `/models`;
-  Anthropic-format catalogs read `display_name`, `max_input_tokens`,
-  `max_tokens`, and the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
-  are independent; modalities come only from `image_input`/`pdf_input` leaves),
-  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
-  guards, probing the endpoint's OpenAI-style listing only where capabilities
-  left efforts unknown. Codex parsing retains streamed output-text and
-  function-call argument deltas since completed events may omit `output`. Only
-  listed efforts are offered; OpenAI's catalog lacks reasoning data. Optional
-  reasoning uses `reasoning_effort` for OpenAI and generic chat completions and
-  `reasoning.effort` for OpenRouter and Codex Responses; the Anthropic Messages
-  format sends `output_config.effort`; unless persisted `adaptiveThinking` is
-  false it adds `thinking: {type: "adaptive", display: "summarized"}`. Lazy
-  model metadata refresh fills null fields independently and never replaces a
-  known capability or output limit while learning the other. It sends neither
-  for `none` and maps `minimal` to `low`. Adaptive-only models (Fable) ignore
-  `enabled`; newer models default `display` to `omitted` — empty thinking text
-  plus a signature while thinking tokens bill. The local proxy tolerates
-  tool-loop replay without signed thinking blocks; strict endpoints may not.
-  Streamed reasoning deltas group by `output_index` and `summary_index`;
-  separate summary parts with paragraphs since completed responses may omit
-  them. OpenAI's WebSocket Mode has a 60-minute limit; the canonical
-  `websocket_connection_limit_reached` and observed underscore-free variant
-  replace the socket once per step, then bound retries, replaying only an
-  unpersisted step. Other WebSocket/accepted HTTP interruptions or provider
-  errors retry before persistence; replays reset partial UI deltas and exhausted
-  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  bypass this path. Responses WebSocket auth events lack reliable HTTP status,
+  so recovery also recognizes canonical nested `authentication_error` and
+  `invalid_api_key` signals; OpenAI documents the nested event shape and that
+  `AuthenticationError` means an invalid, expired, or revoked token. Native
+  attachments share the session refresher; distinct fallbacks bind their
+  selected credential's refresher. OpenRouter and generic endpoints stream chat
+  completions, Anthropic-format endpoints Messages events. OpenAI OAuth
+  refreshes its token bundle before expiry. Session creation needs an explicit
+  model ID. Catalogs: OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`,
+  ChatGPT Codex `/models`, or the generic `/models`; Anthropic-format catalogs
+  read `display_name`, `max_input_tokens`, `max_tokens`, and the `capabilities`
+  tree (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking
+  support are independent; modalities come only from `image_input`/`pdf_input`
+  leaves), page via `has_more`/`last_id` at `limit=1000` with stale-cursor and
+  page-count guards, probing the endpoint's OpenAI-style listing only where
+  capabilities left efforts unknown. Codex parsing retains streamed output-text
+  and function-call argument deltas since completed events may omit `output`.
+  Only listed efforts are offered; OpenAI's catalog lacks reasoning data.
+  Optional reasoning uses `reasoning_effort` for OpenAI and generic chat
+  completions and `reasoning.effort` for OpenRouter and Codex Responses; the
+  Anthropic Messages format sends `output_config.effort`; unless persisted
+  `adaptiveThinking` is false it adds
+  `thinking: {type: "adaptive", display: "summarized"}`. Lazy model metadata
+  refresh fills null fields independently and never replaces a known capability
+  or output limit while learning the other. It sends neither for `none` and maps
+  `minimal` to `low`. Adaptive-only models (Fable) ignore `enabled`; newer
+  models default `display` to `omitted` — empty thinking text plus a signature
+  while thinking tokens bill. The local proxy tolerates tool-loop replay without
+  signed thinking blocks; strict endpoints may not. Streamed reasoning deltas
+  group by `output_index` and `summary_index`; separate summary parts with
+  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
+  has a 60-minute limit; the canonical `websocket_connection_limit_reached` and
+  observed underscore-free variant replace the socket once per step, then bound
+  retries, replaying only an unpersisted step. Other WebSocket/accepted HTTP
+  interruptions or provider errors retry before persistence; replays reset
+  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
+  and aborts do not retry; terminal failures persist as non-replayed `error`
+  messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

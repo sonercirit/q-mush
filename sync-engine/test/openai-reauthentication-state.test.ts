@@ -18,6 +18,16 @@ import { promiseGate } from "./session-race-test-helpers.ts";
 
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000099";
 const CREDENTIAL_KEY = Buffer.alloc(32, 13).toString("base64url");
+const REVOKED_SECRET = JSON.stringify({
+  access: "revoked-access",
+  expires: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
+  refresh: "revoked-refresh",
+});
+const EXTERNAL_ROTATION_SECRET = JSON.stringify({
+  access: "external-access",
+  expires: TEST_NOW + 7_200_000,
+  refresh: "external-refresh",
+});
 const databases: ReturnType<
   typeof createAuthenticatedTestContext
 >["database"][] = [];
@@ -34,7 +44,9 @@ function closeRefreshDatabases(): void {
 
 afterEach(closeRefreshDatabases);
 
-function setupRefresh(response: Response | Promise<Response>) {
+function setupRefresh(
+  response: Response | Promise<Response> | (() => Response | Promise<Response>),
+) {
   const { auth, database } = openAiRefreshTestContext();
   const store = new ProviderCredentialStore(
     database,
@@ -44,11 +56,7 @@ function setupRefresh(response: Response | Promise<Response>) {
   );
   store.add(
     TEST_USER_ID,
-    JSON.stringify({
-      access: "revoked-access",
-      expires: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
-      refresh: "revoked-refresh",
-    }),
+    REVOKED_SECRET,
     { accountId: "account", label: "OpenAI account" },
     "oauth",
     TEST_NOW,
@@ -62,7 +70,9 @@ function setupRefresh(response: Response | Promise<Response>) {
     database,
     fetch: () => {
       refreshRequests += 1;
-      return Promise.resolve(response);
+      return Promise.resolve(
+        typeof response === "function" ? response() : response,
+      );
     },
     now: () => TEST_NOW,
   };
@@ -98,13 +108,40 @@ function gatedRefreshSetup() {
 
 function forceRefresh(
   setup: ReturnType<typeof setupRefresh>,
+  rejectedSecret?: string,
 ): ReturnType<typeof setup.integration.readCredential> {
   return setup.integration.readCredential(
     TEST_USER_ID,
     CREDENTIAL_ID,
     undefined,
-    { force: true },
+    {
+      force: true,
+      ...(rejectedSecret === undefined ? {} : { rejectedSecret }),
+    },
   );
+}
+
+function rotateCredential(
+  setup: ReturnType<typeof setupRefresh>,
+  secret: string,
+): void {
+  setup.store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, TEST_NOW);
+}
+
+function sequentialResponses(
+  ...responses: (Response | Promise<Response>)[]
+): () => Response | Promise<Response> {
+  let index = 0;
+  return () => {
+    const response = responses[index];
+    index += 1;
+    if (response !== undefined) return response;
+    throw new Error("Unexpected extra refresh request");
+  };
+}
+
+function rejectedRefreshResponse(): Response {
+  return Response.json({ error: "refresh_token_reused" }, { status: 401 });
 }
 
 function releaseSuccessfulRefresh(
@@ -118,12 +155,6 @@ function releaseSuccessfulRefresh(
     }),
   );
 }
-
-const EXTERNAL_ROTATION_SECRET = JSON.stringify({
-  access: "external-access",
-  expires: TEST_NOW + 7_200_000,
-  refresh: "external-refresh",
-});
 
 function replacementSecret(): string {
   return JSON.stringify({
@@ -156,16 +187,9 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
     const first = forceRefresh(setup);
 
     await refresh.entered;
-    setup.store.updateSecret(
-      TEST_USER_ID,
-      CREDENTIAL_ID,
-      EXTERNAL_ROTATION_SECRET,
-      TEST_NOW,
-    );
-    const lateUnauthorized = forceRefresh(setup);
-    refresh.release(
-      Response.json({ error: "refresh_token_reused" }, { status: 401 }),
-    );
+    rotateCredential(setup, EXTERNAL_ROTATION_SECRET);
+    const lateUnauthorized = forceRefresh(setup, REVOKED_SECRET);
+    refresh.release(rejectedRefreshResponse());
 
     await expect(lateUnauthorized).resolves.toMatchObject({
       secret: EXTERNAL_ROTATION_SECRET,
@@ -182,20 +206,44 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
     const setup = setupRefresh(
       Response.json({ error: "unexpected" }, { status: 500 }),
     );
-    setup.store.updateSecret(
-      TEST_USER_ID,
-      CREDENTIAL_ID,
-      EXTERNAL_ROTATION_SECRET,
-      TEST_NOW,
-    );
+    rotateCredential(setup, EXTERNAL_ROTATION_SECRET);
 
     await expect(
-      setup.integration.readCredential(TEST_USER_ID, CREDENTIAL_ID, undefined, {
-        force: true,
-        rejectedSecret: replacementSecret(),
-      }),
+      forceRefresh(setup, replacementSecret()),
     ).resolves.toMatchObject({ secret: EXTERNAL_ROTATION_SECRET });
     expect(setup.refreshRequests()).toBe(0);
+  });
+
+  test("forces a fresh refresh after an unrelated stale preparation is in flight", async () => {
+    const staleRefresh = promiseGate<Response>();
+    const setup = setupRefresh(
+      sequentialResponses(
+        staleRefresh.wait(),
+        Response.json({
+          access_token: "forced-access",
+          expires_in: 3_600,
+          refresh_token: "forced-refresh",
+        }),
+      ),
+    );
+    const stale = forceRefresh(setup);
+    await staleRefresh.entered;
+    rotateCredential(setup, EXTERNAL_ROTATION_SECRET);
+
+    const forced = forceRefresh(setup, EXTERNAL_ROTATION_SECRET);
+    await expect.poll(setup.refreshRequests).toBe(2);
+    const refreshRequestsBeforeStaleResolution = setup.refreshRequests();
+    staleRefresh.release(rejectedRefreshResponse());
+
+    const forcedSecret = JSON.stringify({
+      access: "forced-access",
+      expires: TEST_NOW + 3_600_000,
+      refresh: "forced-refresh",
+    });
+    await expect(forced).resolves.toMatchObject({ secret: forcedSecret });
+    await expect(stale).resolves.toMatchObject({ secret: forcedSecret });
+    expect(refreshRequestsBeforeStaleResolution).toBe(2);
+    expect(setup.refreshRequests()).toBe(2);
   });
 
   test("cannot mark another user's or provider's credential", () => {

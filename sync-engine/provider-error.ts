@@ -27,6 +27,10 @@ const TRANSIENT_ERROR_CODES = new Set([
   "timeout",
   "upstream_error",
 ]);
+const OPENAI_AUTHENTICATION_ERROR_CODES = new Set([
+  "authentication_error",
+  "invalid_api_key",
+]);
 const PERMANENT_ERROR_CODES = new Set([
   "authentication_error",
   "bad_request",
@@ -84,6 +88,7 @@ export function isProviderCredentialRejection(
 }
 
 export class ProviderStreamError extends Error {
+  readonly authenticationFailure: boolean;
   readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly status: number | undefined;
@@ -95,6 +100,7 @@ export class ProviderStreamError extends Error {
     options: ProviderStreamErrorOptions = {},
   ) {
     super(message);
+    this.authenticationFailure = options.authenticationFailure === true;
     this.name = "ProviderStreamError";
     this.reconnectWebSocket = options.reconnectWebSocket === true;
     this.retryAfterMilliseconds = options.retryAfterMilliseconds;
@@ -104,6 +110,7 @@ export class ProviderStreamError extends Error {
 }
 
 interface ProviderStreamErrorOptions {
+  readonly authenticationFailure?: boolean;
   readonly reconnectWebSocket?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
   readonly status?: number | undefined;
@@ -214,6 +221,13 @@ function providerErrorDetails(
   };
 }
 
+function codeIsAuthenticationFailure(code: ProviderErrorCode): boolean {
+  return (
+    typeof code === "string" &&
+    OPENAI_AUTHENTICATION_ERROR_CODES.has(code.toLowerCase())
+  );
+}
+
 function codeIsWebSocketConnectionLimit(code: ProviderErrorCode): boolean {
   if (typeof code === "number") {
     return false;
@@ -277,6 +291,7 @@ export function readProviderStreamError(
     providerErrorMessage(details),
     !permanent && (transient || isProviderStreamErrorEvent(event)),
     {
+      authenticationFailure: details.codes.some(codeIsAuthenticationFailure),
       reconnectWebSocket: details.codes.some(codeIsWebSocketConnectionLimit),
       retryAfterMilliseconds: details.retryAfterMilliseconds,
       status: details.status,

@@ -2,14 +2,44 @@ import { expect, test } from "vitest";
 import {
   GENERIC_PANEL,
   OPENAI_PANEL,
+  OPENROUTER_PANEL,
   ProviderPanel,
 } from "../../solid/provider-client.tsx";
 import { ProviderController } from "../../solid/provider-controller.ts";
+import type { ProviderPanelConfiguration } from "../../solid/provider-panel-configuration.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { providerViewState } from "./client-state-fixtures.ts";
 import { expectDefaultControls } from "./default-control-assertions.ts";
 import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
+
+function credentialState(options: {
+  readonly accountId: string;
+  readonly id: string;
+  readonly label: string;
+}) {
+  return providerViewState([
+    {
+      ...options,
+      isDefault: true,
+      requiresReauthentication: true,
+      source: "oauth",
+    },
+  ]);
+}
+
+function renderedProviderPanel(
+  configuration: ProviderPanelConfiguration,
+  state: ReturnType<typeof providerViewState>,
+): string {
+  const controller = new ProviderController(
+    configuration,
+    createReactiveState(state),
+  );
+  return renderSolidToString(() => (
+    <ProviderPanel configuration={configuration} controller={controller} />
+  ));
+}
 
 const STATE = providerViewState([
   {
@@ -72,27 +102,35 @@ test("renders a generic endpoint form with an optional API key", () => {
 });
 
 test("surfaces an explicit OpenAI re-login state", () => {
-  const controller = new ProviderController(
+  const html = renderedProviderPanel(
     OPENAI_PANEL,
-    createReactiveState(
-      providerViewState([
-        {
-          accountId: "account-1",
-          id: "credential-1",
-          isDefault: true,
-          label: "Expired account",
-          requiresReauthentication: true,
-          source: "oauth",
-        },
-      ]),
-    ),
+    credentialState({
+      accountId: "account-1",
+      id: "credential-1",
+      label: "Expired account",
+    }),
   );
-  const html = renderSolidToString(() => openAiProviderPanel(controller));
 
   expect(html).toContain("Re-login required");
   expect(html).toContain(
     "This OpenAI login has expired. Connect the account again before using it in a session.",
   );
+});
+
+test("uses the configured provider name in the shared re-login state", () => {
+  const html = renderedProviderPanel(
+    OPENROUTER_PANEL,
+    credentialState({
+      accountId: "openrouter-account",
+      id: "openrouter-credential",
+      label: "Expired OpenRouter account",
+    }),
+  );
+
+  expect(html).toContain(
+    "This OpenRouter login has expired. Connect the account again before using it in a session.",
+  );
+  expect(html).not.toContain("This OpenAI login has expired");
 });
 
 test("renders provider default controls", () => {

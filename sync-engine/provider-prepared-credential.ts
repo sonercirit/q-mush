@@ -82,7 +82,7 @@ async function prepareAndPersistCredential(
 export function createPreparedCredentialReader(
   options: PreparedCredentialReaderOptions,
 ): ProviderCredentialRead {
-  const preparations = new Map<string, CredentialPreparation>();
+  const preparations = new Map<string, readonly CredentialPreparation[]>();
 
   return async (userId, credentialId, workspaceId, refresh) => {
     const forceRefresh = refresh?.force === true;
@@ -106,14 +106,20 @@ export function createPreparedCredentialReader(
         return credential;
       }
 
-      const active = preparations.get(key);
+      const activePreparations = preparations.get(key);
+      const active = activePreparations?.find(
+        ({ sourceSecret }) => sourceSecret === credential.secret,
+      );
       if (active !== undefined) {
-        if (active.sourceSecret !== credential.secret) {
-          return credential;
-        }
         const refreshed = await active.promise;
         if (forceRefresh && !active.forceRefresh && !refreshed) continue;
         return options.credentials.readCredential(...readArguments);
+      }
+      if (
+        activePreparations !== undefined &&
+        !(forceRefresh && rejectedSecret === credential.secret)
+      ) {
+        return credential;
       }
 
       const promise = prepareAndPersistCredential(
@@ -128,12 +134,19 @@ export function createPreparedCredentialReader(
         promise,
         sourceSecret: credential.secret,
       };
-      preparations.set(key, preparation);
+      preparations.set(key, [...(preparations.get(key) ?? []), preparation]);
       try {
         await promise;
         return options.credentials.readCredential(...readArguments);
       } finally {
-        if (preparations.get(key) === preparation) preparations.delete(key);
+        const activePreparations = preparations.get(key);
+        if (activePreparations?.includes(preparation) === true) {
+          const remaining = activePreparations.filter(
+            (activePreparation) => activePreparation !== preparation,
+          );
+          if (remaining.length === 0) preparations.delete(key);
+          else preparations.set(key, remaining);
+        }
       }
     }
   };

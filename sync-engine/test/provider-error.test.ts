@@ -70,6 +70,23 @@ describe("provider stream error classification", () => {
     }
   });
 
+  test("exposes canonical no-status authentication signals", () => {
+    for (const errorDetail of [
+      { code: "invalid_api_key", type: "invalid_request_error" },
+      { code: null, type: "authentication_error" },
+    ]) {
+      const error = readProviderStreamError({
+        error: { ...errorDetail, message: "Authentication failed" },
+        type: "error",
+      });
+      expect(error).toMatchObject({
+        authenticationFailure: true,
+        status: undefined,
+        transient: false,
+      });
+    }
+  });
+
   test("known permanent signals override unknown or transient ones", () => {
     const errors: readonly Readonly<Record<string, unknown>>[] = [
       { status: "401" },

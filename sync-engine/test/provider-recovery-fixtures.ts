@@ -7,6 +7,15 @@ import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
+export const OPENAI_AUTHENTICATION_ERROR_EVENT = {
+  error: {
+    code: "invalid_api_key",
+    message: "Incorrect API key provided",
+    type: "authentication_error",
+  },
+  type: "error",
+};
+
 export const COMPLETED_EVENT = {
   response: {
     output: [
@@ -115,11 +124,7 @@ export function requireProviderSocket(
 }
 
 function unauthorizedProviderSocket(socket: FakeProviderSocket): void {
-  socket.receive({
-    error: { code: "invalid_token", message: "Access token revoked" },
-    status: 401,
-    type: "error",
-  });
+  socket.receive(OPENAI_AUTHENTICATION_ERROR_EVENT);
 }
 
 export async function openAndRejectProviderSocket(

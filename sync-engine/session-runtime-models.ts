@@ -1,3 +1,4 @@
+import type { AgentCredentialRefresher } from "./agent-model-options.ts";
 import {
   createSessionAgentModels,
   type SessionAgentModels,
@@ -10,8 +11,7 @@ import {
 import type { RuntimeSessionAgentModelOptions } from "./session-runtime-model-options.ts";
 
 export interface RuntimeSessionAgentModels extends SessionAgentModels {
-  readonly attachmentRefreshCredential:
-    ReturnType<typeof createOpenAiSessionCredentialRefresher> | undefined;
+  readonly attachmentRefreshCredential: AgentCredentialRefresher | undefined;
 }
 
 function runtimeCredentialRefresherOptions(

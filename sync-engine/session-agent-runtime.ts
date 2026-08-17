@@ -89,7 +89,10 @@ function writeRuntime(
   write(runtime.detail.id, runtime.now(), runtime.detail.generation);
   runtime.notify();
 }
+
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
+  // Status- and generation-guarded: a racing stop or restart makes this
+  // write match zero rows instead of throwing.
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }

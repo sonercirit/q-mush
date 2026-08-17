@@ -3,7 +3,10 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
-import type { AgentCredentialRefresher } from "./agent-model-options.ts";
+import type {
+  AgentCredentialRefresher,
+  AgentProviderCredential,
+} from "./agent-model-options.ts";
 import {
   ProviderCredentialRejectionError,
   ProviderStreamError,
@@ -19,19 +22,18 @@ function isOpenAiOAuthUnauthorized(
     source === "oauth" &&
     ((error instanceof ProviderCredentialRejectionError &&
       error.status === 401) ||
-      (error instanceof ProviderStreamError && error.status === 401))
+      (error instanceof ProviderStreamError &&
+        (error.status === 401 || error.authenticationFailure)))
   );
 }
 
 export async function recoverOpenAiOAuthUnauthorized(options: {
   readonly complete: () => Promise<AgentModelStep>;
-  readonly currentCredential: Parameters<AgentCredentialRefresher>[0];
+  readonly currentCredential: AgentProviderCredential;
   readonly error: unknown;
   readonly provider: ProviderId;
   readonly refreshCredential: AgentCredentialRefresher | undefined;
-  readonly replaceCredential: (
-    credential: Awaited<ReturnType<AgentCredentialRefresher>>,
-  ) => void;
+  readonly replaceCredential: (credential: AgentProviderCredential) => void;
   readonly resetOutput: () => void;
   readonly resetTransport: () => void;
 }): Promise<AgentModelStep> {

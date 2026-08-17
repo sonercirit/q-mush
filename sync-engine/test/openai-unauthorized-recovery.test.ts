@@ -10,6 +10,7 @@ import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
   COMPLETED_EVENT,
   FakeProviderSockets,
+  OPENAI_AUTHENTICATION_ERROR_EVENT,
   openAndRejectProviderSocket,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
@@ -106,10 +107,19 @@ function refreshSetup(
   return { pending, refreshCredential, sockets };
 }
 
+function completeSuccessfulRetry(
+  sockets: FakeProviderSockets,
+  index = 1,
+): void {
+  const retry = requireProviderSocket(sockets, index);
+  retry.open();
+  retry.receive(COMPLETED_EVENT);
+}
+
 function expectUnauthorized(
   pending: Promise<AgentModelStep>,
 ): PromiseLike<unknown> {
-  return expect(pending).rejects.toMatchObject({ status: 401 });
+  return expect(pending).rejects.toMatchObject({ authenticationFailure: true });
 }
 
 function rejectSocket(
@@ -147,6 +157,19 @@ describe("OpenAI OAuth unauthorized recovery", () => {
     expectDoneStep(await setup.pending);
   });
 
+  test("forces one refresh for a documented no-status WebSocket authentication event", async () => {
+    const setup = refreshSetup();
+    const rejected = requireProviderSocket(setup.sockets, 0);
+    rejected.open();
+    rejected.receive(OPENAI_AUTHENTICATION_ERROR_EVENT);
+
+    await setup.sockets.waitForAttempt(1);
+    completeSuccessfulRetry(setup.sockets);
+
+    expectDoneStep(await setup.pending);
+    expectRefreshAttemptCount(setup, 1);
+  });
+
   test("clears partial output before retrying with the refreshed token", async () => {
     const deltas: ProviderTextDelta[] = [];
     const sockets = new FakeProviderSockets();
@@ -161,19 +184,10 @@ describe("OpenAI OAuth unauthorized recovery", () => {
       delta: "Discarded partial output.",
       type: "response.output_text.delta",
     });
-    rejected.receive({
-      error: {
-        code: "invalid_token",
-        message: "Access token revoked after output started",
-        status: 401,
-      },
-      type: "error",
-    });
+    rejected.receive(OPENAI_AUTHENTICATION_ERROR_EVENT);
 
     await sockets.waitForAttempt(1);
-    const retry = requireProviderSocket(sockets, 1);
-    retry.open();
-    retry.receive(COMPLETED_EVENT);
+    completeSuccessfulRetry(sockets);
 
     expectDoneStep(await pending);
     expect(deltas).toEqual([
@@ -210,7 +224,7 @@ describe("OpenAI OAuth unauthorized recovery", () => {
     const pending =
       genericUnauthorizedModel(refreshCredential).complete(USER_MESSAGE);
 
-    await expectUnauthorized(pending);
+    await expect(pending).rejects.toMatchObject({ status: 401 });
     expect(refreshCredential).not.toHaveBeenCalled();
   });
 

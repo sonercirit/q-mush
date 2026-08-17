@@ -121,8 +121,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
         </div>
         <Show when={props.credential.requiresReauthentication}>
           <p class="mt-2 text-sm font-medium text-amber-100" role="alert">
-            This OpenAI login has expired. Connect the account again before
-            using it in a session.
+            {`This ${props.configuration.name} login has expired. Connect the account again before using it in a session.`}
           </p>
         </Show>
         <p class="path-wrap mt-2 text-sm text-slate-400">
