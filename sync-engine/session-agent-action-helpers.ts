@@ -145,6 +145,7 @@ export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
+  readonly terminal: (detail: AgentSessionDetail) => void;
   readonly userId: string;
 }): Promise<string> {
   const parent = options.dependencies.store.get(
@@ -210,18 +211,14 @@ export async function spawnAgentSession(options: {
       ) {
         return createJsonResponse({ error: "server_restarting" }, 503);
       }
-      options.dependencies.store.appendRuntimeErrorMessage(
+      options.dependencies.store.settleRuntimeFailure(
         child.id,
         "Session failed: the child session could not be launched",
         options.dependencies.now(),
         child.generation,
       );
-      options.dependencies.store.transitionRuntime(
-        child.id,
-        "failed",
-        options.dependencies.now(),
-        child.generation,
-      );
+      const failed = options.dependencies.store.get(options.userId, child.id);
+      if (failed !== undefined) options.terminal(failed);
       throw new Error("The child session could not be launched");
     }
     return notifiedResponse("spawned");

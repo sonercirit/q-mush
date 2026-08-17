@@ -32,6 +32,7 @@ import {
   insertStoredMessage,
 } from "./session-store-values.ts";
 import {
+  activeSessionTurnId,
   rotateSessionTurn,
   updateSessionAndEndGenerationTurn,
 } from "./session-turn-store.ts";
@@ -596,6 +597,7 @@ export class RestartHandoffStore {
           const condition = exactHandoffCondition(exact, "running", userId);
 
           const timing = readActiveSessionTiming(transaction, condition);
+          const turnId = activeSessionTurnId(transaction, identity.sessionId);
           if (
             timing === undefined ||
             !updateSessionAndEndGenerationTurn({
@@ -627,7 +629,7 @@ export class RestartHandoffStore {
           if (settlement.status === "failed") {
             insertStoredMessage(
               transaction,
-              errorMessageValues(settlement.error),
+              { ...errorMessageValues(settlement.error), turnId },
               {
                 actorId: SYSTEM_ID,
                 id: this.#options.generateId(now),

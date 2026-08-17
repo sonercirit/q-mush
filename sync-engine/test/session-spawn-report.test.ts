@@ -32,6 +32,85 @@ function completedReportWithError(
 }
 
 describe("spawned session reports", () => {
+  test("includes generation, stopped status, and a sanitized concise message", () => {
+    const content = spawnedSessionReport(
+      {
+        ...TEST_SESSION_DETAIL,
+        generation: 3,
+        messages: [
+          testSessionMessage(
+            "message-secret",
+            `Stopped\u0085with authorization=Bearer ${"s".repeat(32)} api_key: "${"k".repeat(32)}" github_pat_${"g".repeat(24)} ${"x".repeat(2_100)}`,
+            "error",
+            1,
+          ),
+        ],
+        status: "stopped",
+      },
+      "parent-1",
+    )?.content;
+
+    expect(content).toContain('"generation": 3');
+    expect(content).toContain('"status": "stopped"');
+    expect(content).toContain("authorization=[redacted]");
+    expect(content).not.toContain("\u0085");
+    expect(content).not.toContain("Bearer");
+    expect(content).not.toContain("s".repeat(32));
+    expect(content).not.toContain("k".repeat(32));
+    expect(content).not.toContain("github_pat_");
+    expect(content?.length).toBeLessThan(2_300);
+  });
+
+  test("uses only the current attempt's final error", () => {
+    const content = spawnedSessionReport(
+      {
+        ...TEST_SESSION_DETAIL,
+        generation: 1,
+        messages: [
+          {
+            ...testSessionMessage(
+              "message-old",
+              "Old successful answer",
+              "assistant",
+              1,
+            ),
+            turnId: "turn-0",
+          },
+          {
+            ...testSessionMessage(
+              "message-current",
+              "Session failed: credential_rate_limited",
+              "error",
+              3,
+            ),
+            turnId: "turn-1",
+          },
+        ],
+        status: "failed",
+        turns: [
+          {
+            boundaryMessageId: "message-old",
+            endedAt: 1,
+            executionGeneration: 0,
+            id: "turn-0",
+            startedAt: 0,
+          },
+          {
+            boundaryMessageId: null,
+            endedAt: 3,
+            executionGeneration: 1,
+            id: "turn-1",
+            startedAt: 2,
+          },
+        ],
+      },
+      "parent-1",
+    )?.content;
+
+    expect(content).toContain("credential_rate_limited");
+    expect(content).not.toContain("Old successful answer");
+  });
+
   test("appends a truncation notice that follows the terminal answer", () => {
     const content = completedReport([
       testSessionMessage("message-1", "Summarize the repository", "user", 1),

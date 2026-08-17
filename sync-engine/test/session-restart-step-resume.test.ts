@@ -179,7 +179,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
     status: "completed",
   });
   await waitForTerminalParentNote(recreated.sessions, childId);
-  expect(completionReports(recreated)).toHaveLength(0);
+  expect(completionReports(recreated)).toHaveLength(1);
   expect(JSON.stringify(sessionFor(recreated, childId))).toContain(
     CHILD_SUMMARY,
   );

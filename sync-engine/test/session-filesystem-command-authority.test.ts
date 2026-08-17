@@ -21,7 +21,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import {
   EMPTY_SESSION_REQUEST_MODEL_METADATA,
-  sessionAgentActionDefaults,
+  inactiveSessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
 
 const RUNNER_ID = "runner-filesystem";
@@ -205,9 +205,7 @@ test("cancellation uses the parent session identity for agent-file and directory
 
 function actionDefaults() {
   return {
-    ...sessionAgentActionDefaults(),
-    abortSession: () => undefined,
-    activeSession: () => false,
+    ...inactiveSessionAgentActionDefaults(),
     notify: () => undefined,
   };
 }

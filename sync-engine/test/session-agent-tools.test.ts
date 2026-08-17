@@ -416,7 +416,9 @@ describe("session agent tools", () => {
     await waitForTerminalParentNote(spawnSetup.sessions, childId);
     const child = spawnSetup.sessions.detailForUser(TEST_USER_ID, childId);
     expect(JSON.stringify(child)).toContain("Delegated task done.");
-    expect(JSON.stringify(child)).toContain("already terminal");
+    expect(JSON.stringify(await sessionDetail(spawnSetup.sessions))).toContain(
+      "Delegated task done.",
+    );
     expect(await sessionDetail(spawnSetup.sessions)).toMatchObject({
       generation: 0,
       status: "idle",
@@ -474,7 +476,7 @@ describe("session agent tools", () => {
 
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
     expect(parent).toMatchObject({ generation: 0, status: "idle" });
-    expect(JSON.stringify(parent)).not.toContain("Child work is complete.");
+    expect(JSON.stringify(parent)).toContain("Child work is complete.");
     closeSessionTestDatabase(setup.database);
   });
 
@@ -527,7 +529,7 @@ describe("session agent tools", () => {
     );
     expect(updatedParent?.generation).toBe(0);
     expect(updatedParent?.status).toBe("idle");
-    expect(JSON.stringify(updatedParent)).not.toContain(
+    expect(JSON.stringify(updatedParent)).toContain(
       '\\"status\\": \\"stopped\\"',
     );
     closeSessionTestDatabase(setup.database);
