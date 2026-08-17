@@ -1,12 +1,15 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { chromium, type LaunchOptions } from "playwright";
 import { afterEach, expect, test } from "vitest";
 import { createVitest, parseCLI } from "vitest/node";
 import { isRecord } from "../../shared/validation.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
-const ORIGINAL_PLAYWRIGHT_DEBUG = process.env["PWDEBUG"];
+const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
+  new URL("fixtures/playwright-launch-probe.mjs", import.meta.url),
+);
 
 function restorePlaywrightLaunch(): void {
   chromium.launch = ORIGINAL_PLAYWRIGHT_LAUNCH;
@@ -14,10 +17,7 @@ function restorePlaywrightLaunch(): void {
 
 const ORIGINAL_PLAYWRIGHT_LAUNCH = chromium.launch.bind(chromium);
 
-afterEach(() => {
-  restorePlaywrightLaunch();
-  process.env["PWDEBUG"] = ORIGINAL_PLAYWRIGHT_DEBUG;
-});
+afterEach(restorePlaywrightLaunch);
 
 function packageScripts(source: string): Map<string, string> {
   const value: unknown = JSON.parse(source);
@@ -40,15 +40,12 @@ function packageScripts(source: string): Map<string, string> {
 
 async function browserLaunchProbe(
   arguments_: readonly string[],
-  playwrightDebug: string | undefined,
 ): Promise<LaunchOptions> {
   const launch = Promise.withResolvers<LaunchOptions>();
   chromium.launch = (options) => {
     launch.resolve(options ?? {});
     return Promise.reject(new Error("Browser launch captured"));
   };
-  process.env["PWDEBUG"] = playwrightDebug;
-
   const parsed = parseCLI([
     "vitest",
     "run",
@@ -74,14 +71,88 @@ async function browserLaunchProbe(
 }
 
 test("ordinary Chromium launches stay headless under adversarial overrides", async () => {
-  await expect(browserLaunchProbe([], undefined)).resolves.toMatchObject({
+  await expect(browserLaunchProbe([])).resolves.toMatchObject({
     headless: true,
   });
   await expect(
-    browserLaunchProbe(["--browser.headless=false"], undefined),
+    browserLaunchProbe(["--browser.headless=false"]),
   ).resolves.toMatchObject({ headless: true });
-  await expect(browserLaunchProbe([], "1")).resolves.toMatchObject({
-    headless: true,
+});
+
+interface PlaywrightLaunchResult {
+  readonly configuredHeadless: boolean;
+  readonly effectiveHeadless: boolean;
+  readonly playwrightDebug: string;
+}
+
+async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult> {
+  const inheritedPath = process.env["PATH"];
+  const node = Bun.which(
+    "node",
+    inheritedPath === undefined
+      ? undefined
+      : {
+          PATH: inheritedPath
+            .split(":")
+            .filter((entry) => !entry.startsWith("/tmp/bun-node-"))
+            .join(":"),
+        },
+  );
+  if (node === null) {
+    throw new Error("Playwright launch probe requires Node.js");
+  }
+  const probe = Bun.spawn(
+    [
+      node,
+      "node_modules/vitest/vitest.mjs",
+      "run",
+      "--config",
+      "vitest.browser.config.ts",
+    ],
+    {
+      cwd: ROOT_DIRECTORY,
+      env: {
+        ...process.env,
+        NODE_OPTIONS: `--import=${PLAYWRIGHT_LAUNCH_PROBE}`,
+        PWDEBUG: "0",
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
+  );
+  const [exitCode, stderr, stdout] = await Promise.all([
+    probe.exited,
+    new Response(probe.stderr).text(),
+    new Response(probe.stdout).text(),
+  ]);
+  if (exitCode === 0) {
+    throw new Error("Playwright launch probe unexpectedly passed");
+  }
+  const result = /PLAYWRIGHT_LAUNCH_PROBE=(\{[^\n]+\})/u.exec(stdout)?.[1];
+  if (result === undefined) {
+    throw new Error(`Playwright launch probe did not run: ${stderr}`);
+  }
+  const parsed: unknown = JSON.parse(result);
+  if (
+    !isRecord(parsed) ||
+    typeof parsed["configuredHeadless"] !== "boolean" ||
+    typeof parsed["effectiveHeadless"] !== "boolean" ||
+    typeof parsed["playwrightDebug"] !== "string"
+  ) {
+    throw new TypeError("Playwright launch probe returned an invalid result");
+  }
+  return {
+    configuredHeadless: parsed["configuredHeadless"],
+    effectiveHeadless: parsed["effectiveHeadless"],
+    playwrightDebug: parsed["playwrightDebug"],
+  };
+}
+
+test("fresh Playwright process proves PWDEBUG defense at effective launch", async () => {
+  await expect(runGuardedPlaywrightLaunchProbe()).resolves.toEqual({
+    configuredHeadless: true,
+    effectiveHeadless: true,
+    playwrightDebug: "0",
   });
 });
 

@@ -1,8 +1,11 @@
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import {
   runBrowserTests,
   type BrowserTestDependencies,
 } from "../test-browser-runner.ts";
+
+const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 
 interface SpawnCall {
   readonly command: readonly string[];
@@ -46,6 +49,7 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
     "session-detail",
     "--browser.headless=false",
   ]);
+  expect(probe.calls[0]?.options.cwd).toBe(`${ROOT_DIRECTORY}/`);
   expect(probe.calls[0]?.options.env["PWDEBUG"]).toBe("0");
 });
 

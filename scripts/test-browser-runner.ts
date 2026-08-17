@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+
 interface BrowserTestProcess {
   readonly exited: Promise<number>;
 }
@@ -30,7 +32,7 @@ export async function runBrowserTests(
   const browserTests = dependencies.spawn(
     ["vitest", "run", "--config", "vitest.browser.config.ts", ...arguments_],
     {
-      cwd: new URL("..", import.meta.url).pathname,
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
       env: headlessEnvironment(),
       stderr: "inherit",
       stdin: "inherit",
