@@ -37,14 +37,18 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
       ),
     ).resolves.toBe(0);
   } finally {
-    process.env["PWDEBUG"] = originalDebug;
+    if (originalDebug === undefined) {
+      delete process.env["PWDEBUG"];
+    } else {
+      process.env["PWDEBUG"] = originalDebug;
+    }
   }
 
   expect(probe.calls).toHaveLength(1);
   expect(probe.calls[0]?.command).toEqual([
     "bun",
     "--no-orphans",
-    "x",
+    "run",
     "--bun",
     "vitest",
     "run",

@@ -34,7 +34,7 @@ export async function runBrowserTests(
     [
       "bun",
       "--no-orphans",
-      "x",
+      "run",
       "--bun",
       "vitest",
       "run",

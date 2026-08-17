@@ -11,10 +11,13 @@ export default {
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",
     "scripts/restart-development-server.ts!",
-    "scripts/test-browser.ts!",
-    "vitest.browser.config.ts!",
   ],
-  ignoreFiles: ["knip.config.ts"],
+  ignoreFiles: [
+    "knip.config.ts",
+    "scripts/test-browser-runner.ts",
+    "scripts/test-browser.ts",
+    "vitest.browser.config.ts",
+  ],
   project: [
     "runner/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",
     "shared/**/*.{cjs,cts,js,jsx,mjs,mts,ts,tsx}!",

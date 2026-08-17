@@ -9,8 +9,11 @@ import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const BROWSER_TEST_ENTRY = join(ROOT_DIRECTORY, "scripts", "test-browser.ts");
+const BROWSER_LIFECYCLE_PROBE = fileURLToPath(
+  new URL("fixtures/browser-lifecycle-probe.ts", import.meta.url),
+);
 const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
-  new URL("fixtures/playwright-launch-probe.mjs", import.meta.url),
+  new URL("fixtures/playwright-launch-probe.mts", import.meta.url),
 );
 
 function restorePlaywrightLaunch(): void {
@@ -108,11 +111,20 @@ interface PlaywrightLaunchResult {
 }
 
 function expectHeadlessBinaryArguments(arguments_: readonly string[]): void {
-  const headlessFlags = new Set(["--no-orphans", "--bun", "vitest", "x"]);
-  const argumentSet = new Set(arguments_);
+  const executableIndex = arguments_.findIndex((argument) =>
+    argument.endsWith("/bun"),
+  );
+  const commandArguments = arguments_.slice(executableIndex + 1);
+  const expected = ["--no-orphans", "run", "--bun", "vitest"];
+  const commandOffset = commandArguments.findIndex(
+    (argument) => argument === expected[0],
+  );
   if (
-    arguments_[1] === "scripts/test-browser.ts" ||
-    ![...headlessFlags].every((argument) => argumentSet.has(argument))
+    executableIndex < 0 ||
+    commandOffset < 0 ||
+    expected.some(
+      (argument, index) => commandArguments[commandOffset + index] !== argument,
+    )
   ) {
     throw new Error(
       "Browser probe expected Bun's guarded Vitest binary runner",
@@ -192,29 +204,48 @@ test("shipped browser entrypoint defeats inherited Playwright debug mode", async
   });
 });
 
+test("package and CI structurally use the guarded browser launcher", async () => {
+  const [packageSource, workflowSource] = await Promise.all([
+    readFile(join(ROOT_DIRECTORY, "package.json"), "utf8"),
+    readFile(join(ROOT_DIRECTORY, ".github/workflows/checks.yml"), "utf8"),
+  ]);
+  const configuration = packageConfiguration(packageSource);
+  const workflow: unknown = Bun.YAML.parse(workflowSource);
+  const jobs = isRecord(workflow) ? workflow["jobs"] : undefined;
+  const tests = isRecord(jobs) ? jobs["tests"] : undefined;
+  const steps = isRecord(tests) ? tests["steps"] : undefined;
+  const stepRecords = Array.isArray(steps) ? steps.filter(isRecord) : [];
+  const commands = stepRecords.flatMap((step) =>
+    typeof step["run"] === "string" ? [step["run"]] : [],
+  );
+  const actions = stepRecords.flatMap((step) =>
+    typeof step["uses"] === "string" ? [step["uses"]] : [],
+  );
+
+  expect(
+    actions.some((action) => action.startsWith("actions/setup-node")),
+  ).toBe(false);
+  expect(
+    configuration.devDependencies.get("playwright"),
+    "Update the `<launching>` compatibility probe before Playwright",
+  ).toBe("1.62.1");
+  expect(
+    configuration.devDependencies.get("vitest"),
+    "Update the browser launch monkey patch before Vitest",
+  ).toBe("4.1.10");
+  expect(configuration.scripts.get("test:browser")).toBe(
+    "bun run --no-orphans scripts/test-browser.ts",
+  );
+  expect(configuration.scripts.get("test")).toBe(
+    "bun run test:unit && bun run test:browser",
+  );
+  expect(commands).toContain("bun run test:browser");
+});
+
 interface BrowserLifecycleReport {
   readonly descendantPid: number;
+  readonly launcherPid: number;
   readonly vitestPid: number;
-}
-
-async function readLifecycleReport(
-  pathname: string,
-): Promise<BrowserLifecycleReport | undefined> {
-  if (!(await Bun.file(pathname).exists())) return undefined;
-
-  const value: unknown = await Bun.file(pathname).json();
-  if (
-    !isRecord(value) ||
-    !Number.isInteger(value["descendantPid"]) ||
-    !Number.isInteger(value["vitestPid"])
-  ) {
-    throw new TypeError("Browser lifecycle probe returned invalid process IDs");
-  }
-
-  return {
-    descendantPid: Number(value["descendantPid"]),
-    vitestPid: Number(value["vitestPid"]),
-  };
 }
 
 function isMissingProcessError(error: unknown): boolean {
@@ -238,9 +269,8 @@ async function processIsRunning(pid: number): Promise<boolean> {
   if (process.platform !== "linux") return true;
 
   try {
-    const processStatus = await readFile(`/proc/${String(pid)}/stat`, "utf8");
-    const statusOffset = processStatus.lastIndexOf(") ") + 2;
-    return processStatus[statusOffset] !== "Z";
+    const status = await readFile(`/proc/${String(pid)}/stat`, "utf8");
+    return status[status.lastIndexOf(") ") + 2] !== "Z";
   } catch (error) {
     return failUnlessMissingProcess(error);
   }
@@ -250,70 +280,100 @@ function killProcess(pid: number): void {
   try {
     process.kill(pid, "SIGKILL");
   } catch (error) {
-    if (!isMissingProcessError(error)) {
-      throw error;
-    }
+    if (!isMissingProcessError(error)) throw error;
   }
+}
+
+async function readBrowserLifecycleReport(
+  reportPath: string,
+): Promise<BrowserLifecycleReport | undefined> {
+  const processFile = Bun.file(reportPath);
+  const launcherFile = Bun.file(`${reportPath}.launcher`);
+  if (!(await processFile.exists()) || !(await launcherFile.exists())) {
+    return undefined;
+  }
+  const processes: unknown = await processFile.json();
+  const launcher: unknown = await launcherFile.json();
+  if (
+    !isRecord(processes) ||
+    !Number.isInteger(processes["descendantPid"]) ||
+    !Number.isInteger(processes["vitestPid"]) ||
+    !isRecord(launcher) ||
+    !Number.isInteger(launcher["launcherPid"])
+  ) {
+    throw new TypeError("Browser lifecycle probe returned invalid process IDs");
+  }
+  return {
+    descendantPid: Number(processes["descendantPid"]),
+    launcherPid: Number(launcher["launcherPid"]),
+    vitestPid: Number(processes["vitestPid"]),
+  };
 }
 
 const SUPPORTS_NO_ORPHANS =
   process.platform === "darwin" || process.platform === "linux";
 
 test.runIf(SUPPORTS_NO_ORPHANS)(
-  "no-orphans runner recursively cleans a PID-killed browser process",
+  "shipped launcher recursively cleans an unguarded browser descendant",
   async () => {
     await withTemporaryDirectory(
       "q-mush-browser-lifecycle-probe-",
       async (directory) => {
-        const executable = join(directory, "bun");
         const reportPath = join(directory, "processes.json");
-        const supervisorPath = join(directory, "supervisor.ts");
+        const executable = join(directory, "bun");
         await writeBunExecutable(
           executable,
-          `const descendant = Bun.spawn(
-  [process.execPath, "--no-orphans", "-e", "await new Promise(() => {})"],
-  { stderr: "ignore", stdin: "ignore", stdout: "ignore" },
-);
-await Bun.write(
-  ${JSON.stringify(reportPath)},
-  JSON.stringify({ descendantPid: descendant.pid, vitestPid: process.pid }),
-);
-await new Promise(() => {});
+          `const probe = process.env["Q_MUSH_BROWSER_PROBE_SCRIPT"];
+const report = process.env["Q_MUSH_BROWSER_PROBE_REPORT"];
+if (probe === undefined || report === undefined) throw new Error("Missing browser lifecycle probe paths");
+const browser = Bun.spawn([process.execPath, probe, report], {
+  stderr: "ignore",
+  stdin: "ignore",
+  stdout: "ignore",
+});
+await browser.exited;
 `,
         );
-        await writeFile(
-          supervisorPath,
-          `const browserTests = Bun.spawn([
-  process.execPath,
-  "run",
-  "--no-orphans",
-  ${JSON.stringify(executable)},
-]);
-await Bun.write(${JSON.stringify(
-            join(directory, "browser-process.json"),
-          )}, JSON.stringify({ pid: browserTests.pid }));
-await browserTests.exited;
-`,
+        const supervisor = Bun.spawn(
+          [
+            process.execPath,
+            fileURLToPath(
+              new URL(
+                "fixtures/browser-lifecycle-supervisor.ts",
+                import.meta.url,
+              ),
+            ),
+          ],
+          {
+            detached: true,
+            env: {
+              ...process.env,
+              PATH: `${directory}${delimiter}${process.env["PATH"] ?? ""}`,
+              Q_MUSH_BROWSER_PROBE_REPORT: reportPath,
+              Q_MUSH_BROWSER_PROBE_ROOT: ROOT_DIRECTORY,
+              Q_MUSH_BROWSER_PROBE_SCRIPT: BROWSER_LIFECYCLE_PROBE,
+            },
+            stderr: "pipe",
+            stdin: "ignore",
+            stdout: "pipe",
+          },
         );
-        const supervisor = Bun.spawn([process.execPath, supervisorPath], {
-          detached: true,
-          stderr: "pipe",
-          stdin: "ignore",
-          stdout: "pipe",
-        });
-        const errors = new Response(supervisor.stderr).text();
-        const output = new Response(supervisor.stdout).text();
+        const supervisorError = new Response(supervisor.stderr).text();
+        const supervisorOutput = new Response(supervisor.stdout).text();
         let report: BrowserLifecycleReport | undefined;
 
         try {
           await expect
             .poll(
               async () => {
-                report = await readLifecycleReport(reportPath);
+                report = await readBrowserLifecycleReport(reportPath);
                 if (report === undefined && supervisor.exitCode !== null) {
-                  const [stderr, stdout] = await Promise.all([errors, output]);
+                  const [stderr, stdout] = await Promise.all([
+                    supervisorError,
+                    supervisorOutput,
+                  ]);
                   throw new Error(
-                    `Browser lifecycle probe exited before starting: ${stderr}${stdout}`,
+                    `Browser lifecycle supervisor exited early: ${stderr}${stdout}`,
                   );
                 }
                 return report !== undefined;
@@ -324,40 +384,19 @@ await browserTests.exited;
           if (report === undefined) {
             throw new Error("Browser lifecycle probe did not start");
           }
-          const browserProcess: unknown = await Bun.file(
-            join(directory, "browser-process.json"),
-          ).json();
-          if (
-            !isRecord(browserProcess) ||
-            !Number.isInteger(browserProcess["pid"])
-          ) {
-            throw new TypeError(
-              "Browser lifecycle supervisor returned an invalid PID",
-            );
-          }
-          const browserPid = Number(browserProcess["pid"]);
+          expect(new Set(Object.values(report)).size).toBe(3);
           expect(
-            await Promise.all([
-              processIsRunning(browserPid),
-              processIsRunning(report.vitestPid),
-              processIsRunning(report.descendantPid),
-            ]),
+            await Promise.all(Object.values(report).map(processIsRunning)),
           ).toEqual([true, true, true]);
 
-          killProcess(browserPid);
+          killProcess(report.launcherPid);
 
           await expect
             .poll(
               async () =>
                 (
                   await Promise.all(
-                    [
-                      browserPid,
-                      report?.vitestPid,
-                      report?.descendantPid,
-                    ].flatMap((pid) =>
-                      pid === undefined ? [] : [processIsRunning(pid)],
-                    ),
+                    Object.values(report ?? {}).map(processIsRunning),
                   )
                 ).some(Boolean),
               { interval: 10, timeout: 5_000 },
@@ -371,33 +410,3 @@ await browserTests.exited;
     );
   },
 );
-
-test("package and CI structurally use the guarded browser launcher", async () => {
-  const [packageSource, workflowSource] = await Promise.all([
-    readFile(join(ROOT_DIRECTORY, "package.json"), "utf8"),
-    readFile(join(ROOT_DIRECTORY, ".github/workflows/checks.yml"), "utf8"),
-  ]);
-  const configuration = packageConfiguration(packageSource);
-  const workflow: unknown = Bun.YAML.parse(workflowSource);
-  const jobs = isRecord(workflow) ? workflow["jobs"] : undefined;
-  const tests = isRecord(jobs) ? jobs["tests"] : undefined;
-  const steps = isRecord(tests) ? tests["steps"] : undefined;
-  const stepRecords = Array.isArray(steps) ? steps.filter(isRecord) : [];
-  const commands = stepRecords.flatMap((step) =>
-    typeof step["run"] === "string" ? [step["run"]] : [],
-  );
-  const actions = stepRecords.flatMap((step) =>
-    typeof step["uses"] === "string" ? [step["uses"]] : [],
-  );
-
-  expect(actions).not.toContain("actions/setup-node@v6");
-  expect(configuration.devDependencies.get("playwright")).toBe("1.62.1");
-  expect(configuration.devDependencies.get("vitest")).toBe("4.1.10");
-  expect(configuration.scripts.get("test:browser")).toBe(
-    "bun run --no-orphans scripts/test-browser.ts",
-  );
-  expect(configuration.scripts.get("test")).toBe(
-    "bun run test:unit && bun run test:browser",
-  );
-  expect(commands).toContain("bun run test:browser");
-});

@@ -1,4 +1,3 @@
-import process from "node:process";
 import { chromium } from "playwright";
 
 // Playwright 1.62.1's public launch failure currently reports the spawned
@@ -33,7 +32,7 @@ try {
       `PLAYWRIGHT_LAUNCH_PROBE=${JSON.stringify({
         configuredHeadless: options.headless,
         effectiveHeadless: launchCommand.includes(" --headless "),
-        playwrightDebug: process.env.PWDEBUG,
+        playwrightDebug: process.env["PWDEBUG"],
         workingDirectory: process.cwd(),
       })}\n`,
     );

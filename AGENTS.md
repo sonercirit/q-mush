@@ -43,7 +43,7 @@ Living project memory.
   instance-level headless mode, and disables inherited `PWDEBUG` before real
   Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
-- CI runs tests/check/build/whitespace on Bun 1.3.14 with a frozen lockfile.
+- CI uses Bun 1.3.14, frozen lockfile.
 
 ## Architecture and Conventions
 
@@ -295,5 +295,6 @@ Living project memory.
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
   outside compaction, providers replay the conversation without a timeout.
-- Add new runtime roots and standalone build entries to the matching Knip
-  configs; exclude test support from production patterns.
+- Add runtime roots to Knip; exclude tests from production. Pin Playwright
+  1.62.1/Vitest 4.1.10: probes couple to Playwright's `<launching>` error and
+  monkey-patch Vitest launch.
