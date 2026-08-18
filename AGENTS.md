@@ -39,9 +39,9 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
-  `test:browser` runs its Bun/Vitest descendants with no-orphans cleanup, pins
-  instance-level headless mode, and disables inherited `PWDEBUG` before real
-  Chromium.
+  `test:browser` uses bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
+  recursion fails for `./` or absolute paths. It pins headless mode and clears
+  inherited `PWDEBUG` before real Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
 - CI uses Bun 1.3.14, frozen lockfile.
 
@@ -295,6 +295,5 @@ Living project memory.
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
   outside compaction, providers replay the conversation without a timeout.
-- Add runtime roots to Knip; exclude tests from production. Pin Playwright
-  1.62.1/Vitest 4.1.10: probes couple to Playwright's `<launching>` error and
-  monkey-patch Vitest launch.
+- Add roots to Knip; exclude tests from production. Pin Playwright 1.62.1/
+  Vitest 4.1.10: probes couple to Playwright `<launching>` and Vitest launch.

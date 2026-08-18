@@ -218,7 +218,13 @@ test("package and CI structurally use the guarded browser launcher", async () =>
   const commands = stepRecords.flatMap((step) =>
     typeof step["run"] === "string" ? [step["run"]] : [],
   );
-  const actions = stepRecords.flatMap((step) =>
+  const workflowJobs = isRecord(jobs)
+    ? Object.values(jobs).filter(isRecord)
+    : [];
+  const workflowSteps = workflowJobs.flatMap((job) =>
+    Array.isArray(job["steps"]) ? job["steps"].filter(isRecord) : [],
+  );
+  const actions = workflowSteps.flatMap((step) =>
     typeof step["uses"] === "string" ? [step["uses"]] : [],
   );
 
@@ -384,19 +390,22 @@ await browser.exited;
           if (report === undefined) {
             throw new Error("Browser lifecycle probe did not start");
           }
-          expect(new Set(Object.values(report)).size).toBe(3);
+          const activeReport = report;
+          expect(new Set(Object.values(activeReport)).size).toBe(3);
           expect(
-            await Promise.all(Object.values(report).map(processIsRunning)),
+            await Promise.all(
+              Object.values(activeReport).map(processIsRunning),
+            ),
           ).toEqual([true, true, true]);
 
-          killProcess(report.launcherPid);
+          killProcess(activeReport.launcherPid);
 
           await expect
             .poll(
               async () =>
                 (
                   await Promise.all(
-                    Object.values(report ?? {}).map(processIsRunning),
+                    Object.values(activeReport).map(processIsRunning),
                   )
                 ).some(Boolean),
               { interval: 10, timeout: 5_000 },

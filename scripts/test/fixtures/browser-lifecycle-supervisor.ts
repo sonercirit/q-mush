@@ -1,3 +1,5 @@
+import { publishBrowserLifecycleReport } from "./browser-lifecycle-report.ts";
+
 const rootDirectory = process.env["Q_MUSH_BROWSER_PROBE_ROOT"];
 const lifecycleProbe = process.env["Q_MUSH_BROWSER_PROBE_SCRIPT"];
 const reportPath = process.env["Q_MUSH_BROWSER_PROBE_REPORT"];
@@ -23,8 +25,7 @@ const browserTests = Bun.spawn(
     stdout: "ignore",
   },
 );
-await Bun.write(
-  `${reportPath}.launcher`,
-  JSON.stringify({ launcherPid: browserTests.pid }),
-);
+await publishBrowserLifecycleReport(`${reportPath}.launcher`, {
+  launcherPid: browserTests.pid,
+});
 await browserTests.exited;
