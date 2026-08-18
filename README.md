@@ -216,13 +216,13 @@ default and replaces completed history with a model-generated handoff once usage
 reaches 95%, then transparently continues the active session from that summary.
 Automatic and manual compaction model calls count toward cumulative cost. It can
 be turned off, and a ready session can be compacted manually without continuing
-it. Session transcripts and status survive page reloads; a ready, stopped, or
-failed session accepts follow-up instructions. When an assigned runner is
-removed, the session shows **Choose runner** instead of **Failed**, keeps its
-transcript and configuration, and disables follow-up, continue, image, and
-compaction controls until an online replacement and a confirmed working
-directory are selected. Reassignment itself does not resume work. **Stop
-session** aborts the model request and cancels an active runner command.
+it. **Ready** is continuable `idle`; spawned finals report once per generation.
+**Completed** is terminal child success; waiting for answers is non-final. When
+an assigned runner is removed, it shows **Choose runner**, keeps its transcript
+and configuration, and disables follow-up, continue, image, and compaction
+controls until an online replacement and a confirmed working directory are
+selected. Reassignment itself does not resume work. **Stop session** aborts the
+model request and cancels an active runner command.
 
 The runner executes file tools and bare-metal shells with the runner process's
 local account permissions. In bare-metal sessions file tools accept any path

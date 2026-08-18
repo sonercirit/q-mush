@@ -27,6 +27,19 @@ function currentGenerationMessages(
   );
 }
 
+function generationHasFinalResponse(
+  detail: AgentSessionDetail,
+  messages: readonly AgentSessionMessage[],
+): boolean {
+  if (detail.status !== "idle") return true;
+  const final = messages.at(-1);
+  return (
+    detail.pendingQuestions === null &&
+    final?.role === "assistant" &&
+    final.toolCalls.length === 0
+  );
+}
+
 export function spawnedSessionReport(
   completed: AgentSessionDetail,
   parentId: string,
@@ -34,12 +47,14 @@ export function spawnedSessionReport(
   if (
     completed.status !== "completed" &&
     completed.status !== "failed" &&
+    completed.status !== "idle" &&
     completed.status !== "stopped"
   ) {
     return undefined;
   }
   const failed = completed.status === "failed";
   const messages = currentGenerationMessages(completed);
+  if (!generationHasFinalResponse(completed, messages)) return undefined;
   const terminalAssistant = messages.findLast(
     ({ role, toolCalls }) => role === "assistant" && toolCalls.length === 0,
   );

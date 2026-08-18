@@ -123,7 +123,12 @@ export interface PendingSpawnedSession {
   readonly userId: string;
 }
 
-const REPORTABLE_CHILD_STATUSES = ["completed", "failed", "stopped"] as const;
+const REPORTABLE_CHILD_STATUSES = [
+  "completed",
+  "failed",
+  "idle",
+  "stopped",
+] as const;
 
 export function pendingSpawnedSessions(
   database: AppDatabase,

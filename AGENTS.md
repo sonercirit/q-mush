@@ -113,11 +113,11 @@ Living project memory.
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Choices persist with canonical schemas. `read_session` is bounded;
-  `get_session_options` pages choices. A durable generation ledger delivers one
-  sanitized terminal event per owned child attempt, including
-  continued/immediate failures; routes survive delivery, recreation, compaction,
-  and disconnects. Idle parents retain events until resumed. `parallel` has four
-  ordered workers, bounded output, and cancellation.
+  `get_session_options` pages choices. A durable per-generation ledger delivers
+  one sanitized event per child generation: terminal statuses and an idle final
+  assistant response report; an input pause does not. Routes survive recreation,
+  compaction, and disconnects; idle parents retain events for explicit resume.
+  `parallel` has four ordered workers, bounded output, and cancellation.
   `solid/session-transcript.tsx` renders prompts, Markdown, code, JSON, diffs,
   and results while preserving line breaks; lists page by ten. Live sessions use
   `solid/realtime-client.ts`, `solid/session-client.tsx`,
