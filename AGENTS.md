@@ -39,9 +39,9 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
-  `test:browser` uses bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
-  recursion fails for `./` or absolute paths. It pins headless mode and clears
-  inherited `PWDEBUG` before real Chromium.
+  `test:browser` needs bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
+  fails for `./`/absolute paths. It pins headless and sets `PWDEBUG=0` before
+  real Chromium.
 - `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
 - CI uses Bun 1.3.14, frozen lockfile.
 

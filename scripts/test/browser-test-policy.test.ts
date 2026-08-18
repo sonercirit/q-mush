@@ -9,11 +9,14 @@ import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
 const BROWSER_TEST_ENTRY = join(ROOT_DIRECTORY, "scripts", "test-browser.ts");
+const BROWSER_LIFECYCLE_BUN = fileURLToPath(
+  new URL("fixtures/browser-lifecycle-bun.ts", import.meta.url),
+);
 const BROWSER_LIFECYCLE_PROBE = fileURLToPath(
   new URL("fixtures/browser-lifecycle-probe.ts", import.meta.url),
 );
 const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
-  new URL("fixtures/playwright-launch-probe.mts", import.meta.url),
+  new URL("fixtures/playwright-launch-probe.ts", import.meta.url),
 );
 
 function restorePlaywrightLaunch(): void {
@@ -110,24 +113,19 @@ interface PlaywrightLaunchResult {
   readonly workingDirectory: string;
 }
 
-function expectHeadlessBinaryArguments(arguments_: readonly string[]): void {
-  const executableIndex = arguments_.findIndex((argument) =>
-    argument.endsWith("/bun"),
-  );
-  const commandArguments = arguments_.slice(executableIndex + 1);
+function expectGuardedVitestArguments(arguments_: readonly string[]): void {
   const expected = ["--no-orphans", "run", "--bun", "vitest"];
-  const commandOffset = commandArguments.findIndex(
+  const commandOffset = arguments_.findIndex(
     (argument) => argument === expected[0],
   );
   if (
-    executableIndex < 0 ||
     commandOffset < 0 ||
     expected.some(
-      (argument, index) => commandArguments[commandOffset + index] !== argument,
+      (argument, index) => arguments_[commandOffset + index] !== argument,
     )
   ) {
     throw new Error(
-      "Browser probe expected Bun's guarded Vitest binary runner",
+      `Browser probe expected Bun's guarded Vitest binary runner: ${JSON.stringify(arguments_)}`,
     );
   }
 }
@@ -148,7 +146,7 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
       const inheritedPath = process.env["PATH"] ?? "";
       await writeBunExecutable(
         executable,
-        `(${expectHeadlessBinaryArguments.toString()})(process.argv);\nawait import(${JSON.stringify(
+        `(${expectGuardedVitestArguments.toString()})(process.argv);\nawait import(${JSON.stringify(
           PLAYWRIGHT_LAUNCH_PROBE,
         )});\n`,
       );
@@ -164,7 +162,23 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
       });
       const output = new Response(probe.stdout).text();
       const errors = new Response(probe.stderr).text();
-      const exitCode = await probe.exited;
+      const timeout = AbortSignal.timeout(5_000);
+      const aborted = new Promise<never>((_resolve, reject) => {
+        timeout.addEventListener(
+          "abort",
+          () => {
+            reject(new Error("Playwright launch probe timed out"));
+          },
+          { once: true },
+        );
+      });
+      let exitCode: number;
+      try {
+        exitCode = await Promise.race([probe.exited, aborted]);
+      } finally {
+        if (probe.exitCode === null) probe.kill();
+        await probe.exited;
+      }
       const [stdout, stderr] = await Promise.all([output, errors]);
       if (exitCode !== 1) {
         throw new Error(`Playwright launch probe failed: ${stderr}`);
@@ -249,8 +263,9 @@ test("package and CI structurally use the guarded browser launcher", async () =>
 });
 
 interface BrowserLifecycleReport {
-  readonly descendantPid: number;
+  readonly browserPid: number;
   readonly launcherPid: number;
+  readonly runnerPid: number;
   readonly vitestPid: number;
 }
 
@@ -295,23 +310,32 @@ async function readBrowserLifecycleReport(
 ): Promise<BrowserLifecycleReport | undefined> {
   const processFile = Bun.file(reportPath);
   const launcherFile = Bun.file(`${reportPath}.launcher`);
-  if (!(await processFile.exists()) || !(await launcherFile.exists())) {
+  const runnerFile = Bun.file(`${reportPath}.runner`);
+  if (
+    !(await processFile.exists()) ||
+    !(await launcherFile.exists()) ||
+    !(await runnerFile.exists())
+  ) {
     return undefined;
   }
   const processes: unknown = await processFile.json();
   const launcher: unknown = await launcherFile.json();
+  const runner: unknown = await runnerFile.json();
   if (
     !isRecord(processes) ||
-    !Number.isInteger(processes["descendantPid"]) ||
+    !Number.isInteger(processes["browserPid"]) ||
     !Number.isInteger(processes["vitestPid"]) ||
     !isRecord(launcher) ||
-    !Number.isInteger(launcher["launcherPid"])
+    !Number.isInteger(launcher["launcherPid"]) ||
+    !isRecord(runner) ||
+    !Number.isInteger(runner["runnerPid"])
   ) {
     throw new TypeError("Browser lifecycle probe returned invalid process IDs");
   }
   return {
-    descendantPid: Number(processes["descendantPid"]),
+    browserPid: Number(processes["browserPid"]),
     launcherPid: Number(launcher["launcherPid"]),
+    runnerPid: Number(runner["runnerPid"]),
     vitestPid: Number(processes["vitestPid"]),
   };
 }
@@ -320,7 +344,7 @@ const SUPPORTS_NO_ORPHANS =
   process.platform === "darwin" || process.platform === "linux";
 
 test.runIf(SUPPORTS_NO_ORPHANS)(
-  "shipped launcher recursively cleans an unguarded browser descendant",
+  "shipped launcher recursively cleans a detached non-Bun browser",
   async () => {
     await withTemporaryDirectory(
       "q-mush-browser-lifecycle-probe-",
@@ -329,17 +353,17 @@ test.runIf(SUPPORTS_NO_ORPHANS)(
         const executable = join(directory, "bun");
         await writeBunExecutable(
           executable,
-          `const probe = process.env["Q_MUSH_BROWSER_PROBE_SCRIPT"];
-const report = process.env["Q_MUSH_BROWSER_PROBE_REPORT"];
-if (probe === undefined || report === undefined) throw new Error("Missing browser lifecycle probe paths");
-const browser = Bun.spawn([process.execPath, probe, report], {
-  stderr: "ignore",
-  stdin: "ignore",
-  stdout: "ignore",
-});
-await browser.exited;
-`,
+          `await import(${JSON.stringify(BROWSER_LIFECYCLE_BUN)});\n`,
         );
+        const packageSource = await readFile(
+          join(ROOT_DIRECTORY, "package.json"),
+          "utf8",
+        );
+        const browserCommand =
+          packageConfiguration(packageSource).scripts.get("test:browser");
+        if (browserCommand === undefined) {
+          throw new Error("package.json must define test:browser");
+        }
         const supervisor = Bun.spawn(
           [
             process.execPath,
@@ -351,6 +375,7 @@ await browser.exited;
             ),
           ],
           {
+            cwd: directory,
             detached: true,
             env: {
               ...process.env,
@@ -358,6 +383,11 @@ await browser.exited;
               Q_MUSH_BROWSER_PROBE_REPORT: reportPath,
               Q_MUSH_BROWSER_PROBE_ROOT: ROOT_DIRECTORY,
               Q_MUSH_BROWSER_PROBE_SCRIPT: BROWSER_LIFECYCLE_PROBE,
+              Q_MUSH_BROWSER_PROBE_PATH: `${directory}${delimiter}${process.env["PATH"] ?? ""}`,
+              Q_MUSH_BROWSER_REAL_BUN: process.execPath,
+              Q_MUSH_BROWSER_TEST_COMMAND: JSON.stringify(
+                browserCommand.split(" "),
+              ),
             },
             stderr: "pipe",
             stdin: "ignore",
@@ -391,23 +421,23 @@ await browser.exited;
             throw new Error("Browser lifecycle probe did not start");
           }
           const activeReport = report;
-          expect(new Set(Object.values(activeReport)).size).toBe(3);
+          expect(new Set(Object.values(activeReport)).size).toBe(4);
           expect(
             await Promise.all(
               Object.values(activeReport).map(processIsRunning),
             ),
-          ).toEqual([true, true, true]);
+          ).toEqual([true, true, true, true]);
 
           killProcess(activeReport.launcherPid);
 
           await expect
             .poll(
-              async () =>
-                (
-                  await Promise.all(
-                    Object.values(activeReport).map(processIsRunning),
-                  )
-                ).some(Boolean),
+              async () => {
+                const running = await Promise.all(
+                  Object.values(activeReport).map(processIsRunning),
+                );
+                return running.some(Boolean);
+              },
               { interval: 10, timeout: 5_000 },
             )
             .toBe(false);

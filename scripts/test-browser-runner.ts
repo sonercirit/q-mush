@@ -19,6 +19,8 @@ export interface BrowserTestDependencies {
 }
 
 const defaultDependencies: BrowserTestDependencies = {
+  // PATH resolution is intentional: compatibility probes replace Bun while
+  // still exercising this shipped runner.
   spawn: (command, options) => Bun.spawn([...command], options),
 };
 
