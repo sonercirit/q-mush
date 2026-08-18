@@ -143,6 +143,8 @@ test("a spawned session resumes its interrupted step after server recreation", a
   await drain;
 
   expect(sessionFor(initial, childId)).toMatchObject({
+    parentExecutionGeneration: 0,
+    parentSessionId: SESSION_ID,
     restartHandoff: { operation: "agent" },
     status: "paused",
   });
@@ -175,6 +177,8 @@ test("a spawned session resumes its interrupted step after server recreation", a
     ),
   ).toBe(true);
   expect(sessionFor(recreated, childId)).toMatchObject({
+    parentExecutionGeneration: 0,
+    parentSessionId: SESSION_ID,
     restartHandoff: null,
     status: "completed",
   });

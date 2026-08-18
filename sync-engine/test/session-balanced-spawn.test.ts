@@ -11,6 +11,7 @@ import { providerStep } from "./provider-step-fixtures.ts";
 import {
   childSessionId,
   completeChildAgentFile,
+  failedSpawnOutput,
   spawnCall,
 } from "./session-agent-spawn-helpers.ts";
 import { startToolSession } from "./session-agent-tool-setup.ts";
@@ -23,6 +24,12 @@ import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000095";
+
+function balancedCredentials() {
+  const primary = createTestProviderCredential(CREDENTIAL_ID);
+  const secondary = createTestProviderCredential(SECOND_CREDENTIAL_ID);
+  return { openai: [primary, secondary] };
+}
 
 class BalancedSpawnModel implements AgentModel {
   #step = 0;
@@ -53,12 +60,7 @@ describe("balanced session agent spawn", () => {
     const setup = await startToolSession(
       model,
       {
-        credentials: {
-          openai: [
-            createTestProviderCredential(CREDENTIAL_ID),
-            createTestProviderCredential(SECOND_CREDENTIAL_ID),
-          ],
-        },
+        credentials: balancedCredentials(),
         modelFactory: ({ credential }) => ({
           complete: () => {
             selectedCredentials.push(testCredentialId(credential));
@@ -89,6 +91,31 @@ describe("balanced session agent spawn", () => {
       CREDENTIAL_ID,
       SECOND_CREDENTIAL_ID,
     ]);
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("persists one failed linked child when every balanced credential rejects", async () => {
+    const setup = await startToolSession(
+      new BalancedSpawnModel(),
+      { credentials: balancedCredentials() },
+      () => {
+        throw new AgentModelDiscoveryError("rejected", 429);
+      },
+    );
+
+    const output = await failedSpawnOutput(setup);
+    const children = setup.sessions
+      .listForUser(TEST_USER_ID)
+      .filter(({ id }) => id !== SESSION_ID);
+
+    expect(output).toContain('"status": "failed"');
+    expect(output).toContain('"error": "credential_unavailable"');
+    expect(children).toHaveLength(1);
+    expect(children[0]).toMatchObject({
+      parentExecutionGeneration: 0,
+      parentSessionId: SESSION_ID,
+      status: "failed",
+    });
     closeSessionTestDatabase(setup.database);
   });
 });

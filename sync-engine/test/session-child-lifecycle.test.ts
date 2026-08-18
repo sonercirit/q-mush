@@ -189,7 +189,10 @@ function expectCallbackNoOp(
   expect(
     parent?.messages.some(({ content }) => content.includes("Spawned session")),
   ).toBe(false);
-  expect(child).toMatchObject({ parentExecutionGeneration: null });
+  expect(child).toMatchObject({
+    parentExecutionGeneration: 0,
+    parentSessionId: SESSION_ID,
+  });
   expect(terminalCallbackRecorded(child)).toBe(true);
   expect(model.parentRequests).toBe(2);
   expect(

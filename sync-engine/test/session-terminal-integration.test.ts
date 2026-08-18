@@ -256,7 +256,7 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
   );
   expect(continuedChild).toMatchObject({
     generation: 1,
-    parentExecutionGeneration: null,
+    parentExecutionGeneration: 0,
     parentSessionId: SESSION_ID,
     status: "idle",
   });

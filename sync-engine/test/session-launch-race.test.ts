@@ -533,26 +533,25 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       spawnInput(setup, "Delegate through the production spawn path"),
     );
 
-    if (expected.race === "restart") {
-      expect(parseToolOutput(output)).toEqual({ error: expected.error });
-    } else {
-      expect(output).toEqual({
-        output: "Error: The agent session was stopped",
-        state: "failed",
-      });
-    }
+    expect(parseToolOutput(output)).toMatchObject({
+      error: expected.error,
+      status: expected.race === "none" ? "failed" : "queued",
+    });
     const child = assertLaunchRaceState(
       setup,
       setup.launch,
       expected.race,
       "agent",
-      "queued",
     );
     if (expected.race === "none") {
       expect(child.messages).toEqual([
         expect.objectContaining({
           content: "Delegate through the production spawn path",
           role: "user",
+        }),
+        expect.objectContaining({
+          content: "Session failed: the child session could not be prepared",
+          role: "error",
         }),
       ]);
     }

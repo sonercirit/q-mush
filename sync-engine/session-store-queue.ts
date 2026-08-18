@@ -124,7 +124,7 @@ export function queueStoredSession(options: {
 
     if (stored.status === "completed") {
       const parentId = stored.parentSessionId;
-      const parentGeneration = stored.parentExecutionGeneration;
+      const parentGeneration = stored.parentCallbackGeneration;
       if (parentId !== null && parentGeneration !== null) {
         const report =
           completed?.generation !== stored.executionGeneration
@@ -206,7 +206,6 @@ export function queueStoredSession(options: {
         stepStartedAt: null,
         interruptedHandoff: null,
         executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-        parentExecutionGeneration: null,
         status: "queued",
         ...updatedAuditFields(userId, now),
       })

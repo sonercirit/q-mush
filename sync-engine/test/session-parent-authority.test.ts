@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
+import type { AgentSessionSummary } from "../../shared/session-model.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -31,6 +32,7 @@ import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
 const CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000092";
+const SECOND_CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000093";
 const FOREIGN_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000099";
 
 interface AuthoritySetup {
@@ -97,6 +99,7 @@ function commonActionDependencies() {
 function authoritySetup(options: {
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
+  readonly metadataError?: Error;
   readonly runningTarget?: boolean;
   readonly withTarget?: boolean;
 }): AuthoritySetup {
@@ -121,6 +124,8 @@ function authoritySetup(options: {
     "target-authority-message",
     CHILD_SESSION_ID,
     "child-authority-message",
+    SECOND_CHILD_SESSION_ID,
+    "second-child-authority-message",
   ];
   const store = new SessionStore(
     database,
@@ -158,6 +163,14 @@ function authoritySetup(options: {
   );
   const notify = vi.fn();
   const runtimes = new SessionRuntimes();
+  const readCredential = async () => {
+    if (options.gateCredential === true) await credentialGate.wait();
+    return credential;
+  };
+  const withCredential: ConstructorParameters<
+    typeof SessionAgentActions
+  >[0]["withCredential"] = async (_userId, _selection, action) =>
+    action(await readCredential());
   const actions = new SessionAgentActions({
     ...commonActionDependencies(),
     compactSession: startManualSessionCompactionForUserId,
@@ -165,6 +178,9 @@ function authoritySetup(options: {
     discoverSessionMetadata: async () => {
       if (options.gateMetadata === true) {
         await metadataGate.wait();
+      }
+      if (options.metadataError !== undefined) {
+        throw options.metadataError;
       }
       return {
         adaptiveThinking: null,
@@ -177,15 +193,10 @@ function authoritySetup(options: {
     launchSession: launch,
     notify,
     now: () => TEST_NOW + 3,
-    readCredential: () => Promise.resolve(credential),
+    readCredential,
     runtimes,
     store,
-    withCredential: async (_userId, _selection, action) => {
-      if (options.gateCredential === true) {
-        await credentialGate.wait();
-      }
-      return action(credential);
-    },
+    withCredential,
   }).actions(
     SESSION_ID,
     TEST_USER_ID,
@@ -238,34 +249,48 @@ function spawnInput() {
   };
 }
 
-function expectNoSideEffects(setup: AuthoritySetup): void {
+function linkedChildSummaries(setup: AuthoritySetup) {
+  return setup.store.list(TEST_USER_ID).filter(({ id }) => id !== SESSION_ID);
+}
+
+function expectLinkedChild(
+  child: AgentSessionSummary | undefined,
+  status: "failed" | "queued",
+): void {
+  expect(child).toMatchObject({
+    parentExecutionGeneration: 0,
+    parentSessionId: SESSION_ID,
+    status,
+  });
+}
+
+function expectOnlyParentUnchanged(setup: AuthoritySetup): void {
   expect(setup.launch).not.toHaveBeenCalled();
   expect(setup.notify).not.toHaveBeenCalled();
 }
 
 function closeAuthoritySetup(setup: AuthoritySetup): void {
-  expectNoSideEffects(setup);
+  expectOnlyParentUnchanged(setup);
   setup.close();
 }
 
-async function fenceAtGate(
-  gate: PromiseGate,
-  setup: AuthoritySetup,
-): Promise<void> {
-  await gate.entered;
-  fenceParent(setup);
-  gate.release(undefined);
-}
-
-async function expectStaleSpawn(
+async function expectReservedStaleSpawn(
   gate: PromiseGate,
   setup: AuthoritySetup,
   result: Promise<string>,
 ): Promise<void> {
-  await fenceAtGate(gate, setup);
+  await gate.entered;
+  const reserved = linkedChildSummaries(setup)[0];
+  expectLinkedChild(reserved, "queued");
+  fenceParent(setup);
+  gate.release(undefined);
   expect(await result).toContain("parent_stale");
-  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
-  closeAuthoritySetup(setup);
+  expect(setup.launch).not.toHaveBeenCalled();
+  expectLinkedChild(
+    setup.store.get(TEST_USER_ID, reserved?.id ?? "missing"),
+    "failed",
+  );
+  setup.close();
 }
 
 function targetDetail(setup: AuthoritySetup) {
@@ -462,18 +487,66 @@ describe("cross-session parent execution authority", () => {
     closeSetup(idle);
   });
 
-  test("does not create a child when the parent is fenced during credential access", async () => {
+  test("reserves concurrent children with the exact parent attempt before discovery", async () => {
+    const setup = authoritySetup({ gateMetadata: true });
+    const first = setup.actions.spawnSession(spawnInput());
+    const second = setup.actions.spawnSession({
+      ...spawnInput(),
+      prompt: "Second concurrent child",
+    });
+
+    await setup.metadataGate.entered;
+    await vi.waitFor(() => {
+      expect(setup.store.list(TEST_USER_ID)).toHaveLength(3);
+    });
+    const children = linkedChildSummaries(setup);
+    expect(children).toHaveLength(2);
+    expect(
+      children.every(
+        ({ parentExecutionGeneration, parentSessionId, status }) =>
+          parentExecutionGeneration === 0 &&
+          parentSessionId === SESSION_ID &&
+          status === "queued",
+      ),
+    ).toBe(true);
+
+    setup.metadataGate.release(undefined);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.stringContaining('"status": "spawned"'),
+      expect.stringContaining('"status": "spawned"'),
+    ]);
+    expect(setup.launch).toHaveBeenCalledTimes(2);
+    setup.close();
+  });
+
+  test("persists an owned-provider discovery failure as one linked child", async () => {
+    const setup = authoritySetup({
+      metadataError: new Error("provider rejected immediately"),
+    });
+
+    const output = await setup.actions.spawnSession(spawnInput());
+    const children = linkedChildSummaries(setup);
+
+    expect(output).toContain('"status": "failed"');
+    expect(output).toContain(`"sessionId": "${children[0]?.id ?? "missing"}"`);
+    expect(children).toHaveLength(1);
+    expectLinkedChild(children[0], "failed");
+    expect(setup.launch).not.toHaveBeenCalled();
+    setup.close();
+  });
+
+  test("keeps a linked failed child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });
-    await expectStaleSpawn(
+    await expectReservedStaleSpawn(
       setup.credentialGate,
       setup,
       setup.actions.spawnSession(spawnInput()),
     );
   });
 
-  test("does not create a child when the parent is fenced during metadata discovery", async () => {
+  test("keeps a linked failed child when the parent is fenced during metadata discovery", async () => {
     const setup = authoritySetup({ gateMetadata: true });
-    await expectStaleSpawn(
+    await expectReservedStaleSpawn(
       setup.metadataGate,
       setup,
       setup.actions.spawnSession(spawnInput()),

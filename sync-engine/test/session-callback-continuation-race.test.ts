@@ -6,6 +6,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  expectParentId,
   spawnedChildSetup,
   type SpawnedChildReference,
 } from "./session-store-spawn-test-helpers.ts";
@@ -118,15 +119,13 @@ test("manual continuation claims a completed child's pending callback", () => {
   expect(callback.content).toContain("Child terminal assistant message");
   expect(callback.content).toContain('"role": "assistant"');
   expect(callback.content).toBe(finisherCallbackContent());
-  expect(setup.store.spawnedSessionLink(TEST_USER_ID, setup.childId)).toBe(
-    undefined,
-  );
+  expectParentId(setup);
   expect(deliverLateCallback(setup)).toBeUndefined();
   expect(childCallbackCount(setup)).toBe(1);
   expect(queued).toMatchObject({
     detail: {
       generation: setup.childGeneration + 1,
-      parentExecutionGeneration: null,
+      parentExecutionGeneration: setup.parentGeneration,
       status: "queued",
     },
   });
@@ -136,7 +135,7 @@ test("manual continuation claims a completed child's pending callback", () => {
   const continued = setup.store.get(TEST_USER_ID, setup.childId);
   expect(continued).toMatchObject({
     generation: setup.childGeneration + 1,
-    parentExecutionGeneration: null,
+    parentExecutionGeneration: setup.parentGeneration,
     status: "idle",
   });
   expect(

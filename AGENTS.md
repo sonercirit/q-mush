@@ -9,28 +9,22 @@ Living project memory.
 
 ## Working Agreements
 
-- Research online: use brave-search on provider docs/trackers, then probe APIs,
-  schemas, usage metrics.
-- Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
+- Research online via provider docs/trackers, then probe APIs, schemas and
+  metrics. Call capabilities impossible only with excluding evidence.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now.
+  docs, performance, security and DX.
 - TDD: fail first, implement, refactor green.
 - DRY/KISS: authoritative logic, no premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight,
-  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
-  in a test.
-- Record new decisions, gotchas, and lessons here in the same change, unprompted
-  — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size cap. When evidence overturns a recorded finding, fix the code it
-  justified and every stale record in that change; act, don't ask.
-- Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failure.
+- Never weaken tests, special-case checks, or claim unperformed verification.
+  Fix defects on sight; if a fix proves harmful, codify why in a test.
+- Record new decisions and gotchas here in the same change; condense to fit.
+  When evidence overturns a finding, fix its code and stale records.
+- Keep workflows local-first: focused local tests/static/build; full suites only
+  in exact-head CI. Shell calls are capped at 60 seconds.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
@@ -116,11 +110,16 @@ Living project memory.
   pickers use canonical schemas. Bounded `read_session` spans transcript
   categories and definitions; `get_session_options` pages spawn choices. Grouped
   tools manage non-blocking owned children, report final messages, resume idle
-  parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists page by ten. Live sessions use
-  `solid/realtime-client.ts`, `solid/session-client.tsx`,
+  parents. Native spawns reserve one durable child before provider discovery;
+  `parent_session_id` plus `parent_execution_generation` is stable lineage,
+  while `parent_callback_generation` is consumed independently. Startup repairs
+  only unambiguous same-user/workspace direct or parallel native-spawn results
+  and fails unfinished reservations. Session roots and child groups paginate
+  independently, nesting each linked child once. `parallel` takes 2+ calls on
+  four ordered workers and bounds output. `solid/session-transcript.tsx` renders
+  prompts, tool definitions, raw details, Markdown, code/JSON, diffs and
+  results, preserving user line breaks; session lists page by ten. Live sessions
+  use `solid/realtime-client.ts`, `solid/session-client.tsx`,
   `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events are immediate, unchanged snapshots suppress
   notifications, keyed messages rerender only changes. The long-lived Solid root
@@ -206,9 +205,8 @@ Living project memory.
   Native-token and complete-function alpha matches of ≥20 tokens spanning a line
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
-- Repository policy scans tracked, unignored files: 20,000-code-point maximum
-  (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
-  outside `test`/`fixtures`.
+- Repository policy: 20,000-code-point maximum (`bun.lock`, `drizzle/`
+  excepted), tests only under `test`, no app HTML outside `test`/`fixtures`.
 
 ## Decisions and Gotchas
 

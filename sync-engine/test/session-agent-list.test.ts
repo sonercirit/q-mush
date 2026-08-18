@@ -147,6 +147,7 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
         id: `maximal-list-session-${String(index)}`,
         isDeleted: false,
         model: maximumText,
+        parentExecutionGeneration: index,
         parentSessionId: SESSION_ID,
         provider: "openrouter" as const,
         providerCredentialId: CREDENTIAL_ID,
@@ -168,8 +169,10 @@ test("paginates, validates, and bounds session listings at dispatch", async () =
   );
 
   expect(maxOutput).not.toContain("bounded session list output is too large");
-  expect(records(jsonRecord(maxOutput ?? "null")["items"])).toHaveLength(
-    MAXIMUM_LIST_SESSIONS_PAGE_SIZE,
+  const maxItems = records(jsonRecord(maxOutput ?? "null")["items"]);
+  expect(maxItems).toHaveLength(MAXIMUM_LIST_SESSIONS_PAGE_SIZE);
+  expect(maxItems.every((item) => item["parentSessionId"] === SESSION_ID)).toBe(
+    true,
   );
   expect(Buffer.byteLength(maxOutput ?? "", "utf8")).toBeLessThanOrEqual(
     48_000,

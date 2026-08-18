@@ -51,8 +51,7 @@ function expectReportDisposition(
   now = TEST_NOW + 5,
 ): void {
   expect(report(setup, now) !== undefined).toBe(claimed);
-  if (claimed) expect(spawnedLink(setup)).toBeUndefined();
-  else expectParentId(setup);
+  expectParentId(setup);
 }
 
 function expectReportClaimed(
@@ -89,7 +88,11 @@ function closeAfterParentAssertion(
 
 function updateChild(
   setup: SpawnedChildReference,
-  values: { parentExecutionGeneration?: null; runnerRequired?: true },
+  values: {
+    parentCallbackGeneration?: null;
+    parentExecutionGeneration?: null;
+    runnerRequired?: true;
+  },
 ): void {
   setup.database
     .update(agentSessions)
@@ -229,7 +232,9 @@ describe("spawned session report generation fencing", () => {
         setup.parentGeneration,
       ),
     ).toEqual({ status: "queued", userId: TEST_USER_ID });
-    expect(childSummary(setup)?.parentExecutionGeneration).toBeNull();
+    expect(childSummary(setup)?.parentExecutionGeneration).toBe(
+      setup.parentGeneration,
+    );
     closeAfterParentAssertion(setup, (parent) => {
       expect(parent?.messages.at(-1)?.content).toBe("Child complete");
     });
@@ -340,7 +345,7 @@ describe("spawned session report generation fencing", () => {
       setup.store.spawnedSessionChildren(TEST_USER_ID, setup.parentId),
     ).toEqual([setup.childId]);
     expect(childSummary(setup)).toMatchObject({
-      parentExecutionGeneration: null,
+      parentExecutionGeneration: setup.parentGeneration,
       parentSessionId: setup.parentId,
     });
     closeSetup(setup);
@@ -348,7 +353,10 @@ describe("spawned session report generation fencing", () => {
 
   test("does not expose historical links without a generation", () => {
     const setup = spawnedChildSetup();
-    updateChild(setup, { parentExecutionGeneration: null });
+    updateChild(setup, {
+      parentCallbackGeneration: null,
+      parentExecutionGeneration: null,
+    });
 
     expect(spawnedLink(setup)).toBeUndefined();
     expectNoPendingReports(setup);

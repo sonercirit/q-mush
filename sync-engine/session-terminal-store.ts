@@ -17,7 +17,7 @@ import { canonicalRestartHandoff } from "./session-restart-store.ts";
 import {
   runningCondition,
   sessionTimingUpdate,
-  storedParentExecutionGeneration,
+  storedParentCallbackGeneration,
   storedSessionSnapshotCondition,
   terminalSessionValues,
   updateStoredSessions,
@@ -187,7 +187,7 @@ export function recoverStoredTerminal(
   const settle = (
     transaction: Pick<AppDatabase, "insert" | "select" | "update">,
   ): boolean => {
-    const parentExecutionGeneration = storedParentExecutionGeneration(
+    const parentCallbackGeneration = storedParentCallbackGeneration(
       transaction,
       storedSessionSnapshotCondition(session),
     );
@@ -199,7 +199,7 @@ export function recoverStoredTerminal(
         now,
         terminalSessionValues(
           session,
-          normalSessionCompletionStatus({ parentExecutionGeneration }),
+          normalSessionCompletionStatus({ parentCallbackGeneration }),
           now,
         ),
       )

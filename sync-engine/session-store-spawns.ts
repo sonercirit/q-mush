@@ -164,7 +164,7 @@ export function pendingSpawnedSessions(
           status: REPORTABLE_CHILD_STATUSES,
         }),
         isNotNull(agentSessions.parentSessionId),
-        isNotNull(agentSessions.parentExecutionGeneration),
+        isNotNull(agentSessions.parentCallbackGeneration),
       ),
     )
     .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
@@ -261,11 +261,11 @@ function callbackDisposition(
       userId: options.userId,
     }),
     eq(agentSessions.parentSessionId, options.parentId),
-    eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
+    eq(agentSessions.parentCallbackGeneration, options.parentGeneration),
   );
   if (
     !updateStoredSessions(database, childCondition, {
-      parentExecutionGeneration: null,
+      parentCallbackGeneration: null,
     })
   ) {
     return undefined;

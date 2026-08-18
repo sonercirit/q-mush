@@ -21,7 +21,7 @@ import {
   activeSessionCondition,
   readActiveSessionTiming,
   sessionTimingUpdate,
-  storedParentExecutionGeneration,
+  storedParentCallbackGeneration,
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
@@ -611,8 +611,8 @@ export class RestartHandoffStore {
                 status:
                   settlement.status === "idle"
                     ? normalSessionCompletionStatus({
-                        parentExecutionGeneration:
-                          storedParentExecutionGeneration(
+                        parentCallbackGeneration:
+                          storedParentCallbackGeneration(
                             transaction,
                             condition,
                           ),

@@ -106,13 +106,20 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "adaptive_thinking",
   );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "parent_callback_generation",
+  );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "spawn_preparation_pending",
+  );
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 3",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 4",
     )
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    1_787_002_132_470,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
     MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
     STEP_STARTED_MIGRATION_TIMESTAMP,

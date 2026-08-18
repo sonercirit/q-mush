@@ -18,9 +18,14 @@ import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
 import {
   sessionExecutionIsCurrent,
+  type SessionExecutionAuthority,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
 import { readStoredSessionHistory } from "./session-history-store.ts";
+import {
+  repairSpawnedSessionLineage,
+  type SpawnLineageRepairResult,
+} from "./session-lineage-repair.ts";
 import { ManualCompactionStore } from "./session-manual-compaction-store.ts";
 import {
   cancelPendingInput,
@@ -34,6 +39,13 @@ import {
   queuedSessionDetails,
   queuedSessionOwnerIds,
 } from "./session-queued.ts";
+import {
+  claimSpawnedSessionReservation,
+  failSpawnedSessionReservation,
+  prepareSpawnedSessionReservation,
+  recoverSpawnedSessionReservations,
+  type SpawnedSessionMetadata,
+} from "./session-spawn-reservation-store.ts";
 import {
   createStoredSession,
   type CreateAgentSession,
@@ -102,6 +114,17 @@ export class SessionStore extends SessionStoreRestarts {
       systemActorId: SYSTEM_ID,
     });
   }
+  repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult {
+    return repairSpawnedSessionLineage(this.#database, now);
+  }
+  recoverSpawnedSessionReservations(now: number): number {
+    return recoverSpawnedSessionReservations({
+      content: "Session failed: the server restarted during child preparation",
+      database: this.#database,
+      generateId: this.#resources[1],
+      now,
+    });
+  }
   get #database(): AppDatabase {
     return this.#resources[0];
   }
@@ -117,6 +140,61 @@ export class SessionStore extends SessionStoreRestarts {
   }
   create(input: CreateAgentSession, now: number): CreateSessionResult {
     return createStoredSession(this.#writeResources(), input, now);
+  }
+  #spawnIdentity(userId: string, sessionId: string, generation: number) {
+    return { generation, sessionId, userId };
+  }
+  prepareSpawnedSession(
+    identity: { readonly generation: number; readonly sessionId: string },
+    userId: string,
+    authority: SessionExecutionAuthority,
+    metadata: SpawnedSessionMetadata,
+    now: number,
+  ) {
+    const reservation = this.#spawnIdentity(
+      userId,
+      identity.sessionId,
+      identity.generation,
+    );
+    return prepareSpawnedSessionReservation({
+      authority,
+      database: this.#database,
+      identity: reservation,
+      metadata,
+      now,
+    });
+  }
+  claimSpawnedSession(
+    userId: string,
+    identity: { readonly generation: number; readonly sessionId: string },
+    authority: SessionExecutionAuthority,
+  ): boolean {
+    const options = {
+      authority,
+      database: this.#database,
+      identity: this.#spawnIdentity(
+        userId,
+        identity.sessionId,
+        identity.generation,
+      ),
+    };
+    return claimSpawnedSessionReservation(options);
+  }
+  failSpawnedSessionPreparation(
+    userId: string,
+    sessionId: string,
+    generation: number,
+    content: string,
+    now: number,
+  ): boolean {
+    return failSpawnedSessionReservation({
+      allowClaimed: true,
+      content,
+      database: this.#database,
+      generateId: this.#resources[1],
+      identity: this.#spawnIdentity(userId, sessionId, generation),
+      now,
+    });
   }
   fork(...parameters: SessionStoreForkParameters): SessionStoreForkResult {
     return forkStoredSessionFromSource(

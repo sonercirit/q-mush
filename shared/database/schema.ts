@@ -364,6 +364,12 @@ export const agentSessions = sqliteTable(
     workspaceId: workspaceIdColumn(),
     parentSessionId: text("parent_session_id"),
     parentExecutionGeneration: integer("parent_execution_generation"),
+    parentCallbackGeneration: integer("parent_callback_generation"),
+    spawnPreparationPending: integer("spawn_preparation_pending", {
+      mode: "boolean",
+    })
+      .notNull()
+      .default(false),
     runnerId: text("runner_id")
       .notNull()
       .references(() => runners.id, { onDelete: "restrict" }),
@@ -430,6 +436,11 @@ export const agentSessions = sqliteTable(
     index("agent_sessions_runner_status_index").on(
       table.runnerId,
       table.status,
+    ),
+    index("agent_sessions_parent_owner_deletion_index").on(
+      table.parentSessionId,
+      table.userId,
+      table.isDeleted,
     ),
   ],
 );

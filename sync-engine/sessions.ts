@@ -152,6 +152,8 @@ class DrizzleSessionIntegration
       database,
       dependencies.randomId ?? createUuidV7,
     );
+    this.#store.repairSpawnedSessionLineage(this.#now());
+    this.#store.recoverSpawnedSessionReservations(this.#now());
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,

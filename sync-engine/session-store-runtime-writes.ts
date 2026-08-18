@@ -18,7 +18,7 @@ import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import {
   runningCondition,
   sessionGenerationCondition,
-  storedParentExecutionGeneration,
+  storedParentCallbackGeneration,
 } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import type { SessionRuntimeTarget } from "./session-store-types.ts";
@@ -253,7 +253,7 @@ function terminalSessionStatus(
 ): "completed" | "idle" {
   const condition = runningSessionCondition(options);
   return normalSessionCompletionStatus({
-    parentExecutionGeneration: storedParentExecutionGeneration(
+    parentCallbackGeneration: storedParentCallbackGeneration(
       options.resources.database,
       condition,
     ),

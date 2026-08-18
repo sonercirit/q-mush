@@ -1,7 +1,10 @@
 import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionSummary,
+} from "../../shared/session-model.ts";
 import { OPENAI_PANEL } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
 import {
@@ -251,20 +254,46 @@ function parentSession() {
   };
 }
 
+function relatedSession(
+  parent: AgentSessionSummary,
+  id: string,
+  title: string,
+  parentSessionId: string | null = parent.id,
+): AgentSessionSummary {
+  return { ...parent, id, parentSessionId, title };
+}
+
+function expectSessionDepth(
+  container: ParentNode,
+  sessionId: string,
+  depth: number,
+): void {
+  const item = query(container, `[data-session-id='${sessionId}']`).closest(
+    "li",
+  );
+  expect(item?.getAttribute("data-session-depth")).toBe(String(depth));
+}
+
+function childGroupSession(
+  container: ParentNode,
+  parentId: string,
+  childId: string,
+): Element | null {
+  return query(
+    container,
+    `[data-child-session-group='${parentId}']`,
+  ).querySelector(`[data-session-id='${childId}']`);
+}
+
 test("nests spawned sessions under a collapsed parent", () => {
   const parent = parentSession();
-  const child = {
-    ...parent,
-    id: "child-session",
-    parentSessionId: parent.id,
-    title: "Delegated task",
-  };
-  const detached = {
-    ...parent,
-    id: "detached-session",
-    parentSessionId: "missing-parent",
-    title: "Detached task",
-  };
+  const child = relatedSession(parent, "child-session", "Delegated task");
+  const detached = relatedSession(
+    parent,
+    "detached-session",
+    "Detached task",
+    "missing-parent",
+  );
   const { container } = mountedSessionList([child, detached, parent]);
   const parentToggle = query(
     container,
@@ -290,11 +319,11 @@ test("nests spawned sessions under a collapsed parent", () => {
       "button[aria-label='Collapse child sessions for Parent task']",
     ).textContent,
   ).toContain("Collapse (1)");
+  expect(childGroupSession(container, parent.id, child.id)).not.toBeNull();
   expect(
-    query(container, "[data-session-id='child-session']")
-      .closest("li")
-      ?.getAttribute("data-session-depth"),
-  ).toBe("1");
+    container.querySelectorAll("[data-session-id='child-session']"),
+  ).toHaveLength(1);
+  expectSessionDepth(container, child.id, 1);
 });
 
 test("bounds expanded children while revealing the selected child", () => {
@@ -311,7 +340,7 @@ test("bounds expanded children while revealing the selected child", () => {
 
   expect(container.querySelectorAll("[data-session-id]")).toHaveLength(1);
   select(selected.id);
-  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(10);
+  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(11);
   expect(
     query(
       container,
@@ -325,7 +354,41 @@ test("bounds expanded children while revealing the selected child", () => {
   ).toBe("true");
   expect(
     container.querySelector("[data-load-more-sessions='true']"),
+  ).toBeNull();
+  expect(
+    container.querySelector("[data-load-more-children='parent-session']"),
   ).not.toBeNull();
+});
+
+test("reparents realtime rows without leaving a duplicate root", () => {
+  const parent = parentSession();
+  const child = relatedSession(
+    parent,
+    "realtime-child",
+    "Realtime child",
+    null,
+  );
+  const { container, controller, select } = mountedSessionList([child, parent]);
+  select(child.id);
+  expectSessionDepth(container, child.id, 0);
+
+  controller.applyRealtime([
+    parent,
+    {
+      ...child,
+      parentExecutionGeneration: 0,
+      parentSessionId: parent.id,
+    },
+  ]);
+
+  expect(
+    container.querySelectorAll("[data-session-id='realtime-child']"),
+  ).toHaveLength(1);
+  expect(
+    childGroupSession(container, parent.id, child.id),
+    "the grouped child",
+  ).toBeTruthy();
+  expectSessionDepth(container, child.id, 1);
 });
 
 test("loads more sessions on scroll and resets for a new root", () => {
