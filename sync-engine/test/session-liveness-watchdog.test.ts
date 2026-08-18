@@ -68,6 +68,9 @@ function watchdogSetup(
     >[0]["actions"];
     readonly allowUnsafeTestTiming?: boolean;
     readonly broker?: RunnerCommandBroker;
+    readonly cleanup?: ConstructorParameters<
+      typeof SessionLivenessWatchdog
+    >[0]["cleanup"];
     readonly graceMs?: number;
     readonly runtimes?: SessionRuntimes;
   } = {},
@@ -85,6 +88,7 @@ function watchdogSetup(
     actions: options.actions ?? { finished, reportAll, stopChildren },
     allowUnsafeTestTiming: options.allowUnsafeTestTiming ?? true,
     broker: options.broker ?? new RunnerCommandBroker(),
+    cleanup: options.cleanup ?? vi.fn(),
     database: setup.database,
     generateId: () => "watchdog-failure-message",
     graceMs: options.graceMs ?? 60_000,
@@ -127,6 +131,7 @@ function launchRuntime(
 ) {
   const deferred = Promise.withResolvers<undefined>();
   let signal: AbortSignal | undefined;
+  let setPending: ((component: SessionPendingComponent) => void) | undefined;
   expect(
     runtimes.launch(
       setup.detail.id,
@@ -134,6 +139,7 @@ function launchRuntime(
       generation,
       ({ controller, pendingComponent }) => {
         signal = controller.signal;
+        setPending = pendingComponent;
         if (component !== undefined) pendingComponent(component);
         return component === "provider_admission"
           ? new Promise<never>((_resolve, reject) => {
@@ -152,6 +158,9 @@ function launchRuntime(
   ).toBe(true);
   return {
     ...deferred,
+    pending: (pending: SessionPendingComponent) => {
+      setPending?.(pending);
+    },
     get signal() {
       return signal;
     },
@@ -173,6 +182,16 @@ function launchPendingRuntime(
     throw new Error("The pending runtime signal was unavailable");
   }
   return { ...runtime, runtimes };
+}
+
+function admissionWatchdogSetup() {
+  const setup = runningSetup();
+  const runtime = launchPendingRuntime(setup, "provider_admission");
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: runtime.runtimes,
+  });
+  return { runtime, setup, watchdog };
 }
 
 function dispatchBash(
@@ -208,6 +227,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
         stopChildren: vi.fn(),
       },
       broker: new RunnerCommandBroker(),
+      cleanup: vi.fn(),
       database: setup.database,
       dependencies: {
         braveSearch: { execute: () => Promise.resolve("unused") },
@@ -338,12 +358,7 @@ test("requires the stored execution generation to match its runtime", () => {
 });
 
 test("fails provider admission that remains unacknowledged beyond the grace bound", () => {
-  const setup = runningSetup();
-  const runtime = launchPendingRuntime(setup, "provider_admission");
-  const watchdog = watchdogSetup(setup, {
-    graceMs: 1_000,
-    runtimes: runtime.runtimes,
-  });
+  const { runtime, setup, watchdog } = admissionWatchdogSetup();
 
   scanPastGrace(watchdog);
 
@@ -373,16 +388,31 @@ test("does not time out an acknowledged provider request", () => {
   closeSetup(setup);
 });
 
+test("keeps an acknowledgement just before its deadline unbounded", () => {
+  const { runtime, setup, watchdog } = admissionWatchdogSetup();
+
+  watchdog.scan();
+  watchdog.setNow(TEST_NOW + 999);
+  runtime.pending("provider_request");
+  watchdog.scan();
+  watchdog.setNow(TEST_NOW + 20 * 60_000);
+  watchdog.scan();
+
+  expectStoredStatus(setup, "running");
+  expect(runtime.signal).toMatchObject({ aborted: false });
+  runtime.resolve();
+  closeSetup(setup);
+});
+
 test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
-  const runtimes = new SessionRuntimes();
-  const runtime = launchRuntime(setup, runtimes, setup.detail.generation);
+  const runtime = launchPendingRuntime(setup, "startup");
   const broker = new RunnerCommandBroker({
     commandId: () => "undispatched-command",
   });
   const queuedCommand = dispatchBash(setup, broker);
   const watchdog = watchdogSetup(setup, {
-    runtimes,
+    runtimes: runtime.runtimes,
     graceMs: 1_000,
     broker,
   });

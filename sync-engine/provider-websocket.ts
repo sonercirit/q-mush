@@ -1,4 +1,5 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
+import { isRecord } from "../shared/auth-model.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
 import { createProviderStreamAccumulator } from "./provider-stream.ts";
@@ -55,6 +56,14 @@ function messageText(event: Event): string {
   return event.data;
 }
 
+function providerResponseId(
+  event: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const response = event["response"];
+  const id = isRecord(response) ? response["id"] : undefined;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
 interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
   readonly body: Readonly<Record<string, unknown>>;
   readonly createSocket: ProviderWebSocketFactory;
@@ -106,6 +115,7 @@ export class ProviderWebSocketSession {
       const socket =
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
+      let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
       let requestActive = false;
@@ -164,6 +174,7 @@ export class ProviderWebSocketSession {
         } catch (error) {
           if (reusedSocket === undefined) {
             failUnknown(error);
+            socket.close(1011, "Provider connection failed");
             return;
           }
           // A reused socket that rejects a send died between steps; surface
@@ -185,12 +196,32 @@ export class ProviderWebSocketSession {
         try {
           const value: unknown = JSON.parse(messageText(event));
           invalidProviderMessage = false;
-          accumulator.push(value);
-          receivedEvent = true;
+          if (!isRecord(value)) {
+            return;
+          }
+          const eventResponseId = providerResponseId(value);
           if (!requestActive) {
+            if (value["type"] === "error") {
+              accumulator.push(value);
+              return;
+            }
+            if (
+              value["type"] !== "response.created" ||
+              eventResponseId === undefined
+            ) {
+              return;
+            }
+            currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");
+          } else if (
+            eventResponseId !== undefined &&
+            eventResponseId !== currentResponseId
+          ) {
+            return;
           }
+          accumulator.push(value);
+          receivedEvent = true;
 
           if (accumulator.completed) {
             settle(undefined, accumulator.finish());

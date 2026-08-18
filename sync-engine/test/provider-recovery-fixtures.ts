@@ -13,6 +13,7 @@ import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 export const COMPLETED_EVENT = {
   response: {
+    id: "response-complete",
     output: [
       {
         content: [{ text: "Done.", type: "output_text" }],
@@ -103,8 +104,10 @@ type WebSocketFactory = NonNullable<
 export function expectProviderSocketReleased(socket: FakeProviderSocket): void {
   expect(socket.closeCount).toBe(1);
   expect(
-    ["message", "error", "close"].map((type) => socket.listenerCount(type)),
-  ).toEqual([0, 0, 0]);
+    ["open", "message", "error", "close"].map((type) =>
+      socket.listenerCount(type),
+    ),
+  ).toEqual([0, 0, 0, 0]);
 }
 
 export function complete(
@@ -166,6 +169,13 @@ export function requireProviderSocket(
   return socket;
 }
 
+export function acknowledgeProviderSocket(
+  socket: FakeProviderSocket,
+  responseId = "response-complete",
+): void {
+  socket.receive({ response: { id: responseId }, type: "response.created" });
+}
+
 export function expireProviderSocket(
   socket: FakeProviderSocket,
   code: string,
@@ -193,6 +203,7 @@ export async function replaceProviderSocket(
   await sockets.waitForAttempt(index);
   const replacement = requireProviderSocket(sockets, index);
   replacement.open();
+  acknowledgeProviderSocket(replacement);
   replacement.receive(COMPLETED_EVENT);
 }
 

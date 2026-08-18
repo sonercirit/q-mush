@@ -283,10 +283,10 @@ Living project memory.
   them. OpenAI WebSocket Mode expires after 60 minutes; the canonical
   `websocket_connection_limit_reached` and observed underscore-free variant
   replace the socket once per step, then use bounded retries, replaying only the
-  unpersisted step. A successful local send is only provider admission: bound it
-  until the first valid provider event, after which execution stays unbounded.
-  Runtime pending diagnostics are generation-fenced; admission failure aborts
-  and cleans its owning runtime without replaying durable tools. Other
+  unpersisted step. Local send is admission: bound it until correlated
+  `response.created`; discard unknown, pre-creation and mismatched-ID frames.
+  Acknowledged work stays unbounded. Diagnostics are generation-fenced; watchdog
+  failure aborts its runtime and runs cleanup without replaying tools. Other
   WebSocket/accepted-HTTP interruptions or provider errors retry before
   persistence; replays reset partial UI deltas and exhausted WebSockets fall
   back to HTTP. Permanent errors and aborts do not retry; terminal failures

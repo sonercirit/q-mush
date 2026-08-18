@@ -290,6 +290,7 @@ class DrizzleSessionIntegration
         });
       },
       broker: this.#broker,
+      cleanup: this.#cleanup.cleanup.bind(this.#cleanup),
       database,
       dependencies,
       runtimes: this.#runtimes,

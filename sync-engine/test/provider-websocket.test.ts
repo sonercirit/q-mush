@@ -3,6 +3,7 @@ import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
+  acknowledgeProviderSocket,
   apiKeyModel,
   chatCompletedResponse,
   complete,
@@ -20,15 +21,102 @@ import {
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
+class InstrumentedAbortController extends AbortController {
+  abortListenerCount = 0;
+
+  constructor() {
+    super();
+    const signal = this.signal;
+    const add = signal.addEventListener.bind(signal);
+    const remove = signal.removeEventListener.bind(signal);
+    signal.addEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: AddEventListenerOptions | boolean,
+    ) => {
+      if (type === "abort") this.abortListenerCount += 1;
+      add(type, listener, options);
+    };
+    signal.removeEventListener = (
+      type: string,
+      listener: EventListenerOrEventListenerObject,
+      options?: EventListenerOptions | boolean,
+    ) => {
+      if (type === "abort") this.abortListenerCount -= 1;
+      remove(type, listener, options);
+    };
+  }
+}
+
+function completeWithSignal(
+  model: ChatCompletionsAgentModel,
+  signal: AbortSignal,
+) {
+  return model.complete([{ content: "Hello", role: "user" }], signal);
+}
+
+function instrumentedProviderRequest() {
+  const controller = new InstrumentedAbortController();
+  const sockets = new FakeProviderSockets();
+  const model = apiKeyModel({ webSocket: sockets.create });
+  const pending = completeWithSignal(model, controller.signal);
+  const socket = requireProviderSocket(sockets, 0);
+  socket.open();
+  return { controller, pending, socket };
+}
+
+function lifecycleModel(states: ("active" | "admission")[]) {
+  const sockets = new FakeProviderSockets();
+  return {
+    model: apiKeyModel({
+      onRequestState: (state) => states.push(state),
+      webSocket: sockets.create,
+    }),
+    sockets,
+  };
+}
+
+function beginLifecycleRequest(states: ("active" | "admission")[]) {
+  const { model, sockets } = lifecycleModel(states);
+  const pending = complete(model);
+  const socket = requireProviderSocket(sockets, 0);
+  socket.open();
+  expectRequestStates(states, "admission");
+  return { model, pending, socket };
+}
+
+function responseEvent(
+  type: "response.completed" | "response.created",
+  id: string,
+) {
+  return {
+    response:
+      type === "response.created"
+        ? { id }
+        : { ...COMPLETED_EVENT.response, id },
+    type,
+  };
+}
+
+function expectRequestPending(pending: Promise<unknown>): Promise<void> {
+  return expect(
+    Promise.race([pending.then(() => "settled"), Promise.resolve("pending")]),
+  ).resolves.toBe("pending");
+}
+
+function expectRequestStates(
+  states: readonly ("active" | "admission")[],
+  ...expected: ("active" | "admission")[]
+): void {
+  expect(states).toEqual(expected);
+}
+
 async function expectAbortWithoutHttp(
   model: ChatCompletionsAgentModel,
   controller: AbortController,
   interrupt: () => void,
 ): Promise<void> {
-  const pending = model.complete(
-    [{ content: "Hello", role: "user" }],
-    controller.signal,
-  );
+  const pending = completeWithSignal(model, controller.signal);
   interrupt();
   expect(await captureRejection(pending)).toMatchObject({ name: "AbortError" });
 }
@@ -56,27 +144,71 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
     type: "response.create",
   });
   expect(JSON.parse(socket?.sent[0] ?? "{}")).not.toHaveProperty("stream");
+  socket?.receive(responseEvent("response.created", "response-complete"));
   socket?.receive({ type: "response.output_text.delta", delta: "Done." });
   socket?.receive(COMPLETED_EVENT);
 
   expectDoneStep(await pending);
 });
 
+test("keeps admission bounded through unknown and stale provider frames", async () => {
+  const observedStates: ("active" | "admission")[] = [];
+  const request = beginLifecycleRequest(observedStates);
+
+  request.socket.receive({ type: "provider.keepalive" });
+  request.socket.receive(responseEvent("response.completed", "stale"));
+  expectRequestStates(observedStates, "admission");
+  await expectRequestPending(request.pending);
+
+  request.socket.receive(responseEvent("response.created", "current"));
+  expectRequestStates(observedStates, "admission", "active");
+  request.socket.receive(responseEvent("response.completed", "stale"));
+  await expectRequestPending(request.pending);
+  request.socket.receive(responseEvent("response.completed", "current"));
+  expectDoneStep(await request.pending);
+});
+
+test("removes the abort listener after WebSocket success", async () => {
+  const { controller, pending, socket } = instrumentedProviderRequest();
+  expect(controller.abortListenerCount).toBe(1);
+  acknowledgeProviderSocket(socket);
+  socket.receive(COMPLETED_EVENT);
+
+  await pending;
+  expect(controller.abortListenerCount).toBe(0);
+});
+
+test("removes the abort listener after WebSocket abort", async () => {
+  const { controller, pending, socket } = instrumentedProviderRequest();
+
+  controller.abort();
+  const error = await captureRejection(pending);
+  expect(error).toBeInstanceOf(DOMException);
+  expect(error instanceof DOMException ? error.name : "").toBe("AbortError");
+  expect(controller.abortListenerCount).toBe(0);
+  expectProviderSocketReleased(socket);
+});
+
+test("closes a fresh socket and releases listeners when send throws", async () => {
+  const controller = new InstrumentedAbortController();
+  const socket = new FakeProviderSocket();
+  socket.throwOnSend = true;
+  const model = apiKeyModel({ webSocket: () => socket });
+  const pending = completeWithSignal(model, controller.signal);
+
+  socket.open();
+  await expect(pending).rejects.toThrow("send failed");
+  expectProviderSocketReleased(socket);
+  expect(socket.listenerCount("open")).toBe(0);
+  expect(controller.abortListenerCount).toBe(0);
+});
+
 test("reports reused WebSocket admission until the provider acknowledges it", async () => {
   const states: ("active" | "admission")[] = [];
-  const sockets = new FakeProviderSockets();
-  const model = apiKeyModel({
-    onRequestState: states.push.bind(states),
-    webSocket: sockets.create,
-  });
-
-  const first = complete(model);
-  const socket = requireProviderSocket(sockets, 0);
-  socket.open();
-  expect(states).toEqual(["admission"]);
-  socket.receive({ response: { id: "response-1" }, type: "response.created" });
-  expect(states).toEqual(["admission", "active"]);
-  socket.receive(COMPLETED_EVENT);
+  const { model, pending: first, socket } = beginLifecycleRequest(states);
+  acknowledgeProviderSocket(socket, "response-1");
+  expectRequestStates(states, "admission", "active");
+  socket.receive(responseEvent("response.completed", "response-1"));
   await first;
 
   const controller = new AbortController();
@@ -85,7 +217,7 @@ test("reports reused WebSocket admission until the provider acknowledges it", as
     controller.signal,
   );
   expect(socket.sent).toHaveLength(2);
-  expect(states).toEqual(["admission", "active", "admission"]);
+  expectRequestStates(states, "admission", "active", "admission");
   expect(socket.listenerCount("message")).toBe(1);
 
   controller.abort();
@@ -105,12 +237,14 @@ test("reuses one WebSocket across steps and reconnects after idle close", async 
   await stepSockets.waitForAttempt(0);
   const socket = stepSockets.created[0];
   socket?.open();
-  socket?.receive(COMPLETED_EVENT);
+  if (socket !== undefined) acknowledgeProviderSocket(socket, "first");
+  socket?.receive(responseEvent("response.completed", "first"));
   expectDoneStep(await first);
 
   const second = complete(model);
   expect(socket?.sent).toHaveLength(2);
-  socket?.receive(COMPLETED_EVENT);
+  if (socket !== undefined) acknowledgeProviderSocket(socket, "second");
+  socket?.receive(responseEvent("response.completed", "second"));
   expectDoneStep(await second);
   expect(stepSockets.created).toHaveLength(1);
 
@@ -119,6 +253,7 @@ test("reuses one WebSocket across steps and reconnects after idle close", async 
   await stepSockets.waitForAttempt(1);
   const reconnected = stepSockets.created[1];
   reconnected?.open();
+  if (reconnected !== undefined) acknowledgeProviderSocket(reconnected);
   reconnected?.receive(COMPLETED_EVENT);
   expectDoneStep(await third);
 
@@ -171,6 +306,7 @@ test.each([
     const { delays, deltas, pending, sockets } = retryingSocket();
     const expired = requireProviderSocket(sockets, 0);
     expired.open();
+    acknowledgeProviderSocket(expired);
     expired.receive({
       delta: "Partial",
       type: "response.output_text.delta",
@@ -287,6 +423,7 @@ test("retries partial output after a socket error without stale deltas", async (
   const { delays, deltas, pending, sockets } = retryingSocket();
   const partialSocket = sockets.created[0];
   partialSocket?.open();
+  if (partialSocket !== undefined) acknowledgeProviderSocket(partialSocket);
   partialSocket?.receive({
     delta: "Partial",
     type: "response.output_text.delta",
@@ -300,6 +437,7 @@ test("retries partial output after a socket error without stale deltas", async (
   });
   const recoveredSocket = sockets.created[1];
   recoveredSocket?.open();
+  if (recoveredSocket !== undefined) acknowledgeProviderSocket(recoveredSocket);
   recoveredSocket?.receive({
     delta: "Done.",
     type: "response.output_text.delta",
@@ -321,6 +459,8 @@ test("retries transient failed events and clears partial output", async () => {
   const { delays, deltas, pending, sockets } = retry;
   const failedSocket = sockets.created[0];
   failedSocket?.open();
+  if (failedSocket !== undefined)
+    acknowledgeProviderSocket(failedSocket, "response-transient");
   failedSocket?.receive({
     delta: "Partial",
     type: "response.output_text.delta",
@@ -354,6 +494,8 @@ test("passes through permanent failed events without another socket", async () =
 
   const pending = complete(model);
   sockets.created[0]?.open();
+  if (sockets.created[0] !== undefined)
+    acknowledgeProviderSocket(sockets.created[0], "response-permanent");
   sockets.created[0]?.receive({
     response: {
       error: {
@@ -377,6 +519,7 @@ test("falls back to HTTP after bounded transient failed events", () =>
   expectBoundedHttpFallback({
     failAttempt: (socket, index) => {
       socket.open();
+      acknowledgeProviderSocket(socket, `response-${String(index)}`);
       socket.receive({
         response: {
           error: { code: "server_is_overloaded", message: "Try again later" },

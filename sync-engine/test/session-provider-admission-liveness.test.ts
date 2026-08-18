@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
@@ -5,12 +6,17 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
+import {
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  type RunnerToolCommand,
+} from "../../shared/runner-command-broker.ts";
+import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import type { AgentModelRequestOptions } from "../../sync-engine/agent-model-options.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createAuthenticatedRequest,
+  createAuthenticatedTestDatabase,
   TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
@@ -31,6 +37,7 @@ import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { startToolSessionSetup } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
+  createSessionRequest,
   RUNNER_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
@@ -47,6 +54,9 @@ import {
 
 const TOOL_CALL_ID = "call-terminal-bash";
 const TOOL_OUTPUT = "terminal-result";
+const temporaryDirectory = useSynchronousTemporaryDirectories(
+  "q-mush-provider-admission-",
+);
 
 class StalledReusedSocketModel implements AgentModel {
   readonly #model: ChatCompletionsAgentModel;
@@ -87,7 +97,10 @@ class StalledReusedSocketModel implements AgentModel {
   }
 }
 
-async function createStalledSession() {
+async function createStalledSession(
+  executionEnvironment: "bare_metal" | "container" = "bare_metal",
+  database?: ReturnType<typeof createAuthenticatedTestDatabase>,
+) {
   const clock = testLivenessClock(1_000, 100, true);
   let model: StalledReusedSocketModel | undefined;
   const setup = connectedSessionSetup(
@@ -95,6 +108,7 @@ async function createStalledSession() {
     "api_key",
     undefined,
     {
+      ...(database === undefined ? {} : { database }),
       liveness: clock.dependencies,
       modelFactory: (options) => {
         model ??= new StalledReusedSocketModel(
@@ -106,7 +120,21 @@ async function createStalledSession() {
       now: clock.now,
     },
   );
-  await startToolSessionSetup(setup);
+  await startToolSessionSetup(
+    setup,
+    null,
+    createSessionRequest(
+      true,
+      "high",
+      "gpt-4.1-mini",
+      [],
+      undefined,
+      undefined,
+      undefined,
+      executionEnvironment,
+    ),
+    executionEnvironment,
+  );
   await waitForSessionValue(
     () => model,
     (candidate) => candidate !== undefined,
@@ -137,7 +165,7 @@ async function emitToolCall(model: StalledReusedSocketModel): Promise<void> {
     type: "response.output_item.added",
   });
   socket.receive({
-    response: { output: [call] },
+    response: { id: "response-tool", output: [call] },
     type: "response.completed",
   });
 }
@@ -278,7 +306,7 @@ function expectDurableToolOnce(
 }
 
 test("fails a reused provider socket that stalls after a durable tool result", async () => {
-  const run = await createStalledSession();
+  const run = await createStalledSession("container");
   const realtime = configuredRealtimeTestIntegration({
     auth: {
       ...createGoogleAuthFromEnvironment(
@@ -304,6 +332,14 @@ test("fails a reused provider socket that stalls after a durable tool result", a
     runtimePending: { component: "provider_admission", since: run.clock.now() },
     status: "running",
   });
+  socket.receive({ type: "provider.keepalive" });
+  socket.receive({
+    response: { id: "stale-response", output: [] },
+    type: "response.completed",
+  });
+  expect(currentDetail(run)?.runtimePending).toMatchObject({
+    component: "provider_admission",
+  });
   await waitForSessionValue(
     () => hasRealtimeSession(browser.record.sent, hasPendingAdmission),
     (published) => published === true,
@@ -324,6 +360,15 @@ test("fails a reused provider socket that stalls after a durable tool result", a
     (published) => published === true,
   );
   expectProviderSocketReleased(socket);
+  await waitForSessionValue(
+    () => run.setup.cleanupCommands.length,
+    (count) => count === 1,
+  );
+  expect(run.setup.cleanupCommands[0]).toMatchObject({
+    executionEnvironment: "container",
+    sessionId: SESSION_ID,
+    tool: RUNNER_EXECUTION_CLEANUP_COMMAND,
+  });
   expectDurableToolOnce(run);
   expect(run.model.requests).toHaveLength(2);
   expectToolReplay(run.model, 1);
@@ -332,24 +377,29 @@ test("fails a reused provider socket that stalls after a durable tool result", a
   closeLivenessSession(run.setup);
 });
 
-test("recreation waits for explicit resume and does not duplicate durable tools", async () => {
-  const run = await createStalledSession();
-  await completeDurableTool(run);
-  scanAfter(run.clock, 1_000);
-  await waitForSessionValue(
-    () => sessionStatus(run.setup.sessions),
-    (status) => status === "failed",
-  );
+test("process recreation fails the running row without replaying durable tools", async () => {
+  const databasePath = join(temporaryDirectory(), "sessions.sqlite");
+  const database = createAuthenticatedTestDatabase(databasePath);
+  const run = await createStalledSession("bare_metal", database);
+  const { socket } = await completeDurableTool(run);
+  expect(sessionStatus(run.setup.sessions)).toBe("running");
 
+  run.model.sockets.created[0]?.close(1000, "Process terminated");
+  expectProviderSocketReleased(socket);
+  closeLivenessSession(run.setup);
+
+  const reopened = createAuthenticatedTestDatabase(databasePath);
   const resumedModel = new ScriptedAgentModel([
     { content: "Recovered from durable tool output.", toolCalls: [] },
   ]);
   const recreated = connectedSessionSetup(resumedModel, "api_key", undefined, {
-    database: run.setup.database,
+    database: reopened,
   });
   await Bun.sleep(1);
+  expect(sessionStatus(recreated.sessions)).toBe("failed");
   expect(resumedModel.requests).toHaveLength(0);
   expect(recreated.latestRunnerCommand()).toBeUndefined();
+  expect(storedToolMessages(recreated.sessions)).toHaveLength(1);
 
   const response = await recreated.sessions.continue(
     createAuthenticatedRequest(

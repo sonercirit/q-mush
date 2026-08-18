@@ -4,6 +4,7 @@ import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionDependencies } from "./session-dependencies.ts";
+import type { SessionLivenessCleanupOptions } from "./session-liveness-options.ts";
 import {
   DEFAULT_SESSION_LIVENESS_GRACE_MS,
   SessionLivenessWatchdog,
@@ -15,7 +16,7 @@ import type { SessionStore } from "./session-store.ts";
 const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
 const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;
 
-interface SessionLivenessSchedulerOptions {
+interface SessionLivenessSchedulerOptions extends SessionLivenessCleanupOptions {
   readonly actions: Pick<
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
@@ -44,6 +45,7 @@ export function createSessionLivenessWatchdog(
   const watchdog = new SessionLivenessWatchdog({
     actions: options.actions,
     broker: options.broker,
+    cleanup: options.cleanup,
     database: options.database,
     generateId: dependencies.randomId ?? createUuidV7,
     ...(dependencies.liveness?.allowUnsafeTestTiming === true

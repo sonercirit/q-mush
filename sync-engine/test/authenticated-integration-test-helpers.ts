@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { expect } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
@@ -346,8 +347,18 @@ export function createSchemaCompatibleTestDatabase(): AppDatabase {
   return database;
 }
 
-export function createAuthenticatedTestDatabase(): AppDatabase {
-  const database = createSchemaCompatibleTestDatabase();
+export function createAuthenticatedTestDatabase(path?: string): AppDatabase {
+  const database =
+    path === undefined
+      ? createSchemaCompatibleTestDatabase()
+      : createDatabase(path);
+  if (path !== undefined) ensureWaveOneColumns(database);
+  const fixtureAlreadyInitialized = database
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, TEST_USER_ID))
+    .get();
+  if (fixtureAlreadyInitialized !== undefined) return database;
 
   database
     .insert(users)

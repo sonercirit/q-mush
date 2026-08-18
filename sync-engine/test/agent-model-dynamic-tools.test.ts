@@ -3,6 +3,7 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
+  acknowledgeProviderSocket,
   COMPLETED_EVENT,
   FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
@@ -42,6 +43,7 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
   });
   const tools = isRecord(body) ? body["tools"] : undefined;
   expect(Array.isArray(tools) ? tools.length : 0).toBeGreaterThan(2);
+  acknowledgeProviderSocket(socket);
   socket.receive(COMPLETED_EVENT);
   await expect(pending).resolves.toMatchObject({ content: "Done." });
 });

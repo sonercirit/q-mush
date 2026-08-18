@@ -3,6 +3,7 @@ import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
+import type { SessionLivenessCleanupOptions } from "./session-liveness-options.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import {
@@ -19,7 +20,7 @@ const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
 export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 
-interface SessionLivenessWatchdogOptions {
+interface SessionLivenessWatchdogOptions extends SessionLivenessCleanupOptions {
   readonly actions: Pick<
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
@@ -209,6 +210,7 @@ export class SessionLivenessWatchdog {
     if (detail === undefined) {
       return;
     }
+    void this.#options.cleanup(detail);
     this.#options.actions.stopChildren(detail, session.userId);
     this.#options.actions.finished(detail, session.userId);
   }
