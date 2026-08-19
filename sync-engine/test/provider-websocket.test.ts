@@ -141,6 +141,16 @@ test("prefers Responses WebSocket for API keys", async () => {
   socket?.receive(COMPLETED_EVENT);
   expectDoneStep(await pending);
 });
+test("accepts terminal-only responses on a fresh socket", async () => {
+  const sockets = new FakeProviderSockets();
+  const pending = complete(apiKeyModel({ webSocket: sockets.create }));
+  const socket = requireProviderSocket(sockets, 0);
+  socket.open();
+  socket.receive(responseEvent("response.completed", "terminal-only"));
+  expectDoneStep(await pending);
+  socket.close();
+});
+
 test("bounds admission through unknown frames", async () => {
   const observedStates: ("active" | "admission")[] = [];
   const request = beginLifecycleRequest(observedStates);

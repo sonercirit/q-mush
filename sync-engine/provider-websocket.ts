@@ -151,10 +151,16 @@ export class ProviderWebSocketSession {
         // Only a successfully completed step leaves this socket reusable, so
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
-          if (currentResponseId !== undefined) {
-            this.#priorResponseIds.add(currentResponseId);
+          if (this.#socket === undefined || this.#socket === socket) {
+            this.#priorResponseIds.clear();
+            for (const id of priorResponseIds) this.#priorResponseIds.add(id);
+            if (currentResponseId !== undefined) {
+              this.#priorResponseIds.add(currentResponseId);
+            }
+            this.#socket = socket;
+          } else {
+            socket.close(1000, "Connection superseded");
           }
-          this.#socket = socket;
           resolve(step);
         } else {
           reject(error ?? new Error("The provider returned no model step"));
@@ -232,7 +238,8 @@ export class ProviderWebSocketSession {
               eventType === "response.created" ||
               (typeof eventType === "string" &&
                 eventType.startsWith("response.") &&
-                !RESPONSES_TERMINAL_EVENT_TYPES.has(eventType));
+                (reusedSocket === undefined ||
+                  !RESPONSES_TERMINAL_EVENT_TYPES.has(eventType)));
             if (
               !admitsRequest ||
               eventResponseId === undefined ||

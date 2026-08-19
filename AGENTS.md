@@ -274,13 +274,13 @@ Living project memory.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs since completed responses may omit
-  them. Frozen clocks may give admission -> active -> admission one timestamp;
-  production cannot. Live OpenAI and Codex socket probes emitted
-  `response.created` with its ID; the first identified non-terminal `response.*`
-  also admits servers omitting it. WebSocket Mode expires after 60 minutes;
-  canonical `websocket_connection_limit_reached` and observed underscore-free
-  variant replace the socket once per step, then use bounded retries, replaying
-  only the unpersisted step. Local send is admission: bound until correlated
+  them. Frozen clocks may collapse admission transitions; production cannot.
+  Live OpenAI and Codex socket probes emitted `response.created` with its ID;
+  the first identified non-terminal `response.*` also admits servers omitting
+  it. WebSocket Mode expires after 60 minutes; canonical
+  `websocket_connection_limit_reached` and observed underscore-free variant
+  replace the socket once per step, then use bounded retries, replaying only the
+  unpersisted step. Local send is admission: bound until correlated
   `response.created`; discard unknown, pre-creation, mismatched-ID frames.
   Retain IDs for the socket's 60-minute life, not an arbitrary cap. Acknowledged
   work is unbound. Diagnostics are fenced; watchdog failure aborts without

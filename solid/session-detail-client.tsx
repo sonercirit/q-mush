@@ -340,7 +340,6 @@ function sessionListRowMatches(
     leftSession.reasoningEffort === rightSession.reasoningEffort &&
     leftSession.runtimePending?.component ===
       rightSession.runtimePending?.component &&
-    leftSession.runtimePending?.since === rightSession.runtimePending?.since &&
     leftSession.runnerRequired === rightSession.runnerRequired &&
     leftSession.status === rightSession.status &&
     leftSession.title === rightSession.title
