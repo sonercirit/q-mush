@@ -234,12 +234,13 @@ export class ConnectedAccountOAuth {
           [workspaceId],
         );
       } else if (
+        credential.details.accountId === null ||
         !this.#credentials.reconnectCredential(
           user.id,
           credentialId,
           credential.secret,
           this.#runtime.now(),
-          credential.details.accountId ?? undefined,
+          credential.details.accountId,
         )
       ) {
         return invalidState();

@@ -26,6 +26,10 @@ function credentialStateUpdated(
   requireReauthentication = false,
   accountId?: string,
 ): boolean {
+  if (requireReauthentication && accountId === undefined) {
+    return false;
+  }
+
   const changed = options.database
     .update(providerCredentials)
     .set(values)

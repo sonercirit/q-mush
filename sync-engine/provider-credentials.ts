@@ -297,7 +297,7 @@ export class ProviderCredentialEndpoints {
     credentialId: string,
     secret: string,
     now: number,
-    accountId?: string,
+    accountId: string,
   ): boolean {
     return (
       this.#store?.updateSecret(

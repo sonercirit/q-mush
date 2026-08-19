@@ -319,6 +319,29 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
         setup.store.updateSecret(
           TEST_USER_ID,
           CREDENTIAL_ID,
+          "missing-account-secret",
+          TEST_NOW + 2,
+          true,
+        ),
+      ).toBe(false);
+      expect(
+        setup.store.updateSecret(
+          TEST_USER_ID,
+          CREDENTIAL_ID,
+          "mismatched-account-secret",
+          TEST_NOW + 2,
+          true,
+          "another-account",
+        ),
+      ).toBe(false);
+      expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
+        REVOKED_SECRET,
+      );
+      expectReauthenticationState(setup.store, true);
+      expect(
+        setup.store.updateSecret(
+          TEST_USER_ID,
+          CREDENTIAL_ID,
           replacementSecret(),
           TEST_NOW + 2,
           true,

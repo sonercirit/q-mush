@@ -245,10 +245,12 @@ Living project memory.
   API 401 forces one refresh and one unpersisted-step replay, clearing partial
   output first; concurrent refreshes coalesce because refresh tokens rotate. A
   second 401 stops. Terminal refresh rejection persists re-login-required state,
-  excludes balanced pools, and tells the session/UI to reconnect; API keys
-  bypass this path. Responses WebSocket auth events lack reliable HTTP status,
-  so recovery also recognizes canonical nested `authentication_error` and
-  `invalid_api_key` signals; OpenAI documents the nested event shape and that
+  excludes balanced pools, and tells the session/UI to reconnect. Reconnect
+  fails closed unless stored and returned account IDs match; OpenRouter accounts
+  without `user_id` cannot reconnect until it returns one. API keys bypass this
+  path. Responses WebSocket auth events lack reliable HTTP status, so recovery
+  also recognizes canonical nested `authentication_error` and `invalid_api_key`
+  signals; OpenAI documents the nested event shape and that
   `AuthenticationError` means an invalid, expired, or revoked token. Native
   attachments share the session refresher; distinct fallbacks bind their
   selected credential's refresher. OpenRouter and generic endpoints stream chat
