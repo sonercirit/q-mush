@@ -7,6 +7,7 @@ import {
 } from "../../shared/tool-limits.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
+import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -24,6 +25,11 @@ import {
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { orchestrationActions } from "./session-restart-orchestration-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
 
 interface LimitSetup {
   readonly database: ReturnType<typeof runningCompactionStore>["database"];
@@ -52,8 +58,9 @@ function limitRuntimeOptions(
 
 async function withLimitSetup(
   run: (setup: LimitSetup) => Promise<void>,
+  fakeTimers = true,
 ): Promise<void> {
-  vi.useFakeTimers();
+  if (fakeTimers) vi.useFakeTimers();
   try {
     const setup = runningCompactionStore();
     const detail = requireCompactionSession(setup.store);
@@ -116,47 +123,128 @@ function observedBroker(options: {
   };
 }
 
-describe("global tool time limit integration", () => {
-  test("aborts agent-file loading at the limit before starting a model", () =>
-    withLimitSetup(async (setup) => {
-      const dispatched = Promise.withResolvers<undefined>();
-      const canceled = Promise.withResolvers<undefined>();
-      const factorySelections: unknown[] = [];
-      const loadingDeadline = new AbortController();
-      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
-        setTimeout(() => {
-          loadingDeadline.abort();
-        }, milliseconds);
-        return loadingDeadline.signal;
-      });
-      const broker = new RunnerCommandBroker({
-        cancel: () => {
-          canceled.resolve();
+function persistedDeadlineRun(
+  setup: LimitSetup,
+  broker: RunnerCommandBroker,
+  controller: AbortController,
+  factorySelections: unknown[],
+): Promise<void> {
+  return runPersistedSession({
+    controller,
+    credential: runtimeTestCredential(
+      setup.detail.credentialId,
+      "Agent file deadline credential",
+    ),
+    detail: setup.detail,
+    finish: (detail, _userId, error) => {
+      setup.store.settleRuntimeFailure(
+        detail.id,
+        `Session failed: ${error instanceof Error ? error.message : "Unknown error"}`,
+        TEST_NOW + 4,
+        detail.generation,
+      );
+    },
+    notify: () => undefined,
+    now: () => TEST_NOW + 3,
+    operation: "agent",
+    resources: Object.assign(
+      {},
+      {
+        actions: orchestrationActions(setup.database, setup.store),
+        braveSearch: Object.assign(
+          {},
+          {
+            execute: () => Promise.resolve("unused search result"),
+          },
+        ),
+        broker,
+        modelFactory: (
+          options: Parameters<
+            Parameters<
+              typeof runPersistedSession
+            >[0]["resources"]["modelFactory"]
+          >[0],
+        ) => {
+          factorySelections.push(options);
+          return Object.assign(new ScriptedAgentModel([]), {});
         },
+        notify: () => undefined,
+        realtime: undefined,
+        now: () => TEST_NOW + 3,
+        store: setup.store,
+      },
+    ),
+    restartPersistence: Object.assign(
+      {},
+      {
+        clear: () => undefined,
+        operation: () => "agent" as const,
+        persist: () => undefined,
+      },
+    ),
+    restartRequest: () => undefined,
+    store: setup.store,
+    userId: TEST_USER_ID,
+  });
+}
+
+describe("global tool time limit integration", () => {
+  test("aborts agent-file loading at the limit before starting a model", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const created = createStore();
+    createTestSession(created.store);
+    const setup = {
+      database: created.database,
+      detail: requireCompactionSession(created.store),
+      store: created.store,
+    };
+    try {
+      const dispatched = Promise.withResolvers<undefined>();
+      const factorySelections: unknown[] = [];
+      vi.spyOn(setup.store, "toolSettings").mockReturnValue({
+        ...DEFAULT_TOOL_SETTINGS,
+        executionLimitMinutes: 0.001,
+      });
+      const deadline = AbortSignal.timeout(60);
+      vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline);
+      const broker = new RunnerCommandBroker({
         deliver: (_runnerId, command) => {
           expect(command.tool).toBe("read_agent_file");
           dispatched.resolve();
           return true;
         },
       });
-      const run = runSessionAgent({
-        ...limitRuntimeOptions(setup, "Agent file deadline credential"),
+      const controller = new AbortController();
+      const run = persistedDeadlineRun(
+        setup,
         broker,
-        modelFactory: (options) => {
-          factorySelections.push(options);
-          return new ScriptedAgentModel([]);
-        },
+        controller,
+        factorySelections,
+      );
+      await dispatched.promise;
+      await vi.waitFor(() => {
+        expect(deadline.aborted).toBe(true);
       });
-      const rejectedRun = expect(run).rejects.toMatchObject({
-        name: "AbortError",
+      expect(deadline).toMatchObject({
+        aborted: true,
+        reason: { name: "TimeoutError" },
       });
-      await advancePastLimit(dispatched.promise);
-
-      await rejectedRun;
-      await expect(canceled.promise).resolves.toBeUndefined();
+      await run;
+      expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject({
+        status: "failed",
+      });
+      const failureMessage = setup.store
+        .get(TEST_USER_ID, setup.detail.id)
+        ?.messages.find(({ role }) => role === "error");
+      expect(failureMessage?.content).toContain("timed out");
+      expect(controller.signal.aborted).toBe(false);
       expect(factorySelections).toHaveLength(0);
       closeSessionTestDatabase(setup.database);
-    }));
+    } finally {
+      vi.restoreAllMocks();
+      vi.useRealTimers();
+    }
+  });
 
   test("fails a hung runner tool call at the limit and finishes the run", () =>
     withLimitSetup(async (setup) => {

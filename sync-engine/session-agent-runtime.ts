@@ -215,42 +215,49 @@ async function loadModels(
     toolExecutionLimitMilliseconds(settings),
   );
   const loadingSignal = AbortSignal.any([runtime.signal, loadingDeadline]);
-  const agentFile = await executeForSession(runtime, () =>
-    loadSessionAgentFile(
-      runtime.broker,
-      runtime.detail,
+  try {
+    const agentFile = await executeForSession(runtime, () =>
+      loadSessionAgentFile(
+        runtime.broker,
+        runtime.detail,
+        loadingSignal,
+        runtime.isCurrent,
+      ),
+    );
+    writeRuntime(runtime, (sessionId, now, generation) => {
+      runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
+    });
+    const metadata = await sessionRequestMetadata(
+      runtime,
+      (apply) => {
+        writeRuntime(runtime, apply);
+      },
       loadingSignal,
-      runtime.isCurrent,
-    ),
-  );
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
-  });
-  const metadata = await sessionRequestMetadata(
-    runtime,
-    (apply) => {
-      writeRuntime(runtime, apply);
-    },
-    runtime.signal,
-  );
-  const models = createSessionAgentModels({
-    agentFile,
-    credential: runtime.credential,
-    detail: { ...runtime.detail, ...metadata },
-    factory: runtime.modelFactory,
-    isCurrent: runtime.isCurrent,
-    onStepStart: () => {
-      markSessionStepStart(runtime);
-    },
-    realtime: runtime.realtime,
-    ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
-    ...(options.toolStream === undefined
-      ? {}
-      : { toolStream: options.toolStream }),
-    toolSettings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
-    userId: runtime.userId,
-  });
-  return models;
+    );
+    const models = createSessionAgentModels({
+      agentFile,
+      credential: runtime.credential,
+      detail: { ...runtime.detail, ...metadata },
+      factory: runtime.modelFactory,
+      isCurrent: runtime.isCurrent,
+      onStepStart: () => {
+        markSessionStepStart(runtime);
+      },
+      realtime: runtime.realtime,
+      ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
+      ...(options.toolStream === undefined
+        ? {}
+        : { toolStream: options.toolStream }),
+      toolSettings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+      userId: runtime.userId,
+    });
+    return models;
+  } catch (error) {
+    if (loadingDeadline.aborted && !runtime.signal.aborted) {
+      throw loadingDeadline.reason;
+    }
+    throw error;
+  }
 }
 
 export async function compactSessionConversation(

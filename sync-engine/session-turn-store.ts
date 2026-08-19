@@ -214,6 +214,14 @@ function selectedToolSettingsColumns() {
   };
 }
 
+function requiredToolSettings(settings: unknown): ToolSettings {
+  const parsed = readToolSettings(settings);
+  if (parsed === undefined) {
+    throw new Error("The session turn tool settings snapshot is invalid");
+  }
+  return parsed;
+}
+
 export function activeSessionToolSettings(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
@@ -224,11 +232,7 @@ export function activeSessionToolSettings(
     .from(agentSessionTurns)
     .where(currentTurnCondition(sessionId, executionGeneration))
     .get();
-  const settings = turn === undefined ? undefined : readToolSettings(turn);
-  if (settings === undefined) {
-    throw new Error("The active session tool settings snapshot is invalid");
-  }
-  return settings;
+  return requiredToolSettings(turn);
 }
 
 export function rotateSessionTurn(options: SessionTurnRotationOptions): string {
@@ -281,13 +285,10 @@ export function readSessionTurns(
     .map((turn) => {
       const { executionLimitMinutes, outputLimitCharacters, ...publicTurn } =
         turn;
-      const toolSettings = readToolSettings({
+      const toolSettings = requiredToolSettings({
         executionLimitMinutes,
         outputLimitCharacters,
       });
-      if (toolSettings === undefined) {
-        throw new Error("The session turn tool settings snapshot is invalid");
-      }
       return {
         ...publicTurn,
         endedAt: turn.endedAt?.getTime() ?? null,

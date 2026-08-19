@@ -102,7 +102,7 @@ export class RunnerCommandBroker {
     stream?: RunnerCommandStream,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
-      return Promise.reject(abortError("The agent session was stopped"));
+      return Promise.reject(errorFromUnknown(signal.reason));
     }
     let initiallyAuthorized: boolean;
     try {
@@ -142,7 +142,12 @@ export class RunnerCommandBroker {
       if (!added) {
         return;
       }
-      this.#reject(id, abortError("The agent session was stopped"));
+      this.#reject(
+        id,
+        signal === undefined
+          ? abortError("The agent session was stopped")
+          : errorFromUnknown(signal.reason),
+      );
     };
     return new Promise<RunnerCommandResult>((resolve, reject) => {
       const pending: PendingCommand = {
