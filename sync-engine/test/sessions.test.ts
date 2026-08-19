@@ -241,8 +241,7 @@ describe("agent sessions", () => {
 
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
-        // Pending runner/provider reports add two clock ticks.
-        activeDurationMs: 18_000,
+            activeDurationMs: 18_000,
         activeStartedAt: null,
         messages: [
           { role: "user" },
@@ -319,8 +318,7 @@ describe("agent sessions", () => {
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
-      // Pending runner/provider reports add two clock ticks.
-      activeDurationMs: 18_000,
+        activeDurationMs: 18_000,
       activeStartedAt: null,
       messages: [
         {
