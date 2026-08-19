@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 import { RestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
@@ -30,9 +30,12 @@ function finishCleanupCommand(
   expect(commandId).toBe("cleanup-command");
 }
 
-function completeCleanup(broker: RunnerCommandBroker): void {
+function completeCleanup(
+  broker: RunnerCommandBroker,
+  commandId = "cleanup-command",
+): void {
   expect(
-    broker.complete(TEST_SESSION_DETAIL.runnerId, "cleanup-command", {
+    broker.complete(TEST_SESSION_DETAIL.runnerId, commandId, {
       output: "cleaned",
       state: "completed",
     }),
@@ -61,10 +64,6 @@ async function pendingCleanup() {
   return { broker, cleanup, promise };
 }
 
-function pendingCleanupWithBroker() {
-  return pendingCleanup();
-}
-
 test("development restart cancels pending execution cleanup without waiting", async () => {
   const { broker, cleanup, promise } = await pendingCleanup();
   const runtimes = new SessionRuntimes();
@@ -82,7 +81,8 @@ test("development restart cancels pending execution cleanup without waiting", as
 });
 
 test("development drain prevents chained terminal cleanup from dispatching", async () => {
-  const { broker, cleanup, promise } = await pendingCleanupWithBroker();
+  const pending = await pendingCleanup();
+  const { broker, cleanup, promise } = pending;
   const terminal = cleanup.cleanupTerminal({
     ...TEST_SESSION_DETAIL,
     executionEnvironment: "container",
@@ -93,6 +93,39 @@ test("development drain prevents chained terminal cleanup from dispatching", asy
   await terminal;
 
   expectCleanupInactive(broker);
+});
+
+test("overlapping drains suppress cleanup until every drain settles", async () => {
+  let commandSequence = 0;
+  const broker = new RunnerCommandBroker({
+    commandId: () => `cleanup-${String(++commandSequence)}`,
+    deliver: () => true,
+  });
+  vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
+  const cleanup = new SessionExecutionCleanup(broker);
+  const first = containerCleanup(cleanup);
+  const now = Date.now();
+  const shortDrain = cleanup.drainPending(new RestartDeadline(now + 20));
+  const longDrain = cleanup.drainPending(new RestartDeadline(now + 100));
+
+  await shortDrain;
+  const suppressedDetail = {
+    ...TEST_SESSION_DETAIL,
+    id: "suppressed-cleanup",
+  };
+  await cleanup.cleanupTerminal(suppressedDetail);
+  expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-2")).toBe(
+    false,
+  );
+
+  await longDrain;
+  const resumedDetail = { ...TEST_SESSION_DETAIL, id: "resumed-cleanup" };
+  const resumed = cleanup.cleanupTerminal(resumedDetail);
+  expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-2")).toBe(true);
+  completeCleanup(broker, "cleanup-2");
+  await resumed;
+  broker.cancelSessionCommands(TEST_SESSION_DETAIL.id);
+  await first;
 });
 
 test("cleanup dispatch resumes after a completed development drain", async () => {

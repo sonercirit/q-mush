@@ -281,6 +281,7 @@ export function createSessionRestartControl(
         warn(
           "The active server restart deadline was unavailable; starting a dedicated runner drain",
         );
+        sharedServerRestartIds.set(runnerId, restartId);
       }
       await boundedDrain({ kind: "runner", runnerId }, restartId, false);
     },
@@ -294,7 +295,9 @@ export function createSessionRestartControl(
         // correct-ID escalation in that microtask window is rejected and the
         // runner reconnects to observe the settled server restart.
         if (sharedServerRestartIds.get(runnerId) !== restartId) return false;
-        return escalateScope({ kind: "server" });
+        return serverDeadline === undefined
+          ? escalateScope({ kind: "runner", runnerId })
+          : escalateScope({ kind: "server" });
       }
       if (runnerRestartId(runnerId) !== restartId) {
         return false;

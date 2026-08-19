@@ -352,8 +352,15 @@ describe("session restart control", () => {
     });
     const { restart, runtimes } = setup;
     await runtimes.drain({ kind: "server" }, "external-server");
+    runtimes.settleDrainsImmediately = false;
 
-    await restart.drainRunner("runner-1", "runner-restart");
+    const drain = restart.drainRunner("runner-1", "runner-restart");
+    await Promise.resolve();
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      true,
+    );
+    runtimes.settleDrain("runner:runner-1");
+    await drain;
 
     expect(runtimes.drains.at(-1)).toEqual({
       restartId: "runner-restart",

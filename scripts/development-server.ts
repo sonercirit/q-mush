@@ -62,11 +62,21 @@ function positiveDelay(value: number | undefined, fallback: number): number {
 function settledWithin(
   promise: Promise<unknown>,
   milliseconds: number,
+  interruption?: Promise<unknown>,
 ): Promise<boolean> {
-  return Promise.race([
-    promise.then(() => true),
-    Bun.sleep(milliseconds).then(() => false),
-  ]);
+  const settled = Promise.withResolvers<boolean>();
+  const timer = setTimeout(() => {
+    settled.resolve(false);
+  }, milliseconds);
+  void promise.then(() => {
+    settled.resolve(true);
+  });
+  void interruption?.then(() => {
+    settled.resolve(false);
+  });
+  return settled.promise.finally(() => {
+    clearTimeout(timer);
+  });
 }
 
 function childExitOrInterruption(
@@ -164,21 +174,8 @@ export function startDevelopmentServer(
   const childSettledWithin = (
     milliseconds: number,
     interruption?: Promise<unknown>,
-  ): Promise<boolean> => {
-    const settled = Promise.withResolvers<boolean>();
-    const timer = setTimeout(() => {
-      settled.resolve(false);
-    }, milliseconds);
-    void child.exited.then(() => {
-      settled.resolve(true);
-    });
-    void interruption?.then(() => {
-      settled.resolve(false);
-    });
-    return settled.promise.finally(() => {
-      clearTimeout(timer);
-    });
-  };
+  ): Promise<boolean> =>
+    settledWithin(child.exited, milliseconds, interruption);
 
   const terminateChild = async (
     waitMilliseconds: number,
