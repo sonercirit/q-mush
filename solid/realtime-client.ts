@@ -10,9 +10,8 @@ import {
   type RealtimeServerEvent,
 } from "./realtime-client-codec.ts";
 import {
-  forgetToolSnapshot,
-  rememberToolSnapshot,
-  type ToolSnapshotRequest,
+  ToolSyncTracker,
+  type ToolSyncRequest,
 } from "./realtime-client-tool-sync.ts";
 import {
   RealtimeStreamBuffer,
@@ -93,13 +92,13 @@ export class RealtimeConnection {
   readonly #now: () => number;
   readonly #requestFrame: FrameCallback;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
-  readonly #selected: () => string | undefined;
+  readonly #selectedSession: () => string | undefined;
   readonly #clearTimeout: (id: number) => void;
   #instanceId: string | undefined;
   #hasConnected = false;
   #lastInstanceId: string | undefined;
-  readonly #reconnects = new Set<() => void>();
-  #commandBytes = 0;
+  readonly #reconnectListeners = new Set<() => void>();
+  #pendingCommandBytes = 0;
   #pendingCommands = new Map<string, PendingCommand>();
   #queuedCommands: QueuedCommand[] = [];
   #reconnectAttempt = 0;
@@ -109,11 +108,11 @@ export class RealtimeConnection {
   readonly #stateEvents = new Map<string, DeferredStateEvent>();
   readonly #stateBarriers = new Map<string, RealtimeStreamBarrier>();
   readonly #stateWaiters: ((available: boolean) => void)[] = [];
-  #generation = 0;
-  readonly #buffer = new RealtimeStreamBuffer();
+  #streamGeneration = 0;
+  readonly #streamBuffer = new RealtimeStreamBuffer();
   #streamFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
-  readonly #toolRequests = new Map<string, ToolSnapshotRequest>();
+  readonly #toolSync = new ToolSyncTracker();
   #stopped = true;
   #workspaceId = GLOBAL_WORKSPACE_ID;
   constructor(
@@ -137,12 +136,12 @@ export class RealtimeConnection {
       ((callback) => window.requestAnimationFrame(callback));
     this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
-    this.#selected = options.selectedSession ?? noSelectedSession;
+    this.#selectedSession = options.selectedSession ?? noSelectedSession;
   }
   onReconnect(listener: () => void): () => void {
-    this.#reconnects.add(listener);
+    this.#reconnectListeners.add(listener);
     return () => {
-      this.#reconnects.delete(listener);
+      this.#reconnectListeners.delete(listener);
     };
   }
   yieldToStateApplication(): Promise<boolean> {
@@ -151,7 +150,7 @@ export class RealtimeConnection {
       this.#scheduleStateEvent();
     });
   }
-  #sendToolSync(request: ToolSnapshotRequest): boolean {
+  #sendToolSync(request: ToolSyncRequest): boolean {
     try {
       this.#socket?.send(JSON.stringify({ ...request, type: "sync_tools" }));
       return true;
@@ -161,7 +160,9 @@ export class RealtimeConnection {
     }
   }
   syncTools(sessionId: string): void {
-    for (const request of this.#buffer.activeToolStreams(sessionId)) {
+    for (const request of this.#toolSync.unseen(
+      this.#streamBuffer.activeToolStreams(sessionId),
+    )) {
       if (!this.#sendToolSync(request)) return;
     }
   }
@@ -179,7 +180,7 @@ export class RealtimeConnection {
     this.#lastInstanceId = undefined;
     this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
     this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
-    this.#commandBytes = 0;
+    this.#pendingCommandBytes = 0;
     this.#instanceId = undefined;
     if (this.#reconnectTimer !== undefined) {
       this.#clearTimeout(this.#reconnectTimer);
@@ -188,10 +189,10 @@ export class RealtimeConnection {
     const socket = this.#socket;
     this.#socket = undefined;
     this.#discardStateEvents();
-    this.#generation += 1;
+    this.#streamGeneration += 1;
     this.#streamFrame = undefined;
-    this.#buffer.clear();
-    this.#toolRequests.clear();
+    this.#streamBuffer.clear();
+    this.#toolSync.clear();
     socket?.close();
   }
   command(
@@ -220,7 +221,7 @@ export class RealtimeConnection {
     if (
       this.#queuedCommands.length + this.#pendingCommands.size >=
         MAXIMUM_PENDING_COMMANDS ||
-      bytes > MAXIMUM_PENDING_COMMAND_BYTES - this.#commandBytes
+      bytes > MAXIMUM_PENDING_COMMAND_BYTES - this.#pendingCommandBytes
     ) {
       return Promise.reject(new Error("command_capacity_exceeded"));
     }
@@ -232,7 +233,7 @@ export class RealtimeConnection {
         resolve,
         sentInstanceId: undefined,
       };
-      this.#commandBytes += bytes;
+      this.#pendingCommandBytes += bytes;
       if (
         socket?.readyState !== WebSocket.OPEN ||
         this.#instanceId === undefined
@@ -246,16 +247,16 @@ export class RealtimeConnection {
         socket.send(envelope);
       } catch {
         this.#pendingCommands.delete(commandId);
-        this.#commandBytes -= pending.bytes;
+        this.#pendingCommandBytes -= pending.bytes;
         reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
         socket.close();
       }
     });
   }
   #clearDisconnectedStreams(): void {
-    this.#generation += 1;
+    this.#streamGeneration += 1;
     this.#streamFrame = undefined;
-    this.#buffer.clearPending();
+    this.#streamBuffer.clearPending();
   }
   #connect(): void {
     if (this.#stopped) {
@@ -358,7 +359,7 @@ export class RealtimeConnection {
           ? event.sessionId
           : undefined;
     if (sessionId !== undefined) {
-      this.#stateBarriers.set(key, this.#buffer.markBarrier(sessionId));
+      this.#stateBarriers.set(key, this.#streamBuffer.markBarrier(sessionId));
       this.#invalidateStreamFrame();
     }
     this.#scheduleStateEvent();
@@ -384,13 +385,16 @@ export class RealtimeConnection {
         const barrier = this.#stateBarriers.get(key);
         if (barrier !== undefined) {
           const frameStartedAt = this.#now();
-          const batch = this.#buffer.takeBarrier(
+          const batch = this.#streamBuffer.takeBarrier(
             barrier,
             STREAM_UPDATES_PER_FRAME,
             () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
           );
           this.#deliverStreamBatch(batch);
-          if (batch !== undefined || this.#buffer.barrierPending(barrier)) {
+          if (
+            batch !== undefined ||
+            this.#streamBuffer.barrierPending(barrier)
+          ) {
             this.#scheduleStateEvent();
             return;
           }
@@ -405,19 +409,17 @@ export class RealtimeConnection {
   }
   #deliverDeferredStateEvent(event: DeferredStateEvent): void {
     if (event.type === "tool_stream_snapshot") {
-      const snapshot = this.#buffer.applyToolSnapshot(event);
-      rememberToolSnapshot(this.#toolRequests, event.sessionId, event.streamId);
+      const snapshot = this.#streamBuffer.applyToolSnapshot(event);
+      this.#toolSync.rememberSnapshot(event);
       this.#deliver(snapshot);
       return;
     }
     if (event.type === "session") {
-      if (!sessionIsActive(event.session.status)) {
-        for (const [key, request] of this.#toolRequests) {
-          if (request.sessionId === event.session.id) {
-            this.#toolRequests.delete(key);
-          }
-        }
-        this.#buffer.clearToolSession(event.session.id);
+      if (
+        !sessionIsActive(event.session.status) &&
+        event.session.status !== "paused"
+      ) {
+        this.#streamBuffer.clearToolSession(event.session.id);
       } else {
         this.syncTools(event.session.id);
       }
@@ -435,9 +437,9 @@ export class RealtimeConnection {
     if (!this.#stopped) {
       const frameStartedAt = this.#now();
       this.#deliverStreamBatch(
-        this.#buffer.takeNext(
+        this.#streamBuffer.takeNext(
           STREAM_UPDATES_PER_FRAME,
-          this.#selected(),
+          this.#selectedSession(),
           () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
         ),
       );
@@ -445,20 +447,20 @@ export class RealtimeConnection {
     }
   }
   #invalidateStreamFrame(): void {
-    this.#generation += 1;
+    this.#streamGeneration += 1;
     this.#streamFrame = undefined;
   }
   #scheduleFrame(): void {
     if (
       this.#streamFrame !== undefined ||
-      !this.#buffer.pending ||
+      !this.#streamBuffer.pending ||
       this.#stateEvents.size > 0
     ) {
       return;
     }
-    const generation = this.#generation;
+    const generation = this.#streamGeneration;
     this.#streamFrame = this.#requestFrame(() => {
-      if (generation === this.#generation) {
+      if (generation === this.#streamGeneration) {
         this.#flushStreamFrame();
       }
     });
@@ -469,32 +471,36 @@ export class RealtimeConnection {
       { readonly type: "session_delta" | "tool_stream" }
     >,
   ): void {
-    this.#buffer.queue(event);
-    const requests = this.#buffer.takeToolResyncRequests();
-    this.#rememberAndSyncTools(requests);
+    this.#streamBuffer.queue(event);
+    const requests = this.#streamBuffer.takeToolResyncRequests();
+    this.#syncTools(requests);
     this.#scheduleFrame();
   }
-  #rememberAndSyncTools(requests: readonly ToolSnapshotRequest[]): void {
-    for (const request of requests) {
-      rememberToolSnapshot(
-        this.#toolRequests,
-        request.sessionId,
-        request.streamId,
-      );
+
+  #syncTools(requests: readonly ToolSyncRequest[]): void {
+    const unique = new Map(
+      requests.map((request) => [
+        JSON.stringify([request.sessionId, request.streamId]),
+        request,
+      ]),
+    );
+    for (const request of unique.values()) {
+      this.#toolSync.forget(request);
       if (!this.#sendToolSync(request)) return;
+      this.#toolSync.rememberSnapshot(request);
     }
   }
   #rejectPendingCommands(code: string): void {
     for (const pending of this.#pendingCommands.values()) {
       pending.reject(commandFailure(code));
-      this.#commandBytes -= pending.bytes;
+      this.#pendingCommandBytes -= pending.bytes;
     }
     this.#pendingCommands.clear();
   }
   #rejectQueuedCommands(code: string): void {
     for (const queued of this.#queuedCommands) {
       queued.pending.reject(commandFailure(code));
-      this.#commandBytes -= queued.pending.bytes;
+      this.#pendingCommandBytes -= queued.pending.bytes;
     }
     this.#queuedCommands = [];
   }
@@ -509,7 +515,7 @@ export class RealtimeConnection {
       return;
     }
     this.#pendingCommands.delete(event.commandId);
-    this.#commandBytes -= pending.bytes;
+    this.#pendingCommandBytes -= pending.bytes;
     if (event.type === "command_success") {
       pending.resolve(event.result);
     } else {
@@ -532,7 +538,13 @@ export class RealtimeConnection {
           pending.sentInstanceId = event.instanceId;
           this.#pendingCommands.set(commandId, pending);
         }
-        this.#rememberAndSyncTools(this.#buffer.activeToolStreams());
+        const remembered = this.#toolSync.requests();
+        this.#toolSync.clear();
+        this.#syncTools([
+          ...remembered,
+          ...this.#streamBuffer.activeToolStreams(),
+          ...this.#streamBuffer.takeToolResyncRequests(),
+        ]);
       }
       const pendingCommandIds = [...this.#pendingCommands.keys()];
       for (const commandId of pendingCommandIds) {
@@ -546,7 +558,7 @@ export class RealtimeConnection {
           previousInstanceId !== event.instanceId
         ) {
           this.#pendingCommands.delete(commandId);
-          this.#commandBytes -= pending.bytes;
+          this.#pendingCommandBytes -= pending.bytes;
           pending.reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
           continue;
         }
@@ -561,7 +573,7 @@ export class RealtimeConnection {
         }
       }
       if (reconnected) {
-        for (const listener of this.#reconnects) {
+        for (const listener of this.#reconnectListeners) {
           listener();
         }
       }
@@ -597,17 +609,6 @@ export class RealtimeConnection {
       { type: "session_delta" | "tool_stream" }
     >,
   ): void {
-    if (event.type === "tool_stream" && event.state !== undefined) {
-      if (event.state === "preparing" || event.state === "running") {
-        rememberToolSnapshot(
-          this.#toolRequests,
-          event.sessionId,
-          event.streamId,
-        );
-      } else {
-        forgetToolSnapshot(this.#toolRequests, event.sessionId, event.streamId);
-      }
-    }
     this.#queueStreamDelta(event);
   }
   #scheduleReconnect(): void {

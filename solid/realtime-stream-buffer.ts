@@ -23,35 +23,27 @@ import {
   type RealtimeToolStreamUpdate,
   type SessionStreamDelta,
 } from "./realtime-stream-buffer-update.ts";
-
 export type { RealtimeStreamUpdate, RealtimeToolStreamUpdate };
-
 type SessionDelta = SessionStreamDelta;
 type StreamServerEvent = SessionDelta | ToolStreamDeltaFrame;
-
 export interface RealtimeStreamBatch {
   readonly type: "stream_batch";
   readonly updates: readonly RealtimeStreamUpdate[];
 }
-
 export type RealtimeClientEvent =
   Exclude<RealtimeServerEvent, StreamServerEvent> | RealtimeStreamBatch;
-
 export interface RealtimeStreamBarrier {
   readonly epoch: number;
   readonly sessionId: string;
 }
-
 interface ToolStreamRequest {
   readonly sessionId: string;
   readonly streamId: string;
 }
-
 interface ActiveToolState {
   readonly entry: ToolStreamEntry;
   readonly kind: "active";
 }
-
 interface TerminalToolState {
   readonly callId: string;
   readonly index: number;
@@ -61,31 +53,24 @@ interface TerminalToolState {
   readonly state: ToolStreamTerminalState;
   readonly streamId: string;
 }
-
 type RetainedToolState = ActiveToolState | TerminalToolState;
-
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
 const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
 const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
-
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
 ): RealtimeStreamBatch | undefined {
   return updates.length === 0 ? undefined : { type: "stream_batch", updates };
 }
-
 function updateEpoch(update: BufferedStreamUpdate): number {
   return update.value.epoch;
 }
-
 function updatePendingBytes(update: BufferedStreamUpdate): number {
   return update.value.pendingBytes;
 }
-
 function updateFragments(update: BufferedStreamUpdate): number {
   return update.value.fragments;
 }
-
 function pendingWithinLimit(
   updates: readonly RealtimeStreamUpdate[],
   maximumUpdates: number,
@@ -95,11 +80,9 @@ function pendingWithinLimit(
     updates.length < maximumUpdates && (updates.length === 0 || withinBudget())
   );
 }
-
 function toolStateSessionId(state: RetainedToolState): string {
   return state.kind === "active" ? state.entry.sessionId : state.sessionId;
 }
-
 function drainUpdates(
   maximumUpdates: number,
   withinBudget: () => boolean,
@@ -113,7 +96,6 @@ function drainUpdates(
   }
   return streamBatch(updates);
 }
-
 function terminalToolState(entry: ToolStreamEntry): TerminalToolState {
   if (entry.state === "preparing" || entry.state === "running") {
     throw new TypeError("A tool tombstone must be terminal");
@@ -128,7 +110,6 @@ function terminalToolState(entry: ToolStreamEntry): TerminalToolState {
     streamId: entry.streamId,
   };
 }
-
 function tombstoneEntry(tombstone: TerminalToolState): ToolStreamEntry {
   return {
     arguments: "",
@@ -143,7 +124,6 @@ function tombstoneEntry(tombstone: TerminalToolState): ToolStreamEntry {
     streamId: tombstone.streamId,
   };
 }
-
 function retainedToolEntry(
   local: RetainedToolState | undefined,
   received: ToolStreamEntry,
@@ -152,62 +132,58 @@ function retainedToolEntry(
   if (local === undefined) return received;
   return local.entry.sequence >= received.sequence ? local.entry : received;
 }
-
 export class RealtimeStreamBuffer {
-  #nextSelectedTurn = true;
-  #pendingBytes = 0;
-  #pendingFragments = 0;
-  readonly #pendingBySession = new Map<
-    string,
-    Map<string, BufferedStreamUpdate>
-  >();
-  readonly #pendingOrder = new Map<string, string>();
-  readonly #pendingToolKeys = new Map<string, string>();
-  readonly #resyncToolStreams = new Map<
-    string,
-    { sessionId: string; streamId: string }
-  >();
-  #selectedSessionId: string | undefined;
-  readonly #sessionEpochs = new Map<string, number>();
+  #selectedTurn = true;
+  #bytes = 0;
+  #fragments = 0;
+  readonly #pending = new Map<string, Map<string, BufferedStreamUpdate>>();
+  readonly #order = new Map<string, string>();
+  readonly #toolKeys = new Map<string, string>();
+  readonly #resync = new Map<string, { sessionId: string; streamId: string }>();
+  #selectedId: string | undefined;
+  readonly #epochs = new Map<string, number>();
   readonly #toolStates = new Map<string, RetainedToolState>();
-
   get pending(): boolean {
-    return this.#pendingOrder.size > 0;
+    return this.#order.size > 0;
   }
-
   clear(): void {
     this.clearPending();
     this.#toolStates.clear();
-    this.#resyncToolStreams.clear();
-    this.#nextSelectedTurn = true;
-    this.#selectedSessionId = undefined;
+    this.#resync.clear();
+    this.#selectedTurn = true;
+    this.#selectedId = undefined;
   }
-
   clearPending(): void {
-    this.#pendingBytes = 0;
-    this.#pendingFragments = 0;
-    this.#pendingBySession.clear();
-    this.#pendingOrder.clear();
-    this.#pendingToolKeys.clear();
-    this.#sessionEpochs.clear();
+    for (const pending of this.#pending.values()) {
+      for (const update of pending.values()) {
+        if (update.kind === "tool") {
+          this.#requestToolResync(update.value.entry);
+        }
+      }
+    }
+    this.#bytes = 0;
+    this.#fragments = 0;
+    this.#pending.clear();
+    this.#order.clear();
+    this.#toolKeys.clear();
+    this.#epochs.clear();
   }
-
   markBarrier(sessionId: string): RealtimeStreamBarrier {
     const epoch = this.#sessionEpoch(sessionId);
-    this.#sessionEpochs.set(sessionId, epoch + 1);
+    this.#epochs.set(sessionId, epoch + 1);
     return { epoch, sessionId };
   }
   #sessionEpoch(sessionId: string): number {
-    return this.#sessionEpochs.get(sessionId) ?? 0;
+    return this.#epochs.get(sessionId) ?? 0;
   }
   #pendingSession(
     sessionId: string,
     create = false,
   ): Map<string, BufferedStreamUpdate> | undefined {
-    const current = this.#pendingBySession.get(sessionId);
+    const current = this.#pending.get(sessionId);
     if (current !== undefined || !create) return current;
     const pending = new Map<string, BufferedStreamUpdate>();
-    this.#pendingBySession.set(sessionId, pending);
+    this.#pending.set(sessionId, pending);
     return pending;
   }
   #removePending(
@@ -218,16 +194,16 @@ export class RealtimeStreamBuffer {
     const update = pending?.get(key);
     if (pending === undefined || update === undefined) return undefined;
     pending.delete(key);
-    this.#pendingOrder.delete(key);
+    this.#order.delete(key);
     if (
       update.kind === "tool" &&
-      this.#pendingToolKeys.get(toolKey(update.value.entry)) === key
+      this.#toolKeys.get(toolKey(update.value.entry)) === key
     ) {
-      this.#pendingToolKeys.delete(toolKey(update.value.entry));
+      this.#toolKeys.delete(toolKey(update.value.entry));
     }
-    this.#pendingBytes -= updatePendingBytes(update);
-    this.#pendingFragments -= updateFragments(update);
-    if (pending.size === 0) this.#pendingBySession.delete(sessionId);
+    this.#bytes -= updatePendingBytes(update);
+    this.#fragments -= updateFragments(update);
+    if (pending.size === 0) this.#pending.delete(sessionId);
     return update;
   }
   #deletePending(
@@ -245,7 +221,6 @@ export class RealtimeStreamBuffer {
       if (include(state)) this.#toolStates.delete(key);
     }
   }
-
   activeToolStreams(sessionId?: string): readonly ToolStreamRequest[] {
     const streams = new Map<string, { sessionId: string; streamId: string }>();
     for (const state of this.#toolStates.values()) {
@@ -259,17 +234,16 @@ export class RealtimeStreamBuffer {
         sessionId: state.entry.sessionId,
         streamId: state.entry.streamId,
       };
-      streams.set(JSON.stringify([value.sessionId, value.streamId]), value);
+      const streamKey = JSON.stringify([value.sessionId, value.streamId]);
+      streams.set(streamKey, value);
     }
     return [...streams.values()];
   }
-
   takeToolResyncRequests(): readonly ToolStreamRequest[] {
-    const requests = [...this.#resyncToolStreams.values()];
-    this.#resyncToolStreams.clear();
+    const requests = [...this.#resync.values()];
+    this.#resync.clear();
     return requests;
   }
-
   clearToolSession(sessionId: string): void {
     this.#deletePending(sessionId, (update) => update.kind === "tool");
     this.#deleteToolStates((state) =>
@@ -278,7 +252,6 @@ export class RealtimeStreamBuffer {
         : state.sessionId === sessionId,
     );
   }
-
   queue(event: StreamServerEvent): void {
     if (event.type === "session_delta") {
       this.#queueSessionDelta(event);
@@ -298,16 +271,16 @@ export class RealtimeStreamBuffer {
       update.value.chunks = emptyChannelChunks();
       update.value.fragments = 0;
     }
-    this.#pendingFragments -= previousFragments - updateFragments(update);
+    this.#fragments -= previousFragments - updateFragments(update);
   }
   #oldestEvictable(protectedKey: string | undefined): string | undefined {
-    for (const key of this.#pendingOrder.keys()) {
+    for (const key of this.#order.keys()) {
       if (key !== protectedKey) return key;
     }
     return undefined;
   }
   #evictPending(key: string): void {
-    const sessionId = this.#pendingOrder.get(key);
+    const sessionId = this.#order.get(key);
     if (sessionId === undefined) return;
     const update = this.#removePending(sessionId, key);
     if (update?.kind === "tool") {
@@ -323,9 +296,9 @@ export class RealtimeStreamBuffer {
     additionalKey: boolean,
   ): boolean {
     return (
-      bytes <= MAXIMUM_PENDING_STREAM_BYTES - this.#pendingBytes &&
-      fragments <= MAXIMUM_PENDING_STREAM_FRAGMENTS - this.#pendingFragments &&
-      (!additionalKey || this.#pendingOrder.size < MAXIMUM_PENDING_STREAM_KEYS)
+      bytes <= MAXIMUM_PENDING_STREAM_BYTES - this.#bytes &&
+      fragments <= MAXIMUM_PENDING_STREAM_FRAGMENTS - this.#fragments &&
+      (!additionalKey || this.#order.size < MAXIMUM_PENDING_STREAM_KEYS)
     );
   }
   #makeRoom(
@@ -338,7 +311,7 @@ export class RealtimeStreamBuffer {
       protectedKey !== undefined &&
       !this.#hasCapacity(bytes, fragments, additionalKey)
     ) {
-      const protectedSessionId = this.#pendingOrder.get(protectedKey);
+      const protectedSessionId = this.#order.get(protectedKey);
       const protectedUpdate =
         protectedSessionId === undefined
           ? undefined
@@ -359,12 +332,12 @@ export class RealtimeStreamBuffer {
   ): void {
     const pending = this.#pendingSession(sessionId, true);
     pending?.set(key, update);
-    this.#pendingOrder.set(key, sessionId);
+    this.#order.set(key, sessionId);
     if (update.kind === "tool") {
-      this.#pendingToolKeys.set(toolKey(update.value.entry), key);
+      this.#toolKeys.set(toolKey(update.value.entry), key);
     }
-    this.#pendingBytes += updatePendingBytes(update);
-    this.#pendingFragments += updateFragments(update);
+    this.#bytes += updatePendingBytes(update);
+    this.#fragments += updateFragments(update);
   }
   #queueSessionDelta(event: SessionDelta): void {
     const epoch = this.#sessionEpoch(event.sessionId);
@@ -386,8 +359,8 @@ export class RealtimeStreamBuffer {
       previous.value.thinking.push(event.thinking);
       previous.value.pendingBytes += bytes;
       previous.value.fragments += 1;
-      this.#pendingBytes += bytes;
-      this.#pendingFragments += 1;
+      this.#bytes += bytes;
+      this.#fragments += 1;
       return;
     }
     this.#storePending(event.sessionId, key, {
@@ -414,12 +387,19 @@ export class RealtimeStreamBuffer {
     sessionId: string,
     retainedKey: string,
   ): ToolStreamEntry | undefined {
-    const key = this.#pendingToolKeys.get(retainedKey);
+    const key = this.#toolKeys.get(retainedKey);
     const update =
       key === undefined ? undefined : this.#pendingSession(sessionId)?.get(key);
     return update?.kind === "tool"
       ? materializeToolUpdate(update.value)
       : undefined;
+  }
+  #requestToolResync(request: ToolStreamRequest): void {
+    const value = {
+      sessionId: request.sessionId,
+      streamId: request.streamId,
+    };
+    this.#resync.set(JSON.stringify([value.sessionId, value.streamId]), value);
   }
   #queueToolUpdate(event: ToolStreamDeltaFrame): void {
     const epoch = this.#sessionEpoch(event.sessionId);
@@ -433,17 +413,17 @@ export class RealtimeStreamBuffer {
       this.#pendingToolEntry(event.sessionId, retainedKey) ??
       this.#currentToolEntry(retainedKey);
     const result = validatedToolDelta(current, event);
-    if (!result.accepted) return;
-
+    if (!result.accepted) {
+      if (result.reason === "initial" || result.reason === "gap") {
+        this.#requestToolResync(event);
+      }
+      return;
+    }
     const contentBytes =
       event.content === undefined ? 0 : utf8ByteLength(event.content);
     const fragments = event.content === undefined ? 0 : 1;
     if (!this.#makeRoom(contentBytes, fragments, buffered === undefined, key)) {
-      const request = { sessionId: event.sessionId, streamId: event.streamId };
-      this.#resyncToolStreams.set(
-        JSON.stringify([request.sessionId, request.streamId]),
-        request,
-      );
+      this.#requestToolResync(event);
       return;
     }
     const next = buffered ?? initialBufferedToolUpdate(result.entry, epoch);
@@ -451,14 +431,14 @@ export class RealtimeStreamBuffer {
     if (buffered === undefined) {
       this.#storePending(event.sessionId, key, { kind: "tool", value: next });
     } else {
-      this.#pendingBytes += contentBytes;
-      this.#pendingFragments += fragments;
+      this.#bytes += contentBytes;
+      this.#fragments += fragments;
     }
   }
   #backgroundSession(
     selectedSessionId: string | undefined,
   ): string | undefined {
-    for (const sessionId of this.#pendingBySession.keys()) {
+    for (const sessionId of this.#pending.keys()) {
       if (sessionId !== selectedSessionId) return sessionId;
     }
     return undefined;
@@ -467,39 +447,38 @@ export class RealtimeStreamBuffer {
     sessionId: string,
     rotate: boolean,
   ): RealtimeStreamUpdate | undefined {
-    const pending = this.#pendingBySession.get(sessionId);
+    const pending = this.#pending.get(sessionId);
     const next = pending?.entries().next();
     if (pending === undefined || next?.done !== false) return undefined;
     const [key] = next.value;
     const update = this.#removePending(sessionId, key);
-    const remaining = this.#pendingBySession.get(sessionId);
+    const remaining = this.#pending.get(sessionId);
     if (rotate && remaining !== undefined) {
-      this.#pendingBySession.delete(sessionId);
-      this.#pendingBySession.set(sessionId, remaining);
+      this.#pending.delete(sessionId);
+      this.#pending.set(sessionId, remaining);
     }
     return update === undefined ? undefined : this.#materialize(update);
   }
-
   takeNext(
     maximumUpdates = 1,
     selectedSessionId?: string,
     withinBudget: () => boolean = () => true,
   ): RealtimeStreamBatch | undefined {
-    if (selectedSessionId !== this.#selectedSessionId) {
-      this.#nextSelectedTurn = true;
-      this.#selectedSessionId = selectedSessionId;
+    if (selectedSessionId !== this.#selectedId) {
+      this.#selectedTurn = true;
+      this.#selectedId = selectedSessionId;
     }
     return drainUpdates(maximumUpdates, withinBudget, () => {
       const backgroundSessionId = this.#backgroundSession(selectedSessionId);
-      const preferredSessionId = this.#nextSelectedTurn
+      const preferredSessionId = this.#selectedTurn
         ? selectedSessionId
         : backgroundSessionId;
-      const fallbackSessionId = this.#nextSelectedTurn
+      const fallbackSessionId = this.#selectedTurn
         ? backgroundSessionId
         : selectedSessionId;
       const sessionId =
         preferredSessionId !== undefined &&
-        this.#pendingBySession.has(preferredSessionId)
+        this.#pending.has(preferredSessionId)
           ? preferredSessionId
           : fallbackSessionId;
       if (sessionId === undefined) return undefined;
@@ -508,18 +487,17 @@ export class RealtimeStreamBuffer {
         sessionId !== selectedSessionId,
       );
       if (update === undefined) return undefined;
-      this.#nextSelectedTurn = !this.#nextSelectedTurn;
+      this.#selectedTurn = !this.#selectedTurn;
       return update;
     });
   }
-
   takeBarrier(
     barrier: RealtimeStreamBarrier,
     maximumUpdates = 1,
     withinBudget: () => boolean = () => true,
   ): RealtimeStreamBatch | undefined {
     return drainUpdates(maximumUpdates, withinBudget, () => {
-      const pending = this.#pendingBySession.get(barrier.sessionId);
+      const pending = this.#pending.get(barrier.sessionId);
       // A session Map preserves insertion order, and markBarrier advances the
       // epoch before later updates are inserted (see markBarrier above). Thus
       // the first entry has its lowest epoch.
@@ -534,12 +512,8 @@ export class RealtimeStreamBuffer {
       return this.#takeFirst(barrier.sessionId, false);
     });
   }
-
   barrierPending(barrier: RealtimeStreamBarrier): boolean {
-    const first = this.#pendingBySession
-      .get(barrier.sessionId)
-      ?.values()
-      .next();
+    const first = this.#pending.get(barrier.sessionId)?.values().next();
     return first?.done === false && updateEpoch(first.value) <= barrier.epoch;
   }
   #deleteOldestToolState(sessionId?: string): void {
@@ -592,7 +566,6 @@ export class RealtimeStreamBuffer {
       type: "tool_update",
     };
   }
-
   applyToolSnapshot(
     snapshot: ToolStreamSnapshotFrame,
   ): ToolStreamSnapshotFrame {

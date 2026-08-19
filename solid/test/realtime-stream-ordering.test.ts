@@ -501,8 +501,8 @@ function receiveToolLifecycle(
 }
 test("synchronizes only active tool streams on session state", () => {
   const stream = streamingTestConnection("active-sync-instance");
-  const activeStreamId = "tool-stream-active";
-  const active = preparingToolDelta(0, activeStreamId, "call-active");
+  const activeId = "tool-stream-active";
+  const active = preparingToolDelta(0, activeId, "call-active");
   stream.receive({ ...active, state: "preparing" });
   expectNextFrame(stream);
   for (let index = 0; index < 30; index += 1) {
@@ -522,28 +522,29 @@ test("synchronizes only active tool streams on session state", () => {
   expect(socket?.sent).toEqual([
     JSON.stringify({
       sessionId: SESSION_ID,
-      streamId: activeStreamId,
+      streamId: activeId,
       type: "sync_tools",
     }),
   ]);
   stream.stop();
 });
 test("reconnect synchronizes every observed tool stream", () => {
-  const firstStreamId = "tool-stream-a";
-  const secondStreamId = "tool-stream-b";
+  const firstId = "tool-stream-a";
+  const secondId = "tool-stream-b";
   const stream = streamingTestConnection("multi-stream-instance");
   stream.receive({
-    ...preparingToolDelta(0, firstStreamId, "call-0"),
+    ...preparingToolDelta(0, firstId, "call-0"),
     state: "preparing",
   });
   expectNextFrame(stream);
   stream.receive({
-    ...preparingToolDelta(1, secondStreamId, "call-1"),
+    ...preparingToolDelta(1, secondId, "call-1"),
     state: "preparing",
   });
   const reconnected = stream.reconnect("multi-stream-reconnected");
-  expectToolSync(reconnected.sent, firstStreamId);
-  expect(reconnected.sent).toHaveLength(1);
+  expectToolSync(reconnected.sent, firstId);
+  expectToolSync(reconnected.sent, secondId);
+  expect(reconnected.sent).toHaveLength(2);
   stream.stop();
 });
 function selectedRunningController(): SessionController {
@@ -602,7 +603,6 @@ test("keeps paused ask-questions tool state through terminal output and reconnec
     type: "session",
   });
   expectNextFrame(stream);
-  expectToolSync(stream.setup.sockets[0]?.sent);
   expect(controller.state.detail).toMatchObject({
     pendingQuestions: { id: "paused-questions" },
     status: "paused",

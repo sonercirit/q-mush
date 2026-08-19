@@ -1,49 +1,34 @@
-import {
-  MAXIMUM_TOOL_STREAMS_PER_SESSION,
-  MAXIMUM_TOOL_STREAMS_PER_USER,
-} from "../shared/tool-stream.ts";
-
-export interface ToolSnapshotRequest {
+export interface ToolSyncRequest {
   readonly sessionId: string;
   readonly streamId: string;
 }
 
-function requestKey(sessionId: string, streamId: string): string {
-  return JSON.stringify([sessionId, streamId]);
+function requestKey(request: ToolSyncRequest): string {
+  return JSON.stringify([request.sessionId, request.streamId]);
 }
 
-export function forgetToolSnapshot(
-  snapshots: Map<string, ToolSnapshotRequest>,
-  sessionId: string,
-  streamId: string,
-): void {
-  snapshots.delete(requestKey(sessionId, streamId));
-}
+export class ToolSyncTracker {
+  readonly #seenSnapshots = new Map<string, ToolSyncRequest>();
 
-export function rememberToolSnapshot(
-  snapshots: Map<string, ToolSnapshotRequest>,
-  sessionId: string,
-  streamId: string | undefined,
-): void {
-  if (streamId === undefined) return;
-  const key = requestKey(sessionId, streamId);
-  snapshots.delete(key);
-  snapshots.set(key, { sessionId, streamId });
-  let sessionRequests = 0;
-  for (const request of snapshots.values()) {
-    if (request.sessionId === sessionId) sessionRequests += 1;
+  clear(): void {
+    this.#seenSnapshots.clear();
   }
-  while (sessionRequests > MAXIMUM_TOOL_STREAMS_PER_SESSION) {
-    for (const [candidateKey, request] of snapshots) {
-      if (request.sessionId !== sessionId) continue;
-      snapshots.delete(candidateKey);
-      sessionRequests -= 1;
-      break;
-    }
+
+  forget(request: ToolSyncRequest): void {
+    this.#seenSnapshots.delete(requestKey(request));
   }
-  while (snapshots.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
-    const oldest = snapshots.keys().next().value;
-    if (oldest === undefined) break;
-    snapshots.delete(oldest);
+
+  rememberSnapshot(request: ToolSyncRequest): void {
+    this.#seenSnapshots.set(requestKey(request), request);
+  }
+
+  requests(): readonly ToolSyncRequest[] {
+    return [...this.#seenSnapshots.values()];
+  }
+
+  unseen(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[] {
+    return requests.filter(
+      (request) => !this.#seenSnapshots.has(requestKey(request)),
+    );
   }
 }
