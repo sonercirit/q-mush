@@ -150,6 +150,7 @@ export function createSessionRestartControl(
   let finalShutdownMark: Promise<void> | undefined;
   let serverDeadline: RestartDeadline | undefined;
   const boundedDrains = new Map<string, BoundedDrain>();
+  const sharedServerRestartIds = new Map<string, string>();
   const forcePark = (
     scope: RestartScope,
     persistence: Promise<unknown>,
@@ -209,6 +210,7 @@ export function createSessionRestartControl(
       .finally(() => {
         clearDrainTimer(timeout);
         boundedDrains.delete(key);
+        if (scope.kind === "server") sharedServerRestartIds.clear();
       });
     boundedDrains.set(key, { bounded, escalate, finish, timer: timeout });
     return bounded;
@@ -263,6 +265,7 @@ export function createSessionRestartControl(
         if (serverId === undefined) {
           throw new Error("The server restart request was lost");
         }
+        sharedServerRestartIds.set(runnerId, restartId);
         await boundedDrain(
           { kind: "server" },
           serverId,
@@ -282,7 +285,7 @@ export function createSessionRestartControl(
       validRestartId(restartId);
       if (finalShutdownPrepared) return true;
       if (runtimes.draining) {
-        if (runnerRestartId(runnerId) !== restartId) return false;
+        if (sharedServerRestartIds.get(runnerId) !== restartId) return false;
         return escalateScope({ kind: "server" });
       }
       if (runnerRestartId(runnerId) !== restartId) {

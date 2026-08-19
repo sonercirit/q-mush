@@ -345,14 +345,29 @@ describe("session restart control", () => {
     ]);
   });
 
-  test("server drain rejects a stale runner escalation", async () => {
+  test("a late runner escalates the shared server drain with its restart ID", async () => {
     const { restart, runtimes } = control(() => "server");
     runtimes.settleDrainsImmediately = false;
-    const pending = restart.drainServer();
+    const server = restart.drainServer();
+    const runner = restart.drainRunner("runner-1", "runner-restart");
+
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      true,
+    );
+    await Promise.all([server, runner]);
+    expect(runtimes.forceParkCalls).toBe(1);
+  });
+
+  test("server drain rejects a stale late-runner escalation", async () => {
+    const { restart, runtimes } = control(() => "server");
+    runtimes.settleDrainsImmediately = false;
+    const server = restart.drainServer();
+    const runner = restart.drainRunner("runner-1", "runner-restart");
+
     expect(restart.escalateRunnerDrain("runner-1", "stale")).toBe(false);
     expect(runtimes.forceParkCalls).toBe(0);
     runtimes.settleDrain();
-    await pending;
+    await Promise.all([server, runner]);
   });
 
   test("escalates a pending runner drain through its dedicated boundary", async () => {
