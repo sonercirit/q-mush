@@ -17,14 +17,12 @@ Living project memory.
   docs, performance, security, and DX. Ship small improvements now.
 - TDD: fail first, implement, refactor green.
 - DRY/KISS: authoritative logic, no premature abstraction.
-- Never invent tunables: probe omission, prefer provider defaults, else use
-  metadata or docs.
-- Integrate completely the first time: wire every session capability to each
-  protocol's native control, recording what a protocol lacks.
+- Never invent tunables; omit them or use provider metadata/docs.
+- Integrate every session capability into each protocol's native control; record
+  protocol gaps.
 - No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight,
-  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
-  in a test.
+  unperformed verification; disclose unverified work. Fix defects on sight;
+  codify in a test if a fix proves harmful.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
@@ -55,7 +53,7 @@ Living project memory.
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
   source and local `.env`, coalescing bursts into the ignored restart trigger;
-  `dev:restart` writes it, while plain `dev` restarts only from it.
+  `dev:restart` writes it; plain `dev` restarts only from it.
   `runner-executable.ts` fingerprints runner source/compiler, builds privately,
   caches in memory, serves `/runner/executable`. Restarts drain active steps and
   queue new work, so sessions may request their own restart. Text handlers
@@ -123,8 +121,10 @@ Living project memory.
   `solid/realtime-client.ts`, `solid/session-client.tsx`,
   `solid/session-controller.ts`: model deltas combine once per frame per
   session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
+  notifications, keyed messages rerender only changes. The owned detail header
+  shows the stable session ID with responsive selectable text and clipboard
+  feedback; public page shells contain no session identity. The long-lived Solid
+  root preserves focus and scroll; the changing session detail is not a document
   scroll anchor, and only bottom-pinned transcripts follow live output.
   `agent-model-discovery.ts` queries metadata, signal-cancelable;
   `shared/agent-configuration.ts` owns catalog types/validation. New sessions

@@ -24,6 +24,7 @@ import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.t
 import { SessionEditorGroup } from "./session-editor-group.tsx";
 import { SessionForkEditor } from "./session-fork-client.tsx";
 import { SessionHistoryControls } from "./session-history-client.tsx";
+import { SessionIdentity } from "./session-identity.tsx";
 import {
   createSessionShortcuts,
   sessionComposerShortcut,
@@ -222,6 +223,7 @@ export function SessionDetailBody(props: {
               {`· Agent file: ${view().detail.agentFile?.name ?? "None"}`}
             </span>
           </div>
+          <SessionIdentity sessionId={view().detail.id} />
           <span class="mt-2 block">{props.sessionMetrics}</span>
           <SessionUsage kind="session" usage={view().detail.tokenUsage} />
         </div>

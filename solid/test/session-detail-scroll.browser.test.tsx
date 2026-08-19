@@ -1,4 +1,5 @@
 import { afterEach, expect, test } from "vitest";
+import { page } from "vitest/browser";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import type { SessionController } from "../session-controller.ts";
 import "../styles.css";
@@ -8,6 +9,9 @@ import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 
 const BROWSER_TEST_DISPOSALS: (() => void)[] = [];
+const MOBILE_VIEWPORT = { height: 720, width: 320 };
+const SESSION_ID_FOR_NARROW_LAYOUT =
+  "session-identity-with-a-long-stable-identifier-that-must-wrap-without-overflowing";
 const LARGE_CONTENT = Array.from(
   { length: 36 },
   (_, index) => `Layout line ${String(index)}`,
@@ -72,10 +76,36 @@ function setComposerValue(composer: HTMLTextAreaElement, value: string): void {
   composer.dispatchEvent(new InputEvent("input", { bubbles: true }));
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const dispose of BROWSER_TEST_DISPOSALS.splice(0).reverse()) dispose();
   document.body.replaceChildren();
   document.documentElement.style.scrollBehavior = "auto";
+  await page.viewport(1_024, 720);
+});
+
+test("a full session ID wraps in the real mobile layout without page overflow", async () => {
+  await page.viewport(MOBILE_VIEWPORT.width, MOBILE_VIEWPORT.height);
+  const mounted = mountTestSessionDetail(
+    { ...INITIAL_DETAIL, id: SESSION_ID_FOR_NARROW_LAYOUT },
+    BROWSER_TEST_DISPOSALS,
+  );
+  await nextPaint();
+  const identity = queryTestElement(
+    mounted.container,
+    "[data-session-identity='true']",
+  );
+  const value = queryTestElement(identity, "[data-session-id-value='true']");
+  const copy = queryTestElement(identity, "[data-copy-session-id='true']");
+
+  expect(value.textContent).toBe(SESSION_ID_FOR_NARROW_LAYOUT);
+  expect(getComputedStyle(value).overflowWrap).toBe("anywhere");
+  expect(identity.scrollWidth).toBeLessThanOrEqual(identity.clientWidth);
+  expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(
+    document.documentElement.clientWidth,
+  );
+  expect(copy.getBoundingClientRect().right).toBeLessThanOrEqual(
+    document.documentElement.clientWidth,
+  );
 });
 
 test("real session layout changes do not move the document or nested transcript", async () => {

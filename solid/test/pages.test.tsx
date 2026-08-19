@@ -20,6 +20,18 @@ function expectFaviconMetadata(html: string, pageUrl: string): void {
   expect(document.body.querySelectorAll('link[rel~="icon"]')).toHaveLength(0);
 }
 
+test("does not put session identities in public server-rendered shells", () => {
+  const publicSessionId = "public-url-session-id-must-not-be-serialized";
+  const home = renderHomePage();
+  const app = renderAppPage();
+
+  for (const html of [home, app]) {
+    expect(html).not.toContain(publicSessionId);
+    expect(html).not.toContain("Session ID:");
+    expect(html).not.toContain("data-session-identity");
+  }
+});
+
 test("renders every server page through Solid with absolute favicon metadata", () => {
   const home = renderHomePage();
   const app = renderAppPage();
