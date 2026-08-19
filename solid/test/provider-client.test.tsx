@@ -14,7 +14,7 @@ import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
 function credentialState(options: {
-  readonly accountId: string;
+  readonly accountId: string | null;
   readonly id: string;
   readonly label: string;
 }) {
@@ -132,6 +132,25 @@ test("uses the configured provider name in the shared re-login state", () => {
   expect(html).toContain("This OpenRouter login has expired.");
   expect(html).toContain("Reconnect this account");
   expect(html).not.toContain("This OpenAI login has expired");
+});
+
+test("directs an unverifiable OpenRouter account through viable recovery", () => {
+  const html = renderedProviderPanel(
+    OPENROUTER_PANEL,
+    credentialState({
+      accountId: null,
+      id: "unverified-openrouter-credential",
+      label: "Unverified OpenRouter account",
+    }),
+  );
+
+  expect(html).toContain("This OpenRouter login has expired.");
+  expect(html).toContain("has no verified OpenRouter account ID");
+  expect(html).toContain(
+    "Remove it, then connect OpenRouter again as a new credential.",
+  );
+  expect(html).not.toContain("Reconnect this account");
+  expect(html).not.toContain("credentialId=unverified-openrouter-credential");
 });
 
 test("renders provider default controls", () => {
