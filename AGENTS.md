@@ -2,30 +2,27 @@
 
 Living project memory.
 
-- TypeScript ESM Bun/SolidJS; tests are under `test/`. `/` is home, `/app` the
-  app.
+- TypeScript ESM Bun/SolidJS; tests under `test/`. `/` is home, `/app` the app.
 
 ## Working Agreements
 
-- Research provider docs with Brave Search, then probe APIs and schemas. Call a
-  capability impossible only with excluding evidence; otherwise record an open
-  question.
-- Preserve patterns and improve touched code, tests, docs, performance,
-  security, and DX. Ship small improvements now; use TDD (red, green, refactor),
-  DRY/KISS, and no premature abstraction.
+- Research provider docs, probe APIs/schemas. Call a capability impossible only
+  with excluding evidence; otherwise record an open question.
+- Preserve patterns; improve touched code, tests, docs, performance, security,
+  and DX. Ship small improvements now; use TDD, DRY/KISS, no premature
+  abstraction.
 - Never invent tunables: probe omission, prefer defaults, else use metadata or
   docs.
-- Integrate once: wire each session capability to each protocol's native
-  control, recording what a protocol lacks.
-- No reward hacking: never weaken tests, special-case checks, or claim unrun
-  verification. Fix defects on sight, including pre-existing/out-of-scope ones;
-  if a fix proves harmful, codify why in a test.
+- Integrate once: wire capabilities to each protocol's native control, recording
+  gaps.
+- No reward hacking: don't weaken tests, special-case checks, or claim unrun
+  checks. Fix defects on sight; if a fix is harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change. A repeated
   instruction means a rule is missing. If evidence overturns a finding, fix the
   code it justified and all stale records in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failure. Never commit secrets, generated
-  artifacts or env files.
+  captured, then rerun narrow failures. Never commit secrets, artifacts or env
+  files.
 
 ## Setup, Commands
 
@@ -277,8 +274,10 @@ Living project memory.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs since completed responses may omit
-  them. Frozen-clock tests can give admission -> active -> admission one
-  timestamp; production cannot across its grace. OpenAI WebSocket Mode expires
+  them. Frozen clocks may give admission -> active -> admission one timestamp;
+  production cannot. Live OpenAI and Codex socket probes emitted
+  `response.created` with `response.id`; the first identified `response.*` also
+  admits servers omitting it. WebSocket Mode expires after 60 minutes; canonical
   `websocket_connection_limit_reached` and observed underscore-free variant
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. Local send is admission: bound it until correlated

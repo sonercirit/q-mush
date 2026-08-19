@@ -129,6 +129,26 @@ function sessionCostText(
   }
 }
 
+function liveDuration(now: number, startedAt: number): string {
+  return formatSessionTime(Math.max(0, now - startedAt));
+}
+
+function LiveDuration(props: {
+  readonly kind: "run" | "step";
+  readonly now: () => number;
+  readonly startedAt: number;
+}): JSX.Element {
+  return (
+    <span
+      class={props.kind === "run" ? "text-emerald-200" : "text-emerald-200/80"}
+      data-session-run-duration={props.kind === "run" ? "true" : undefined}
+      data-session-step-duration={props.kind === "step" ? "true" : undefined}
+    >
+      {`${props.kind === "run" ? "Run" : "Step"}: ${liveDuration(props.now(), props.startedAt)}`}
+    </span>
+  );
+}
+
 function SessionMetrics(props: {
   readonly session: Pick<
     AgentSessionSummary,
@@ -148,29 +168,18 @@ function SessionMetrics(props: {
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
       <Show when={props.session.activeStartedAt} keyed>
-        {(startedAt) => {
-          const elapsed = now() - startedAt;
-          return (
-            <span class="text-emerald-200" data-session-run-duration="true">
-              {`Run: ${formatSessionTime(elapsed < 0 ? 0 : elapsed)}`}
-            </span>
-          );
-        }}
-      </Show>
-      <Show
-        when={
-          props.session.activeStartedAt === null
-            ? null
-            : props.session.stepStartedAt
-        }
-        keyed
-      >
-        {(stepStartedAt) => (
-          <span class="text-emerald-200/80" data-session-step-duration="true">
-            {`Step: ${formatSessionTime(Math.max(stepStartedAt, now()) - stepStartedAt)}`}
-          </span>
+        {(startedAt) => (
+          <LiveDuration kind="run" now={now} startedAt={startedAt} />
         )}
       </Show>
+      {props.session.activeStartedAt !== null &&
+      props.session.stepStartedAt !== null ? (
+        <LiveDuration
+          kind="step"
+          now={now}
+          startedAt={props.session.stepStartedAt}
+        />
+      ) : null}
       <Show when={props.session.runtimePending} keyed>
         {(pending) => (
           <span class="text-amber-200/90" data-session-pending-component="true">

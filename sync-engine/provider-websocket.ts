@@ -137,6 +137,8 @@ export class ProviderWebSocketSession {
         socket.removeEventListener("message", onMessage);
         socket.removeEventListener("error", onError);
         socket.removeEventListener("close", onClose);
+        // Only a successfully completed step leaves this socket reusable, so
+        // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
           this.#lastResponseId = currentResponseId;
           this.#socket = socket;

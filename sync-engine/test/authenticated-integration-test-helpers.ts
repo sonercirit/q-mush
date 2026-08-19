@@ -375,6 +375,9 @@ export function createAuthenticatedTestDatabase(
     })
     .run();
   database
+    // The shared fake clock advances for every pending-component report. Keep
+    // authentication valid through long tool-heavy session tests, including
+    // image persistence, rather than expiring after their accumulated ticks.
     .insert(sessions)
     .values({
       ...testAuditFields(),
