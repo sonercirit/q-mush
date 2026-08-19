@@ -76,7 +76,7 @@ export class SessionLauncher {
       operation === "agent" ? "step" : "handoff",
       async ({ controller, pendingComponent, restartRequest, settled }) => {
         const reportPending = (component: SessionPendingComponent): void => {
-          if (!pendingComponent(component)) {
+          if (pendingComponent(component) !== "updated") {
             return;
           }
           try {
@@ -89,8 +89,13 @@ export class SessionLauncher {
             ) {
               this.#dependencies.notify(userId, detail.id);
             }
-          } catch {
-            // Diagnostic publication must not interrupt the model request.
+          } catch (error) {
+            // Diagnostic publication must not interrupt the model request, but
+            // unexpected persistence failures must remain observable.
+            console.warn(
+              "Session pending diagnostic publication failed",
+              error,
+            );
           }
         };
         const restartPersistence: DurableRestartPersistence = {

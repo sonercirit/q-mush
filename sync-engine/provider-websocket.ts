@@ -211,17 +211,26 @@ export class ProviderWebSocketSession {
               accumulator.push(value);
               return;
             }
+            const eventType = value["type"];
+            const admitsRequest =
+              eventType === "response.created" ||
+              (typeof eventType === "string" &&
+                eventType.startsWith("response.") &&
+                eventType !== "response.completed" &&
+                eventType !== "response.failed" &&
+                eventType !== "response.incomplete" &&
+                eventType !== "response.cancelled");
             if (
-              typeof value["type"] !== "string" ||
-              !value["type"].startsWith("response.") ||
+              !admitsRequest ||
               eventResponseId === undefined ||
               eventResponseId === previousResponseId
             ) {
               return;
             }
-            // Responses servers normally acknowledge with response.created,
-            // but any correlated response event proves admission when that
-            // optional event is absent.
+            // response.created is the canonical correlation event. Servers
+            // that omit it can still correlate the request with an identified
+            // non-terminal event; an unfamiliar terminal frame alone may be a
+            // stale response from the reused connection and is discarded.
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");
