@@ -14,6 +14,7 @@ export default {
   ],
   ignoreFiles: [
     "knip.config.ts",
+    "headless-browser-provider.ts",
     "scripts/test-browser-runner.ts",
     "scripts/test-browser.ts",
     "vitest.browser.config.ts",

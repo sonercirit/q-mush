@@ -1,5 +1,14 @@
 import { chromium } from "playwright";
 
+const expected = ["--no-orphans", "run", "--bun", "vitest"];
+if (
+  !expected.every((argument, index) => process.argv[index + 2] === argument)
+) {
+  throw new Error(
+    `Playwright launch probe received invalid arguments: ${JSON.stringify(process.argv)}`,
+  );
+}
+
 // Playwright 1.62.1's public launch failure currently reports the spawned
 // command as `<launching> ...`. Keep this fail-closed probe and its pinned-version
 // assertion in browser-test-policy.test.ts green before upgrading Playwright.
@@ -30,7 +39,6 @@ try {
   } else {
     process.stdout.write(
       `PLAYWRIGHT_LAUNCH_PROBE=${JSON.stringify({
-        configuredHeadless: options.headless,
         effectiveHeadless: launchCommand.includes(" --headless "),
         playwrightDebug: process.env["PWDEBUG"],
         workingDirectory: process.cwd(),

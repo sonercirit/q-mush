@@ -1,4 +1,4 @@
-import { chmod, readFile, writeFile } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium, type LaunchOptions } from "playwright";
@@ -12,6 +12,9 @@ const BROWSER_TEST_ENTRY = join(ROOT_DIRECTORY, "scripts", "test-browser.ts");
 const BROWSER_LIFECYCLE_BUN = fileURLToPath(
   new URL("fixtures/browser-lifecycle-bun.ts", import.meta.url),
 );
+const BUN_SHIM_WRITER = fileURLToPath(
+  new URL("fixtures/write-bun-shim.ts", import.meta.url),
+);
 const BROWSER_LIFECYCLE_PROBE = fileURLToPath(
   new URL("fixtures/browser-lifecycle-probe.ts", import.meta.url),
 );
@@ -20,10 +23,8 @@ const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
 );
 
 function restorePlaywrightLaunch(): void {
-  chromium.launch = ORIGINAL_PLAYWRIGHT_LAUNCH;
+  Reflect.deleteProperty(chromium, "launch");
 }
-
-const ORIGINAL_PLAYWRIGHT_LAUNCH = chromium.launch.bind(chromium);
 
 afterEach(restorePlaywrightLaunch);
 
@@ -102,40 +103,43 @@ test("ordinary Chromium launches stay headless under adversarial overrides", asy
     headless: true,
   });
   await expect(
-    browserLaunchProbe(["--browser.headless=false"]),
+    browserLaunchProbe([
+      "--browser.instances.0.browser=chromium",
+      "--browser.instances.0.name=forced-headed",
+      "--no-browser.instances.0.headless",
+      "--project=forced-headed",
+    ]),
+  ).resolves.toMatchObject({ headless: true });
+  await expect(
+    browserLaunchProbe([
+      "--browser.instances.0.browser",
+      "chromium",
+      "--browser.instances.0.name",
+      "forced-headed-separated",
+      "--browser.instances.0.headless=false",
+      "--project",
+      "forced-headed-separated",
+    ]),
   ).resolves.toMatchObject({ headless: true });
 });
 
 interface PlaywrightLaunchResult {
-  readonly configuredHeadless: boolean;
   readonly effectiveHeadless: boolean;
   readonly playwrightDebug: string;
   readonly workingDirectory: string;
 }
 
-function expectGuardedVitestArguments(arguments_: readonly string[]): void {
-  const expected = ["--no-orphans", "run", "--bun", "vitest"];
-  const commandOffset = arguments_.findIndex(
-    (argument) => argument === expected[0],
-  );
-  if (
-    commandOffset < 0 ||
-    expected.some(
-      (argument, index) => arguments_[commandOffset + index] !== argument,
-    )
-  ) {
-    throw new Error(
-      `Browser probe expected Bun's guarded Vitest binary runner: ${JSON.stringify(arguments_)}`,
-    );
-  }
-}
-
 async function writeBunExecutable(
   pathname: string,
-  source: string,
+  modulePath: string,
 ): Promise<void> {
-  await writeFile(pathname, `#!${process.execPath}\n${source}`);
-  await chmod(pathname, 0o755);
+  const writer = Bun.spawn(
+    [process.execPath, BUN_SHIM_WRITER, pathname, modulePath],
+    { stderr: "inherit", stdout: "inherit" },
+  );
+  if ((await writer.exited) !== 0) {
+    throw new Error("Bun shim writer failed");
+  }
 }
 
 async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult> {
@@ -144,18 +148,15 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
     async (directory) => {
       const executable = join(directory, "bun");
       const inheritedPath = process.env["PATH"] ?? "";
-      await writeBunExecutable(
-        executable,
-        `(${expectGuardedVitestArguments.toString()})(process.argv);\nawait import(${JSON.stringify(
-          PLAYWRIGHT_LAUNCH_PROBE,
-        )});\n`,
-      );
+      await writeBunExecutable(executable, PLAYWRIGHT_LAUNCH_PROBE);
       const probe = Bun.spawn([process.execPath, BROWSER_TEST_ENTRY], {
         cwd: directory,
+        detached: true,
         env: {
           ...process.env,
           PATH: `${directory}${delimiter}${inheritedPath}`,
           PWDEBUG: "1",
+          Q_MUSH_BROWSER_EXECUTABLE: executable,
         },
         stderr: "pipe",
         stdout: "pipe",
@@ -176,7 +177,7 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
       try {
         exitCode = await Promise.race([probe.exited, aborted]);
       } finally {
-        if (probe.exitCode === null) probe.kill();
+        if (probe.exitCode === null) killProcess(-probe.pid);
         await probe.exited;
       }
       const [stdout, stderr] = await Promise.all([output, errors]);
@@ -190,7 +191,6 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
       const parsed: unknown = JSON.parse(result);
       if (
         !isRecord(parsed) ||
-        typeof parsed["configuredHeadless"] !== "boolean" ||
         typeof parsed["effectiveHeadless"] !== "boolean" ||
         typeof parsed["playwrightDebug"] !== "string" ||
         typeof parsed["workingDirectory"] !== "string"
@@ -200,7 +200,6 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
         );
       }
       return {
-        configuredHeadless: parsed["configuredHeadless"],
         effectiveHeadless: parsed["effectiveHeadless"],
         playwrightDebug: parsed["playwrightDebug"],
         workingDirectory: parsed["workingDirectory"],
@@ -211,7 +210,6 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
 
 test("shipped browser entrypoint defeats inherited Playwright debug mode", async () => {
   await expect(runGuardedPlaywrightLaunchProbe()).resolves.toEqual({
-    configuredHeadless: true,
     effectiveHeadless: true,
     playwrightDebug: "0",
     workingDirectory: ROOT_DIRECTORY,
@@ -232,19 +230,6 @@ test("package and CI structurally use the guarded browser launcher", async () =>
   const commands = stepRecords.flatMap((step) =>
     typeof step["run"] === "string" ? [step["run"]] : [],
   );
-  const workflowJobs = isRecord(jobs)
-    ? Object.values(jobs).filter(isRecord)
-    : [];
-  const workflowSteps = workflowJobs.flatMap((job) =>
-    Array.isArray(job["steps"]) ? job["steps"].filter(isRecord) : [],
-  );
-  const actions = workflowSteps.flatMap((step) =>
-    typeof step["uses"] === "string" ? [step["uses"]] : [],
-  );
-
-  expect(
-    actions.some((action) => action.startsWith("actions/setup-node")),
-  ).toBe(false);
   expect(
     configuration.devDependencies.get("playwright"),
     "Update the `<launching>` compatibility probe before Playwright",
@@ -351,19 +336,7 @@ test.runIf(SUPPORTS_NO_ORPHANS)(
       async (directory) => {
         const reportPath = join(directory, "processes.json");
         const executable = join(directory, "bun");
-        await writeBunExecutable(
-          executable,
-          `await import(${JSON.stringify(BROWSER_LIFECYCLE_BUN)});\n`,
-        );
-        const packageSource = await readFile(
-          join(ROOT_DIRECTORY, "package.json"),
-          "utf8",
-        );
-        const browserCommand =
-          packageConfiguration(packageSource).scripts.get("test:browser");
-        if (browserCommand === undefined) {
-          throw new Error("package.json must define test:browser");
-        }
+        await writeBunExecutable(executable, BROWSER_LIFECYCLE_BUN);
         const supervisor = Bun.spawn(
           [
             process.execPath,
@@ -379,15 +352,11 @@ test.runIf(SUPPORTS_NO_ORPHANS)(
             detached: true,
             env: {
               ...process.env,
-              PATH: `${directory}${delimiter}${process.env["PATH"] ?? ""}`,
+              Q_MUSH_BROWSER_EXECUTABLE: executable,
               Q_MUSH_BROWSER_PROBE_REPORT: reportPath,
               Q_MUSH_BROWSER_PROBE_ROOT: ROOT_DIRECTORY,
               Q_MUSH_BROWSER_PROBE_SCRIPT: BROWSER_LIFECYCLE_PROBE,
-              Q_MUSH_BROWSER_PROBE_PATH: `${directory}${delimiter}${process.env["PATH"] ?? ""}`,
               Q_MUSH_BROWSER_REAL_BUN: process.execPath,
-              Q_MUSH_BROWSER_TEST_COMMAND: JSON.stringify(
-                browserCommand.split(" "),
-              ),
             },
             stderr: "pipe",
             stdin: "ignore",

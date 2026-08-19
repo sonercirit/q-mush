@@ -12,16 +12,31 @@ interface SpawnCall {
   readonly options: Parameters<BrowserTestDependencies["spawn"]>[1];
 }
 
-function dependencyProbe(exitCode = 0): {
+function dependencyProbe(
+  exitCode = 0,
+  signalCode: NodeJS.Signals | null = null,
+): {
   readonly calls: SpawnCall[];
   readonly dependencies: BrowserTestDependencies;
+  readonly signals: (number | NodeJS.Signals | undefined)[];
 } {
   const calls: SpawnCall[] = [];
+  const signals: (number | NodeJS.Signals | undefined)[] = [];
   const spawn: BrowserTestDependencies["spawn"] = (command, options) => {
     calls.push({ command, options });
-    return { exited: Promise.resolve(exitCode) };
+    return {
+      exited: Promise.resolve(exitCode),
+      kill: (signal) => {
+        signals.push(signal);
+      },
+      signalCode,
+    };
   };
-  return { calls, dependencies: { spawn } };
+  return {
+    calls,
+    dependencies: { executable: "/pinned/bun", spawn },
+    signals,
+  };
 }
 
 test("browser launcher forwards filters while disabling inherited Playwright debug mode", async () => {
@@ -31,10 +46,13 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
 
   try {
     await expect(
-      runBrowserTests(
-        ["session-detail", "--browser.headless=false"],
-        probe.dependencies,
-      ),
+      runBrowserTests(["session-detail", "--browser.headless=false"], {
+        ...probe.dependencies,
+        environment: {
+          ...process.env,
+          Q_MUSH_BROWSER_LAUNCH_REPORT: "/tmp/untrusted-report",
+        },
+      }),
     ).resolves.toBe(0);
   } finally {
     if (originalDebug === undefined) {
@@ -46,7 +64,7 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
 
   expect(probe.calls).toHaveLength(1);
   expect(probe.calls[0]?.command).toEqual([
-    "bun",
+    "/pinned/bun",
     "--no-orphans",
     "run",
     "--bun",
@@ -59,10 +77,56 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
   ]);
   expect(probe.calls[0]?.options.cwd).toBe(ROOT_DIRECTORY);
   expect(probe.calls[0]?.options.env["PWDEBUG"]).toBe("0");
+  expect(
+    probe.calls[0]?.options.env["Q_MUSH_BROWSER_LAUNCH_REPORT"],
+  ).toBeUndefined();
+});
+
+test("browser launcher rejects config shaping", async () => {
+  for (const arguments_ of [
+    ["--config", "other.ts"],
+    ["--config=other.ts"],
+    ["-c", "other.ts"],
+    ["-c=other.ts"],
+  ]) {
+    const probe = dependencyProbe();
+    await expect(
+      runBrowserTests(arguments_, probe.dependencies),
+    ).rejects.toThrow("do not accept Vitest config overrides");
+    expect(probe.calls).toHaveLength(0);
+  }
 });
 
 test("browser launcher preserves the child exit code", async () => {
   await expect(
     runBrowserTests([], dependencyProbe(7).dependencies),
   ).resolves.toBe(7);
+});
+
+test("browser launcher forwards termination signals", async () => {
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    const exited = Promise.withResolvers<number>();
+    const signals: NodeJS.Signals[] = [];
+    const dependencies: BrowserTestDependencies = {
+      executable: "/pinned/bun",
+      spawn: () => ({
+        exited: exited.promise,
+        kill: (received) => {
+          if (typeof received === "string") signals.push(received);
+        },
+        signalCode: null,
+      }),
+    };
+    const running = runBrowserTests([], dependencies);
+    process.emit(signal);
+    exited.resolve(0);
+    await expect(running).resolves.toBe(0);
+    expect(signals).toEqual([signal]);
+  }
+});
+
+test("browser launcher treats signal termination as failure", async () => {
+  await expect(
+    runBrowserTests([], dependencyProbe(0, "SIGTERM").dependencies),
+  ).resolves.toBe(1);
 });

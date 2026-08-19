@@ -200,7 +200,8 @@ Living project memory.
   First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
   and HTML-like `Response` bodies; HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in test and production graphs;
-  tests cannot keep production alive, and unused test helpers fail.
+  browser-only runtime roots are explicit production `ignoreFiles`; tests cannot
+  keep production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
   deliberately matches native CPD's crude whole-file fallback tokenizer.
   Native-token and complete-function alpha matches of ≥20 tokens spanning a line
