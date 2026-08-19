@@ -247,7 +247,6 @@ describe("global tool time limit integration", () => {
       expect(finishedError).toBeInstanceOf(Error);
       if (!(finishedError instanceof Error)) throw new Error("Expected error");
       expect(finishedError).toMatchObject({ name: "TimeoutError" });
-      expect(finishedError.cause).toMatchObject({ name: "TimeoutError" });
       expect(finishedError.message).toContain("global 30-minute limit");
       expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject({
         status: "failed",

@@ -78,6 +78,10 @@ export function toolExecutionLimitSeconds(settings: ToolSettings): number {
   return settings.executionLimitMinutes * 60;
 }
 
+export function formatGlobalToolExecutionLimit(settings: ToolSettings): string {
+  return `global ${String(settings.executionLimitMinutes)}-minute limit`;
+}
+
 export function formatToolLimitsStatement(settings: ToolSettings): string {
   const minuteLabel =
     settings.executionLimitMinutes === 1 ? "minute" : "minutes";

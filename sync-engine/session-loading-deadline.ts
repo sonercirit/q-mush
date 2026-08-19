@@ -1,10 +1,11 @@
 import {
+  formatGlobalToolExecutionLimit,
   toolExecutionLimitMilliseconds,
   type ToolSettings,
 } from "../shared/tool-limits.ts";
 
 function loadingTimeLimitMessage(settings: ToolSettings): string {
-  return `Loading session context was canceled after reaching the global ${String(settings.executionLimitMinutes)}-minute limit.`;
+  return `Loading session context was canceled after reaching the ${formatGlobalToolExecutionLimit(settings)}.`;
 }
 
 export async function withLoadingDeadline<Result>(
@@ -33,16 +34,7 @@ export async function withLoadingDeadline<Result>(
       !runtimeSignal.aborted &&
       !preservesError(error)
     ) {
-      const timeout = new DOMException(
-        loadingTimeLimitMessage(settings),
-        "TimeoutError",
-      );
-      Object.defineProperty(timeout, "cause", {
-        configurable: true,
-        enumerable: true,
-        value: deadline.signal.reason,
-      });
-      throw timeout;
+      throw deadline.signal.reason;
     }
     throw error;
   } finally {

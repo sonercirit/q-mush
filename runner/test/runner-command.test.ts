@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
   executeRunnerCommand,
@@ -291,8 +291,9 @@ describe("runner WebSocket protocol", () => {
       {},
       120,
     );
+    const outsideWorkspace = process.cwd();
     const directory = await executeSession(
-      session,
+      createSessionExecutor(outsideWorkspace, "session-directory-payload"),
       "list_directories",
       {},
       120,
@@ -302,7 +303,11 @@ describe("runner WebSocket protocol", () => {
       content: instructions,
       name: "AGENTS.md",
     });
-    expect(JSON.parse(directory)).toMatchObject({ path: root });
+    expect(JSON.parse(directory)).toMatchObject({
+      parent: dirname(outsideWorkspace),
+      path: outsideWorkspace,
+      truncated: false,
+    });
   });
 
   test("preserves normal shell completion and exit reporting", async () => {
