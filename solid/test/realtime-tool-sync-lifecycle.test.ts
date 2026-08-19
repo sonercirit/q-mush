@@ -9,12 +9,12 @@ const SESSION_ID = "session-ordered";
 const STREAM_ID = "stream-ordered";
 
 function expectToolSync(sent: readonly string[] | undefined): void {
-  const decoded = sent?.map((frame) => JSON.parse(frame));
-  expect(decoded).toContainEqual({
+  const request = JSON.stringify({
     sessionId: SESSION_ID,
     streamId: STREAM_ID,
     type: "sync_tools",
   });
+  expect(sent?.includes(request)).toBe(true);
 }
 
 test("resolves snapshot synchronization before terminal reconnect", () => {
