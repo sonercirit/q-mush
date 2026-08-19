@@ -98,7 +98,6 @@ function writeRuntime(
 }
 
 function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // A racing stop or restart makes this guarded write match zero rows.
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }

@@ -406,7 +406,7 @@ describe("session store", () => {
     database.$client.close();
   });
 
-  test("persists distinct timing for a user-less continuation", () => {
+  test("persists timing for a user-less continuation", () => {
     const setup = runningStore();
     setup.store.appendCurrentAgentMessage(
       SESSION_ID,
