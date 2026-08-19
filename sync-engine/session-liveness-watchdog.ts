@@ -130,7 +130,7 @@ export class SessionLivenessWatchdog {
       if (now - missing.missingSince < (this.#options.graceMs ?? 0)) {
         continue;
       }
-      this.#fail(session, now, missing.reason);
+      this.#fail(session, now, missing);
       this.#missing.delete(session.id);
     }
     for (const sessionId of this.#missing.keys()) {
@@ -186,15 +186,28 @@ export class SessionLivenessWatchdog {
   #fail(
     session: InterruptedStoredSession,
     now: number,
-    reason: MissingRuntimeReason,
+    missing: MissingRuntime,
   ): void {
+    if (missing.reason === "provider_admission") {
+      const pending = this.#options.runtimes.pending(
+        session.id,
+        session.executionGeneration,
+      );
+      if (
+        pending?.component !== "provider_admission" ||
+        pending.since !== missing.pendingSince
+      ) {
+        return;
+      }
+    }
+    const error = LIVENESS_ERRORS[missing.reason];
     if (
       !failInterruptedStoredSession(
         this.#options.database,
         session,
         this.#options.generateId(now),
         now,
-        LIVENESS_ERRORS[reason],
+        error,
       )
     ) {
       return;
@@ -202,7 +215,7 @@ export class SessionLivenessWatchdog {
     this.#options.runtimes.abortForGeneration(
       session.id,
       session.executionGeneration,
-      new DOMException(LIVENESS_ERRORS[reason], "AbortError"),
+      new DOMException(error, "AbortError"),
     );
     this.#options.broker.cancelSession(session.id);
     const detail = this.#options.store.get(session.userId, session.id);

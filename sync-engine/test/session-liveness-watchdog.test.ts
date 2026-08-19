@@ -217,6 +217,16 @@ function expectStoredStatus(
   expect(status).toBe(expected);
 }
 
+function expectRuntimeRemainsActive(
+  setup: ReturnType<typeof runningSetup>,
+  runtime: ReturnType<typeof launchPendingRuntime>,
+): void {
+  expectStoredStatus(setup, "running");
+  expect(runtime.signal).toMatchObject({ aborted: false });
+  runtime.resolve();
+  closeSetup(setup);
+}
+
 function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
   const setup = runningSetup();
   const create = () =>
@@ -388,7 +398,24 @@ test("does not time out an acknowledged provider request", () => {
   closeSetup(setup);
 });
 
-test("keeps an acknowledgement just before its deadline unbounded", () => {
+test("preserves grace-boundary acknowledgement", () => {
+  const { runtime, setup, watchdog } = admissionWatchdogSetup();
+  const originalPending = runtime.runtimes.pending.bind(runtime.runtimes);
+  const pending = vi.spyOn(runtime.runtimes, "pending");
+  let calls = 0;
+  pending.mockImplementation((...arguments_) => {
+    const observed = originalPending(...arguments_);
+    calls += 1;
+    if (calls === 2) runtime.pending("provider_request");
+    return observed;
+  });
+
+  scanPastGrace(watchdog);
+
+  expectRuntimeRemainsActive(setup, runtime);
+});
+
+test("preserves pre-deadline acknowledgement", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
 
   watchdog.scan();
@@ -398,10 +425,7 @@ test("keeps an acknowledgement just before its deadline unbounded", () => {
   watchdog.setNow(TEST_NOW + 20 * 60_000);
   watchdog.scan();
 
-  expectStoredStatus(setup, "running");
-  expect(runtime.signal).toMatchObject({ aborted: false });
-  runtime.resolve();
-  closeSetup(setup);
+  expectRuntimeRemainsActive(setup, runtime);
 });
 
 test("fails a queued runner command even when its runner recently connected", async () => {
