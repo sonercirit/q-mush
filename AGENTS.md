@@ -109,11 +109,10 @@ Project memory.
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session via
-  canonical schemas. Bounded `read_session` spans transcript categories and
-  definitions; `get_session_options` pages spawn choices. Grouped tools manage
-  non-blocking owned children; a durable generation ledger delivers one
-  sanitized terminal event per owned attempt. Routes survive compaction; only
-  attempts report, administrative fences settle captured identity without
+  canonical schemas. `read_session` is bounded; `get_session_options` pages
+  choices. Grouped tools manage owned children; a durable generation ledger
+  delivers one sanitized terminal event per attempt. Routes survive compaction;
+  only attempts report, administrative fences settle captured identity without
   duplicates, and callback persistence/claiming are atomic. `callback_pending`
   blocks another attempt; idle parents retain events until resumed. `parallel`
   uses four ordered workers with bounded output and cancellation.
@@ -123,16 +122,15 @@ Project memory.
   `solid/session-client.tsx`, `solid/session-controller.ts`: model deltas
   combine once per frame per session, other events are immediate, unchanged
   snapshots suppress notifications, keyed messages rerender only changes. The
-  long-lived Solid root preserves focus and scroll; the changing session detail
-  is not a document scroll anchor, and only bottom-pinned transcripts follow
-  live output. `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else the first) and credential, first
-  discovered model, latest working directory, top reported effort. Unknown
-  modalities imply no attachment support; choices show provider and Q Mush
-  modalities. `solid/custom-select.tsx` shares search normalization, paginates
-  past ten items, owns accessible keyboard/focus. Focus mode fills the app
-  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  long-lived Solid root preserves focus and scroll; only bottom-pinned
+  transcripts follow live output. `agent-model-discovery.ts` queries metadata,
+  signal-cancelable; `shared/agent-configuration.ts` owns catalog
+  types/validation. New sessions take the default online runner (else the first)
+  and credential, first discovered model, latest working directory, top reported
+  effort. Unknown modalities imply no attachment support; choices show provider
+  and Q Mush modalities. `solid/custom-select.tsx` shares search normalization,
+  paginates past ten items, owns accessible keyboard/focus. Focus mode fills the
+  app viewport (not browser Fullscreen), keeping drafts and scroll; its rail
   overlays on desktop, becomes a drawer, collapses on selection, closing with
   Escape first. `shared/agent-prompt.ts` builds the model system prompt and
   transcript display; reasoning summaries persist as `thinking` messages omitted
