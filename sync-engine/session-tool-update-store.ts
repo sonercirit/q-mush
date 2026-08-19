@@ -30,11 +30,8 @@ export function updateStoredSessionTools(
     readonly workspaceId: string;
   },
 ): SessionToolUpdateStoreResult {
-  const existing = options.read(
-    input.userId,
-    input.sessionId,
-    input.workspaceId,
-  );
+  const { sessionId, userId, workspaceId } = input;
+  const existing = options.read(userId, sessionId, workspaceId);
   if (existing === undefined) {
     return { status: "not_found" };
   }

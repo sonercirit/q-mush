@@ -83,7 +83,10 @@ export function updateStoredSessionProvider(
   const timing = active
     ? { status: "idle" as const, ...sessionTimingUpdate(existing, input.now) }
     : {};
-  const condition = workspaceSessionCondition(input, input.expectedGeneration);
+  const condition = workspaceSessionCondition(
+    { ...input },
+    input.expectedGeneration,
+  );
   const changed = resources.database.transaction((transaction) =>
     advanceStoredSessionGeneration({
       condition,
