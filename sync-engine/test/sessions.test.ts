@@ -301,7 +301,7 @@ describe("agent sessions", () => {
     );
   });
 
-  test("persists image inputs, completes with settled timing, and sends them to the model", async () => {
+  test("persists image inputs and sends them to the model", async () => {
     let now = TEST_NOW;
     const model = new ScriptedAgentModel([
       { content: "Screenshot implemented.", toolCalls: [] },
