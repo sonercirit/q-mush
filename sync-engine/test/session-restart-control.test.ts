@@ -357,7 +357,9 @@ describe("session restart control", () => {
     runtimes.settleDrainsImmediately = false;
 
     const drain = restart.drainRunner("runner-1", "runner-restart");
-    await Promise.resolve();
+    const server = restart.drainServer();
+    runtimes.settleDrain("server");
+    await server;
     expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
       true,
     );
@@ -370,7 +372,7 @@ describe("session restart control", () => {
       false,
     );
 
-    expect(runtimes.drains.at(-1)).toEqual({
+    expect(runtimes.drains).toContainEqual({
       restartId: "runner-restart",
       scope: { kind: "runner", runnerId: "runner-1" },
     });

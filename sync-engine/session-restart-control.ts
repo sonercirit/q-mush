@@ -150,6 +150,7 @@ export function createSessionRestartControl(
   let finalShutdownMark: Promise<void> | undefined;
   let serverDeadline: RestartDeadline | undefined;
   const boundedDrains = new Map<string, BoundedDrain>();
+  const fallbackRunnerRestartIds = new Map<string, string>();
   const sharedServerRestartIds = new Map<string, string>();
   const forcePark = (
     scope: RestartScope,
@@ -281,12 +282,12 @@ export function createSessionRestartControl(
         warn(
           "The active server restart deadline was unavailable; starting a dedicated runner drain",
         );
-        sharedServerRestartIds.set(runnerId, restartId);
+        fallbackRunnerRestartIds.set(runnerId, restartId);
         try {
           await boundedDrain({ kind: "runner", runnerId }, restartId, false);
         } finally {
-          if (sharedServerRestartIds.get(runnerId) === restartId) {
-            sharedServerRestartIds.delete(runnerId);
+          if (fallbackRunnerRestartIds.get(runnerId) === restartId) {
+            fallbackRunnerRestartIds.delete(runnerId);
           }
         }
         return;
@@ -302,10 +303,16 @@ export function createSessionRestartControl(
         // settlement. Its association is cleared at that boundary, so a
         // correct-ID escalation in that microtask window is rejected and the
         // runner reconnects to observe the settled server restart.
-        if (sharedServerRestartIds.get(runnerId) !== restartId) return false;
-        return serverDeadline === undefined
-          ? escalateScope({ kind: "runner", runnerId })
-          : escalateScope({ kind: "server" });
+        const shared = sharedServerRestartIds.get(runnerId) === restartId;
+        const fallback = fallbackRunnerRestartIds.get(runnerId) === restartId;
+        if (!shared && !fallback) return false;
+        if (serverDeadline !== undefined) {
+          // An active server restart deliberately widens even a fallback
+          // runner association to the server scope and its shared deadline.
+          if (escalateScope({ kind: "server" })) return true;
+          if (shared) return false;
+        }
+        return escalateScope({ kind: "runner", runnerId });
       }
       if (runnerRestartId(runnerId) !== restartId) {
         return false;

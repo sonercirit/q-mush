@@ -10,6 +10,13 @@ export type RestartProgressVisibilityCache = Map<
   RestartProgressVisibility
 >;
 
+export function restartProgressVisibilityKey(
+  userId: string,
+  workspaceId: string,
+): string {
+  return `${userId}\0${workspaceId}`;
+}
+
 function visibility(
   cache: RestartProgressVisibilityCache,
   key: string,

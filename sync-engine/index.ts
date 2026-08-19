@@ -49,6 +49,7 @@ import {
 import {
   addVisibleRestartSession,
   type RestartProgressVisibilityCache,
+  restartProgressVisibilityKey,
   visibleRestartProgress,
 } from "./restart-progress-visibility.ts";
 import { buildRunnerExecutableProvider } from "./runner-executable.ts";
@@ -206,7 +207,7 @@ sessions.onChange((userId, sessionId) => {
     }
     addVisibleRestartSession(
       restartVisibleSessionIds,
-      `${userId}\0${workspaceId}`,
+      restartProgressVisibilityKey(userId, workspaceId),
       sessionId,
     );
   }
@@ -238,7 +239,7 @@ function publishRestartProgress(): void {
   process.send?.(message);
   for (const userId of realtimeHub.userIds()) {
     for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
-      const visibilityKey = `${userId}\0${workspaceId}`;
+      const visibilityKey = restartProgressVisibilityKey(userId, workspaceId);
       const visibleProgress = visibleRestartProgress(
         restartVisibleSessionIds,
         visibilityKey,

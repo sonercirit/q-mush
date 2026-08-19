@@ -1,4 +1,4 @@
-import { expect, test, vi } from "vitest";
+import { expect, onTestFinished, test, vi } from "vitest";
 import { RestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
@@ -97,6 +97,9 @@ test("development drain prevents chained terminal cleanup from dispatching", asy
 
 test("overlapping drains suppress cleanup until every drain settles", async () => {
   const timers: (() => void)[] = [];
+  onTestFinished(() => {
+    vi.restoreAllMocks();
+  });
   const originalSetTimeout = globalThis.setTimeout;
   vi.spyOn(globalThis, "setTimeout").mockImplementation(
     (callback: () => void) => {
@@ -118,6 +121,7 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   const shortDrain = cleanup.drainPending(new RestartDeadline(20, () => 0));
   const longDrain = cleanup.drainPending(new RestartDeadline(100, () => 0));
 
+  expect(timers).toHaveLength(2);
   timers[0]?.();
   await shortDrain;
   const suppressedDetail = {
@@ -137,7 +141,6 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   completeCleanup(broker, "cleanup-2");
   await resumed;
   await first;
-  vi.restoreAllMocks();
 });
 
 test("cleanup dispatch resumes after a completed development drain", async () => {
