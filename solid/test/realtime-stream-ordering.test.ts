@@ -1,11 +1,12 @@
 import { expect, test } from "vitest";
-import { MAXIMUM_TOOL_STREAMS_PER_SESSION } from "../../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type {
   RealtimeClientEvent,
   RealtimeStreamBatch,
+  RealtimeStreamUpdate,
 } from "../realtime-stream-buffer.ts";
 import { SessionController } from "../session-controller.ts";
+import { orderedToolDelta } from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -67,56 +68,6 @@ function modelDelta(
   return identifiedModelDelta(SESSION_ID, STREAM_ID, content);
 }
 
-function toolDelta(
-  sequence: number,
-  change:
-    | { readonly state: "completed" | "preparing" | "running" }
-    | { readonly content: string },
-): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
-  const identity = {
-    callId: "ordered-call",
-    index: 0,
-    sequence,
-    sessionId: SESSION_ID,
-    streamId: STREAM_ID,
-    type: "tool_stream" as const,
-  };
-  return "state" in change
-    ? { ...identity, state: change.state }
-    : { ...identity, channel: "stdout", content: change.content };
-}
-
-function terminalStream(
-  index: number,
-  streamId: string,
-  callId = `terminal-call-${String(index)}`,
-  output?: string,
-): readonly RealtimeServerEvent[] {
-  const identity = {
-    callId,
-    index,
-    sessionId: SESSION_ID,
-    streamId,
-    type: "tool_stream" as const,
-  };
-  const running = [
-    { ...identity, sequence: 0, state: "preparing" as const },
-    { ...identity, sequence: 1, state: "running" as const },
-  ];
-  return output === undefined
-    ? [...running, { ...identity, sequence: 2, state: "completed" as const }]
-    : [
-        ...running,
-        {
-          ...identity,
-          channel: "stdout" as const,
-          content: output,
-          sequence: 2,
-        },
-        { ...identity, sequence: 3, state: "completed" as const },
-      ];
-}
-
 function toolSnapshot(
   sequence: number,
   stdout: string,
@@ -170,11 +121,14 @@ function expectNextFrame(stream: StreamingTestConnection): void {
   stream.pendingFrames.shift()?.();
 }
 
-function expectToolSync(sent: readonly string[] | undefined): void {
+function expectToolSync(
+  sent: readonly string[] | undefined,
+  streamId = STREAM_ID,
+): void {
   expect(sent).toContain(
     JSON.stringify({
       sessionId: SESSION_ID,
-      streamId: STREAM_ID,
+      streamId,
       type: "sync_tools",
     }),
   );
@@ -216,13 +170,29 @@ function receiveSessionModels(
   );
 }
 
+function nextBatchUpdates(
+  stream: StreamingTestConnection,
+  batchIndex: number,
+): readonly RealtimeStreamUpdate[] {
+  expectNextFrame(stream);
+  return stream.batches()[batchIndex]?.updates ?? [];
+}
+
 function drainExpectedFrame(
   stream: StreamingTestConnection,
   batchIndex: number,
   expected: readonly Readonly<Record<string, unknown>>[],
 ): void {
-  expectNextFrame(stream);
-  expect(stream.batches()[batchIndex]?.updates).toMatchObject(expected);
+  expect(nextBatchUpdates(stream, batchIndex)).toMatchObject(expected);
+}
+
+function expectBarrierBatch(
+  stream: StreamingTestConnection,
+  batchIndex: number,
+  updates: number,
+): void {
+  expect(nextBatchUpdates(stream, batchIndex)).toHaveLength(updates);
+  expect(stream.emitted.some(({ type }) => type === "session")).toBe(false);
 }
 
 function expectBatch(
@@ -238,9 +208,9 @@ function sendRunningTool(
   stream: StreamingTestConnection,
   output: string,
 ): void {
-  stream.receive(toolDelta(0, { state: "preparing" }));
-  stream.receive(toolDelta(1, { state: "running" }));
-  stream.receive(toolDelta(2, { content: output }));
+  stream.receive(orderedToolDelta(0, { state: "preparing" }));
+  stream.receive(orderedToolDelta(1, { state: "running" }));
+  stream.receive(orderedToolDelta(2, { content: output }));
 }
 
 function receiveSnapshotBarrier(
@@ -248,6 +218,12 @@ function receiveSnapshotBarrier(
   snapshot = snapshotWithStreams([]),
 ): void {
   stream.receive(snapshot);
+  while (
+    stream.pendingFrames.length > 0 &&
+    !stream.emitted.some((event) => event.type === "tool_stream_snapshot")
+  ) {
+    stream.pendingFrames.shift()?.();
+  }
 }
 
 function expectSingleSnapshotBarrier(stream: StreamingTestConnection): void {
@@ -255,7 +231,7 @@ function expectSingleSnapshotBarrier(stream: StreamingTestConnection): void {
     "stream_batch",
     "tool_stream_snapshot",
   ]);
-  expectNextFrame(stream);
+  expectNoPendingFrames(stream);
   expectBatchCount(stream, 1);
 }
 
@@ -284,7 +260,7 @@ test("bounds sustained mixed streams to one ordered batch per frame", () => {
   expectNoPendingFrames(stream);
 
   stream.receive(modelDelta("model-2"));
-  stream.receive(toolDelta(3, { content: "+tool-2" }));
+  stream.receive(orderedToolDelta(3, { content: "+tool-2" }));
   expectNextFrame(stream);
   expectBatch(stream, 1, { content: "model-2", type: "session_delta" });
   expectBatch(stream, 1, expectedToolUpdate(3, "tool-1+tool-2"), 1);
@@ -303,9 +279,8 @@ test("drains several keys per frame and prioritizes the selected session", () =>
   stream.receive(indexedToolDelta(1, "selected-tool-1"));
   stream.receive(indexedToolDelta(2, "selected-tool-2"));
 
-  expectNextFrame(stream);
+  expectBarrierBatch(stream, 0, 4);
 
-  expect(stream.batches()[0]?.updates).toHaveLength(4);
   expect(stream.batches()[0]?.updates).toMatchObject([
     { content: "selected-model", sessionId: SESSION_ID },
     { content: "background-0", sessionId: otherSessionId },
@@ -342,6 +317,39 @@ test("rotates fairly between background sessions", () => {
     { sessionId: "background-c", streamId: "background-c-0" },
     { sessionId: selectedSessionId, streamId: "selected-3" },
     { sessionId: "background-a", streamId: "background-a-1" },
+  ]);
+  stream.stop();
+});
+
+test("keeps alternating turns across one-update frames", () => {
+  let clock = 0;
+  const selectedSessionId = "session-selected";
+  const stream = streamingTestConnection(
+    "cross-frame-fairness-instance",
+    undefined,
+    {
+      now: () => {
+        clock += 9;
+        return clock;
+      },
+      selectedSession: () => selectedSessionId,
+    },
+  );
+  for (const sessionId of [selectedSessionId, "background-a", "background-b"]) {
+    receiveSessionModels(stream, 3, sessionId, sessionId);
+  }
+
+  drainExpectedFrame(stream, 0, [
+    { sessionId: selectedSessionId, streamId: `${selectedSessionId}-0` },
+  ]);
+  drainExpectedFrame(stream, 1, [
+    { sessionId: "background-a", streamId: "background-a-0" },
+  ]);
+  drainExpectedFrame(stream, 2, [
+    { sessionId: selectedSessionId, streamId: `${selectedSessionId}-1` },
+  ]);
+  drainExpectedFrame(stream, 3, [
+    { sessionId: "background-b", streamId: "background-b-0" },
   ]);
   stream.stop();
 });
@@ -392,6 +400,29 @@ test("bounds a stream frame by elapsed work", () => {
   stream.stop();
 });
 
+test("drains a snapshot barrier incrementally before applying its state", () => {
+  const stream = streamingTestConnection("incremental-barrier-instance");
+  receiveSessionModels(stream, 9, SESSION_ID, "barrier-model");
+  stream.receive({
+    session: {
+      ...TEST_SESSION_DETAIL,
+      id: SESSION_ID,
+      status: "running",
+    },
+    type: "session",
+  });
+
+  expect(stream.pendingFrames).toHaveLength(2);
+  stream.pendingFrames.shift()?.();
+  expect(stream.emitted).toEqual([]);
+  expectBarrierBatch(stream, 0, 4);
+  expectBarrierBatch(stream, 1, 4);
+  expectBarrierBatch(stream, 2, 1);
+  expectNextFrame(stream);
+  expect(stream.emitted.at(-1)?.type).toBe("session");
+  stream.stop();
+});
+
 test("keeps a newer buffered tool entry through a stale snapshot", () => {
   const stream = streamingTestConnection("stale-snapshot-instance");
   sendRunningTool(stream, "new output");
@@ -413,12 +444,20 @@ test("flushes concurrent tools as one snapshot barrier batch", () => {
   sendRunningTool(stream, "first");
   for (const event of [
     {
-      ...toolDelta(0, { state: "preparing" }),
+      ...orderedToolDelta(0, { state: "preparing" }),
       callId: "second-call",
       index: 1,
     },
-    { ...toolDelta(1, { state: "running" }), callId: "second-call", index: 1 },
-    { ...toolDelta(2, { content: "second" }), callId: "second-call", index: 1 },
+    {
+      ...orderedToolDelta(1, { state: "running" }),
+      callId: "second-call",
+      index: 1,
+    },
+    {
+      ...orderedToolDelta(2, { content: "second" }),
+      callId: "second-call",
+      index: 1,
+    },
   ]) {
     stream.receive(event);
   }
@@ -446,7 +485,7 @@ test("keeps terminal state through repeated stale snapshots without revival", ()
   const stream = streamingTestConnection("snapshot-instance");
   const staleSnapshot = toolSnapshot(2, "complete output");
   sendRunningTool(stream, "complete output");
-  stream.receive(toolDelta(3, { state: "completed" }));
+  stream.receive(orderedToolDelta(3, { state: "completed" }));
   receiveSnapshotBarrier(stream, staleSnapshot);
 
   expectBatch(stream, 0, {
@@ -472,7 +511,7 @@ test("keeps terminal state through repeated stale snapshots without revival", ()
 test("does not schedule frames for rejected terminal continuations", () => {
   const stream = streamingTestConnection("terminal-rejection-instance");
   sendRunningTool(stream, "done");
-  const terminal = toolDelta(3, { state: "completed" });
+  const terminal = orderedToolDelta(3, { state: "completed" });
   stream.receive(terminal);
   expectNextFrame(stream);
   expectNoPendingFrames(stream);
@@ -501,36 +540,21 @@ test("discards buffered fragments from a disconnected socket", () => {
   stream.stop();
 });
 
-test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
-  const stream = streamingTestConnection("terminal-cap-instance");
-  const terminalCount = MAXIMUM_TOOL_STREAMS_PER_SESSION + 1;
-  const terminalOutput = "x".repeat(32 * 1_024);
-  for (let index = 0; index < terminalCount; index += 1) {
-    const streamId = `terminal-step-${String(index)}`;
-    for (const event of terminalStream(
-      index,
-      streamId,
-      undefined,
-      terminalOutput,
-    )) {
-      stream.receive(event);
-    }
-    expectNextFrame(stream);
-  }
-
-  const reusedStreamId = "terminal-step-0";
-  for (const event of terminalStream(0, reusedStreamId, "reused-call")) {
-    stream.receive(event);
-  }
+test("reconnect synchronizes every observed tool stream", () => {
+  const firstStreamId = "tool-stream-a";
+  const secondStreamId = "tool-stream-b";
+  const stream = streamingTestConnection("multi-stream-instance");
+  stream.receive({ ...indexedToolDelta(0, firstStreamId), state: "preparing" });
   expectNextFrame(stream);
-
-  expectBatchCount(stream, terminalCount + 1);
-  expectBatch(stream, terminalCount, {
-    entry: { callId: "reused-call", sequence: 2, state: "completed" },
-    terminal: true,
-    type: "tool_update",
+  stream.receive({
+    ...indexedToolDelta(1, secondStreamId),
+    state: "preparing",
   });
-  expectNoPendingFrames(stream);
+
+  const reconnected = stream.reconnect("multi-stream-reconnected");
+
+  expectToolSync(reconnected.sent, firstStreamId);
+  expectToolSync(reconnected.sent, secondStreamId);
   stream.stop();
 });
 
@@ -592,8 +616,8 @@ test("keeps paused ask-questions tool state through terminal output and reconnec
     },
     type: "session",
   });
-  expectToolSync(stream.setup.sockets[0]?.sent);
   expectNextFrame(stream);
+  expectToolSync(stream.setup.sockets[0]?.sent);
   expect(controller.state.detail).toMatchObject({
     pendingQuestions: { id: "paused-questions" },
     status: "paused",
@@ -602,7 +626,7 @@ test("keeps paused ask-questions tool state through terminal output and reconnec
   const reconnected = stream.reconnect("paused-reconnected-instance");
   expectToolSync(reconnected.sent);
 
-  reconnected.receive(toolDelta(3, { state: "completed" }));
+  reconnected.receive(orderedToolDelta(3, { state: "completed" }));
   expectNextFrame(stream);
 
   expectBatch(stream, 0, {

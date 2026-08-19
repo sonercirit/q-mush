@@ -3,13 +3,11 @@ import type {
   AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import {
-  applyToolStreamDelta,
-  type ToolStreamEntry,
-} from "../shared/tool-stream.ts";
+import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type {
   RealtimeStreamBatch,
+  RealtimeStreamUpdate,
   RealtimeToolStreamUpdate,
 } from "./realtime-stream-buffer.ts";
 import type { RevisionState } from "./revision-state.ts";
@@ -61,15 +59,17 @@ function toolStreamsMatch(
 
 export class SessionRealtimeState {
   readonly #compactionRequests = new Map<string, AgentSessionMessage>();
+  readonly #mutationRebases = new Set<string>();
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
 
-  #toolStreamAllowed(sessionId: string, requireDetail: boolean): boolean {
+  #toolStreamAllowed(sessionId: string): boolean {
     const view = this.#view.value;
     return (
       !view.stopping &&
       view.selectedId === sessionId &&
-      (!requireDetail || view.detail !== undefined)
+      view.detail?.id === sessionId &&
+      sessionDetailIsActive(view.detail)
     );
   }
 
@@ -80,6 +80,52 @@ export class SessionRealtimeState {
   #clearCompaction(sessionId: string): void {
     this.#compactionRequests.delete(sessionId);
     this.#streamedContent.delete(sessionId);
+  }
+
+  #sessionId(update: RealtimeStreamUpdate): string {
+    return update.type === "tool_update"
+      ? update.entry.sessionId
+      : update.sessionId;
+  }
+
+  #forStreamSessions(
+    event: RealtimeStreamBatch,
+    apply: (sessionId: string) => void,
+  ): void {
+    for (const update of event.updates) apply(this.#sessionId(update));
+  }
+
+  #applyMutationStreamSessions(
+    event: RealtimeStreamBatch,
+    freeze: boolean,
+  ): void {
+    this.#forStreamSessions(event, (sessionId) => {
+      if (freeze) this.#mutationRebases.add(sessionId);
+      else this.#rebaseMutationStream(sessionId);
+    });
+  }
+
+  freezeStreamBatch(event: RealtimeStreamBatch): void {
+    this.#applyMutationStreamSessions(event, true);
+  }
+
+  rebaseStream(sessionId: string): void {
+    this.#mutationRebases.add(sessionId);
+  }
+
+  #rebaseMutationStream(sessionId: string): void {
+    if (!this.#mutationRebases.delete(sessionId)) return;
+    this.#clearCompaction(sessionId);
+    const view = this.#view.value;
+    if (view.selectedId !== sessionId || view.detail?.id !== sessionId) return;
+    const detail = persistedDetail(view.detail);
+    const clearTools = view.toolStreams.length > 0;
+    if (detail !== view.detail || clearTools) {
+      this.#view.patch({
+        ...(detail === view.detail ? {} : { detail }),
+        ...(clearTools ? { toolStreams: [] } : {}),
+      });
+    }
   }
 
   applyReconnectDetail(detail: AgentSessionDetail): void {
@@ -96,6 +142,7 @@ export class SessionRealtimeState {
   }
 
   applyDetail(detail: AgentSessionDetail): void {
+    this.#rebaseMutationStream(detail.id);
     const persistable = persistedDetail(detail);
     const active = sessionDetailIsActive(persistable);
     if (!active) {
@@ -218,6 +265,7 @@ export class SessionRealtimeState {
   }
 
   applyStreamBatch(event: RealtimeStreamBatch): void {
+    this.#applyMutationStreamSessions(event, false);
     const view = this.#view.value;
     let detail = view.detail;
     let streamedDetailChanged = false;
@@ -233,8 +281,11 @@ export class SessionRealtimeState {
         ) {
           continue;
         }
-        toolStreams = replaceToolStream(toolStreams, update);
-        toolStreamsChanged = true;
+        const nextToolStreams = replaceToolStream(toolStreams, update);
+        if (!toolStreamsMatch(toolStreams, nextToolStreams)) {
+          toolStreams = nextToolStreams;
+          toolStreamsChanged = true;
+        }
         continue;
       }
       const delta = update;
@@ -280,33 +331,11 @@ export class SessionRealtimeState {
       ...(toolStreamsChanged ? { toolStreams } : {}),
     });
   }
-  applyToolDelta(
-    event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
-  ): void {
-    if (!this.#toolStreamAllowed(event.sessionId, true)) return;
-    const current = this.#view.value.toolStreams.find(
-      (entry) => toolStreamKey(entry) === toolStreamKey(event),
-    );
-    const result = applyToolStreamDelta(current, event);
-    if (!result.accepted) return;
-    this.#applyToolUpdate({
-      entry: result.entry,
-      terminal: result.terminal,
-      type: "tool_update",
-    });
-  }
-
-  #applyToolUpdate(event: RealtimeToolStreamUpdate): void {
-    if (!this.#toolStreamAllowed(event.entry.sessionId, true)) return;
-    const next = replaceToolStream(this.#view.value.toolStreams, event);
-    if (toolStreamsMatch(this.#view.value.toolStreams, next)) return;
-    this.#view.patch({ toolStreams: next });
-  }
-
   applyToolSnapshot(
     event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
   ): void {
-    if (!this.#toolStreamAllowed(event.sessionId, false)) return;
+    this.#rebaseMutationStream(event.sessionId);
+    if (!this.#toolStreamAllowed(event.sessionId)) return;
     const current = new Map(
       this.#view.value.toolStreams
         .filter((entry) => entry.streamId === event.streamId)
@@ -314,7 +343,7 @@ export class SessionRealtimeState {
     );
     const streams = event.streams.map((entry) => {
       const local = current.get(toolStreamKey(entry));
-      return local !== undefined && local.sequence > entry.sequence
+      return local !== undefined && local.sequence >= entry.sequence
         ? local
         : entry;
     });
@@ -336,6 +365,7 @@ export class SessionRealtimeState {
 
   reset(): void {
     this.#compactionRequests.clear();
+    this.#mutationRebases.clear();
     this.#streamedContent.clear();
     if (this.#view.value.toolStreams.length > 0) {
       this.#view.patch({ toolStreams: [] });

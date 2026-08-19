@@ -215,12 +215,13 @@ test("high-rate model and tool streams apply one bounded view update per frame",
   fixture.stream.receive(toolDelta(streamUpdates));
   expect(fixture.stream.pendingFrames).toHaveLength(1);
   const selection = fixture.controller.select(TEST_NAVIGATION_SESSION.id);
-  expect(fixture.controller.state.selectedId).toBe(TEST_NAVIGATION_SESSION.id);
-  fixture.stream.pendingFrames.shift()?.();
   await selection;
   expect(fixture.controller.state).toMatchObject({
     detail: { id: TEST_NAVIGATION_SESSION.id, messages: [] },
     selectedId: TEST_NAVIGATION_SESSION.id,
   });
+  const selectedDetail = fixture.controller.state.detail;
+  fixture.stream.pendingFrames.shift()?.();
+  expect(fixture.controller.state.detail).toBe(selectedDetail);
   expect(fixture.appliedBatches()).toBe(2);
 });

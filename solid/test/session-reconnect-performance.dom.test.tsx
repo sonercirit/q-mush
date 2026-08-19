@@ -8,7 +8,6 @@ import {
   createProviderViewState,
   type ProviderCredential,
 } from "../provider-credential-model.ts";
-import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
@@ -79,36 +78,6 @@ function mountRealSessionPanel(detail: AgentSessionDetail) {
     });
   const container = mountTestView(panel, disposals);
   return { container, controller };
-}
-
-function toolDelta(
-  sessionId: string,
-  sequence: number,
-): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
-  return sequence === 0
-    ? {
-        callId: "call-typing-profile",
-        index: 0,
-        sequence,
-        sessionId,
-        state: "preparing",
-        streamId: "stream-typing-profile",
-        type: "tool_stream",
-      }
-    : {
-        callId: "call-typing-profile",
-        ...(sequence === 2
-          ? { state: "running" as const }
-          : {
-              channel: sequence === 1 ? ("name" as const) : ("stdout" as const),
-              content: sequence === 1 ? "bash" : "x",
-            }),
-        index: 0,
-        sequence,
-        sessionId,
-        streamId: "stream-typing-profile",
-        type: "tool_stream",
-      };
 }
 
 function applySessionEvent(
@@ -262,9 +231,26 @@ test("streaming tool updates do not invalidate the controlled new-session input"
   });
   draftReads = 0;
 
-  for (let sequence = 0; sequence < 40; sequence += 1) {
-    controller.applyToolDelta(toolDelta(detail.id, sequence));
-  }
+  const bufferedToolUpdates = Array.from({ length: 40 }, (_, sequence) => ({
+    entry: {
+      arguments: "",
+      callId: "call-typing-profile",
+      index: 0,
+      name: sequence === 0 ? "" : "bash",
+      sequence,
+      sessionId: detail.id,
+      state: sequence < 2 ? ("preparing" as const) : ("running" as const),
+      stderr: "",
+      stdout: sequence < 3 ? "" : "x".repeat(sequence - 2),
+      streamId: "stream-typing-profile",
+    },
+    terminal: false,
+    type: "tool_update" as const,
+  }));
+  controller.applyStreamBatch({
+    type: "stream_batch",
+    updates: bufferedToolUpdates,
+  });
 
   expect(controller.state.toolStreams).toEqual([
     {

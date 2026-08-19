@@ -75,6 +75,42 @@ function selectedController(
   );
 }
 
+function activeController(): SessionController {
+  return selectedController({ ...TEST_SESSION_DETAIL, status: "running" });
+}
+
+function toolSnapshot(streamId: string, streams: readonly ToolStreamEntry[]) {
+  return {
+    sessionId: TEST_SESSION_DETAIL.id,
+    streamId,
+    streams,
+    type: "tool_stream_snapshot" as const,
+  };
+}
+
+function controlledController(
+  detail: typeof TEST_SESSION_DETAIL,
+): Readonly<{ controller: SessionController; patches: () => number }> {
+  const initial = initialSessionViewState();
+  const reactive = createReactiveState<SessionViewState>(initial);
+  reactive.setState({ ...initial, detail, selectedId: detail.id });
+  let count = 0;
+  return {
+    controller: new SessionController(
+      {
+        setState(updater) {
+          count += 1;
+          reactive.setState(updater);
+        },
+        state: reactive.state,
+      },
+      undefined,
+      undefined,
+    ),
+    patches: () => count,
+  };
+}
+
 function expectToolOutputs(
   controller: SessionController,
   outputs: readonly string[],
@@ -84,7 +120,9 @@ function expectToolOutputs(
   );
 }
 
-function streamBatch(): RealtimeStreamBatch {
+function streamBatch(
+  toolOutputs: readonly string[] = EXPECTED_TOOL_OUTPUTS,
+): RealtimeStreamBatch {
   return {
     type: "stream_batch",
     updates: [
@@ -95,7 +133,7 @@ function streamBatch(): RealtimeStreamBatch {
         thinking: "",
         type: "session_delta",
       },
-      ...EXPECTED_TOOL_OUTPUTS.map(
+      ...toolOutputs.map(
         (stdout, index) =>
           ({
             entry: streamEntry(index, stdout),
@@ -139,34 +177,87 @@ test("a mixed barrier batch reconciles the selected view once", () => {
     ...TEST_SESSION_DETAIL,
     status: "running",
   };
-  const state = initialSessionViewState();
-  const reactive = createReactiveState<SessionViewState>(
-    Object.assign(state, {
-      detail,
-      selectedId: TEST_SESSION_DETAIL.id,
-    }),
-  );
-  let patches = 0;
-  const controller = new SessionController(
-    {
-      setState(updater) {
-        patches += 1;
-        reactive.setState(updater);
-      },
-      state: reactive.state,
-    },
-    undefined,
-    undefined,
-  );
-  patches = 0;
+  const tracked = controlledController(detail);
+  const controller = tracked.controller;
+  const before = tracked.patches();
 
   controller.applyStreamBatch(streamBatch());
 
-  expect(patches).toBe(1);
+  expect(tracked.patches() - before).toBe(1);
   const streamed = controller.state.detail?.messages.at(-1);
   expect(streamed?.content).toBe("batched model output");
   expect(streamed?.role).toBe("assistant");
   expectToolOutputs(controller, EXPECTED_TOOL_OUTPUTS);
+});
+
+test("rebases retained model output when a real mutation settles without a blocked frame", async () => {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const commandResult = Promise.withResolvers<unknown>();
+  const state = initialSessionViewState();
+  const reactive = createReactiveState<SessionViewState>(state);
+  reactive.setState({ ...state, detail, selectedId: detail.id });
+  const controller = new SessionController(reactive, undefined, undefined, {
+    command: vi.fn(() => commandResult.promise),
+  });
+  const modelBatch = (content: string): RealtimeStreamBatch => ({
+    type: "stream_batch",
+    updates: [
+      {
+        content,
+        sessionId: detail.id,
+        streamId: "mutation-stream",
+        thinking: "",
+        type: "session_delta",
+      },
+    ],
+  });
+
+  controller.applyStreamBatch(modelBatch("A"));
+  const mutation = controller.toggleCompactionFlag("autoCompact", false);
+  commandResult.resolve({ ...detail, autoCompact: false, updatedAt: 3 });
+  await mutation;
+  controller.applyStreamBatch(modelBatch("C"));
+
+  const latest = controller.state.detail?.messages.at(-1);
+  expect([latest?.content, latest?.role]).toEqual(["C", "assistant"]);
+});
+
+test("rebases retained output when a pending-input mutation settles", async () => {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const commandResult = Promise.withResolvers<unknown>();
+  const state: SessionViewState = {
+    ...initialSessionViewState(),
+    detail,
+    followUp: "Queue this",
+    selectedId: detail.id,
+  };
+  const controller = new SessionController(
+    createReactiveState(state),
+    undefined,
+    undefined,
+    { command: vi.fn(() => commandResult.promise) },
+  );
+  const modelBatch = (content: string): RealtimeStreamBatch => ({
+    type: "stream_batch",
+    updates: [
+      {
+        content,
+        sessionId: detail.id,
+        streamId: "pending-input-stream",
+        thinking: "",
+        type: "session_delta",
+      },
+    ],
+  });
+
+  controller.applyStreamBatch(modelBatch("A"));
+  const mutation = controller.followUp();
+  commandResult.resolve({ ...detail, updatedAt: detail.updatedAt + 1 });
+  await mutation;
+  controller.applyStreamBatch(modelBatch("C"));
+
+  const latest = controller.state.detail?.messages.at(-1);
+  expect([latest?.content, latest?.role]).toEqual(["C", "assistant"]);
 });
 
 test.each(STREAM_MUTATION_CASES)(
@@ -178,32 +269,69 @@ test.each(STREAM_MUTATION_CASES)(
     );
 
     controller.applyStreamBatch(streamBatch());
-    controller.applyToolDelta({
-      callId: "direct-tool",
-      index: 2,
-      sequence: 0,
-      sessionId: TEST_SESSION_DETAIL.id,
-      state: "preparing",
-      streamId: "stream-batch",
-      type: "tool_stream",
+    controller.applyStreamBatch({
+      type: "stream_batch",
+      updates: [
+        {
+          entry: streamEntry(2, "direct tool"),
+          terminal: false,
+          type: "tool_update",
+        },
+      ],
     });
-    controller.applyToolSnapshot({
-      sessionId: TEST_SESSION_DETAIL.id,
-      streamId: "stream-batch",
-      streams: [streamEntry(0, "snapshot output")],
-      type: "tool_stream_snapshot",
-    });
+    controller.applyToolSnapshot(
+      toolSnapshot("stream-batch", [streamEntry(0, "snapshot output")]),
+    );
 
     expect(controller.state.detail?.messages).toEqual([]);
     expect(controller.state.toolStreams).toEqual([]);
   },
 );
 
-test("ignores buffered tool updates after a terminal session snapshot", () => {
-  const controller = selectedController({
-    ...TEST_SESSION_DETAIL,
-    status: "idle",
+test("does not patch for invisible terminal tool updates", () => {
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const tracked = controlledController(detail);
+  const before = tracked.patches();
+
+  tracked.controller.applyStreamBatch({
+    type: "stream_batch",
+    updates: [
+      {
+        entry: { ...streamEntry(0, "never shown"), state: "completed" },
+        terminal: true,
+        type: "tool_update",
+      },
+    ],
   });
+
+  expect(tracked.patches()).toBe(before);
+});
+
+test("equal-sequence snapshots retain the visible tool reference", () => {
+  const controller = activeController();
+  controller.applyStreamBatch(streamBatch(["same output"]));
+  const visible = controller.state.toolStreams[0];
+  if (visible === undefined) throw new TypeError("Missing visible tool");
+
+  controller.applyToolSnapshot(
+    toolSnapshot(visible.streamId, [{ ...visible }]),
+  );
+
+  expect(controller.state.toolStreams[0]).toBe(visible);
+});
+
+test("terminal details reject later tool snapshots", () => {
+  const controller = selectedController(TEST_SESSION_DETAIL);
+
+  controller.applyToolSnapshot(
+    toolSnapshot("stream-batch", [streamEntry(0, "stale running output")]),
+  );
+
+  expect(controller.state.toolStreams).toEqual([]);
+});
+
+test("ignores buffered tool updates after a terminal session snapshot", () => {
+  const controller = selectedController(TEST_SESSION_DETAIL);
 
   controller.applyStreamBatch(streamBatch());
 
@@ -229,25 +357,18 @@ test("clears visible tool activity when the session becomes terminal", () => {
 });
 
 test("tool snapshots only replace their own stream", () => {
-  const controller = selectedController({
-    ...TEST_SESSION_DETAIL,
-    status: "running",
-  });
+  const controller = activeController();
   controller.applyStreamBatch(streamBatch());
-  const snapshot = {
-    sessionId: TEST_SESSION_DETAIL.id,
-    streams: [],
-    type: "tool_stream_snapshot" as const,
-  };
+  const snapshot = (streamId: string) => toolSnapshot(streamId, []);
 
-  controller.applyToolSnapshot({ ...snapshot, streamId: "previous-stream" });
+  controller.applyToolSnapshot(snapshot("previous-stream"));
   expectToolOutputs(controller, EXPECTED_TOOL_OUTPUTS);
 
   const beforeNoop = controller.state.toolStreams;
-  controller.applyToolSnapshot({ ...snapshot, streamId: "previous-stream" });
+  controller.applyToolSnapshot(snapshot("previous-stream"));
   expect(controller.state.toolStreams).toBe(beforeNoop);
 
-  controller.applyToolSnapshot({ ...snapshot, streamId: "stream-batch" });
+  controller.applyToolSnapshot(snapshot("stream-batch"));
   expectToolOutputs(controller, []);
 });
 

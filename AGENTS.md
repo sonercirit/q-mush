@@ -118,15 +118,15 @@ Living project memory.
   categories and definitions; `get_session_options` pages spawn choices. Grouped
   tools manage non-blocking owned children, report final messages, resume idle
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, details, Markdown, code/JSON, diffs/results, preserving line
-  breaks; session lists by ten. Live streams coalesce into fair four-key/8 ms
-  frames, alternating selected and background work. Mutation/stop requests
-  freeze model/tool UI so results cannot mix pre/post-mutation state; reconnect
-  drops unrendered fragments, then resyncs paused tools. Snapshot barriers plus
-  100/session, 1,000/user tombstone caps block revival and permit reuse. Resets
-  replace models; other events are immediate; no-op snapshots suppress notices.
-  The Solid root keeps focus/scroll; session detail disables document anchoring
+  propagates cancellation. `solid/session-transcript.tsx` renders prompts,
+  Markdown, code/JSON, diffs/results; session lists by ten. Live streams use
+  count/time-bounded fair four-key preparation frames; each batch patches once.
+  Mutation/stop freezes model/tool UI to prevent mixed state; settlement rebases
+  streams. Disconnect drops unrendered fragments, then resyncs active paused
+  tool streams. Incremental barriers and compact 100/session, 1,000/user caps
+  block stale revival and permit key reuse. Resets replace models; state events
+  coalesce one/frame; ready, health, commands apply directly; no-op snapshots
+  suppress notices. Solid keeps focus/scroll; detail disables document anchoring
   and only bottom-pinned transcripts follow output. `agent-model-discovery.ts`
   queries metadata, signal-cancelable; `shared/agent-configuration.ts` owns
   catalog types/validation. New sessions take the default online runner (else
