@@ -6,7 +6,11 @@ import type {
   RealtimeStreamUpdate,
 } from "../realtime-stream-buffer.ts";
 import { SessionController } from "../session-controller.ts";
-import { orderedToolDelta } from "./realtime-stream-event-fixtures.ts";
+import {
+  identifiedModelDelta,
+  orderedToolDelta,
+  preparingToolDelta,
+} from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -30,35 +34,6 @@ function streamingTestConnection(
     ...stream,
     batches: () =>
       stream.emitted.filter((event) => event.type === "stream_batch"),
-  };
-}
-
-function identifiedModelDelta(
-  sessionId: string,
-  streamId: string,
-  content = streamId,
-): Extract<RealtimeServerEvent, { type: "session_delta" }> {
-  return {
-    content,
-    sessionId,
-    streamId,
-    thinking: "",
-    type: "session_delta",
-  };
-}
-
-function indexedToolDelta(
-  index: number,
-  streamId: string,
-): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
-  return {
-    callId: `call-${String(index)}`,
-    index,
-    sequence: 0,
-    sessionId: SESSION_ID,
-    state: "preparing",
-    streamId,
-    type: "tool_stream",
   };
 }
 
@@ -275,9 +250,9 @@ test("drains several keys per frame and prioritizes the selected session", () =>
   const otherSessionId = "session-background";
   receiveSessionModels(stream, 8, otherSessionId, "background");
   stream.receive(modelDelta("selected-model"));
-  stream.receive(indexedToolDelta(0, "selected-tool-0"));
-  stream.receive(indexedToolDelta(1, "selected-tool-1"));
-  stream.receive(indexedToolDelta(2, "selected-tool-2"));
+  stream.receive(preparingToolDelta(0, "selected-tool-0", "call-0"));
+  stream.receive(preparingToolDelta(1, "selected-tool-1", "call-1"));
+  stream.receive(preparingToolDelta(2, "selected-tool-2", "call-2"));
 
   expectBarrierBatch(stream, 0, 4);
 
@@ -524,7 +499,7 @@ test("does not schedule frames for rejected terminal continuations", () => {
 test("discards buffered fragments from a disconnected socket", () => {
   const stream = streamingTestConnection("disconnect-instance");
   stream.receive(modelDelta("old model"));
-  stream.receive(indexedToolDelta(0, "old-tool"));
+  stream.receive(preparingToolDelta(0, "old-tool", "call-0"));
   expectOnePendingFrame(stream);
 
   const reconnected = stream.reconnect("reconnected-instance");
@@ -544,10 +519,13 @@ test("reconnect synchronizes every observed tool stream", () => {
   const firstStreamId = "tool-stream-a";
   const secondStreamId = "tool-stream-b";
   const stream = streamingTestConnection("multi-stream-instance");
-  stream.receive({ ...indexedToolDelta(0, firstStreamId), state: "preparing" });
+  stream.receive({
+    ...preparingToolDelta(0, firstStreamId, "call-0"),
+    state: "preparing",
+  });
   expectNextFrame(stream);
   stream.receive({
-    ...indexedToolDelta(1, secondStreamId),
+    ...preparingToolDelta(1, secondStreamId, "call-1"),
     state: "preparing",
   });
 

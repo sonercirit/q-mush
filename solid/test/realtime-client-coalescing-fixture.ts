@@ -1,6 +1,7 @@
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 export interface RealtimeEventRecorder {
   readonly events: RealtimeClientEvent[];
@@ -28,6 +29,23 @@ export function realtimeEventRecorder(
     },
     setup,
   };
+}
+
+export function runningRealtimeEventRecorder(instanceId: string): {
+  readonly running: typeof TEST_SESSION_DETAIL;
+  readonly stream: RealtimeEventRecorder;
+} {
+  return {
+    running: { ...TEST_SESSION_DETAIL, status: "running" },
+    stream: realtimeEventRecorder(instanceId),
+  };
+}
+
+export function receiveRealtimeEvents(
+  recorder: RealtimeEventRecorder,
+  events: readonly RealtimeServerEvent[],
+): void {
+  for (const event of events) recorder.receive(event);
 }
 
 export function runNextRealtimeFrame(frames: (() => void)[]): void {

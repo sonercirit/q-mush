@@ -3,7 +3,9 @@ import type { RealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
 import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
 import {
   realtimeEventRecorder,
+  receiveRealtimeEvents,
   runNextRealtimeFrame,
+  runningRealtimeEventRecorder,
   testSessionDelta,
 } from "./realtime-client-coalescing-fixture.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -34,16 +36,17 @@ function expectLatest(
 }
 
 test("keeps post-snapshot deltas behind a production-order session barrier", () => {
-  const stream = realtimeEventRecorder("barrier-instance");
-  const running = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const { running, stream } = runningRealtimeEventRecorder("barrier-instance");
 
-  stream.receive(testSessionDelta("A", running.id, "barrier-stream"));
-  stream.receive({ session: running, type: "session" });
-  stream.receive(testSessionDelta("B", running.id, "barrier-stream"));
+  receiveRealtimeEvents(stream, [
+    testSessionDelta("A", running.id, "barrier-stream"),
+    { session: running, type: "session" },
+    testSessionDelta("B", running.id, "barrier-stream"),
+  ]);
 
   expect(stream.events).toEqual([]);
   runNextRealtimeFrame(stream.setup.requestFrames);
-  expect(stream.events).toHaveLength(0);
+  expect(stream.events.length).toBe(0);
   runNextRealtimeFrame(stream.setup.requestFrames);
   expect(stream.events).toMatchObject([
     {
@@ -65,21 +68,26 @@ test("keeps post-snapshot deltas behind a production-order session barrier", () 
 });
 
 test("orders a replaced state key at its latest wire position", () => {
-  const stream = realtimeEventRecorder("state-replacement-instance");
-  const running = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const { running, stream } = runningRealtimeEventRecorder(
+    "state-replacement-instance",
+  );
 
-  stream.receive({ session: running, type: "session" });
-  stream.receive({
-    pending: null,
-    sessionId: running.id,
-    type: "session_questions",
-  });
-  stream.receive({
-    session: { ...running, updatedAt: running.updatedAt + 1 },
-    type: "session",
-  });
+  receiveRealtimeEvents(stream, [
+    { session: running, type: "session" },
+    {
+      pending: null,
+      sessionId: running.id,
+      type: "session_questions",
+    },
+    {
+      session: { ...running, updatedAt: running.updatedAt + 1 },
+      type: "session",
+    },
+  ]);
 
-  runNextRealtimeFrame(stream.setup.requestFrames);
+  const nextFrame = stream.setup.requestFrames.shift();
+  if (nextFrame === undefined) throw new TypeError("Missing state frame");
+  nextFrame();
   expect(stream.events).toMatchObject([{ type: "session_questions" }]);
   runNextRealtimeFrame(stream.setup.requestFrames);
   expect(stream.events.at(-1)).toMatchObject({

@@ -6,6 +6,7 @@ import { createReactiveState } from "../reactive-state.ts";
 import type { RealtimeStreamBatch } from "../realtime-stream-buffer.ts";
 import type { SessionViewState } from "../session-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
+import { modelOutputBatch } from "./realtime-stream-event-fixtures.ts";
 
 const EXPECTED_TOOL_OUTPUTS = ["first tool", "second tool"] as const;
 
@@ -190,74 +191,66 @@ test("a mixed barrier batch reconciles the selected view once", () => {
   expectToolOutputs(controller, EXPECTED_TOOL_OUTPUTS);
 });
 
+async function expectMutationRebasesModelOutput(
+  detail: typeof TEST_SESSION_DETAIL,
+  controller: SessionController,
+  commandResult: PromiseWithResolvers<unknown>,
+  streamId: string,
+  mutate: () => Promise<void>,
+  result: unknown,
+): Promise<void> {
+  const batch = (content: string): RealtimeStreamBatch =>
+    modelOutputBatch(detail, content, streamId);
+  controller.applyStreamBatch(batch("A"));
+  const mutation = mutate();
+  commandResult.resolve(result);
+  await mutation;
+  controller.applyStreamBatch(batch("C"));
+  const latest = controller.state.detail?.messages.at(-1);
+  expect([latest?.content, latest?.role]).toEqual(["C", "assistant"]);
+}
+
 test("rebases retained model output when a real mutation settles without a blocked frame", async () => {
   const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
-  const commandResult = Promise.withResolvers<unknown>();
   const state = initialSessionViewState();
+  const commandResult = Promise.withResolvers<unknown>();
   const reactive = createReactiveState<SessionViewState>(state);
   reactive.setState({ ...state, detail, selectedId: detail.id });
   const controller = new SessionController(reactive, undefined, undefined, {
     command: vi.fn(() => commandResult.promise),
   });
-  const modelBatch = (content: string): RealtimeStreamBatch => ({
-    type: "stream_batch",
-    updates: [
-      {
-        content,
-        sessionId: detail.id,
-        streamId: "mutation-stream",
-        thinking: "",
-        type: "session_delta",
-      },
-    ],
-  });
-
-  controller.applyStreamBatch(modelBatch("A"));
-  const mutation = controller.toggleCompactionFlag("autoCompact", false);
-  commandResult.resolve({ ...detail, autoCompact: false, updatedAt: 3 });
-  await mutation;
-  controller.applyStreamBatch(modelBatch("C"));
-
-  const latest = controller.state.detail?.messages.at(-1);
-  expect([latest?.content, latest?.role]).toEqual(["C", "assistant"]);
+  await expectMutationRebasesModelOutput(
+    detail,
+    controller,
+    commandResult,
+    "mutation-stream",
+    () => controller.toggleCompactionFlag("autoCompact", false),
+    { ...detail, autoCompact: false, updatedAt: 3 },
+  );
 });
 
 test("rebases retained output when a pending-input mutation settles", async () => {
-  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
   const commandResult = Promise.withResolvers<unknown>();
-  const state: SessionViewState = {
-    ...initialSessionViewState(),
+  const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
+  const state: SessionViewState = Object.assign(initialSessionViewState(), {
     detail,
     followUp: "Queue this",
     selectedId: detail.id,
-  };
+  });
   const controller = new SessionController(
     createReactiveState(state),
     undefined,
     undefined,
     { command: vi.fn(() => commandResult.promise) },
   );
-  const modelBatch = (content: string): RealtimeStreamBatch => ({
-    type: "stream_batch",
-    updates: [
-      {
-        content,
-        sessionId: detail.id,
-        streamId: "pending-input-stream",
-        thinking: "",
-        type: "session_delta",
-      },
-    ],
-  });
-
-  controller.applyStreamBatch(modelBatch("A"));
-  const mutation = controller.followUp();
-  commandResult.resolve({ ...detail, updatedAt: detail.updatedAt + 1 });
-  await mutation;
-  controller.applyStreamBatch(modelBatch("C"));
-
-  const latest = controller.state.detail?.messages.at(-1);
-  expect([latest?.content, latest?.role]).toEqual(["C", "assistant"]);
+  await expectMutationRebasesModelOutput(
+    detail,
+    controller,
+    commandResult,
+    "pending-input-stream",
+    () => controller.followUp(),
+    { ...detail, updatedAt: detail.updatedAt + 1 },
+  );
 });
 
 test.each(STREAM_MUTATION_CASES)(

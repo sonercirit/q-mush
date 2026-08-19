@@ -1,7 +1,56 @@
+import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import type { RealtimeStreamBatch } from "../realtime-stream-buffer.ts";
 
 const SESSION_ID = "session-ordered";
 const STREAM_ID = "stream-ordered";
+
+export function preparingToolDelta(
+  index: number,
+  streamId: string,
+  callId: string,
+): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
+  return {
+    callId,
+    index,
+    sequence: 0,
+    sessionId: SESSION_ID,
+    state: "preparing",
+    streamId,
+    type: "tool_stream",
+  };
+}
+
+export function activeToolDelta(
+  streamId: string,
+): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
+  return preparingToolDelta(0, streamId, `active-${streamId}`);
+}
+
+export function modelOutputBatch(
+  detail: AgentSessionDetail,
+  content: string,
+  streamId: string,
+): RealtimeStreamBatch {
+  return {
+    type: "stream_batch",
+    updates: [identifiedModelDelta(detail.id, streamId, content)],
+  };
+}
+
+export function identifiedModelDelta(
+  sessionId: string,
+  streamId: string,
+  content = streamId,
+): Extract<RealtimeServerEvent, { type: "session_delta" }> {
+  return {
+    content,
+    sessionId,
+    streamId,
+    thinking: "",
+    type: "session_delta",
+  };
+}
 
 export function orderedToolDelta(
   sequence: number,
@@ -20,6 +69,20 @@ export function orderedToolDelta(
   return "state" in change
     ? { ...identity, state: change.state }
     : { ...identity, channel: "stdout", content: change.content };
+}
+
+export function deliverTerminalStream(
+  receive: (
+    event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
+  ) => void,
+  index: number,
+  streamId: string,
+  callId: string | undefined,
+  output: string | undefined,
+): void {
+  for (const event of terminalToolStream(index, streamId, callId, output)) {
+    receive(event);
+  }
 }
 
 export function terminalToolStream(

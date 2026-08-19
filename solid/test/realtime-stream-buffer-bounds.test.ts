@@ -3,56 +3,16 @@ import {
   MAXIMUM_TOOL_STREAMS_PER_SESSION,
   MAXIMUM_TOOL_STREAMS_PER_USER,
 } from "../../shared/tool-stream.ts";
-import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
 import {
+  activeToolDelta,
+  deliverTerminalStream,
+  identifiedModelDelta,
   orderedToolDelta,
-  terminalToolStream,
 } from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 
 const STREAM_ID = "stream-ordered";
-
-function identifiedModelDelta(
-  sessionId: string,
-  streamId: string,
-): Extract<RealtimeServerEvent, { type: "session_delta" }> {
-  return {
-    content: streamId,
-    sessionId,
-    streamId,
-    thinking: "",
-    type: "session_delta",
-  };
-}
-
-function activeStreamDelta(
-  streamId: string,
-): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
-  return {
-    callId: `active-${streamId}`,
-    index: 0,
-    sequence: 0,
-    sessionId: "session-ordered",
-    state: "preparing",
-    streamId,
-    type: "tool_stream",
-  };
-}
-
-function deliverTerminalStream(
-  receive: (
-    event: Extract<RealtimeServerEvent, { type: "tool_stream" }>,
-  ) => void,
-  index: number,
-  streamId: string,
-  callId: string | undefined,
-  output: string | undefined,
-): void {
-  for (const event of terminalToolStream(index, streamId, callId, output)) {
-    receive(event);
-  }
-}
 
 test("bounds pending keys before materialization", () => {
   const buffer = new RealtimeStreamBuffer();
@@ -93,22 +53,31 @@ test("retains compact terminal identity independent of rendered payload", () => 
   expect(buffer.takeNext()).toBeUndefined();
 });
 
-test("active tool state survives a terminal tombstone flood", () => {
-  const buffer = new RealtimeStreamBuffer();
-  const activeStreamId = "active-stream";
-  buffer.queue(activeStreamDelta(activeStreamId));
-  buffer.takeNext();
-
+function floodTerminalStreams(
+  receive: Parameters<typeof deliverTerminalStream>[0],
+  advance: () => void,
+): void {
   for (let index = 0; index < MAXIMUM_TOOL_STREAMS_PER_SESSION; index += 1) {
     deliverTerminalStream(
-      buffer.queue.bind(buffer),
+      receive,
       index + 1,
       `terminal-step-${String(index)}`,
       undefined,
       undefined,
     );
-    buffer.takeNext();
+    advance();
   }
+}
+
+test("active tool state survives a terminal tombstone flood", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const activeStreamId = "active-stream";
+  buffer.queue(activeToolDelta(activeStreamId));
+  buffer.takeNext();
+
+  floodTerminalStreams(buffer.queue.bind(buffer), () => {
+    buffer.takeNext();
+  });
 
   expect(buffer.activeToolStreams()).toContainEqual({
     sessionId: "session-ordered",
@@ -119,19 +88,12 @@ test("active tool state survives a terminal tombstone flood", () => {
 test("reconnect synchronizes active tools retained through a tombstone flood", () => {
   const stream = streamingRealtimeFixture("tombstone-reconnect-instance");
   const activeStreamId = "surviving-active-stream";
-  stream.receive(activeStreamDelta(activeStreamId));
+  stream.receive(activeToolDelta(activeStreamId));
   stream.pendingFrames.shift()?.();
 
-  for (let index = 0; index < MAXIMUM_TOOL_STREAMS_PER_SESSION; index += 1) {
-    deliverTerminalStream(
-      stream.receive,
-      index + 1,
-      `terminal-step-${String(index)}`,
-      undefined,
-      undefined,
-    );
+  floodTerminalStreams(stream.receive, () => {
     stream.pendingFrames.shift()?.();
-  }
+  });
   const reconnected = stream.reconnect("tombstone-reconnected-instance");
 
   expect(reconnected.sent).toContain(
