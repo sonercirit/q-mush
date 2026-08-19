@@ -96,6 +96,15 @@ test("development drain prevents chained terminal cleanup from dispatching", asy
 });
 
 test("overlapping drains suppress cleanup until every drain settles", async () => {
+  const timers: (() => void)[] = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  vi.spyOn(globalThis, "setTimeout").mockImplementation(
+    (callback: () => void) => {
+      timers.push(callback);
+      return originalSetTimeout(() => undefined, 1_000_000);
+    },
+  );
+  vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
   let commandSequence = 0;
   const broker = new RunnerCommandBroker({
     commandId: () => `cleanup-${String(++commandSequence)}`,
@@ -104,10 +113,10 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
   const cleanup = new SessionExecutionCleanup(broker);
   const first = containerCleanup(cleanup);
-  const now = Date.now();
-  const shortDrain = cleanup.drainPending(new RestartDeadline(now + 20));
-  const longDrain = cleanup.drainPending(new RestartDeadline(now + 100));
+  const shortDrain = cleanup.drainPending(new RestartDeadline(20, () => 0));
+  const longDrain = cleanup.drainPending(new RestartDeadline(100, () => 0));
 
+  timers[0]?.();
   await shortDrain;
   const suppressedDetail = {
     ...TEST_SESSION_DETAIL,
@@ -118,14 +127,15 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
     false,
   );
 
+  timers[1]?.();
   await longDrain;
   const resumedDetail = { ...TEST_SESSION_DETAIL, id: "resumed-cleanup" };
   const resumed = cleanup.cleanupTerminal(resumedDetail);
   expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-2")).toBe(true);
   completeCleanup(broker, "cleanup-2");
   await resumed;
-  broker.cancelSessionCommands(TEST_SESSION_DETAIL.id);
   await first;
+  vi.restoreAllMocks();
 });
 
 test("cleanup dispatch resumes after a completed development drain", async () => {

@@ -282,6 +282,14 @@ export function createSessionRestartControl(
           "The active server restart deadline was unavailable; starting a dedicated runner drain",
         );
         sharedServerRestartIds.set(runnerId, restartId);
+        try {
+          await boundedDrain({ kind: "runner", runnerId }, restartId, false);
+        } finally {
+          if (sharedServerRestartIds.get(runnerId) === restartId) {
+            sharedServerRestartIds.delete(runnerId);
+          }
+        }
+        return;
       }
       await boundedDrain({ kind: "runner", runnerId }, restartId, false);
     },

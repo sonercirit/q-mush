@@ -27,6 +27,7 @@ function runnerGate(
 class TestRestartRuntimes implements RestartRuntimeControl {
   readonly blocked = new Set<string>();
   readonly forceParked: string[] = [];
+  readonly forceParkScopes: RestartScope[] = [];
   forceParkCalls = 0;
   forceParkFailure: Error | undefined;
   markGate: Promise<void> | undefined;
@@ -84,8 +85,9 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     return [];
   }
 
-  forcePark(): Promise<readonly string[]> {
+  forcePark(scope: RestartScope): Promise<readonly string[]> {
     this.forceParkCalls += 1;
+    this.forceParkScopes.push(scope);
     return this.forceParkFailure === undefined
       ? Promise.resolve(this.forceParked)
       : Promise.reject(this.forceParkFailure);
@@ -359,8 +361,14 @@ describe("session restart control", () => {
     expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
       true,
     );
+    expect(runtimes.forceParkScopes).toEqual([
+      { kind: "runner", runnerId: "runner-1" },
+    ]);
     runtimes.settleDrain("runner:runner-1");
     await drain;
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      false,
+    );
 
     expect(runtimes.drains.at(-1)).toEqual({
       restartId: "runner-restart",
