@@ -12,6 +12,14 @@ import {
   summarizeStoredTurn,
 } from "./session-turn-read.ts";
 
+function generationTurnCondition(sessionId: string, generation: number) {
+  return and(
+    eq(agentSessionTurns.sessionId, sessionId),
+    eq(agentSessionTurns.executionGeneration, generation),
+    eq(agentSessionTurns.isDeleted, false),
+  );
+}
+
 /**
  * Reads one execution generation independently of the current cache segment.
  * Administrative cache resets and compaction may move or soft-delete the
@@ -28,13 +36,7 @@ export function readStoredSessionGenerationTranscript(
   const turns = database
     .select(STORED_SESSION_TURN_SELECTION)
     .from(agentSessionTurns)
-    .where(
-      and(
-        eq(agentSessionTurns.sessionId, sessionId),
-        eq(agentSessionTurns.executionGeneration, generation),
-        eq(agentSessionTurns.isDeleted, false),
-      ),
-    )
+    .where(generationTurnCondition(sessionId, generation))
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
     .map(summarizeStoredTurn);
@@ -51,9 +53,7 @@ export function readStoredSessionGenerationTranscript(
           .where(
             and(
               eq(agentMessages.sessionId, sessionId),
-              eq(agentSessionTurns.sessionId, sessionId),
-              eq(agentSessionTurns.executionGeneration, generation),
-              eq(agentSessionTurns.isDeleted, false),
+              generationTurnCondition(sessionId, generation),
             ),
           )
           .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
