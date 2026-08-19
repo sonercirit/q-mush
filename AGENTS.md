@@ -1,7 +1,5 @@
 # AGENTS.md
 
-Living project memory.
-
 ## Project Snapshot
 
 - Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
@@ -94,7 +92,7 @@ Living project memory.
   Reinstalling for the same user and machine rotates the registration to its new
   token instead of adding a runner; other registrations stay protected; tokens
   never appear in lists.
-- Browser messages sort by time then ID; live output anchors at its initiator,
+- Browser messages sort by time then ID; live output anchors at its initiator;
   snapshots replace it. `session-agent-read.ts` byte-bounds transcript/system/
   tool-definition data.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
