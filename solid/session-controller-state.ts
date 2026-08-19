@@ -72,9 +72,15 @@ export class SessionRealtimeState {
     this.#streamedContent.delete(sessionId);
     this.#streamedContent.set(sessionId, content);
     while (this.#streamedContent.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
-      const oldest = this.#streamedContent.keys().next();
-      if (oldest.done !== false) break;
-      this.#streamedContent.delete(oldest.value);
+      const view = this.#view.value;
+      const oldest = this.#streamedContent
+        .keys()
+        .find(
+          (candidate) =>
+            candidate !== view.selectedId && candidate !== view.detail?.id,
+        );
+      if (oldest === undefined) break;
+      this.#streamedContent.delete(oldest);
     }
   }
 
@@ -259,7 +265,7 @@ export class SessionRealtimeState {
       role: "compaction_request",
     });
     this.#compactionRequests.set(event.sessionId, request);
-    this.#streamedContent.set(event.sessionId, {
+    this.#retainStreamedContent(event.sessionId, {
       baseMessageId: messages.at(-1)?.id ?? null,
       compactionRequest: request,
       content: "",
@@ -270,15 +276,6 @@ export class SessionRealtimeState {
       detail: { ...detail, messages: [...messages, request] },
     });
   }
-  applyDelta(
-    event: Extract<RealtimeServerEvent, { type: "session_delta" }>,
-  ): void {
-    this.applyStreamBatch({
-      type: "stream_batch",
-      updates: [event],
-    });
-  }
-
   applyStreamBatch(event: RealtimeStreamBatch): void {
     this.#applyMutationStreamSessions(event, false);
     const view = this.#view.value;
