@@ -177,7 +177,7 @@ export class RealtimeConnection {
 
   syncTools(sessionId: string): void {
     for (const request of this.#toolSnapshotRequests.values()) {
-      if (request.sessionId !== sessionId || !this.#sendToolSync(request)) {
+      if (request.sessionId === sessionId && !this.#sendToolSync(request)) {
         return;
       }
     }

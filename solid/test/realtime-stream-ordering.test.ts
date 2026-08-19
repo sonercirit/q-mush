@@ -515,6 +515,36 @@ test("discards buffered fragments from a disconnected socket", () => {
   stream.stop();
 });
 
+test("synchronizes a session whose remembered tool request is not first", () => {
+  const stream = streamingTestConnection("multi-session-instance");
+  for (const [sessionId, streamId] of [
+    ["session-a", "tool-stream-a"],
+    ["session-b", "tool-stream-b"],
+  ] as const) {
+    stream.receive({
+      sessionId,
+      streamId,
+      streams: [],
+      type: "tool_stream_snapshot",
+    });
+    expectNextFrame(stream);
+  }
+  const socket = stream.setup.sockets[0];
+  expect(socket).toBeDefined();
+  socket?.sent.splice(0);
+
+  stream.setup.connection.syncTools("session-b");
+
+  expect(socket?.sent).toEqual([
+    JSON.stringify({
+      sessionId: "session-b",
+      streamId: "tool-stream-b",
+      type: "sync_tools",
+    }),
+  ]);
+  stream.stop();
+});
+
 test("reconnect synchronizes every observed tool stream", () => {
   const firstStreamId = "tool-stream-a";
   const secondStreamId = "tool-stream-b";
