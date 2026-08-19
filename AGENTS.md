@@ -2,10 +2,8 @@
 
 Living project memory.
 
-## Project Snapshot
-
-- Strict TypeScript ESM Bun/SolidJS; tests under `test/`, no `src`. `/` is the
-  homepage, `/app` the app.
+- TypeScript ESM Bun/SolidJS; tests are under `test/`. `/` is home, `/app` the
+  app.
 
 ## Working Agreements
 
@@ -208,7 +206,7 @@ Living project memory.
 
 ## Decisions and Gotchas
 
-- HTTP port 12345 (`PORT` overrides).
+- Port 12345 (`PORT` overrides).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
   `GOOGLE_REDIRECT_URI`; the two appear together; register the callback
   `http://localhost:12345/api/auth/google/callback` on the OAuth client. Never
@@ -250,17 +248,16 @@ Living project memory.
   records stay contained (they run on the host). Container shells run as root in
   a disposable per-session Arch container (default `archlinux:latest`) with
   network and default capabilities, so pacman works; only the workspace mounts.
-  `read` pages its source. The directory picker browses beyond a session
-  workspace with runner-account permissions, returns bounded directory-only
-  metadata, times out stalls. Stopping a session aborts its model request and
-  cancels runner commands, ending an active shell. OpenAI API-key and OAuth
-  requests prefer Responses WebSockets, falling back to HTTP streaming;
-  OpenRouter and generic endpoints stream chat completions, Anthropic-format
-  endpoints Messages events. OpenAI OAuth refreshes its token bundle before
-  expiry. Session creation needs an explicit model ID. Catalogs: OpenAI
-  `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
-  the generic `/models`; Anthropic-format catalogs read `display_name`,
-  `max_input_tokens`, `max_tokens`, and the `capabilities` tree
+  `read` pages its source. The directory picker browses beyond workspaces with
+  runner permissions and bounded directory-only results. Stopping a session
+  aborts its model request and cancels runner commands, ending an active shell.
+  OpenAI API-key and OAuth requests prefer Responses WebSockets, falling back to
+  HTTP streaming; OpenRouter and generic endpoints stream chat completions,
+  Anthropic-format endpoints Messages events. OpenAI OAuth refreshes its token
+  bundle before expiry. Session creation needs an explicit model ID. Catalogs:
+  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
+  `/models`, or the generic `/models`; Anthropic-format catalogs read
+  `display_name`, `max_input_tokens`, `max_tokens`, and the `capabilities` tree
   (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
   are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
@@ -280,7 +277,8 @@ Living project memory.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs since completed responses may omit
-  them. OpenAI WebSocket Mode expires after 60 minutes; the canonical
+  them. Frozen-clock tests can give admission -> active -> admission one
+  timestamp; production cannot across its grace. OpenAI WebSocket Mode expires
   `websocket_connection_limit_reached` and observed underscore-free variant
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. Local send is admission: bound it until correlated

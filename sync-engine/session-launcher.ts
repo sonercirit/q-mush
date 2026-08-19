@@ -77,18 +77,18 @@ export class SessionLauncher {
       async ({ controller, pendingComponent, restartRequest, settled }) => {
         const reportPending = (component: SessionPendingComponent): void => {
           pendingComponent(component);
-          try {
-            if (
-              this.#dependencies.store.executionIsCurrent(
-                userId,
-                detail.id,
-                detail.generation,
-              )
-            ) {
+          if (
+            this.#dependencies.store.executionIsCurrent(
+              userId,
+              detail.id,
+              detail.generation,
+            )
+          ) {
+            try {
               this.#dependencies.notify(userId, detail.id);
+            } catch {
+              // Diagnostic publication must not interrupt the model request.
             }
-          } catch {
-            // Diagnostic publication must not interrupt the model request.
           }
         };
         const restartPersistence: DurableRestartPersistence = {

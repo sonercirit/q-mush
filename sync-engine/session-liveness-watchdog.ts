@@ -130,6 +130,9 @@ export class SessionLivenessWatchdog {
       if (now - missing.missingSince < (this.#options.graceMs ?? 0)) {
         continue;
       }
+      if (!this.#stillMissing(session, missing)) {
+        continue;
+      }
       this.#fail(session, now, missing);
       this.#missing.delete(session.id);
     }
@@ -183,23 +186,22 @@ export class SessionLivenessWatchdog {
       : undefined;
   }
 
+  #stillMissing(
+    session: InterruptedStoredSession,
+    observed: MissingRuntime,
+  ): boolean {
+    const current = this.#missingReason(session.id, session.userId);
+    return (
+      current?.reason === observed.reason &&
+      current.pendingSince === observed.pendingSince
+    );
+  }
+
   #fail(
     session: InterruptedStoredSession,
     now: number,
     missing: MissingRuntime,
   ): void {
-    if (missing.reason === "provider_admission") {
-      const pending = this.#options.runtimes.pending(
-        session.id,
-        session.executionGeneration,
-      );
-      if (
-        pending?.component !== "provider_admission" ||
-        pending.since !== missing.pendingSince
-      ) {
-        return;
-      }
-    }
     const error = LIVENESS_ERRORS[missing.reason];
     if (
       !failInterruptedStoredSession(

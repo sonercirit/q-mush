@@ -398,7 +398,7 @@ test("does not time out an acknowledged provider request", () => {
   closeSetup(setup);
 });
 
-test("preserves grace-boundary acknowledgement", () => {
+test("preserves acknowledgement", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
   const originalPending = runtime.runtimes.pending.bind(runtime.runtimes);
   const pending = vi.spyOn(runtime.runtimes, "pending");
@@ -412,10 +412,11 @@ test("preserves grace-boundary acknowledgement", () => {
 
   scanPastGrace(watchdog);
 
+  expect(pending).toHaveBeenCalledTimes(3);
   expectRuntimeRemainsActive(setup, runtime);
 });
 
-test("preserves pre-deadline acknowledgement", () => {
+test("preserves early acknowledgement", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
 
   watchdog.scan();
@@ -428,7 +429,7 @@ test("preserves pre-deadline acknowledgement", () => {
   expectRuntimeRemainsActive(setup, runtime);
 });
 
-test("fails a queued runner command even when its runner recently connected", async () => {
+test("fails queued command with connected runner", async () => {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "startup");
   const broker = new RunnerCommandBroker({

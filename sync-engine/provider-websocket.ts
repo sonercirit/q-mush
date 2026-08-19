@@ -79,6 +79,7 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
+  #lastResponseId: string | undefined;
   #socket: ProviderWebSocket | undefined;
 
   close(): void {
@@ -115,6 +116,8 @@ export class ProviderWebSocketSession {
       const socket =
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
+      const previousResponseId =
+        reusedSocket === undefined ? undefined : this.#lastResponseId;
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
@@ -135,6 +138,7 @@ export class ProviderWebSocketSession {
         socket.removeEventListener("error", onError);
         socket.removeEventListener("close", onClose);
         if (error === undefined && step !== undefined) {
+          this.#lastResponseId = currentResponseId;
           this.#socket = socket;
           resolve(step);
         } else {
@@ -206,11 +210,16 @@ export class ProviderWebSocketSession {
               return;
             }
             if (
-              value["type"] !== "response.created" ||
-              eventResponseId === undefined
+              typeof value["type"] !== "string" ||
+              !value["type"].startsWith("response.") ||
+              eventResponseId === undefined ||
+              eventResponseId === previousResponseId
             ) {
               return;
             }
+            // Responses servers normally acknowledge with response.created,
+            // but any correlated response event proves admission when that
+            // optional event is absent.
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");

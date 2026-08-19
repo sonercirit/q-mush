@@ -151,16 +151,19 @@ test("prefers the Responses WebSocket for OpenAI API keys", async () => {
   expectDoneStep(await pending);
 });
 
-test("keeps admission bounded through unknown and stale provider frames", async () => {
+test("keeps admission bounded through unknown provider frames", async () => {
   const observedStates: ("active" | "admission")[] = [];
   const request = beginLifecycleRequest(observedStates);
 
   request.socket.receive({ type: "provider.keepalive" });
-  request.socket.receive(responseEvent("response.completed", "stale"));
   expectRequestStates(observedStates, "admission");
   await expectRequestPending(request.pending);
 
-  request.socket.receive(responseEvent("response.created", "current"));
+  request.socket.receive({
+    delta: "Done.",
+    response: { id: "current" },
+    type: "response.output_text.delta",
+  });
   expectRequestStates(observedStates, "admission", "active");
   request.socket.receive(responseEvent("response.completed", "stale"));
   await expectRequestPending(request.pending);
@@ -219,6 +222,10 @@ test("reports reused WebSocket admission until the provider acknowledges it", as
   expect(socket.sent).toHaveLength(2);
   expectRequestStates(states, "admission", "active", "admission");
   expect(socket.listenerCount("message")).toBe(1);
+
+  socket.receive(responseEvent("response.created", "response-1"));
+  expectRequestStates(states, "admission", "active", "admission");
+  await expectRequestPending(stalled);
 
   controller.abort();
   await expect(stalled).rejects.toMatchObject({ name: "AbortError" });

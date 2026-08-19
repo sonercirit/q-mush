@@ -158,10 +158,6 @@ function recordCompaction(
   });
 }
 
-function runtimeProviderStateHandler(runtime: SessionAgentRuntimeDependencies) {
-  return runtime.markPending;
-}
-
 function sessionConversation(
   runtime: SessionAgentRuntimeDependencies,
 ): ReturnType<SessionStore["conversation"]> {
@@ -204,7 +200,7 @@ async function loadModels(
     detail: { ...runtime.detail, ...metadata },
     factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
-    onRequestState: runtimeProviderStateHandler(runtime),
+    onRequestState: runtime.markPending,
     onStepStart: markRuntimeStepStart.bind(undefined, runtime),
     realtime: runtime.realtime,
     ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
@@ -472,7 +468,7 @@ export async function runSessionAgent(
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
         factory: runtime.modelFactory,
-        onRequestState: runtimeProviderStateHandler(runtime),
+        onRequestState: runtime.markPending,
         onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
