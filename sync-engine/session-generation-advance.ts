@@ -47,7 +47,7 @@ export interface SessionGenerationAdvanceResult {
   readonly userId: string;
   readonly reportedParent?: {
     readonly disposition: SpawnedReportDisposition;
-    readonly id: string;
+    readonly parentId: string;
   };
   readonly turnId?: string;
 }
@@ -164,11 +164,15 @@ export function advanceStoredSessionGeneration(
     return undefined;
   }
   const report = reportTerminalGeneration(options, state);
-  if (report.status === "blocked") {
+  if (report.status === "blocked" && options.mode === "attempt") {
     return undefined;
   }
   const reportedGeneration =
-    options.mode === "attempt" ? state.executionGeneration : generation;
+    report.status === "blocked"
+      ? state.parentReportedGeneration
+      : options.mode === "attempt"
+        ? state.executionGeneration
+        : generation;
   if (
     !updateStoredSessions(
       options.database,
@@ -228,7 +232,7 @@ export function advanceStoredSessionGeneration(
       : {
           reportedParent: {
             disposition: report.disposition,
-            id: report.parentId,
+            parentId: report.parentId,
           },
         }),
     ...(turnId === undefined ? {} : { turnId }),

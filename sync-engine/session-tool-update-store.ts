@@ -6,7 +6,10 @@ import {
   sessionTimingUpdate,
   workspaceSessionCondition,
 } from "./session-store-persistence.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 
 export type SessionToolUpdateStoreResult =
   | { readonly detail: AgentSessionDetail; readonly status: "updated" }
@@ -65,12 +68,7 @@ export function updateStoredSessionTools(
   if (changed === undefined) {
     return { status: "conflict" };
   }
-  if (changed.reportedParent !== undefined) {
-    options.reportParent?.(input.userId, {
-      disposition: changed.reportedParent.disposition,
-      parentId: changed.reportedParent.id,
-    });
-  }
+  emitReportedParent(options, input.userId, changed.reportedParent);
   const detail = options.read(input.userId, input.sessionId, input.workspaceId);
   if (detail === undefined) {
     throw new Error("The updated agent session could not be read");

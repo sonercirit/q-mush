@@ -45,7 +45,10 @@ import {
   tokenHashMatches,
 } from "./runner-token.ts";
 import type { RunnerAvailabilityParameters } from "./session-runner-availability.ts";
-import type { ReportedParentEvent } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type ReportedParentEvent,
+} from "./session-store-resources.ts";
 
 export type {
   RunnerConnection,
@@ -592,10 +595,7 @@ export class RunnerStore {
     });
     if (removed === false) return false;
     for (const { report, userId: ownerId } of removed.reports) {
-      this.#context.reportParent?.(ownerId, {
-        disposition: report.disposition,
-        parentId: report.id,
-      });
+      emitReportedParent(this.#context, ownerId, report);
     }
     return true;
   }

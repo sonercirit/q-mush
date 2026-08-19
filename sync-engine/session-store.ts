@@ -99,10 +99,7 @@ export class SessionStore extends SessionStoreRestarts {
     generateId: IdGenerator = createUuidV7,
     reportParent?: SessionStoreWriteResources["reportParent"],
   ) {
-    const reportParentAfterConstruction = reportParent;
-    super(database, generateId, (userId, report) => {
-      reportParentAfterConstruction?.(userId, report);
-    });
+    super(database, generateId, reportParent);
     this.#resources = [database, generateId];
     this.#reportParent = reportParent;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);

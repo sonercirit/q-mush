@@ -3,7 +3,10 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionStatus,
+} from "../shared/session-model.ts";
 import { appendSystemPendingInput } from "./session-pending-inputs.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
@@ -11,9 +14,7 @@ import {
   updateStoredSessions,
 } from "./session-store-persistence.ts";
 
-function parentIsTerminal(
-  status: (typeof REPORTABLE_PARENT_STATUSES)[number],
-): boolean {
+function parentIsTerminal(status: AgentSessionStatus): boolean {
   return status === "completed" || status === "failed" || status === "stopped";
 }
 

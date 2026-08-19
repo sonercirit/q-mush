@@ -26,7 +26,10 @@ import {
   updateStoredSessions,
 } from "./session-store-persistence.ts";
 import type { InterruptedStoredSession } from "./session-store-reassignment.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 import {
   errorMessageValues,
   insertStoredMessage,
@@ -320,12 +323,7 @@ export class RestartHandoffStore {
       };
     });
     if (result === false) return false;
-    if (result.reportedParent !== undefined) {
-      this.#options.reportParent?.(result.userId, {
-        disposition: result.reportedParent.disposition,
-        parentId: result.reportedParent.id,
-      });
-    }
+    emitReportedParent(this.#options, result.userId, result.reportedParent);
     return true;
   }
 

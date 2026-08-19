@@ -19,7 +19,10 @@ import {
   terminalSessionValues,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import {
   errorMessageValues,
@@ -109,12 +112,7 @@ export function reassignStoredSession(options: {
   if (typeof status === "string") {
     return { status };
   }
-  if (status.reportedParent !== undefined) {
-    options.resources.reportParent?.(options.userId, {
-      disposition: status.reportedParent.disposition,
-      parentId: status.reportedParent.id,
-    });
-  }
+  emitReportedParent(options.resources, options.userId, status.reportedParent);
   const detail = options.read(options.userId, options.sessionId);
   if (detail === undefined) {
     throw new Error("The reassigned agent session could not be read");

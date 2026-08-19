@@ -163,7 +163,7 @@ class DrizzleSessionIntegration
       generateId: dependencies.randomId ?? createUuidV7,
       reportParent: (userId, report) => {
         this.#actions.reportedParent(
-          { disposition: report.disposition, parentId: report.id },
+          { disposition: report.disposition, parentId: report.parentId },
           userId,
         );
       },

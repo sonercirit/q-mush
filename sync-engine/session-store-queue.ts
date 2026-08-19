@@ -16,7 +16,10 @@ import {
   activeSessionCondition,
   type SessionFilter,
 } from "./session-store-persistence.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import {
   readStoredSessionGeneration,
@@ -105,7 +108,11 @@ export function queueStoredSession(options: {
       sessionId,
     );
     const pending = activePendingInput(transaction, sessionId);
-    if (prompt !== undefined && pending !== undefined) {
+    if (
+      prompt !== undefined &&
+      pending !== undefined &&
+      !durableReports.some(({ id }) => id === pending.id)
+    ) {
       return "pending_input_conflict" as const;
     }
     const parentId = stored.parentSessionId;
@@ -188,12 +195,7 @@ export function queueStoredSession(options: {
   });
 
   if (typeof status === "string") return { status };
-  if (status.report !== undefined) {
-    resources.reportParent?.(userId, {
-      disposition: status.report.disposition,
-      parentId: status.report.id,
-    });
-  }
+  emitReportedParent(resources, userId, status.report);
   return readStoredSessionResult(
     resources,
     userId,

@@ -14,7 +14,10 @@ import {
   workspaceSessionCondition,
 } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
+import {
+  emitReportedParent,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
   detail?: AgentSessionDetail;
   error?: string;
@@ -92,12 +95,7 @@ export function updateStoredSessionProvider(
     }),
   );
   if (changed === undefined) return { status: "conflict" };
-  if (changed.reportedParent !== undefined) {
-    resources.reportParent?.(input.userId, {
-      disposition: changed.reportedParent.disposition,
-      parentId: changed.reportedParent.id,
-    });
-  }
+  emitReportedParent(resources, input.userId, changed.reportedParent);
 
   const detail = resources.read(
     input.userId,

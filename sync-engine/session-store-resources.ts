@@ -15,3 +15,11 @@ export interface SessionStoreWriteResources {
   readonly read: SessionDetailLookup;
   readonly reportParent?: (userId: string, report: ReportedParentEvent) => void;
 }
+
+export function emitReportedParent(
+  resources: Pick<SessionStoreWriteResources, "reportParent">,
+  userId: string,
+  report: ReportedParentEvent | undefined,
+): void {
+  if (report !== undefined) resources.reportParent?.(userId, report);
+}

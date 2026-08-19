@@ -204,6 +204,7 @@ test("idle parents persist sibling events and surface them on next resume", asyn
     TEST_USER_ID,
     setup.parentId,
     TEST_NOW + 10,
+    { content: "Continue with my request", images: [] },
   );
   expect(resumed.status).toBe("queued");
   expect(
@@ -213,6 +214,14 @@ test("idle parents persist sibling events and surface them on next resume", asyn
         )
       : [],
   ).toHaveLength(2);
+  expect(
+    resumed.status === "queued"
+      ? resumed.detail.messages.some(
+          ({ content, role }) =>
+            role === "user" && content === "Continue with my request",
+        )
+      : false,
+  ).toBe(true);
 
   const reports = parentReports(setup.store, setup.parentId);
   expect(reportCount(setup.store, setup.parentId)).toBe(2);

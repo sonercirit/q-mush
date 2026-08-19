@@ -10,10 +10,9 @@ const PROVIDER_SECRET =
   /\b(?:bearer\s+|github_pat_|ghp_|qmr_|sk-|sess-|xox[baprs]-)[-_A-Za-z0-9./+=]{8,}\b/giu;
 
 export function sanitizedTerminalEventText(value: string): string {
-  return withoutControlCharacters(value)
+  return withoutControlCharacters(value.slice(0, TERMINAL_EVENT_MAXIMUM_LENGTH))
     .replace(SENSITIVE_ASSIGNMENT, "$1=[redacted]")
     .replace(PROVIDER_SECRET, "[redacted]")
     .replace(/\s+/gu, " ")
-    .trim()
-    .slice(0, TERMINAL_EVENT_MAXIMUM_LENGTH);
+    .trim();
 }
