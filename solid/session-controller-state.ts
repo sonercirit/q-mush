@@ -71,14 +71,16 @@ export class SessionRealtimeState {
   ): void {
     this.#streamedContent.delete(sessionId);
     this.#streamedContent.set(sessionId, content);
+    const view = this.#view.value;
     while (this.#streamedContent.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
-      const view = this.#view.value;
       const oldest = this.#streamedContent
         .keys()
         .find(
           (candidate) =>
             candidate !== view.selectedId && candidate !== view.detail?.id,
         );
+      // Only the selected and rendered sessions are protected. With two
+      // protected keys and a cap of 100, an eviction candidate always exists.
       if (oldest === undefined) break;
       this.#streamedContent.delete(oldest);
     }
@@ -184,7 +186,7 @@ export class SessionRealtimeState {
       : { messages: persistable.messages, persisted: true };
 
     if (retainCompactionStream(currentStream, reconciled) && streamed) {
-      this.#streamedContent.set(detail.id, streamed);
+      this.#retainStreamedContent(detail.id, streamed);
     } else if (
       !retainCompactionStream(currentStream, reconciled) &&
       resolved?.provisional !== true
