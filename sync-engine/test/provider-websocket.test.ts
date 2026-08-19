@@ -256,6 +256,36 @@ test("correlates realistic delta events on a reused WebSocket", async () => {
   expectProviderSocketReleased(socket);
 });
 
+test("keeps an in-flight reused-request fence across a fresh socket reset", async () => {
+  const transitions: ("active" | "admission")[] = [];
+  const { model, sockets } = lifecycleModel(transitions);
+  const first = complete(model);
+  const reusedSocket = requireProviderSocket(sockets, 0);
+  reusedSocket.open();
+  acknowledgeProviderSocket(reusedSocket, "response-old");
+  reusedSocket.receive(responseEvent("response.completed", "response-old"));
+  await first;
+
+  const reused = complete(model);
+  const freshController = new AbortController();
+  const fresh = completeWithSignal(model, freshController.signal);
+  const freshSocket = requireProviderSocket(sockets, 1);
+  freshSocket.open();
+  reusedSocket.receive({
+    delta: "Stale",
+    response_id: "response-old",
+    type: "response.output_text.delta",
+  });
+  await expectRequestPending(reused);
+
+  acknowledgeProviderSocket(reusedSocket, "response-current");
+  reusedSocket.receive(responseEvent("response.completed", "response-current"));
+  expectDoneStep(await reused);
+  freshController.abort();
+  await expect(fresh).rejects.toMatchObject({ name: "AbortError" });
+  reusedSocket.close();
+});
+
 test("rejects IDs from the full lifetime of a reused socket", async () => {
   const observed: ("active" | "admission")[] = [];
   const lifecycle = beginLifecycleRequest(observed);

@@ -92,6 +92,7 @@ export class ProviderWebSocketSession {
   close(): void {
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#priorResponseIds.clear();
     socket?.close(1000, "Session complete");
   }
 
