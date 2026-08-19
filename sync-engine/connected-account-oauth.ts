@@ -226,15 +226,16 @@ export class ConnectedAccountOAuth {
         redirectUri,
         verifier: callback.verifier,
       });
-      const reconnecting =
-        credentialId === undefined || credentialId.length === 0
-          ? undefined
-          : this.#credentials.readCredentialMetadata(
-              user.id,
-              credentialId,
-              workspaceId,
-            );
-      if (credentialId === undefined || credentialId.length === 0) {
+      const isNewCredential =
+        credentialId === undefined || credentialId.length === 0;
+      const reconnecting = isNewCredential
+        ? undefined
+        : this.#credentials.readCredentialMetadata(
+            user.id,
+            credentialId,
+            workspaceId,
+          );
+      if (isNewCredential) {
         this.#credentials.addConnectedAccount(
           user,
           credential.secret,
@@ -244,8 +245,7 @@ export class ConnectedAccountOAuth {
       } else if (
         reconnecting?.requiresReauthentication !== true ||
         credential.details.accountId === null ||
-        (reconnecting.accountId !== null &&
-          reconnecting.accountId !== credential.details.accountId) ||
+        reconnecting.accountId !== credential.details.accountId ||
         !this.#credentials.reconnectCredential(
           user.id,
           credentialId,

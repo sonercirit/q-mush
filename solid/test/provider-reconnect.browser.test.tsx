@@ -1,6 +1,7 @@
 import { afterEach, expect, test } from "vitest";
 import { ProviderController } from "../provider-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
+import "../styles.css";
 import { providerViewState } from "./client-state-fixtures.ts";
 import {
   mountProviderTestPanel,
@@ -28,7 +29,13 @@ test("an OpenAI OAuth credential without a verified identity cannot reconnect", 
   );
   const panel = mountProviderTestPanel(controller);
 
-  expect(panel.textContent).toContain("Remove it, then connect OpenAI again");
+  const alert = panel.querySelector("[role='alert']");
+  if (!(alert instanceof HTMLParagraphElement)) {
+    throw new TypeError("Missing unavailable reconnect alert");
+  }
+  expect(alert.textContent).toContain("Remove it, then connect OpenAI again");
+  expect(alert.getBoundingClientRect().height).toBeGreaterThan(0);
+  expect(getComputedStyle(alert).color).toBe("oklch(0.962 0.059 95.617)");
   expect(
     [...panel.querySelectorAll("a")].some(
       (link) => link.textContent.trim() === "Reconnect this account",

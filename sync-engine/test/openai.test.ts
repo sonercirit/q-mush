@@ -224,6 +224,10 @@ const setupIntegration = createProviderTestSetup(
       "openai-verifier-five",
       "openai-state-six",
       "openai-verifier-six",
+      "openai-state-seven",
+      "openai-verifier-seven",
+      "openai-state-eight",
+      "openai-verifier-eight",
     ],
   ),
 );
@@ -439,6 +443,27 @@ describe("OpenAI credentials", () => {
       }),
     );
 
+    const endpointReconnect = vi
+      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
+      .mockReturnValue(true);
+    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
+    const unflagged = beginProviderAccount({
+      callbackPath: TEST_ROUTES.callbackPath,
+      code: "authorization-code-one",
+      integration,
+      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+      state: "openai-state-six",
+    });
+    database
+      .update(providerCredentials)
+      .set({ requiresReauthentication: false })
+      .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
+      .run();
+    expectRedirect(
+      await integration.complete(unflagged.callbackRequest),
+      "http://localhost:3000/app?openai=wrong_account",
+    );
+
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
     const unchangedSecret = store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
     const wrongAccount = beginProviderAccount({
@@ -446,7 +471,7 @@ describe("OpenAI credentials", () => {
       code: "authorization-code-two",
       integration,
       oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-      state: "openai-state-six",
+      state: "openai-state-seven",
     });
     expectRedirect(
       await integration.complete(wrongAccount.callbackRequest),
@@ -455,6 +480,25 @@ describe("OpenAI credentials", () => {
     expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
       unchangedSecret,
     );
+
+    database
+      .update(providerCredentials)
+      .set({ providerAccountId: null })
+      .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
+      .run();
+    const missingStoredIdentity = beginProviderAccount({
+      callbackPath: TEST_ROUTES.callbackPath,
+      code: "authorization-code-one",
+      integration,
+      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+      state: "openai-state-eight",
+    });
+    expectRedirect(
+      await integration.complete(missingStoredIdentity.callbackRequest),
+      "http://localhost:3000/app?openai=wrong_account",
+    );
+    expect(endpointReconnect).not.toHaveBeenCalled();
+    endpointReconnect.mockRestore();
     database.$client.close();
   });
 
