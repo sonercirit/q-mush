@@ -55,6 +55,7 @@ test("retains the selected stream while its detail fetch is pending", async () =
   try {
     const controller = new SessionController();
     const selection = controller.select(selected.id);
+    expect(resolveFetch).toBeTypeOf("function");
     controller.applyStreamBatch(streamBatch(selected.id));
 
     resolveFetch?.(Response.json(selected));

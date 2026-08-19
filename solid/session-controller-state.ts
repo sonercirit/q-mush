@@ -34,6 +34,17 @@ import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
 
 const MAXIMUM_STREAMED_SESSIONS_PER_USER = 100;
+const MAXIMUM_PROTECTED_STREAMED_SESSIONS = 2;
+
+function assertStreamRetentionCapacity(maximum: number): void {
+  if (maximum < MAXIMUM_PROTECTED_STREAMED_SESSIONS) {
+    throw new Error(
+      "The streamed-session cap must accommodate the selected and rendered sessions",
+    );
+  }
+}
+
+assertStreamRetentionCapacity(MAXIMUM_STREAMED_SESSIONS_PER_USER);
 
 function replaceToolStream(
   streams: readonly ToolStreamEntry[],
@@ -79,8 +90,8 @@ export class SessionRealtimeState {
           (candidate) =>
             candidate !== view.selectedId && candidate !== view.detail?.id,
         );
-      // Only the selected and rendered sessions are protected. With two
-      // protected keys and a cap of 100, an eviction candidate always exists.
+      // Only the selected and rendered sessions are protected. The enforced
+      // minimum cap guarantees an eviction candidate whenever this is over cap.
       if (oldest === undefined) break;
       this.#streamedContent.delete(oldest);
     }
