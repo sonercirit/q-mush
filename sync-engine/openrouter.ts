@@ -141,6 +141,7 @@ export function createOpenRouterIntegrationFromEnvironment(
       callbackPath: OPENROUTER_OAUTH_CALLBACK_PATH,
       createAuthorizationUrl,
       exchangeCredential: (request) => exchangeCredential(runtime, request),
+      credentialCookie: "q_mush_openrouter_credential",
       flowCookies: OPENROUTER_FLOW_COOKIES,
       resultParameter: "openrouter",
       userCookie: "q_mush_openrouter_user",

@@ -360,6 +360,7 @@ function createOpenAiIntegration(
         createAuthorizationUrl(clientId, request),
       exchangeCredential: (request) =>
         exchangeCredential(runtime, clientId, request),
+      credentialCookie: "q_mush_openai_credential",
       flowCookies: OPENAI_FLOW_COOKIES,
       resultParameter: "openai",
       userCookie: "q_mush_openai_user",

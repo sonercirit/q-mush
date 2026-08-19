@@ -112,8 +112,10 @@ test("surfaces an explicit OpenAI re-login state", () => {
   );
 
   expect(html).toContain("Re-login required");
+  expect(html).toContain("This OpenAI login has expired.");
+  expect(html).toContain("Reconnect this account");
   expect(html).toContain(
-    "This OpenAI login has expired. Connect the account again before using it in a session.",
+    "/api/openai/oauth?workspaceId=global&credentialId=credential-1",
   );
 });
 
@@ -127,9 +129,8 @@ test("uses the configured provider name in the shared re-login state", () => {
     }),
   );
 
-  expect(html).toContain(
-    "This OpenRouter login has expired. Connect the account again before using it in a session.",
-  );
+  expect(html).toContain("This OpenRouter login has expired.");
+  expect(html).toContain("Reconnect this account");
   expect(html).not.toContain("This OpenAI login has expired");
 });
 

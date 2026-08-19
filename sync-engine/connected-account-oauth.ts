@@ -46,6 +46,7 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly exchangeCredential: (
     request: CredentialExchangeRequest,
   ) => Promise<ConnectedAccountCredential>;
+  readonly credentialCookie: string;
   readonly flowCookies: FlowCookies;
   readonly redirectUri?: string;
   readonly resultParameter: string;
@@ -106,6 +107,23 @@ export class ConnectedAccountOAuth {
       secure,
     );
 
+    const requestedCredentialId = new URL(request.url).searchParams.get(
+      "credentialId",
+    );
+    if (
+      requestedCredentialId !== null &&
+      this.#credentials.readCredential(user.id, requestedCredentialId)
+        ?.requiresReauthentication !== true
+    ) {
+      return new Response("Invalid credential", { status: 409 });
+    }
+    const credentialCookie = createFlowCookie(
+      this.#configuration.credentialCookie,
+      requestedCredentialId ?? "",
+      this.#configuration.flowCookies.path,
+      secure,
+    );
+
     const requestedWorkspaceId = new URL(request.url).searchParams.get(
       "workspaceId",
     );
@@ -124,6 +142,7 @@ export class ConnectedAccountOAuth {
       ...cookies,
       userCookie,
       workspaceCookie,
+      credentialCookie,
     ]);
   }
 
@@ -147,6 +166,13 @@ export class ConnectedAccountOAuth {
       ...clearPkceCookies(this.#configuration.flowCookies, secure),
       createCookie(
         this.#configuration.userCookie,
+        "",
+        0,
+        this.#configuration.flowCookies.path,
+        secure,
+      ),
+      createCookie(
+        this.#configuration.credentialCookie,
         "",
         0,
         this.#configuration.flowCookies.path,
@@ -181,6 +207,10 @@ export class ConnectedAccountOAuth {
       request,
       this.#configuration.workspaceCookie,
     );
+    const credentialId = readCookie(
+      request,
+      this.#configuration.credentialCookie,
+    );
     if (
       flowUserId === undefined ||
       !valuesMatch(flowUserId, user.id) ||
@@ -195,12 +225,23 @@ export class ConnectedAccountOAuth {
         redirectUri,
         verifier: callback.verifier,
       });
-      this.#credentials.addConnectedAccount(
-        user,
-        credential.secret,
-        credential.details,
-        [workspaceId],
-      );
+      if (credentialId === undefined || credentialId.length === 0) {
+        this.#credentials.addConnectedAccount(
+          user,
+          credential.secret,
+          credential.details,
+          [workspaceId],
+        );
+      } else if (
+        !this.#credentials.updateCredentialSecret(
+          user.id,
+          credentialId,
+          credential.secret,
+          this.#runtime.now(),
+        )
+      ) {
+        return invalidState();
+      }
       return this.#appRedirect(request, "connected", clearedCookies);
     } catch {
       return this.#appRedirect(request, "failed", clearedCookies);

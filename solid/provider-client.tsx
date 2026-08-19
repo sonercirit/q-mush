@@ -41,6 +41,7 @@ interface CredentialItemProps {
     credential: ProviderCredential,
     trigger: HTMLElement,
   ) => void;
+  readonly selectedWorkspaceId?: string;
   readonly state: ProviderViewState;
   readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
@@ -121,7 +122,20 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
         </div>
         <Show when={props.credential.requiresReauthentication}>
           <p class="mt-2 text-sm font-medium text-amber-100" role="alert">
-            {`This ${props.configuration.name} login has expired. Connect the account again before using it in a session.`}
+            {`This ${props.configuration.name} login has expired. `}
+            <Show
+              fallback="Connect the account again before using it in a session."
+              when={props.configuration.oauthPath}
+            >
+              {(oauthPath) => (
+                <a
+                  class="underline decoration-amber-200/60 underline-offset-2 hover:text-white"
+                  href={`${oauthPath()}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? "global")}&credentialId=${encodeURIComponent(props.credential.id)}`}
+                >
+                  Reconnect this account
+                </a>
+              )}
+            </Show>
           </p>
         </Show>
         <p class="path-wrap mt-2 text-sm text-slate-400">
@@ -192,6 +206,9 @@ function ProviderCredentialList(
           controller: props.controller,
           credential,
           onOpenSessionReassignment: props.onOpenSessionReassignment,
+          ...(props.selectedWorkspaceId === undefined
+            ? {}
+            : { selectedWorkspaceId: props.selectedWorkspaceId }),
           state: state(),
           ...optionalWorkspaces(props.workspaces),
         };
