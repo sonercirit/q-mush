@@ -110,27 +110,27 @@ Project memory.
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session via
   canonical schemas. `read_session` is bounded; `get_session_options` pages
-  choices. Grouped tools manage children; a durable generation ledger delivers
-  one sanitized terminal event per attempt. Routes survive compaction; only
-  attempts report, administrative fences settle identity without duplicates, and
-  callback persistence/claiming are atomic. `callback_pending` blocks another
-  attempt; idle parents retain events until resumed. `parallel` uses four
-  ordered workers with bounded output and cancellation.
-  `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
-  Markdown, code/JSON, diffs, and contextual results, preserving line breaks;
-  lists page by ten. Live sessions use `solid/realtime-client.ts`,
-  `solid/session-client.tsx`, `solid/session-controller.ts`: model deltas
-  combine once per frame per session, other events are immediate, unchanged
-  snapshots suppress notifications, keyed messages rerender only changes. The
-  long-lived Solid root preserves focus and scroll; only bottom-pinned
-  transcripts follow live output. `agent-model-discovery.ts` queries metadata,
-  signal-cancelable; `shared/agent-configuration.ts` owns catalog
-  types/validation. New sessions take the default online runner (else the first)
-  and credential, first discovered model, latest working directory, top reported
-  effort. Unknown modalities imply no attachment support; choices show provider
-  and Q Mush modalities. `solid/custom-select.tsx` shares search normalization,
-  paginates past ten items, owns accessible keyboard/focus. Focus mode fills the
-  app viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  choices. Grouped tools manage children; a generation ledger delivers one
+  sanitized terminal event per attempt. Routes survive compaction; only attempts
+  report, administrative fences settle identity without duplicates, and callback
+  persistence/claiming are atomic. `callback_pending` blocks another attempt;
+  idle parents retain events until resumed. `parallel` uses four ordered workers
+  with bounded output and cancellation. `solid/session-transcript.tsx` renders
+  prompts, tool definitions, raw details, Markdown, code/JSON, diffs, and
+  contextual results, preserving line breaks; lists page by ten. Live sessions
+  use `solid/realtime-client.ts`, `solid/session-client.tsx`,
+  `solid/session-controller.ts`: model deltas combine once per frame per
+  session, other events are immediate, unchanged snapshots suppress
+  notifications, keyed messages rerender only changes. The long-lived Solid root
+  preserves focus and scroll; only bottom-pinned transcripts follow live output.
+  `agent-model-discovery.ts` queries metadata, signal-cancelable;
+  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
+  take the default online runner (else the first) and credential, first
+  discovered model, latest working directory, top reported effort. Unknown
+  modalities imply no attachment support; choices show provider and Q Mush
+  modalities. `solid/custom-select.tsx` shares search normalization, paginates
+  past ten items, owns accessible keyboard/focus. Focus mode fills the app
+  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
   overlays on desktop, becomes a drawer, collapses on selection, closing with
   Escape first. `shared/agent-prompt.ts` builds the model system prompt and
   transcript display; reasoning summaries persist as `thinking` messages omitted
