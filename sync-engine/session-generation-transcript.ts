@@ -7,6 +7,10 @@ import type {
 } from "../shared/session-model.ts";
 import { STORED_SESSION_MESSAGE_SELECTION } from "./session-message-selection.ts";
 import { summarizeStoredMessage } from "./session-store-read.ts";
+import {
+  STORED_SESSION_TURN_SELECTION,
+  summarizeStoredTurn,
+} from "./session-turn-read.ts";
 
 /**
  * Reads one execution generation independently of the current cache segment.
@@ -22,13 +26,7 @@ export function readStoredSessionGenerationTranscript(
   readonly turns: readonly AgentSessionTurn[];
 } {
   const turns = database
-    .select({
-      boundaryMessageId: agentSessionTurns.boundaryMessageId,
-      endedAt: agentSessionTurns.endedAt,
-      executionGeneration: agentSessionTurns.executionGeneration,
-      id: agentSessionTurns.id,
-      startedAt: agentSessionTurns.startedAt,
-    })
+    .select(STORED_SESSION_TURN_SELECTION)
     .from(agentSessionTurns)
     .where(
       and(
@@ -39,11 +37,7 @@ export function readStoredSessionGenerationTranscript(
     )
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
-    .map((turn) => ({
-      ...turn,
-      endedAt: turn.endedAt?.getTime() ?? null,
-      startedAt: turn.startedAt.getTime(),
-    }));
+    .map(summarizeStoredTurn);
   const messages =
     turns.length === 0
       ? []

@@ -14,6 +14,10 @@ import {
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import {
+  STORED_SESSION_TURN_SELECTION,
+  summarizeStoredTurn,
+} from "./session-turn-read.ts";
 
 function activeTurnCondition(sessionId: string) {
   return and(
@@ -215,13 +219,7 @@ export function readSessionTurns(
   sessionId: string,
 ): readonly AgentSessionTurn[] {
   return database
-    .select({
-      boundaryMessageId: agentSessionTurns.boundaryMessageId,
-      endedAt: agentSessionTurns.endedAt,
-      executionGeneration: agentSessionTurns.executionGeneration,
-      id: agentSessionTurns.id,
-      startedAt: agentSessionTurns.startedAt,
-    })
+    .select(STORED_SESSION_TURN_SELECTION)
     .from(agentSessionTurns)
     .where(
       and(
@@ -237,9 +235,5 @@ export function readSessionTurns(
     )
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
-    .map((turn) => ({
-      ...turn,
-      endedAt: turn.endedAt?.getTime() ?? null,
-      startedAt: turn.startedAt.getTime(),
-    }));
+    .map(summarizeStoredTurn);
 }
