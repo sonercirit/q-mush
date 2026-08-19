@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Project memory.
+Memory.
 
 ## Project Snapshot
 
@@ -111,8 +111,8 @@ Project memory.
   resolution. Tool, skill, model, and effort choices persist per session via
   canonical schemas. `read_session` is bounded; `get_session_options` pages
   choices. Grouped tools manage children; a generation ledger delivers one
-  sanitized terminal event per attempt. Routes survive compaction; only attempts
-  report, administrative fences settle identity without duplicates, and callback
+  terminal event per attempt. Routes survive compaction; only attempts report,
+  administrative fences settle identity without duplicates, and callback
   persistence/claiming are atomic. `callback_pending` blocks another attempt;
   idle parents retain events until resumed. `parallel` uses four ordered workers
   with bounded output and cancellation. `solid/session-transcript.tsx` renders
