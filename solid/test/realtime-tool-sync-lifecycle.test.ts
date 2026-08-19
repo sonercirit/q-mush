@@ -1,4 +1,5 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
+import { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import {
   orderedToolDelta,
   preparingToolDelta,
@@ -27,19 +28,30 @@ function flushOne(stream: ReturnType<typeof streamingRealtimeFixture>): void {
   stream.pendingFrames.shift()?.();
 }
 
-test("reconnect deduplicates flushed and pending tool streams", () => {
+test("reconnect deduplicates remembered, active, and resync tool streams", () => {
   const stream = streamingRealtimeFixture("deduplicated-reconnect");
-  for (const [index, streamId] of ["flushed", "pending"].entries()) {
-    stream.receive(preparingToolDelta(index, streamId, `call-${streamId}`));
-    if (index === 0) flushOne(stream);
-  }
+  stream.receive(preparingToolDelta(0, STREAM_ID, "deduplicated-call"));
+  flushOne(stream);
+  stream.receive(orderedToolDelta(2, { content: "sequence gap" }));
+
   const reconnected = stream.reconnect("deduplicated-again");
-  expect(reconnected.sent).toHaveLength(2);
-  for (const streamId of ["flushed", "pending"]) {
-    expect(reconnected.sent.some((frame) => frame.includes(streamId))).toBe(
-      true,
-    );
-  }
+  const identities = reconnected.sent.flatMap((frame) => {
+    const parsed: unknown = JSON.parse(frame);
+    if (
+      typeof parsed !== "object" ||
+      parsed === null ||
+      !("type" in parsed) ||
+      parsed.type !== "sync_tools" ||
+      !("sessionId" in parsed) ||
+      typeof parsed.sessionId !== "string" ||
+      !("streamId" in parsed) ||
+      typeof parsed.streamId !== "string"
+    ) {
+      return [];
+    }
+    return [`${parsed.sessionId}:${parsed.streamId}`];
+  });
+  expect(identities).toEqual([`${SESSION_ID}:${STREAM_ID}`]);
   stream.stop();
 });
 
@@ -68,20 +80,30 @@ test("does not resend unresolved session synchronization", () => {
 });
 
 test("retains current and remaining requests after a send failure", () => {
+  const pendingCalls: (readonly { sessionId: string; streamId: string }[])[] =
+    [];
   const stream = streamingRealtimeFixture("failed-sync-instance");
   const failedStreams = ["failed-a", "failed-b"];
   for (const [index, streamId] of failedStreams.entries()) {
-    const delta = preparingToolDelta(index, streamId, `call-${streamId}`);
-    stream.receive(delta);
-    stream.pendingFrames.shift()?.();
+    stream.receive(preparingToolDelta(index, streamId, `call-${streamId}`));
+    flushOne(stream);
   }
   const socket = firstSocket(stream);
   socket.sent.length = 0;
   socket.throwAfter = 0;
   stream.setup.connection.syncTools(SESSION_ID);
-  const reconnected = stream.reconnect("failed-sync-reconnected");
-  const sentAfterFailure = reconnected.sent.length;
-  expect(sentAfterFailure).toBe(2);
+  const pendingSpy = vi
+    .spyOn(ToolSyncTracker.prototype, "pending")
+    .mockImplementation(function (this: ToolSyncTracker) {
+      pendingSpy.mockRestore();
+      const result = this.pending();
+      pendingCalls.push(result);
+      return result;
+    });
+  stream.reconnect("failed-sync-reconnected");
+  expect(pendingCalls.at(-1)).toEqual(
+    failedStreams.map((streamId) => ({ sessionId: SESSION_ID, streamId })),
+  );
   stream.stop();
 });
 
