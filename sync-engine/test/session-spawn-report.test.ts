@@ -6,13 +6,26 @@ import {
 } from "../../shared/test/session-fixtures.ts";
 import { spawnedSessionReport } from "../session-spawn-report.ts";
 
+function reportWithStatus(
+  messages: readonly AgentSessionMessage[],
+  status: "completed" | "failed",
+): string | undefined {
+  return spawnedSessionReport(
+    { ...TEST_SESSION_DETAIL, messages, status },
+    "parent-1",
+  )?.content;
+}
+
 function completedReport(
   messages: readonly AgentSessionMessage[],
 ): string | undefined {
-  return spawnedSessionReport(
-    { ...TEST_SESSION_DETAIL, messages, status: "completed" },
-    "parent-1",
-  )?.content;
+  return reportWithStatus(messages, "completed");
+}
+
+function failedReport(
+  messages: readonly AgentSessionMessage[],
+): string | undefined {
+  return reportWithStatus(messages, "failed");
 }
 
 function completedReportWithError(
@@ -69,21 +82,14 @@ describe("spawned session reports", () => {
       openai: "openai-secret-value",
       privateKey: "private-key-secret-value",
     } as const;
-    const content = spawnedSessionReport(
-      {
-        ...TEST_SESSION_DETAIL,
-        messages: [
-          testSessionMessage(
-            "message-secret-assignments",
-            `OPENAI_API_KEY=${secrets.openai} GENERIC_ACCESS_TOKEN='${secrets.generic}' credential: "${secrets.credential}" clientSecret=${secrets.camel} private-key=${secrets.privateKey}`,
-            "error",
-            1,
-          ),
-        ],
-        status: "failed",
-      },
-      "parent-1",
-    )?.content;
+    const content = failedReport([
+      testSessionMessage(
+        "message-secret-assignments",
+        `OPENAI_API_KEY=${secrets.openai} GENERIC_ACCESS_TOKEN='${secrets.generic}' credential: "${secrets.credential}" clientSecret=${secrets.camel} private-key=${secrets.privateKey}`,
+        "error",
+        1,
+      ),
+    ]);
 
     expect(content).toContain("OPENAI_API_KEY=[redacted]");
     expect(content).toContain("GENERIC_ACCESS_TOKEN=[redacted]");
@@ -96,27 +102,20 @@ describe("spawned session reports", () => {
   });
 
   test("always includes the terminal error after a partial failed answer", () => {
-    const content = spawnedSessionReport(
-      {
-        ...TEST_SESSION_DETAIL,
-        messages: [
-          testSessionMessage(
-            "message-partial",
-            "Partial work before failure",
-            "assistant",
-            1,
-          ),
-          testSessionMessage(
-            "message-failure",
-            "Session failed: credential_rate_limited",
-            "error",
-            2,
-          ),
-        ],
-        status: "failed",
-      },
-      "parent-1",
-    )?.content;
+    const content = failedReport([
+      testSessionMessage(
+        "message-partial",
+        "Partial work before failure",
+        "assistant",
+        1,
+      ),
+      testSessionMessage(
+        "message-failure",
+        "Session failed: credential_rate_limited",
+        "error",
+        2,
+      ),
+    ]);
 
     expect(content).toContain('"error"');
     expect(content).toContain("credential_rate_limited");
