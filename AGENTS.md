@@ -1,18 +1,17 @@
 # AGENTS.md
 
-Living project memory.
+Project memory.
 
 ## Project Snapshot
 
-- Strict-TypeScript ESM Bun/SolidJS project; tests live under `test/`, no `src`.
-  `/` is the homepage, `/app` the app.
+- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
+  the homepage, `/app` the app.
 
 ## Working Agreements
 
-- Research online: use brave-search on provider docs/trackers, then probe APIs,
-  schemas, usage metrics.
-- Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
+- Research provider docs via Brave Search, then probe APIs/schemas/usage.
+- Call capabilities impossible only with excluding evidence; else record an open
+  question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
   docs, performance, security, and DX. Ship small improvements now.
 - TDD: fail first, implement, refactor green.
@@ -21,16 +20,14 @@ Living project memory.
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight,
-  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
-  in a test.
+- Never weaken tests, special-case checks, or claim unperformed verification;
+  disclose gaps. Fix defects on sight; codify harmful fixes in tests.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
   justified and every stale record in that change; act, don't ask.
-- Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failure.
+- Keep workflows local-first: narrow checks, then broad suites, then rerun
+  failures.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands
@@ -41,17 +38,16 @@ Living project memory.
 - Test: `bun run test` (DOM/server + Chromium); `test:watch` omits browsers.
   `test:browser` uses bare `scripts/test-browser.ts` (Bun no-orphans rejects
   `./`/absolute paths), pins headless, and clears `PWDEBUG`.
-- `bun run check` runs every static check, each standalone too; `bun run format`
-  / `lint:fix` write fixes.
+- `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
   whitespace checks on Bun 1.3.14 with a frozen lockfile.
 
 ## Architecture and Conventions
 
-- Four enforced production workspaces: `solid` owns browser UI, `sync-engine`
-  the Bun server/integrations, `runner` the standalone runner, `shared`
-  cross-workspace code. The first three import only themselves and `shared`;
-  `shared` imports no other workspace; only `scripts` may import `scripts`.
+- Four production workspaces: `solid` owns browser UI, `sync-engine` the Bun
+  server/integrations, `runner` the standalone runner, `shared` cross-workspace
+  code. The first three import only themselves and `shared`; `shared` imports no
+  other workspace; only `scripts` may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
@@ -208,7 +204,7 @@ Living project memory.
   Native-token and complete-function alpha matches of ≥20 tokens spanning a line
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
-- Repository policy scans tracked, unignored files: 20,000-code-point maximum
+- Repository policy: tracked, unignored files have a 20,000-code-point maximum
   (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
   outside `test`/`fixtures`.
 

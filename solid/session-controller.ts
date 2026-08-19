@@ -9,6 +9,7 @@ import type {
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
+import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import {
@@ -36,10 +37,7 @@ import {
 } from "./session-controller-guards.ts";
 import { showNewestSessionHistory } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
-import type {
-  SessionStreamBatch,
-  SessionToolUpdateResult,
-} from "./session-controller-options.ts";
+import type { SessionToolUpdateResult } from "./session-controller-options.ts";
 import {
   SessionPendingInputController,
   type PendingInputTimer,
@@ -158,7 +156,7 @@ export class SessionController {
       this.#live.applyCompaction(event);
     });
   }
-  applyStreamBatch(event: SessionStreamBatch): void {
+  applyStreamBatch(event: RealtimeStreamBatch): void {
     this.#applyNewestSnapshot(
       () => {
         this.#live.applyStreamBatch(event);

@@ -12,6 +12,14 @@ function requestKey(sessionId: string, streamId: string): string {
   return JSON.stringify([sessionId, streamId]);
 }
 
+export function forgetToolSnapshot(
+  snapshots: Map<string, ToolSnapshotRequest>,
+  sessionId: string,
+  streamId: string,
+): void {
+  snapshots.delete(requestKey(sessionId, streamId));
+}
+
 export function rememberToolSnapshot(
   snapshots: Map<string, ToolSnapshotRequest>,
   sessionId: string,
