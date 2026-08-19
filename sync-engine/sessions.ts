@@ -19,7 +19,6 @@ import {
 } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
@@ -70,6 +69,7 @@ import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
+import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { SessionStore } from "./session-store.ts";
 import {
   compactSessionForUser,
@@ -149,10 +149,12 @@ class DrizzleSessionIntegration
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
-    const reportParent = (
-      notify: "notifyReportedParent" | "reportedParent",
-    ) =>
-      (userId: string, report: { disposition: SpawnedReportDisposition; parentId: string }) => {
+    const reportParent =
+      (notify: "notifyReportedParent" | "reportedParent") =>
+      (
+        userId: string,
+        report: { disposition: SpawnedReportDisposition; parentId: string },
+      ) => {
         this.#actions[notify](
           { disposition: report.disposition, parentId: report.parentId },
           userId,

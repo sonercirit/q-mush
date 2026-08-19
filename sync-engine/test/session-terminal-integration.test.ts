@@ -274,8 +274,10 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
     readParent,
     (value) =>
       isRecord(value) &&
-      recordContentsContaining(value["pendingInputs"], "Spawned session completed")
-        .length === 1,
+      recordContentsContaining(
+        value["pendingInputs"],
+        "Spawned session completed",
+      ).length === 1,
   );
   expect(parentSessionRequests(model.requests)).toHaveLength(3);
   const parentReports = isRecord(parentWithSecondReport)
