@@ -158,11 +158,6 @@ export class SessionController {
       this.#live.applyCompaction(event);
     });
   }
-  applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
-    this.#applyNewestSnapshot(() => {
-      this.#live.applyDelta(event);
-    });
-  }
   applyStreamBatch(event: SessionStreamBatch): void {
     this.#applyNewestSnapshot(
       () => {

@@ -33,6 +33,8 @@ import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
 
+const MAXIMUM_STREAMED_SESSIONS_PER_USER = 100;
+
 function replaceToolStream(
   streams: readonly ToolStreamEntry[],
   update: RealtimeToolStreamUpdate,
@@ -62,6 +64,19 @@ export class SessionRealtimeState {
   readonly #mutationRebases = new Set<string>();
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
+
+  #retainStreamedContent(
+    sessionId: string,
+    content: StreamedSessionContent,
+  ): void {
+    this.#streamedContent.delete(sessionId);
+    this.#streamedContent.set(sessionId, content);
+    while (this.#streamedContent.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
+      const oldest = this.#streamedContent.keys().next();
+      if (oldest.done !== false) break;
+      this.#streamedContent.delete(oldest.value);
+    }
+  }
 
   #toolStreamAllowed(sessionId: string): boolean {
     const view = this.#view.value;
@@ -313,7 +328,7 @@ export class SessionRealtimeState {
         delta,
         this.#compactionRequests.get(delta.sessionId),
       );
-      this.#streamedContent.set(delta.sessionId, next);
+      this.#retainStreamedContent(delta.sessionId, next);
 
       if (!active || !visibleSelectedDetail) continue;
       const visibleMessages = streamMessages(

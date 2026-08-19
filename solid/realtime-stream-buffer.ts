@@ -510,6 +510,8 @@ export class RealtimeStreamBuffer {
   ): RealtimeStreamBatch | undefined {
     return drainUpdates(maximumUpdates, withinBudget, () => {
       const pending = this.#pendingBySession.get(barrier.sessionId);
+      // A session Map preserves insertion order, and epochs only advance before
+      // later updates are inserted. Thus the first entry has its lowest epoch.
       const first = pending?.values().next();
       if (
         pending === undefined ||

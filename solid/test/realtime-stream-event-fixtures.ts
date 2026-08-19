@@ -85,7 +85,7 @@ export function deliverTerminalStream(
   }
 }
 
-export function terminalToolStream(
+function terminalToolStream(
   index: number,
   streamId: string,
   callId = `terminal-call-${String(index)}`,
