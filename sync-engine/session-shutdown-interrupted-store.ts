@@ -61,19 +61,23 @@ export class ShutdownInterruptedSessionStore {
     values: Parameters<typeof advanceStoredSessionGeneration>[0]["values"],
     now: number,
   ): SessionGenerationAdvanceResult | undefined {
+    const generationChange = {
+      database: this.#options.database,
+      generateId: this.#options.generateId,
+      mode: "attempt" as const,
+      now,
+      sessionId,
+      startTurn: {},
+      values,
+    };
     return this.#options.database.transaction((transaction) =>
       advanceStoredSessionGeneration({
+        ...generationChange,
         condition: sessionGenerationCondition(
           { id: sessionId, status: "running" },
           generation,
         ),
         database: transaction,
-        generateId: this.#options.generateId,
-        mode: "attempt",
-        now,
-        sessionId,
-        startTurn: {},
-        values,
       }),
     );
   }
