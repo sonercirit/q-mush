@@ -133,7 +133,11 @@ function completionReports(
   setup: ReturnType<typeof connectedSessionSetup>,
 ): readonly string[] {
   const parent = sessionFor(setup, SESSION_ID);
-  return [...(parent?.messages ?? []), ...(parent?.pendingInputs ?? [])]
+  const combined = [
+    ...(parent?.messages ?? []),
+    ...(parent?.pendingInputs ?? []),
+  ];
+  return combined
     .filter(({ content }) => content.includes(COMPLETION_REPORT))
     .map(({ content }) => content);
 }
@@ -230,12 +234,12 @@ test("a reported child event survives parent compaction and is consumed on resum
   if (compactCommand === undefined) {
     throw new Error("The parent compaction command is unavailable");
   }
-  expect(
-    compacted.sessions.completeRunnerCommand(RUNNER_ID, compactCommand.id, {
-      output: "null",
-      state: "completed",
-    }),
-  ).toBe(true);
+  const completed = compacted.sessions.completeRunnerCommand(
+    RUNNER_ID,
+    compactCommand.id,
+    { output: "null", state: "completed" },
+  );
+  expect(completed).toBe(true);
   const compactedParent = await waitForSessionValue(
     () => sessionFor(compacted, SESSION_ID),
     hasSessionStatus("idle"),
