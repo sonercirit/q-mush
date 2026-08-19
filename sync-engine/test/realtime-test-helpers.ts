@@ -185,6 +185,7 @@ function realtimeTestRunners(
     installer: () => new Response(),
     listForUser: () => [],
     listOnlineForUser: () => ({ items: [], totalItems: 0 }),
+    onParentReport: () => undefined,
     onRemoved: () => undefined,
     onRemoving: () => undefined,
     onlineForUser: () => [],

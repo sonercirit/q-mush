@@ -6,7 +6,10 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
-import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
+import {
+  TEST_AUTHENTICATED_USER,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
   childSessionId,
@@ -41,6 +44,7 @@ import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts"
 const CHILD_PROMPT = "Finish this work across a server restart.";
 const CHILD_TOOL_OUTPUT = "Durable child tool output.";
 const CHILD_SUMMARY = "The child finished with an assistant summary.";
+const COMPACTION_REPORT_SUMMARY = "Preserve the reported child result.";
 const COMPLETION_REPORT = "Spawned session completed:";
 
 function includesContent(
@@ -48,6 +52,15 @@ function includesContent(
   content: string,
 ): boolean {
   return messages.some((message) => message.content.includes(content));
+}
+
+class ReportCompactionModel implements AgentModel {
+  complete(
+    messages: readonly AgentConversationMessage[],
+  ): Promise<AgentModelStep> {
+    expect(includesContent(messages, COMPLETION_REPORT)).toBe(false);
+    return Promise.resolve(providerStep(COMPACTION_REPORT_SUMMARY));
+  }
 }
 
 class RestartedSpawnModel implements AgentModel {
@@ -99,15 +112,10 @@ function sessionFor(
 function completionReports(
   setup: ReturnType<typeof connectedSessionSetup>,
 ): readonly string[] {
-  return (
-    sessionFor(setup, SESSION_ID)
-      ?.messages.filter(
-        (message) =>
-          message.role === "user" &&
-          message.content.includes(COMPLETION_REPORT),
-      )
-      .map(({ content }) => content) ?? []
-  );
+  const parent = sessionFor(setup, SESSION_ID);
+  return [...(parent?.messages ?? []), ...(parent?.pendingInputs ?? [])]
+    .filter(({ content }) => content.includes(COMPLETION_REPORT))
+    .map(({ content }) => content);
 }
 
 function recreateSessionSetup(
@@ -187,6 +195,77 @@ test("a spawned session resumes its interrupted step after server recreation", a
     generation: 0,
     status: "idle",
   });
+  closeSessionTestDatabase(initial.database);
+});
+
+test("a reported child event survives parent compaction and is consumed on resume", async () => {
+  const childModel = new RestartedSpawnModel();
+  const initial = await startToolSession(childModel);
+  const childId = await childSessionId(initial);
+  completeChildAgentFile(initial);
+  await waitForChildRunnerTool(initial, childId, "bash");
+  completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
+  await waitForSessionValue(
+    () => sessionFor(initial, childId),
+    (value) =>
+      hasSessionStatus("completed")(value) &&
+      JSON.stringify(value).includes(CHILD_SUMMARY),
+  );
+  await waitForTerminalParentNote(initial.sessions, childId);
+  expect(completionReports(initial)).toHaveLength(1);
+
+  const compacted = recreateSessionSetup(new ReportCompactionModel(), initial);
+  const response = await compacted.sessions.realtimeCommands.compactForUser(
+    TEST_AUTHENTICATED_USER,
+    SESSION_ID,
+    sessionFor(compacted, SESSION_ID)?.workspaceId ?? "",
+  );
+  expect(["queued", "running"]).toContain(response.status);
+  await waitForChildRunnerTool(compacted, SESSION_ID, "read_agent_file");
+  const compactCommand = compacted.latestRunnerCommand();
+  if (compactCommand === undefined) {
+    throw new Error("The parent compaction command is unavailable");
+  }
+  expect(
+    compacted.sessions.completeRunnerCommand(RUNNER_ID, compactCommand.id, {
+      output: "null",
+      state: "completed",
+    }),
+  ).toBe(true);
+  const compactedParent = await waitForSessionValue(
+    () => sessionFor(compacted, SESSION_ID),
+    hasSessionStatus("idle"),
+  );
+  expect(compactedParent).toMatchObject({ status: "idle" });
+  expect(JSON.stringify(compactedParent)).toContain(COMPACTION_REPORT_SUMMARY);
+  const afterCompaction = sessionFor(compacted, SESSION_ID);
+  expect(afterCompaction?.pendingInputs).toHaveLength(1);
+  expect(afterCompaction?.pendingInputs[0]?.content).toContain(
+    COMPLETION_REPORT,
+  );
+  expect(
+    afterCompaction?.messages.some(({ content }) =>
+      content.includes(COMPLETION_REPORT),
+    ),
+  ).toBe(false);
+
+  const workspaceId = afterCompaction?.workspaceId;
+  if (workspaceId === undefined) {
+    throw new Error("The compacted parent workspace is unavailable");
+  }
+  const resumed = compacted.sessions.realtimeCommands.continueForUser(
+    TEST_AUTHENTICATED_USER,
+    SESSION_ID,
+    workspaceId,
+  );
+  await expect(resumed).resolves.toMatchObject({ generation: 2 });
+  const final = sessionFor(compacted, SESSION_ID);
+  expect(final?.pendingInputs).toEqual([]);
+  expect(
+    final?.messages.filter(({ content }) =>
+      content.includes(COMPLETION_REPORT),
+    ),
+  ).toHaveLength(1);
   closeSessionTestDatabase(initial.database);
 });
 

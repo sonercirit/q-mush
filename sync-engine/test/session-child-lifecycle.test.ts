@@ -150,14 +150,14 @@ function callbackContentIncludes(
   lifecycle: ChildLifecycleSetup,
   content: string,
 ): boolean {
-  return (
-    lifecycle.setup.sessions
-      .detailForUser(TEST_USER_ID, SESSION_ID)
-      ?.messages.some(
-        (message) =>
-          message.content.includes("Spawned session") &&
-          message.content.includes(content),
-      ) === true
+  const parent = lifecycle.setup.sessions.detailForUser(
+    TEST_USER_ID,
+    SESSION_ID,
+  );
+  return [...(parent?.messages ?? []), ...(parent?.pendingInputs ?? [])].some(
+    (message) =>
+      message.content.includes("Spawned session") &&
+      message.content.includes(content),
   );
 }
 

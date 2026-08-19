@@ -94,9 +94,12 @@ function setup(userContextTokenCap?: number) {
     },
     runtimes: { abortForGeneration },
     store: {
-      database,
-      read: (identity: readonly [string, string, string]) =>
-        store.get(...identity),
+      resources: {
+        database,
+        generateId: () => crypto.randomUUID(),
+        read: (userId: string, sessionId: string, workspaceId?: string) =>
+          store.get(userId, sessionId, workspaceId),
+      },
     },
   };
   const input = {

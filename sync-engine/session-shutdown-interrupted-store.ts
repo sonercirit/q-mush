@@ -7,7 +7,10 @@ import type {
   RestartHandoff,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
-import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
+import {
+  advanceStoredSessionGeneration,
+  type SessionGenerationAdvanceResult,
+} from "./session-generation-advance.ts";
 import {
   canonicalRestartHandoff,
   parseRestartHandoff,
@@ -15,16 +18,20 @@ import {
 import {
   activeSessionCondition,
   readStoredSessionSnapshots,
+  sessionGenerationCondition,
   sessionTimingUpdate,
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
 import { appendUnknownRestartToolResults } from "./session-store-read.ts";
-import { rotateSessionTurn } from "./session-turn-store.ts";
 
 interface ShutdownInterruptedSessionStoreOptions {
   readonly database: AppDatabase;
   readonly generateId: (now: number) => string;
+  readonly reportParent?: (
+    userId: string,
+    report: NonNullable<SessionGenerationAdvanceResult["reportedParent"]>,
+  ) => void;
 }
 
 function shutdownHandoff(
@@ -46,6 +53,29 @@ export class ShutdownInterruptedSessionStore {
 
   constructor(options: ShutdownInterruptedSessionStoreOptions) {
     this.#options = options;
+  }
+
+  advanceGeneration(
+    sessionId: string,
+    generation: number,
+    values: Parameters<typeof advanceStoredSessionGeneration>[0]["values"],
+    now: number,
+  ): SessionGenerationAdvanceResult | undefined {
+    return this.#options.database.transaction((transaction) =>
+      advanceStoredSessionGeneration({
+        condition: sessionGenerationCondition(
+          { id: sessionId, status: "running" },
+          generation,
+        ),
+        database: transaction,
+        generateId: this.#options.generateId,
+        mode: "attempt",
+        now,
+        sessionId,
+        startTurn: {},
+        values,
+      }),
+    );
   }
 
   mark(
@@ -170,57 +200,59 @@ export class ShutdownInterruptedSessionStore {
         continue;
       }
       const { marker, raw } = marked;
-      const handoff = {
-        ...marker,
-        executionGeneration: session.executionGeneration + 1,
-      };
-      this.#options.database.transaction((transaction) => {
-        const changed = updateStoredSessions(
-          transaction,
-          this.#exactCondition(session, raw),
-          {
+      const restored = this.#options.database.transaction((transaction) => {
+        const advanced = advanceStoredSessionGeneration({
+          condition: this.#exactCondition(session, raw),
+          database: transaction,
+          generateId: this.#options.generateId,
+          mode: "attempt",
+          now,
+          sessionId: session.id,
+          startTurn: {},
+          values: {
             status: "paused",
-            restartHandoff: canonicalRestartHandoff(handoff),
             interruptedHandoff: null,
             ...sessionTimingUpdate(session, now),
-            executionGeneration: handoff.executionGeneration,
             ...updatedAuditFields(SYSTEM_ID, now),
           },
+        });
+        if (advanced === undefined) return;
+        const handoff = {
+          ...marker,
+          executionGeneration: advanced.generation,
+        };
+        const changed = updateStoredSessions(
+          transaction,
+          and(
+            sessionGenerationCondition(
+              {
+                id: session.id,
+                status: "paused",
+                userId: session.userId,
+              },
+              advanced.generation,
+            ),
+            isNull(agentSessions.interruptedHandoff),
+          ),
+          { restartHandoff: canonicalRestartHandoff(handoff) },
         );
         if (!changed) {
-          return;
+          throw new Error("The shutdown handoff generation changed");
         }
-        retireManualCompactionOperations(
-          transaction,
-          session.id,
-          session.executionGeneration,
-          now,
-          "through",
-        );
-        const segment =
-          transaction.query.agentSessions
-            .findFirst({
-              columns: { currentSegment: true },
-              where: eq(agentSessions.id, session.id),
-            })
-            .sync()?.currentSegment ?? 0;
-        rotateSessionTurn({
-          database: transaction,
-          executionGeneration: handoff.executionGeneration,
-          generateId: this.#options.generateId,
-          now,
-          previousExecutionGeneration: session.executionGeneration,
-          segment,
-          sessionId: session.id,
-          userId: session.userId,
-        });
         appendUnknownRestartToolResults({
           database: transaction,
           generateId: this.#options.generateId,
           now,
           sessionId: session.id,
         });
+        return {
+          reportedParent: advanced.reportedParent,
+          restored: true as const,
+        };
       });
+      if (restored?.reportedParent !== undefined) {
+        this.#options.reportParent?.(session.userId, restored.reportedParent);
+      }
     }
   }
 }

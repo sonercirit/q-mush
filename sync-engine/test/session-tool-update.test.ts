@@ -47,7 +47,8 @@ function setup() {
     runtimes: { abortForGeneration },
     store: {
       database,
-      read: (userId: string, sessionId: string, workspaceId: string) =>
+      generateId: () => crypto.randomUUID(),
+      read: (userId: string, sessionId: string, workspaceId?: string) =>
         store.get(userId, sessionId, workspaceId),
     },
   };

@@ -1,13 +1,12 @@
-import { sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import {
   activePendingInput,
   settleNormalSessionBoundary,
@@ -20,6 +19,7 @@ import {
   terminalSessionValues,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionState } from "./session-store-state.ts";
 import {
   errorMessageValues,
@@ -28,7 +28,7 @@ import {
 } from "./session-store-values.ts";
 import { recoverStoredTerminal } from "./session-terminal-store.ts";
 import {
-  updateSessionAndEndGenerationTurn,
+  activeSessionTurnId,
   updateStoredSnapshotAndEndGenerationTurn,
 } from "./session-turn-store.ts";
 
@@ -40,7 +40,7 @@ export type ReassignSessionResult =
     };
 
 export function reassignStoredSession(options: {
-  readonly database: AppDatabase;
+  readonly resources: SessionStoreWriteResources;
   readonly now: number;
   readonly read: (
     userId: string,
@@ -55,7 +55,7 @@ export function reassignStoredSession(options: {
     id: options.sessionId,
     userId: options.userId,
   });
-  const status = options.database.transaction((transaction) => {
+  const status = options.resources.database.transaction((transaction) => {
     const stored = readStoredSessionState(transaction, ownedSession);
 
     if (stored === undefined) {
@@ -83,35 +83,43 @@ export function reassignStoredSession(options: {
       return "runner_unavailable" as const;
     }
 
-    if (
-      !updateSessionAndEndGenerationTurn({
-        condition: ownedSession,
-        database: transaction,
-        generation: stored.executionGeneration,
-        now: options.now,
-        sessionId: options.sessionId,
-        values: {
-          runnerId: options.runnerId,
-          runnerRequired: false,
-          executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-          workingDirectory: options.workingDirectory,
-          ...updatedAuditFields(options.userId, options.now),
-        },
-      })
-    ) {
+    const advanced = advanceStoredSessionGeneration({
+      condition: ownedSession,
+      database: transaction,
+      generateId: options.resources.generateId,
+      mode: "administrative",
+      now: options.now,
+      sessionId: options.sessionId,
+      values: {
+        runnerId: options.runnerId,
+        runnerRequired: false,
+        workingDirectory: options.workingDirectory,
+        ...updatedAuditFields(options.userId, options.now),
+      },
+    });
+    if (advanced === undefined) {
       throw new Error("The agent session changed during reassignment");
     }
-    return "reassigned" as const;
+    return {
+      reportedParent: advanced.reportedParent,
+      status: "reassigned" as const,
+    };
   });
 
-  if (status !== "reassigned") {
+  if (typeof status === "string") {
     return { status };
+  }
+  if (status.reportedParent !== undefined) {
+    options.resources.reportParent?.(options.userId, {
+      disposition: status.reportedParent.disposition,
+      parentId: status.reportedParent.id,
+    });
   }
   const detail = options.read(options.userId, options.sessionId);
   if (detail === undefined) {
     throw new Error("The reassigned agent session could not be read");
   }
-  return { detail, status };
+  return { detail, status: status.status };
 }
 
 export interface InterruptedStoredSession extends StoredSessionSnapshot {
@@ -168,6 +176,7 @@ export function failInterruptedStoredSession(
   error?: string,
 ): boolean {
   return database.transaction((transaction) => {
+    const turnId = activeSessionTurnId(transaction, session.id);
     const updated = updateStoredSnapshotAndEndGenerationTurn(
       transaction,
       session,
@@ -179,9 +188,12 @@ export function failInterruptedStoredSession(
     }
     insertStoredMessage(
       transaction,
-      error === undefined
-        ? interruptedSessionErrorValues()
-        : errorMessageValues(error),
+      {
+        ...(error === undefined
+          ? interruptedSessionErrorValues()
+          : errorMessageValues(error)),
+        turnId,
+      },
       {
         actorId: SYSTEM_ID,
         id: messageId,

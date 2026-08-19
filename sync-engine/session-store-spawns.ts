@@ -4,16 +4,12 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { appendSystemFollowUp } from "./session-pending-inputs.ts";
+import { appendSystemPendingInput } from "./session-pending-inputs.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
-import {
-  appendSystemStoredMessage,
-  storedUserMessageValues,
-} from "./session-store-values.ts";
 
 function parentIsTerminal(
   status: (typeof REPORTABLE_PARENT_STATUSES)[number],
@@ -263,30 +259,22 @@ function callbackDisposition(
   ) {
     return undefined;
   }
-  switch (parent.status) {
-    case "running":
-      if (
-        !appendSystemFollowUp({
-          ...reportMessageOptions(options, database),
-          clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-          content: options.content,
-          kind: "steer",
-        })
-      ) {
-        return undefined;
-      }
-      break;
-    case "completed":
-    case "failed":
-    case "idle":
-    case "paused":
-    case "queued":
-    case "stopped":
-      appendSystemStoredMessage({
-        ...reportMessageOptions(options, database),
-        message: storedUserMessageValues(options.content),
-      });
-      break;
+  if (parent.status === "running") {
+    const appended = appendSystemPendingInput({
+      ...reportMessageOptions(options, database),
+      clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+      content: options.content,
+      kind: "steer",
+    });
+    if (!appended) return undefined;
+  } else {
+    const appended = appendSystemPendingInput({
+      ...reportMessageOptions(options, database),
+      clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+      content: options.content,
+      kind: "follow_up",
+    });
+    if (!appended) return undefined;
   }
 
   const terminal = parentIsTerminal(parent.status);

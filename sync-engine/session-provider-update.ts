@@ -18,6 +18,7 @@ import {
 } from "./session-provider-selection.ts";
 import { updateStoredSessionProvider } from "./session-provider-update-store.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
+import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 
 export interface SessionProviderUpdateDependencies {
   readonly broker: Pick<RunnerCommandBroker, "cancelSessionGeneration">;
@@ -28,14 +29,7 @@ export interface SessionProviderUpdateDependencies {
   readonly rejectCredentialErrors?: boolean;
   readonly runtimes: Pick<SessionRuntimes, "abortForGeneration">;
   readonly store: {
-    readonly database: Parameters<typeof updateStoredSessionProvider>[0];
-    readonly read: (
-      identity: readonly [
-        userId: string,
-        sessionId: string,
-        workspaceId: string,
-      ],
-    ) => AgentSessionDetail | undefined;
+    readonly resources: SessionStoreWriteResources;
   };
 }
 
@@ -73,11 +67,11 @@ export async function applySessionProviderUpdate(
   userId: string,
   input: SessionProviderUpdateInput,
 ): Promise<AgentSessionDetail> {
-  const existing = dependencies.store.read([
+  const existing = dependencies.store.resources.read(
     userId,
     input.sessionId,
     input.workspaceId,
-  ]);
+  );
   if (existing === undefined) {
     throw new RealtimeCommandError("not_found");
   }
@@ -92,16 +86,12 @@ export async function applySessionProviderUpdate(
   }
 
   const metadata = await targetMetadata(dependencies, userId, input);
-  const result = updateStoredSessionProvider(
-    dependencies.store.database,
-    dependencies.store.read,
-    {
-      ...input,
-      ...metadata,
-      now: dependencies.now(),
-      userId,
-    },
-  );
+  const result = updateStoredSessionProvider(dependencies.store.resources, {
+    ...input,
+    ...metadata,
+    now: dependencies.now(),
+    userId,
+  });
   const detail = result.detail;
   if (result.status === "invalid_context_token_cap") {
     throw new RealtimeCommandError(

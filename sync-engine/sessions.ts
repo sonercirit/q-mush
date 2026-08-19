@@ -151,10 +151,22 @@ class DrizzleSessionIntegration
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
+      (userId, report) => {
+        this.#actions.notifyReportedParent(
+          { disposition: report.disposition, parentId: report.parentId },
+          userId,
+        );
+      },
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
+      reportParent: (userId, report) => {
+        this.#actions.reportedParent(
+          { disposition: report.disposition, parentId: report.id },
+          userId,
+        );
+      },
     });
     this.#fallbacks = createAttachmentFallbackIntegration({
       database,
@@ -254,6 +266,9 @@ class DrizzleSessionIntegration
       restart: this.#restart,
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
+    });
+    this.#runners.onParentReport((userId, report) => {
+      this.#actions.reportedParent(report, userId);
     });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);

@@ -11,8 +11,13 @@ export interface ParentSessionReport {
   readonly parentId: string;
 }
 
+type SpawnedSessionReportDetail = Pick<
+  AgentSessionDetail,
+  "generation" | "id" | "messages" | "status" | "turns"
+>;
+
 function currentGenerationMessages(
-  completed: AgentSessionDetail,
+  completed: SpawnedSessionReportDetail,
 ): readonly AgentSessionMessage[] {
   const generationTurns =
     completed.turns?.filter(
@@ -28,7 +33,7 @@ function currentGenerationMessages(
 }
 
 export function spawnedSessionReport(
-  completed: AgentSessionDetail,
+  completed: SpawnedSessionReportDetail,
   parentId: string,
 ): ParentSessionReport | undefined {
   if (
@@ -39,17 +44,19 @@ export function spawnedSessionReport(
     return undefined;
   }
   const failed = completed.status === "failed";
-  const messages = currentGenerationMessages(completed);
-  const terminalAssistant = messages.findLast(
+  const currentMessages = currentGenerationMessages(completed);
+  const terminalAssistant = currentMessages.findLast(
     ({ role, toolCalls }) => role === "assistant" && toolCalls.length === 0,
   );
   // A truncation notice lands directly after its assistant step; carry it
   // into the callback so the parent never mistakes a cut-short answer for
   // a finished one.
   const terminalIndex =
-    terminalAssistant === undefined ? -1 : messages.indexOf(terminalAssistant);
+    terminalAssistant === undefined
+      ? -1
+      : currentMessages.indexOf(terminalAssistant);
   const trailingNotice =
-    terminalIndex >= 0 ? messages[terminalIndex + 1] : undefined;
+    terminalIndex >= 0 ? currentMessages[terminalIndex + 1] : undefined;
   const noticedAssistant =
     terminalAssistant !== undefined &&
     trailingNotice?.role === "error" &&
@@ -59,23 +66,29 @@ export function spawnedSessionReport(
           content: `${terminalAssistant.content}\n\n${trailingNotice.content}`,
         }
       : terminalAssistant;
-  const assistant = messages.findLast(({ role }) => role === "assistant");
+  const assistant = currentMessages.findLast(
+    ({ role }) => role === "assistant",
+  );
   const failure = failed
-    ? messages.findLast(({ role }) => role === "error")
+    ? (currentMessages.findLast(({ role }) => role === "error") ??
+      completed.messages.findLast(({ role }) => role === "error"))
     : undefined;
   const lastMessage = failed
-    ? (assistant?.content.trim().length ?? 0) > 0
-      ? assistant
-      : {
-          content:
-            failure?.content ??
-            "Session failed without a recorded failure reason",
-          role: "error" as const,
-        }
+    ? assistant
     : completed.status === "stopped"
-      ? messages.findLast(({ role }) => role !== "thinking")
+      ? currentMessages.findLast(({ role }) => role !== "thinking")
       : noticedAssistant;
+  const terminalError = failed
+    ? {
+        content: sanitizedTerminalEventText(
+          failure?.content ??
+            "Session failed without a recorded failure reason",
+        ),
+        role: "error" as const,
+      }
+    : undefined;
   const summary = sessionToolOutput({
+    ...(terminalError === undefined ? {} : { error: terminalError }),
     generation: completed.generation,
     lastMessage:
       lastMessage === undefined

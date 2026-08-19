@@ -61,6 +61,118 @@ describe("spawned session reports", () => {
     expect(content?.length).toBeLessThan(2_300);
   });
 
+  test("redacts generic and provider-prefixed assignment names", () => {
+    const secrets = {
+      camel: "camel-secret-value",
+      credential: "credential-secret-value",
+      generic: "generic-secret-value",
+      openai: "openai-secret-value",
+      privateKey: "private-key-secret-value",
+    } as const;
+    const content = spawnedSessionReport(
+      {
+        ...TEST_SESSION_DETAIL,
+        messages: [
+          testSessionMessage(
+            "message-secret-assignments",
+            `OPENAI_API_KEY=${secrets.openai} GENERIC_ACCESS_TOKEN='${secrets.generic}' credential: "${secrets.credential}" clientSecret=${secrets.camel} private-key=${secrets.privateKey}`,
+            "error",
+            1,
+          ),
+        ],
+        status: "failed",
+      },
+      "parent-1",
+    )?.content;
+
+    expect(content).toContain("OPENAI_API_KEY=[redacted]");
+    expect(content).toContain("GENERIC_ACCESS_TOKEN=[redacted]");
+    expect(content).toContain("credential=[redacted]");
+    expect(content).toContain("clientSecret=[redacted]");
+    expect(content).toContain("private-key=[redacted]");
+    for (const secret of Object.values(secrets)) {
+      expect(content).not.toContain(secret);
+    }
+  });
+
+  test("always includes the terminal error after a partial failed answer", () => {
+    const content = spawnedSessionReport(
+      {
+        ...TEST_SESSION_DETAIL,
+        messages: [
+          testSessionMessage(
+            "message-partial",
+            "Partial work before failure",
+            "assistant",
+            1,
+          ),
+          testSessionMessage(
+            "message-failure",
+            "Session failed: credential_rate_limited",
+            "error",
+            2,
+          ),
+        ],
+        status: "failed",
+      },
+      "parent-1",
+    )?.content;
+
+    expect(content).toContain('"error"');
+    expect(content).toContain("credential_rate_limited");
+    expect(content).toContain("Partial work before failure");
+  });
+
+  test("uses an unbound terminal failure instead of an earlier generation", () => {
+    const content = spawnedSessionReport(
+      {
+        ...TEST_SESSION_DETAIL,
+        generation: 1,
+        messages: [
+          {
+            ...testSessionMessage(
+              "message-old",
+              "Old successful answer",
+              "assistant",
+              1,
+            ),
+            turnId: "turn-0",
+          },
+          {
+            ...testSessionMessage(
+              "message-unbound-error",
+              "Session failed: server interrupted the current attempt",
+              "error",
+              4,
+            ),
+            turnId: null,
+          },
+        ],
+        status: "failed",
+        turns: [
+          {
+            boundaryMessageId: "message-old",
+            endedAt: 2,
+            executionGeneration: 0,
+            id: "turn-0",
+            startedAt: 0,
+          },
+          {
+            boundaryMessageId: null,
+            endedAt: 4,
+            executionGeneration: 1,
+            id: "turn-1",
+            startedAt: 3,
+          },
+        ],
+      },
+      "parent-1",
+    )?.content;
+
+    expect(content).toContain("server interrupted the current attempt");
+    expect(content).not.toContain("Old successful answer");
+  });
+
   test("uses only the current attempt's final error", () => {
     const content = spawnedSessionReport(
       {

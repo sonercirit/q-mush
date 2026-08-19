@@ -66,6 +66,7 @@ import {
   reassignStoredSession,
   type ReassignSessionResult,
 } from "./session-store-reassignment.ts";
+import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { SessionStoreRestarts } from "./session-store-restarts.ts";
 import {
   setSessionCompactionFlag,
@@ -91,10 +92,19 @@ import { appendSessionUserMessage } from "./session-store-values.ts";
 export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
+  readonly #reportParent: SessionStoreWriteResources["reportParent"];
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
-    super(database, generateId);
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    reportParent?: SessionStoreWriteResources["reportParent"],
+  ) {
+    const reportParentAfterConstruction = reportParent;
+    super(database, generateId, (userId, report) => {
+      reportParentAfterConstruction?.(userId, report);
+    });
     this.#resources = [database, generateId];
+    this.#reportParent = reportParent;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
@@ -110,9 +120,19 @@ export class SessionStore extends SessionStoreRestarts {
     const generateId = this.#resources[1];
     const read = (userId: string, sessionId: string) =>
       this.get(userId, sessionId, workspaceId);
-    return { database, generateId, read };
+    return {
+      database,
+      generateId,
+      read,
+      ...(this.#reportParent === undefined
+        ? {}
+        : { reportParent: this.#reportParent }),
+    };
   }
-  #generateId(now: number): string {
+  writeResources(workspaceId?: string) {
+    return this.#writeResources(workspaceId);
+  }
+  generateId(now: number): string {
     return this.#resources[1](now);
   }
   create(input: CreateAgentSession, now: number): CreateSessionResult {
@@ -213,7 +233,7 @@ export class SessionStore extends SessionStoreRestarts {
     now: number,
   ): ReassignSessionResult {
     return reassignStoredSession({
-      database: this.#database,
+      resources: this.#writeResources(),
       now,
       read: (ownerId, id) => this.get(ownerId, id),
       runnerId,
@@ -479,7 +499,7 @@ export class SessionStore extends SessionStoreRestarts {
       failInterruptedStoredSession(
         this.#database,
         session,
-        this.#generateId(now),
+        this.generateId(now),
         now,
       );
     }

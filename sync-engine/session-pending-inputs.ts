@@ -203,7 +203,7 @@ export interface SessionSystemWriteTarget {
   readonly userId: string;
 }
 
-export function appendSystemFollowUp(
+export function appendSystemPendingInput(
   options: SessionSystemWriteTarget & {
     readonly clientRequestId: string;
     readonly content: string;
@@ -215,7 +215,7 @@ export function appendSystemFollowUp(
     sessionId: options.sessionId,
     userId: options.userId,
   });
-  if (session?.status !== "running") {
+  if (session === undefined) {
     return false;
   }
   const id = options.generateId(options.now);

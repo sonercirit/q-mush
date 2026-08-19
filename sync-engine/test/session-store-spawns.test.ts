@@ -98,11 +98,14 @@ function updateChild(
     .run();
 }
 
-function expectedPendingReport(setup: SpawnedChildReference) {
+function expectedPendingReport(
+  setup: SpawnedChildReference,
+  kind: "follow_up" | "steer" = "steer",
+) {
   return {
     clientRequestId: `spawn:${setup.childId}:${String(setup.childGeneration)}`,
     content: "Child complete",
-    kind: "steer",
+    kind,
   } as const;
 }
 
@@ -305,8 +308,10 @@ describe("spawned session report generation fencing", () => {
           ?.messages.some(({ role }) => role === "system"),
       ).toBe(false);
       closeAfterParentAssertion(setup, (parent) => {
-        expect(parentHasChildReport(parent)).toBe(true);
-        expect(parent?.pendingInputs).toEqual([]);
+        expect(parentHasChildReport(parent)).toBe(false);
+        expect(parent?.pendingInputs).toMatchObject([
+          expectedPendingReport(setup, "follow_up"),
+        ]);
         expect(parent?.status).toBe(status);
       });
     },
@@ -329,8 +334,11 @@ describe("spawned session report generation fencing", () => {
 
     expectReportClaimed(setup, TEST_NOW + 6);
     const paused = setup.store.get(TEST_USER_ID, setup.parentId);
-    expect(parentHasChildReport(paused)).toBe(true);
-    expect(paused).toMatchObject({ pendingInputs: [], status: "paused" });
+    expect(parentHasChildReport(paused)).toBe(false);
+    expect(paused).toMatchObject({
+      pendingInputs: [expectedPendingReport(setup, "follow_up")],
+      status: "paused",
+    });
     closeSetup(setup);
   });
 

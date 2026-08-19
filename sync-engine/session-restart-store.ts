@@ -13,7 +13,7 @@ import {
 } from "../shared/session-model.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
-import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import { restartHandoffValues } from "./session-restart-handoff.ts";
 import { runnerSessionCondition } from "./session-runner-condition.ts";
@@ -33,7 +33,6 @@ import {
 } from "./session-store-values.ts";
 import {
   activeSessionTurnId,
-  rotateSessionTurn,
   updateSessionAndEndGenerationTurn,
 } from "./session-turn-store.ts";
 
@@ -253,100 +252,61 @@ export class RestartHandoffStore {
     return parseRestartHandoff(value);
   }
 
-  #pauseValues(options: PauseRestartHandoff, handoffGeneration: number) {
+  #pauseValues(options: PauseRestartHandoff) {
     return {
-      executionGeneration: handoffGeneration,
       interruptedHandoff: null,
-      restartHandoff: handoffValue({
-        executionGeneration: handoffGeneration,
-        operation: options.operation,
-        requestedBy: options.requestedBy,
-        restartId: options.restartId,
-      }),
       status: "paused" as const,
       ...updatedAuditFields(SYSTEM_ID, options.now),
     };
   }
 
-  #updateTimedSession(
-    transaction: Pick<AppDatabase, "select" | "update">,
-    condition: ReturnType<typeof and>,
-    now: number,
-    values: Parameters<typeof updateStoredSessions>[2],
-  ): boolean {
-    const session = readActiveSessionTiming(transaction, condition);
-    return (
-      session !== undefined &&
-      updateStoredSessions(transaction, condition, {
-        ...sessionTimingUpdate(session, now),
-        ...values,
-      })
-    );
-  }
-
-  #rotateTurn(
-    transaction: Pick<AppDatabase, "insert" | "select" | "update">,
-    options: PauseRestartHandoff,
-    handoffGeneration: number,
-  ): void {
-    const session = transaction
-      .select({
-        segment: agentSessions.currentSegment,
-        userId: agentSessions.userId,
-      })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, options.authority.sessionId))
-      .get();
-    if (session === undefined) {
-      throw new Error("The restart handoff session no longer exists");
-    }
-    rotateSessionTurn({
-      database: transaction,
-      executionGeneration: handoffGeneration,
-      generateId: this.#options.generateId,
-      now: options.now,
-      previousExecutionGeneration: options.authority.generation,
-      segment: session.segment,
-      sessionId: options.authority.sessionId,
-      userId: session.userId,
-    });
-  }
-
   #pause(options: PauseRestartHandoff, from: "queued" | "running"): boolean {
-    const handoffGeneration = options.authority.generation + 1;
-    if (readNonNegativeSafeInteger(handoffGeneration) === undefined) {
-      return false;
-    }
     const condition = restartSessionCondition({
       generation: options.authority.generation,
       sessionId: options.authority.sessionId,
       status: from,
     });
-    return this.#options.database.transaction((transaction) => {
-      const updated =
-        from === "queued"
-          ? updateStoredSessions(
-              transaction,
-              condition,
-              this.#pauseValues(options, handoffGeneration),
-            )
-          : this.#updateTimedSession(
-              transaction,
-              condition,
-              options.now,
-              this.#pauseValues(options, handoffGeneration),
-            );
-      if (!updated) {
-        return false;
+    const result = this.#options.database.transaction((transaction) => {
+      const timing =
+        from === "running"
+          ? readActiveSessionTiming(transaction, condition)
+          : undefined;
+      if (from === "running" && timing === undefined) return false;
+      const advanced = advanceStoredSessionGeneration({
+        condition,
+        database: transaction,
+        generateId: this.#options.generateId,
+        mode: "attempt",
+        now: options.now,
+        sessionId: options.authority.sessionId,
+        startTurn: {},
+        values: {
+          ...this.#pauseValues(options),
+          ...(timing === undefined
+            ? {}
+            : sessionTimingUpdate(timing, options.now)),
+        },
+      });
+      if (advanced === undefined) return false;
+      const restartHandoff = handoffValue({
+        executionGeneration: advanced.generation,
+        operation: options.operation,
+        requestedBy: options.requestedBy,
+        restartId: options.restartId,
+      });
+      if (
+        !updateStoredSessions(
+          transaction,
+          restartSessionCondition({
+            generation: advanced.generation,
+            sessionId: options.authority.sessionId,
+            status: "paused",
+          }),
+          { restartHandoff },
+        )
+      ) {
+        throw new Error("The restart handoff generation changed");
       }
-      retireManualCompactionOperations(
-        transaction,
-        options.authority.sessionId,
-        options.authority.generation,
-        options.now,
-        "through",
-      );
-      this.#rotateTurn(transaction, options, handoffGeneration);
       if (from === "running") {
         this.#options.interruptUnknownTools?.(
           transaction,
@@ -354,8 +314,19 @@ export class RestartHandoffStore {
           options.now,
         );
       }
-      return true;
+      return {
+        reportedParent: advanced.reportedParent,
+        userId: advanced.userId,
+      };
     });
+    if (result === false) return false;
+    if (result.reportedParent !== undefined) {
+      this.#options.reportParent?.(result.userId, {
+        disposition: result.reportedParent.disposition,
+        parentId: result.reportedParent.id,
+      });
+    }
+    return true;
   }
 
   pauseQueued(...arguments_: RestartPauseArguments): boolean {

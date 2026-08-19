@@ -264,6 +264,15 @@ export class SessionAgentActions {
     this.#wakeReport(this.#reportAndNotify(detail, userId), userId);
   }
 
+  notifyReportedParent(report: SpawnedSessionCompletion, userId: string): void {
+    this.#dependencies.notify(userId, report.parentId);
+  }
+
+  reportedParent(report: SpawnedSessionCompletion, userId: string): void {
+    this.notifyReportedParent(report, userId);
+    this.#wakeReport(report, userId);
+  }
+
   stopSession(sessionId: string, detail?: AgentSessionDetail): void {
     this.#cancel(sessionId);
     if (detail !== undefined) {

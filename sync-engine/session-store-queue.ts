@@ -1,32 +1,29 @@
-import { and, eq, sql } from "drizzle-orm";
 import type { AgentImage } from "../shared/agent-images.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
-import { agentMessages, agentSessions } from "../shared/database/schema.ts";
+import { agentMessages } from "../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   sessionExecutionIsCurrent,
   type SessionQueueAuthorization,
 } from "./session-execution-authority.ts";
-import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import {
   activePendingInput,
   promotePendingInput,
 } from "./session-pending-inputs.ts";
 import { storedSessionRunnerIsAvailable } from "./session-runner-availability-store.ts";
-import { spawnedSessionReport } from "./session-spawn-report.ts";
 import {
   activeSessionCondition,
   type SessionFilter,
 } from "./session-store-persistence.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
-import { appendSpawnedSessionReportInTransaction } from "./session-store-spawns.ts";
 import {
   readStoredSessionGeneration,
   readStoredSessionState,
 } from "./session-store-state.ts";
 import { userMessageValues } from "./session-store-values.ts";
-import { rotateSessionTurn } from "./session-turn-store.ts";
+import { activeDurableSystemPendingInputs } from "./session-system-pending-inputs.ts";
 
 function queueSessionFilter(
   sessionId: string,
@@ -54,15 +51,6 @@ export type QueueSessionResult =
         | "runner_unavailable";
     };
 
-function readCallbackDetail(
-  options: Pick<
-    Parameters<typeof queueStoredSession>[0],
-    "resources" | "sessionId" | "userId"
-  >,
-): AgentSessionDetail | undefined {
-  return options.resources.read(options.userId, options.sessionId);
-}
-
 export function queueStoredSession(options: {
   readonly authorization?: SessionQueueAuthorization;
   readonly now: number;
@@ -86,7 +74,6 @@ export function queueStoredSession(options: {
   } = options;
   const messageId =
     prompt === undefined ? undefined : resources.generateId(now);
-  const completed = readCallbackDetail(options);
   const status = resources.database.transaction((transaction) => {
     if (
       authorization?.parent !== undefined &&
@@ -94,19 +81,12 @@ export function queueStoredSession(options: {
     ) {
       return "parent_stale" as const;
     }
-    const stored = readStoredSessionState(
-      transaction,
-      activeSessionCondition(
-        queueSessionFilter(sessionId, userId, workspaceId),
-      ),
+    const sessionCondition = activeSessionCondition(
+      queueSessionFilter(sessionId, userId, workspaceId),
     );
-
-    if (stored === undefined) {
-      return "not_found" as const;
-    }
-    if (stored.runnerRequired) {
-      return "runner_required" as const;
-    }
+    const stored = readStoredSessionState(transaction, sessionCondition);
+    if (stored === undefined) return "not_found" as const;
+    if (stored.runnerRequired) return "runner_required" as const;
     if (
       authorization?.targetGeneration !== undefined &&
       authorization.targetGeneration !== stored.executionGeneration
@@ -120,40 +100,16 @@ export function queueStoredSession(options: {
       return "runner_unavailable" as const;
     }
 
+    const durableReports = activeDurableSystemPendingInputs(
+      transaction,
+      sessionId,
+    );
     const pending = activePendingInput(transaction, sessionId);
-    if (pending !== undefined && prompt !== undefined) {
+    if (prompt !== undefined && pending !== undefined) {
       return "pending_input_conflict" as const;
     }
-
     const parentId = stored.parentSessionId;
     const parentGeneration = stored.parentExecutionGeneration;
-    const callbackPending =
-      parentId !== null &&
-      parentGeneration !== null &&
-      stored.parentReportedGeneration < stored.executionGeneration;
-    if (callbackPending) {
-      const report =
-        completed?.generation !== stored.executionGeneration
-          ? undefined
-          : spawnedSessionReport(completed, parentId);
-      if (report === undefined) {
-        return "callback_pending" as const;
-      }
-      const disposition = appendSpawnedSessionReportInTransaction(transaction, {
-        childGeneration: stored.executionGeneration,
-        childId: sessionId,
-        content: report.content,
-        generateId: resources.generateId,
-        now,
-        parentGeneration,
-        parentId: report.parentId,
-        userId,
-      });
-      if (disposition === undefined) {
-        return "callback_pending" as const;
-      }
-    }
-
     const continuedParentGeneration =
       parentId === null || parentGeneration !== null
         ? parentGeneration
@@ -161,19 +117,26 @@ export function queueStoredSession(options: {
             condition: activeSessionCondition({ id: parentId, userId }),
             database: transaction,
           }) ?? null);
-    const turnId = rotateSessionTurn({
+    const advanced = advanceStoredSessionGeneration({
+      condition: sessionCondition,
       database: transaction,
-      executionGeneration: stored.executionGeneration + 1,
-      generateId:
-        prompt !== undefined && messageId !== undefined
-          ? () => messageId
-          : resources.generateId,
+      generateId: resources.generateId,
+      mode: "attempt",
       now,
-      previousExecutionGeneration: stored.executionGeneration,
-      segment: stored.currentSegment,
       sessionId,
-      userId,
+      startTurn: messageId === undefined ? {} : { id: messageId },
+      values: {
+        activeStartedAt: null,
+        stepStartedAt: null,
+        interruptedHandoff: null,
+        parentExecutionGeneration: continuedParentGeneration,
+        status: "queued",
+        ...updatedAuditFields(userId, now),
+      },
     });
+    if (advanced?.turnId === undefined) {
+      return "callback_pending" as const;
+    }
     if (prompt !== undefined && messageId !== undefined) {
       transaction
         .insert(agentMessages)
@@ -185,53 +148,51 @@ export function queueStoredSession(options: {
             now,
             segment: stored.currentSegment,
             sessionId,
-            turnId,
+            turnId: advanced.turnId,
             userId,
           }),
         )
         .run();
     }
-    if (pending !== undefined) {
+    if (authorization?.deferSystemPendingInputs !== true) {
+      for (const durableReport of durableReports) {
+        promotePendingInput(
+          transaction,
+          durableReport,
+          userId,
+          now,
+          stored.currentSegment,
+          advanced.turnId,
+        );
+      }
+    }
+    const pendingAfterReport = activePendingInput(transaction, sessionId);
+    if (
+      authorization?.deferSystemPendingInputs !== true &&
+      pendingAfterReport !== undefined &&
+      !durableReports.some(({ id }) => id === pendingAfterReport.id)
+    ) {
       promotePendingInput(
         transaction,
-        pending,
+        pendingAfterReport,
         userId,
         now,
         stored.currentSegment,
-        turnId,
+        advanced.turnId,
       );
     }
-    retireManualCompactionOperations(
-      transaction,
-      sessionId,
-      stored.executionGeneration,
-      now,
-      "through",
-    );
-    transaction
-      .update(agentSessions)
-      .set({
-        activeStartedAt: null,
-        stepStartedAt: null,
-        interruptedHandoff: null,
-        executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
-        parentExecutionGeneration: continuedParentGeneration,
-        parentReportedGeneration: stored.executionGeneration,
-        status: "queued",
-        ...updatedAuditFields(userId, now),
-      })
-      .where(
-        and(
-          eq(agentSessions.id, sessionId),
-          eq(agentSessions.executionGeneration, stored.executionGeneration),
-        ),
-      )
-      .run();
-    return "queued" as const;
+    return {
+      report: advanced.reportedParent,
+      status: "queued" as const,
+    };
   });
 
-  if (status !== "queued") {
-    return { status };
+  if (typeof status === "string") return { status };
+  if (status.report !== undefined) {
+    resources.reportParent?.(userId, {
+      disposition: status.report.disposition,
+      parentId: status.report.id,
+    });
   }
   return readStoredSessionResult(
     resources,

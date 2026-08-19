@@ -1,11 +1,11 @@
 # AGENTS.md
 
-Living project memory.
+Project memory.
 
 ## Project Snapshot
 
-- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
-  the homepage; `/app` is the app.
+- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
+  the homepage, `/app` the app.
 
 ## Working Agreements
 
@@ -108,21 +108,21 @@ Living project memory.
   `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
-  resolution. Choices persist with canonical schemas. `read_session` is bounded;
-  `get_session_options` pages choices. A durable generation ledger delivers one
-  sanitized terminal event per owned child attempt, including
-  continued/immediate failures; routes survive delivery, recreation, compaction,
-  and disconnects. Idle parents retain events until resumed. `parallel` has four
-  ordered workers, bounded output, and cancellation.
-  `solid/session-transcript.tsx` renders prompts, Markdown, code, JSON, diffs,
-  and results while preserving line breaks; lists page by ten. Live sessions use
-  `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  `solid/session-controller.ts`: model deltas combine once per frame per
-  session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
-  scroll anchor, and only bottom-pinned transcripts follow live output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
+  resolution. `read_session` is bounded; `get_session_options` pages choices. A
+  durable generation ledger delivers one sanitized terminal event per owned
+  child attempt. Routes survive compaction; only attempts become reportable,
+  administrative fences settle captured identity without duplicates, and
+  callback persistence/claiming are atomic. `callback_pending` blocks another
+  attempt. Idle parents retain events until resumed. `parallel` has four ordered
+  workers, bounded output, and cancellation. `solid/session-transcript.tsx`
+  renders prompts, Markdown, code, JSON, diffs, and results while preserving
+  line breaks; lists page by ten. Live sessions use `solid/realtime-client.ts`,
+  `solid/session-client.tsx`, `solid/session-controller.ts`: model deltas
+  combine once per frame per session, other events are immediate, unchanged
+  snapshots suppress notifications, keyed messages rerender only changes. The
+  long-lived Solid root preserves focus and scroll; the changing session detail
+  is not a document scroll anchor, and only bottom-pinned transcripts follow
+  live output. `agent-model-discovery.ts` queries metadata, signal-cancelable;
   `shared/agent-configuration.ts` owns catalog types/validation. New sessions
   take the default online runner (else the first) and credential, first
   discovered model, latest working directory, top reported effort. Unknown

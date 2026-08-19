@@ -279,6 +279,9 @@ export function connectedSessionSetup(
         totalItems: matching.length,
       };
     },
+    onParentReport: (listener) => {
+      storedRunners.onParentReport(listener);
+    },
     onRemoved: (listener) => {
       storedRunners.onRemoved(listener);
     },
