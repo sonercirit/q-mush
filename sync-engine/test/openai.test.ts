@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
+import { providerCredentials } from "../../shared/database/schema.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
@@ -454,6 +456,51 @@ describe("OpenAI credentials", () => {
       unchangedSecret,
     );
     database.$client.close();
+  });
+
+  test("rejects reconnect when the stored account changes during the callback", async () => {
+    const { database, integration } = setupIntegration();
+    await connectAccount(integration, FIRST_STATE, "authorization-code-one");
+    const store = new ProviderCredentialStore(
+      database,
+      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
+      "openai",
+    );
+    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
+    const unchangedSecret = store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
+    const originalUpdateSecret = store.updateSecret.bind(store);
+    const updateSecret = vi
+      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
+      .mockImplementation((...parameters) => {
+        if (parameters[4] === true) {
+          database
+            .update(providerCredentials)
+            .set({ providerAccountId: "chatgpt-workspace-two" })
+            .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
+            .run();
+        }
+        return originalUpdateSecret(...parameters);
+      });
+
+    try {
+      const reconnect = beginProviderAccount({
+        callbackPath: TEST_ROUTES.callbackPath,
+        code: "authorization-code-one",
+        integration,
+        oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+        state: SECOND_STATE,
+      });
+      expectRedirect(
+        await integration.complete(reconnect.callbackRequest),
+        "http://localhost:3000/app?openai=wrong_account",
+      );
+      expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
+        unchangedSecret,
+      );
+    } finally {
+      updateSecret.mockRestore();
+      database.$client.close();
+    }
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>
