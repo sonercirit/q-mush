@@ -124,7 +124,9 @@ export class ProviderWebSocketSession {
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
       const priorResponseIds =
-        reusedSocket === undefined ? new Set<string>() : this.#priorResponseIds;
+        reusedSocket === undefined
+          ? new Set<string>()
+          : new Set(this.#priorResponseIds);
       if (reusedSocket === undefined) this.#priorResponseIds.clear();
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
@@ -218,6 +220,9 @@ export class ProviderWebSocketSession {
           const eventResponseId = providerResponseId(value);
           if (!requestActive) {
             if (value["type"] === "error") {
+              // Provider error events generally carry no response ID, so they
+              // cannot participate in the stale-response fence. Treat them as
+              // applying to the sole sequential request on this socket.
               accumulator.push(value);
               return;
             }

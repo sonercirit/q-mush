@@ -76,6 +76,8 @@ export class SessionLauncher {
       operation === "agent" ? "step" : "handoff",
       async ({ controller, pendingComponent, restartRequest, settled }) => {
         const reportPending = (component: SessionPendingComponent): void => {
+          // Repeated provider admission reports refresh watchdog liveness and
+          // intentionally publish each bounded retry to realtime clients.
           if (pendingComponent(component) !== "updated") {
             return;
           }
