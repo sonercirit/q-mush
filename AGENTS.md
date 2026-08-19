@@ -56,11 +56,12 @@ Living project memory.
   supervisor-issued absolute 120-second deadline, reject new steps and
   provider/auxiliary requests, report scoped active-tool counts, force-park
   stragglers only after durable handoffs, then use bounded cleanup/termination;
-  repeated requests escalate immediately. Final shutdown cancels the supervisor
-  deadline, promotes runner handoffs to a server marker, and stays unbounded
-  after that marker; live markers are fenced from liveness recovery. Text
-  handlers precompress once, negotiating zstd, Brotli, gzip, deflate;
-  `/favicon.svg` revalidates separately with ETag.
+  repeated requests escalate immediately. Supervisor restart-chain failures are
+  logged and released so later triggers remain usable. Final shutdown cancels
+  the supervisor deadline, promotes runner handoffs to a server marker, and
+  stays unbounded after that marker; live markers are fenced from liveness
+  recovery. Text handlers precompress once, negotiating zstd, Brotli, gzip,
+  deflate; `/favicon.svg` revalidates separately with ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.

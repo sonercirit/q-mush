@@ -192,6 +192,10 @@ function errorMessage(error: unknown): string {
 
 let shutdownKind: "development_restart" | "final" | undefined;
 let developmentRestart: Promise<void> | undefined;
+const restartVisibleProgress = new Map<
+  string,
+  ReturnType<typeof sessions.drainProgress>
+>();
 
 function stopMaintenance(): void {
   clearInterval(recoveryTimer);
@@ -219,9 +223,15 @@ function publishRestartProgress(): void {
   process.send?.(message);
   for (const userId of realtimeHub.userIds()) {
     for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
+      const visibilityKey = `${userId}\0${workspaceId}`;
+      let visibleProgress = restartVisibleProgress.get(visibilityKey);
+      if (visibleProgress === undefined) {
+        visibleProgress = sessions.drainProgress(userId, workspaceId);
+        restartVisibleProgress.set(visibilityKey, visibleProgress);
+      }
       realtimeHub.publishUser(
         userId,
-        restartProgressMessage(sessions.drainProgress(userId, workspaceId)),
+        restartProgressMessage(visibleProgress),
         workspaceId,
       );
     }
@@ -248,12 +258,18 @@ function restartDevelopment(deadlineAt = Date.now()): Promise<void> {
   const deadline = new RestartDeadline(deadlineAt);
   developmentRestart = sessions
     .drain(deadline)
+    .catch((error: unknown) => {
+      console.warn(
+        `Q Mush development restart drain failed: ${errorMessage(error)}`,
+      );
+    })
     .then(() => {
       publishRestartProgress();
       process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
     })
     .finally(() => {
       clearInterval(progressTimer);
+      restartVisibleProgress.clear();
     });
   return developmentRestart;
 }

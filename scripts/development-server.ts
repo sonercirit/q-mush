@@ -272,17 +272,22 @@ export function startDevelopmentServer(
       restartTimer = undefined;
       restarting = true;
       operation = operation.then(async () => {
-        await drainChild();
+        try {
+          await drainChild();
 
-        if (!stopping) {
-          finalPreparation = Promise.withResolvers<undefined>();
-          restartReady = Promise.withResolvers<undefined>();
-          forced = Promise.withResolvers<undefined>();
-          forceRequested = false;
-          finalShutdownSent = false;
-          child = spawn();
+          if (!stopping) {
+            finalPreparation = Promise.withResolvers<undefined>();
+            restartReady = Promise.withResolvers<undefined>();
+            forced = Promise.withResolvers<undefined>();
+            forceRequested = false;
+            finalShutdownSent = false;
+            child = spawn();
+          }
+        } catch (error) {
+          console.error("Q Mush development server restart failed", error);
+        } finally {
+          restarting = false;
         }
-        restarting = false;
       });
     }, options.restartDelayMilliseconds ?? 50);
   };

@@ -147,6 +147,8 @@ export function createSessionRestartControl(
   const nextServerRestartId = (): string =>
     serverRestartId() ?? generatedRestartId();
   let finalShutdownPrepared = false;
+  let finalShutdownMark: Promise<void> | undefined;
+  let serverDeadline: RestartDeadline | undefined;
   const boundedDrains = new Map<string, BoundedDrain>();
   const forcePark = (
     scope: RestartScope,
@@ -195,7 +197,10 @@ export function createSessionRestartControl(
       escalated = true;
       void forcePark(scope, requested.persistence).then(
         finish,
-        escalation.reject,
+        (error: unknown) => {
+          warn(`Q Mush restart force-park failed: ${String(error)}`);
+          finish();
+        },
       );
     };
     const timeout = setDrainTimer(escalate, deadline.remaining());
@@ -221,11 +226,14 @@ export function createSessionRestartControl(
     },
     drainProgress,
     drainServer: async (deadline) => {
+      serverDeadline ??=
+        deadline ??
+        new RestartDeadline(now() + DEVELOPMENT_RESTART_LIFECYCLE_MS, now);
       await boundedDrain(
         { kind: "server" },
         nextServerRestartId(),
         true,
-        deadline,
+        serverDeadline,
       );
     },
     drainServerFinal: () =>
@@ -234,16 +242,22 @@ export function createSessionRestartControl(
         .then(() => undefined),
     escalateServerDrain: () => escalateScope({ kind: "server" }),
     prepareServerShutdown: async () => {
+      finalShutdownMark ??= runtimes
+        .mark({ kind: "server" }, nextServerRestartId())
+        .then(() => undefined);
+      await finalShutdownMark;
       finalShutdownPrepared = true;
       for (const drain of boundedDrains.values()) {
         clearDrainTimer(drain.timer);
         drain.finish();
       }
-      await runtimes.mark({ kind: "server" }, nextServerRestartId());
     },
     drainRunner: async (runnerId, restartId) => {
       validRestartId(restartId);
-      if (finalShutdownPrepared) return;
+      if (finalShutdownMark !== undefined) {
+        await finalShutdownMark;
+        return;
+      }
       if (runtimes.draining) {
         const serverId = serverRestartId();
         if (serverId === undefined) {
@@ -253,7 +267,10 @@ export function createSessionRestartControl(
           { kind: "server" },
           serverId,
           true,
-          undefined,
+          (serverDeadline ??= new RestartDeadline(
+            now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
+            now,
+          )),
           false,
         );
         return;
@@ -263,7 +280,9 @@ export function createSessionRestartControl(
     draining: () => runtimes.draining,
     escalateRunnerDrain: (runnerId, restartId) => {
       validRestartId(restartId);
+      if (finalShutdownPrepared) return true;
       if (runtimes.draining) {
+        if (runnerRestartId(runnerId) !== restartId) return false;
         return escalateScope({ kind: "server" });
       }
       if (runnerRestartId(runnerId) !== restartId) {
