@@ -110,12 +110,12 @@ Project memory.
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session via
   canonical schemas. `read_session` is bounded; `get_session_options` pages
-  choices. Grouped tools manage owned children; a durable generation ledger
-  delivers one sanitized terminal event per attempt. Routes survive compaction;
-  only attempts report, administrative fences settle captured identity without
-  duplicates, and callback persistence/claiming are atomic. `callback_pending`
-  blocks another attempt; idle parents retain events until resumed. `parallel`
-  uses four ordered workers with bounded output and cancellation.
+  choices. Grouped tools manage children; a durable generation ledger delivers
+  one sanitized terminal event per attempt. Routes survive compaction; only
+  attempts report, administrative fences settle identity without duplicates, and
+  callback persistence/claiming are atomic. `callback_pending` blocks another
+  attempt; idle parents retain events until resumed. `parallel` uses four
+  ordered workers with bounded output and cancellation.
   `solid/session-transcript.tsx` renders prompts, tool definitions, raw details,
   Markdown, code/JSON, diffs, and contextual results, preserving line breaks;
   lists page by ten. Live sessions use `solid/realtime-client.ts`,
