@@ -9,6 +9,7 @@ import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
+  createAuthenticatedTestDatabase,
   TEST_AUTHENTICATED_USER,
   TEST_NOW,
   TEST_USER_ID,
@@ -306,6 +307,9 @@ describe("agent sessions", () => {
       { content: "Screenshot implemented.", toolCalls: [] },
     ]);
     const setup = connectedSessionSetup(model, "api_key", undefined, {
+      database: createAuthenticatedTestDatabase({
+        expiresAt: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
+      }),
       now: () => (now += 3_000),
     });
     const imageRequest = createSessionRequest(true, "high", "gpt-4.1-mini", [
