@@ -148,11 +148,14 @@ function SessionMetrics(props: {
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
       <Show when={props.session.activeStartedAt} keyed>
-        {(startedAt) => (
-          <span class="text-emerald-200" data-session-run-duration="true">
-            {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
-          </span>
-        )}
+        {(startedAt) => {
+          const elapsed = now() - startedAt;
+          return (
+            <span class="text-emerald-200" data-session-run-duration="true">
+              {`Run: ${formatSessionTime(elapsed < 0 ? 0 : elapsed)}`}
+            </span>
+          );
+        }}
       </Show>
       <Show
         when={
@@ -164,7 +167,7 @@ function SessionMetrics(props: {
       >
         {(stepStartedAt) => (
           <span class="text-emerald-200/80" data-session-step-duration="true">
-            {`Step: ${formatSessionTime(Math.max(0, now() - stepStartedAt))}`}
+            {`Step: ${formatSessionTime(Math.max(stepStartedAt, now()) - stepStartedAt)}`}
           </span>
         )}
       </Show>

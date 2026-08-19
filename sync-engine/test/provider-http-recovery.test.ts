@@ -78,7 +78,7 @@ class ProviderResponses {
     this.#responses = responses;
   }
 
-  readonly fetch = async (request: Request): Promise<Response> => {
+  fetch = async (request: Request): Promise<Response> => {
     const response = this.#responses.shift();
     this.requests.push(request);
     if (response === undefined) {
@@ -98,6 +98,7 @@ class ProviderResponses {
 function openRouterModel(
   provider: ProviderResponses,
   deltas?: ProviderTextDelta[],
+  onRequestState?: (state: "active" | "admission") => void,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     credential: {
@@ -108,6 +109,7 @@ function openRouterModel(
     fetch: provider.fetch,
     maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",
+    ...(onRequestState === undefined ? {} : { onRequestState }),
     ...(deltas === undefined
       ? {}
       : {
@@ -145,6 +147,38 @@ function resetDeltas(
 }
 
 describe("provider HTTP step recovery", () => {
+  test("tracks admission through headers on every retry", async () => {
+    const states: string[] = [];
+    let releaseFirst: (() => void) | undefined;
+    const firstHeaders = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    let attempts = 0;
+    const retryResponse = eventStream([
+      errorEvent({ code: 502, message: "Retry" }),
+    ]);
+    const provider = new ProviderResponses([
+      retryResponse,
+      eventStream([textEvent("Done.")]),
+    ]);
+    const fetch = provider.fetch;
+    provider.fetch = async (request: Request): Promise<Response> => {
+      attempts += 1;
+      if (attempts === 1) await firstHeaders;
+      return fetch(request);
+    };
+    const model = openRouterModel(provider, undefined, (state) => {
+      states.push(state);
+    });
+
+    const completion = model.complete(USER_MESSAGE);
+    await Promise.resolve();
+    expect(states).toEqual(["admission"]);
+    releaseFirst?.();
+    await completion;
+    expect(states).toEqual(["admission", "active", "admission", "active"]);
+  });
+
   test("resets a partial step and persists only the recovered tool call", async () => {
     const provider = new ProviderResponses([
       eventStream([
