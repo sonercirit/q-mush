@@ -260,23 +260,13 @@ function callbackDisposition(
   ) {
     return undefined;
   }
-  if (parent.status === "running") {
-    const appended = appendSystemPendingInput({
-      ...reportMessageOptions(options, database),
-      clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-      content: options.content,
-      kind: "steer",
-    });
-    if (!appended) return undefined;
-  } else {
-    const appended = appendSystemPendingInput({
-      ...reportMessageOptions(options, database),
-      clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-      content: options.content,
-      kind: "follow_up",
-    });
-    if (!appended) return undefined;
-  }
+  const appended = appendSystemPendingInput({
+    ...reportMessageOptions(options, database),
+    clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+    content: options.content,
+    kind: parent.status === "running" ? "steer" : "follow_up",
+  });
+  if (!appended) return undefined;
 
   const terminal = parentIsTerminal(parent.status);
   database

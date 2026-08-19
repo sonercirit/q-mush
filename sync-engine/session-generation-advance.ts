@@ -19,7 +19,7 @@ import {
   rotateSessionTurn,
 } from "./session-turn-store.ts";
 
-export type SessionGenerationAdvanceMode = "administrative" | "attempt";
+type SessionGenerationAdvanceMode = "administrative" | "attempt";
 
 type GenerationAdvanceDatabase = Pick<
   AppDatabase,
@@ -191,15 +191,15 @@ export function advanceStoredSessionGeneration(
     return undefined;
   }
 
+  retireManualCompactionOperations(
+    options.database,
+    state.id,
+    state.executionGeneration,
+    options.now,
+    "through",
+  );
   let turnId: string | undefined;
   if (options.startTurn === undefined) {
-    retireManualCompactionOperations(
-      options.database,
-      state.id,
-      state.executionGeneration,
-      options.now,
-      "through",
-    );
     endGenerationSessionTurn(
       options.database,
       state.id,
