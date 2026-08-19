@@ -160,7 +160,7 @@ export class RealtimeConnection {
     }
   }
   syncTools(sessionId: string): void {
-    for (const request of this.#toolSync.unseen(
+    for (const request of this.#toolSync.unresolved(
       this.#streamBuffer.activeToolStreams(sessionId),
     )) {
       if (!this.#sendToolSync(request)) return;
@@ -410,7 +410,7 @@ export class RealtimeConnection {
   #deliverDeferredStateEvent(event: DeferredStateEvent): void {
     if (event.type === "tool_stream_snapshot") {
       const snapshot = this.#streamBuffer.applyToolSnapshot(event);
-      this.#toolSync.rememberSnapshot(event);
+      this.#toolSync.resolve(event);
       this.#deliver(snapshot);
       return;
     }
@@ -485,9 +485,8 @@ export class RealtimeConnection {
       ]),
     );
     for (const request of unique.values()) {
-      this.#toolSync.forget(request);
       if (!this.#sendToolSync(request)) return;
-      this.#toolSync.rememberSnapshot(request);
+      this.#toolSync.remember(request);
     }
   }
   #rejectPendingCommands(code: string): void {
@@ -538,7 +537,7 @@ export class RealtimeConnection {
           pending.sentInstanceId = event.instanceId;
           this.#pendingCommands.set(commandId, pending);
         }
-        const remembered = this.#toolSync.requests();
+        const remembered = this.#toolSync.pending();
         this.#toolSync.clear();
         this.#syncTools([
           ...remembered,

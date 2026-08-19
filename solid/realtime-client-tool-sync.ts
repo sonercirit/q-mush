@@ -1,3 +1,8 @@
+import {
+  MAXIMUM_TOOL_STREAMS_PER_SESSION,
+  MAXIMUM_TOOL_STREAMS_PER_USER,
+} from "../shared/tool-stream.ts";
+
 export interface ToolSyncRequest {
   readonly sessionId: string;
   readonly streamId: string;
@@ -8,27 +13,46 @@ function requestKey(request: ToolSyncRequest): string {
 }
 
 export class ToolSyncTracker {
-  readonly #seenSnapshots = new Map<string, ToolSyncRequest>();
+  readonly #pending = new Map<string, ToolSyncRequest>();
 
   clear(): void {
-    this.#seenSnapshots.clear();
+    this.#pending.clear();
   }
 
-  forget(request: ToolSyncRequest): void {
-    this.#seenSnapshots.delete(requestKey(request));
+  pending(): readonly ToolSyncRequest[] {
+    return [...this.#pending.values()];
   }
 
-  rememberSnapshot(request: ToolSyncRequest): void {
-    this.#seenSnapshots.set(requestKey(request), request);
+  remember(request: ToolSyncRequest): void {
+    const key = requestKey(request);
+    this.#pending.delete(key);
+    this.#pending.set(key, request);
+    let sessionEntries = 0;
+    for (const pending of this.#pending.values()) {
+      if (pending.sessionId === request.sessionId) sessionEntries += 1;
+    }
+    while (sessionEntries > MAXIMUM_TOOL_STREAMS_PER_SESSION) {
+      for (const [candidateKey, pending] of this.#pending) {
+        if (pending.sessionId !== request.sessionId) continue;
+        this.#pending.delete(candidateKey);
+        sessionEntries -= 1;
+        break;
+      }
+    }
+    while (this.#pending.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
+      const oldest = this.#pending.keys().next().value;
+      if (oldest === undefined) break;
+      this.#pending.delete(oldest);
+    }
   }
 
-  requests(): readonly ToolSyncRequest[] {
-    return [...this.#seenSnapshots.values()];
+  resolve(request: ToolSyncRequest): void {
+    this.#pending.delete(requestKey(request));
   }
 
-  unseen(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[] {
+  unresolved(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[] {
     return requests.filter(
-      (request) => !this.#seenSnapshots.has(requestKey(request)),
+      (request) => !this.#pending.has(requestKey(request)),
     );
   }
 }
