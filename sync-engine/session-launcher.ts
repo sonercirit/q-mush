@@ -93,7 +93,7 @@ export class SessionLauncher {
             // Diagnostic publication must not interrupt the model request, but
             // unexpected persistence failures must remain observable.
             console.warn(
-              "Session pending diagnostic publication failed",
+              `Session ${detail.id} pending diagnostic publication failed`,
               error,
             );
           }

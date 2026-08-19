@@ -106,9 +106,9 @@ function isRuntimePendingComponent(
 function readRuntimePending(
   value: unknown,
 ): AgentSessionSummary["runtimePending"] | undefined {
-  if (value === null) return null;
-  const record = isRecord(value) ? value : undefined;
+  const record = readRecord(value);
   if (record === undefined) return undefined;
+  if (record === null) return null;
   const component = record["component"];
   const since = readFiniteNumber(record["since"]);
   return isRuntimePendingComponent(component) &&

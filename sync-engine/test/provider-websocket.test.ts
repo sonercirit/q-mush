@@ -224,6 +224,11 @@ test("reports reused WebSocket admission until the provider acknowledges it", as
   expect(socket.listenerCount("message")).toBe(1);
 
   socket.receive(responseEvent("response.created", "response-1"));
+  socket.receive({
+    delta: "Stale",
+    response: { id: "response-1" },
+    type: "response.output_text.delta",
+  });
   expectRequestStates(states, "admission", "active", "admission");
   await expectRequestPending(stalled);
 

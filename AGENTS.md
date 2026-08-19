@@ -276,18 +276,18 @@ Living project memory.
   separate summary parts with paragraphs since completed responses may omit
   them. Frozen clocks may give admission -> active -> admission one timestamp;
   production cannot. Live OpenAI and Codex socket probes emitted
-  `response.created` with `response.id`; the first identified `response.*` also
-  admits servers omitting it. WebSocket Mode expires after 60 minutes; canonical
-  `websocket_connection_limit_reached` and observed underscore-free variant
-  replace the socket once per step, then use bounded retries, replaying only the
-  unpersisted step. Local send is admission: bound it until correlated
-  `response.created`; discard unknown, pre-creation and mismatched-ID frames.
-  Acknowledged work stays unbounded. Diagnostics are generation-fenced; watchdog
-  failure aborts its runtime and runs cleanup without replaying tools. Other
-  WebSocket/accepted-HTTP interruptions or provider errors retry before
-  persistence; replays reset partial UI deltas and exhausted WebSockets fall
-  back to HTTP. Permanent errors and aborts do not retry; terminal failures
-  persist as non-replayed `error` messages.
+  `response.created` with `response.id`; the first identified non-terminal
+  `response.*` also admits servers omitting it. WebSocket Mode expires after 60
+  minutes; canonical `websocket_connection_limit_reached` and observed
+  underscore-free variant replace the socket once per step, then use bounded
+  retries, replaying only the unpersisted step. Local send is admission: bound
+  it until correlated `response.created`; discard unknown, pre-creation and
+  mismatched-ID frames. Acknowledged work stays unbounded. Diagnostics are
+  generation-fenced; watchdog failure aborts its runtime and runs cleanup
+  without replaying tools. Other WebSocket/accepted-HTTP interruptions or
+  provider errors retry before persistence; replays reset partial UI deltas and
+  exhausted WebSockets fall back to HTTP. Permanent errors and aborts do not
+  retry; terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
