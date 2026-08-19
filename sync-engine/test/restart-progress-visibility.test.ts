@@ -20,12 +20,24 @@ function progress(
   };
 }
 
+function sessionIds(...ids: string[]): string[] {
+  return ids;
+}
+
+function progressForIds(sessionIds: ReadonlySet<string>) {
+  return [...sessionIds].map((sessionId) => progress(sessionId, 1));
+}
+
+function visibilityCache(): RestartProgressVisibilityCache {
+  return new Map();
+}
+
 test("publishes late visible drain progress without repeating the listing", () => {
-  const cache: RestartProgressVisibilityCache = new Map();
+  const cache = visibilityCache();
   const key = "user\0workspace";
   const otherKey = "other-user\0other-workspace";
-  const listSessionIds = vi.fn(() => ["session-initial"]);
-  const listOtherSessionIds = vi.fn(() => ["session-other"]);
+  const listSessionIds = vi.fn(() => sessionIds("session-initial"));
+  const listOtherSessionIds = vi.fn(() => sessionIds("session-other"));
   const draining = new Map([
     ["session-initial", progress("session-initial", 1)],
   ]);
@@ -61,13 +73,11 @@ test("publishes late visible drain progress without repeating the listing", () =
 });
 
 test("keeps a session added before the initial visibility listing", () => {
-  const cache: RestartProgressVisibilityCache = new Map();
+  const cache = visibilityCache();
   const key = "user\0workspace";
   addVisibleRestartSession(cache, key, "session-late");
-  const listSessionIds = vi.fn(() => ["session-initial"]);
-  const readProgress = vi.fn((sessionIds: ReadonlySet<string>) =>
-    [...sessionIds].map((sessionId) => progress(sessionId, 1)),
-  );
+  const listSessionIds = vi.fn(() => sessionIds("session-initial"));
+  const readProgress = vi.fn(progressForIds);
 
   expect(
     visibleRestartProgress(cache, key, listSessionIds, readProgress),
