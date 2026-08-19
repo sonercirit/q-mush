@@ -6,7 +6,7 @@ import {
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { abortSignalError, errorFromUnknown } from "../shared/validation.ts";
 
-function timeLimitMessage(settings: ToolSettings): string {
+export function timeLimitMessage(settings: ToolSettings): string {
   return `Error: the tool call was canceled after reaching the global ${String(settings.executionLimitMinutes)}-minute limit. Cancellation is best-effort after a filesystem mutation begins, so verify its result before retrying.`;
 }
 

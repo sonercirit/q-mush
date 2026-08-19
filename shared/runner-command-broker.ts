@@ -12,7 +12,7 @@ import {
   type RunnerToolCommand,
 } from "./runner-command.ts";
 import type { RunnerCommandResult } from "./tool-stream.ts";
-import { errorFromUnknown } from "./validation.ts";
+import { abortSignalError, errorFromUnknown } from "./validation.ts";
 
 export {
   failedRunnerCommandResult,
@@ -102,7 +102,9 @@ export class RunnerCommandBroker {
     stream?: RunnerCommandStream,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
-      return Promise.reject(errorFromUnknown(signal.reason));
+      return Promise.reject(
+        abortSignalError(signal, "The agent session was stopped"),
+      );
     }
     let initiallyAuthorized: boolean;
     try {
@@ -146,7 +148,7 @@ export class RunnerCommandBroker {
         id,
         signal === undefined
           ? abortError("The agent session was stopped")
-          : errorFromUnknown(signal.reason),
+          : abortSignalError(signal, "The agent session was stopped"),
       );
     };
     return new Promise<RunnerCommandResult>((resolve, reject) => {

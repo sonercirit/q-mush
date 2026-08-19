@@ -7,6 +7,7 @@ import {
 } from "../../shared/tool-limits.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
+import { SessionFinisher } from "../session-finisher.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
@@ -128,7 +129,19 @@ function persistedDeadlineRun(
   broker: RunnerCommandBroker,
   controller: AbortController,
   factorySelections: unknown[],
+  finishedErrors: unknown[],
 ): Promise<void> {
+  const actions = Object.assign(
+    orchestrationActions(setup.database, setup.store),
+    {},
+  );
+  const finisherOptions = {
+    actions,
+    notify: () => undefined,
+    now: () => TEST_NOW + 4,
+    store: setup.store,
+  };
+  const finisher = new SessionFinisher(finisherOptions);
   return runPersistedSession({
     controller,
     credential: runtimeTestCredential(
@@ -136,13 +149,9 @@ function persistedDeadlineRun(
       "Agent file deadline credential",
     ),
     detail: setup.detail,
-    finish: (detail, _userId, error) => {
-      setup.store.settleRuntimeFailure(
-        detail.id,
-        `Session failed: ${error instanceof Error ? error.message : "Unknown error"}`,
-        TEST_NOW + 4,
-        detail.generation,
-      );
+    finish: (detail, userId, error, recovered) => {
+      finishedErrors.push(error);
+      finisher.finish(detail, userId, error, recovered);
     },
     notify: () => undefined,
     now: () => TEST_NOW + 3,
@@ -150,7 +159,7 @@ function persistedDeadlineRun(
     resources: Object.assign(
       {},
       {
-        actions: orchestrationActions(setup.database, setup.store),
+        actions,
         braveSearch: Object.assign(
           {},
           {
@@ -200,14 +209,16 @@ describe("global tool time limit integration", () => {
     };
     try {
       const dispatched = Promise.withResolvers<undefined>();
+      const canceled = Promise.withResolvers<string>();
+      const finishedErrors: unknown[] = [];
       const factorySelections: unknown[] = [];
-      vi.spyOn(setup.store, "toolSettings").mockReturnValue({
-        ...DEFAULT_TOOL_SETTINGS,
-        executionLimitMinutes: 0.001,
-      });
       const deadline = AbortSignal.timeout(60);
       vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline);
       const broker = new RunnerCommandBroker({
+        cancel: (_runnerId, commandId) => {
+          canceled.resolve(commandId);
+        },
+        commandId: () => "loading-command",
         deliver: (_runnerId, command) => {
           expect(command.tool).toBe("read_agent_file");
           dispatched.resolve();
@@ -220,6 +231,7 @@ describe("global tool time limit integration", () => {
         broker,
         controller,
         factorySelections,
+        finishedErrors,
       );
       await dispatched.promise;
       await vi.waitFor(() => {
@@ -230,13 +242,21 @@ describe("global tool time limit integration", () => {
         reason: { name: "TimeoutError" },
       });
       await run;
+      await expect(canceled.promise).resolves.toBe("loading-command");
+      expect(finishedErrors).toHaveLength(1);
+      const finishedError = finishedErrors[0];
+      expect(finishedError).toBeInstanceOf(Error);
+      if (!(finishedError instanceof Error)) throw new Error("Expected error");
+      expect(finishedError).toMatchObject({ name: "TimeoutError" });
+      expect(finishedError.cause).toBe(deadline.reason);
+      expect(finishedError.message).toContain("global 30-minute limit");
       expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject({
         status: "failed",
       });
       const failureMessage = setup.store
         .get(TEST_USER_ID, setup.detail.id)
         ?.messages.find(({ role }) => role === "error");
-      expect(failureMessage?.content).toContain("timed out");
+      expect(failureMessage?.content).toContain("global 30-minute limit");
       expect(controller.signal.aborted).toBe(false);
       expect(factorySelections).toHaveLength(0);
       closeSessionTestDatabase(setup.database);
