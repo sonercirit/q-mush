@@ -21,7 +21,7 @@ export function enforceHeadlessBrowser(
 ): BrowserProviderOption<HeadlessProviderOptions> {
   return {
     ...provider,
-    options: { provider },
+    options: { ...provider.options, provider },
     providerFactory: (project): BrowserProvider => {
       forceHeadless(project);
       if (launchReportPath !== undefined) {

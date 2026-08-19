@@ -71,7 +71,7 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
     "vitest",
     "run",
     "--config",
-    "vitest.browser.config.ts",
+    join(ROOT_DIRECTORY, "vitest.browser.config.ts"),
     "session-detail",
     "--browser.headless=false",
   ]);
@@ -117,11 +117,14 @@ test("browser launcher forwards termination signals", async () => {
         signalCode: null,
       }),
     };
+    const baseline = process.listenerCount(signal);
     const running = runBrowserTests([], dependencies);
+    expect(process.listenerCount(signal)).toBe(baseline + 1);
     process.emit(signal);
     exited.resolve(0);
     await expect(running).resolves.toBe(0);
     expect(signals).toEqual([signal]);
+    expect(process.listenerCount(signal)).toBe(baseline);
   }
 });
 

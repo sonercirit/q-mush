@@ -1,3 +1,5 @@
+import { publishBrowserLifecycleReport } from "./browser-lifecycle-report.ts";
+
 const reportPath = process.env["Q_MUSH_BROWSER_PROBE_REPORT"];
 const realBun = process.env["Q_MUSH_BROWSER_REAL_BUN"];
 if (reportPath === undefined || realBun === undefined) {
@@ -5,6 +7,7 @@ if (reportPath === undefined || realBun === undefined) {
 }
 
 const invocation = process.argv.slice(2);
+const configPath = `${process.env["Q_MUSH_BROWSER_PROBE_ROOT"] ?? ""}/vitest.browser.config.ts`;
 const runnerCommand = [
   "--no-orphans",
   "run",
@@ -12,7 +15,7 @@ const runnerCommand = [
   "vitest",
   "run",
   "--config",
-  "vitest.browser.config.ts",
+  configPath,
 ];
 if (!runnerCommand.every((argument, index) => invocation[index] === argument)) {
   throw new Error(
@@ -22,10 +25,9 @@ if (!runnerCommand.every((argument, index) => invocation[index] === argument)) {
 
 const probe = process.env["Q_MUSH_BROWSER_PROBE_SCRIPT"];
 if (probe === undefined) throw new Error("Missing browser lifecycle probe");
-await Bun.write(
-  `${reportPath}.runner`,
-  JSON.stringify({ runnerPid: process.pid }),
-);
+await publishBrowserLifecycleReport(`${reportPath}.runner`, {
+  runnerPid: process.pid,
+});
 const browser = Bun.spawn([realBun, probe, reportPath], {
   stderr: "ignore",
   stdin: "ignore",

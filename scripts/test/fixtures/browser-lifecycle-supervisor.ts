@@ -14,7 +14,12 @@ if (
 }
 
 const browserTests = Bun.spawn(
-  [realBun, "run", "--no-orphans", "scripts/test-browser.ts"],
+  [
+    realBun,
+    "run",
+    "--no-orphans",
+    "scripts/test/fixtures/browser-test-runner-probe.ts",
+  ],
   {
     cwd: rootDirectory,
     env: {

@@ -8,7 +8,13 @@ import { isRecord } from "../../shared/validation.ts";
 import { withTemporaryDirectory } from "./temporary-directory.ts";
 
 const ROOT_DIRECTORY = join(import.meta.dirname, "../..");
-const BROWSER_TEST_ENTRY = join(ROOT_DIRECTORY, "scripts", "test-browser.ts");
+const BROWSER_TEST_ENTRY = join(
+  ROOT_DIRECTORY,
+  "scripts",
+  "test",
+  "fixtures",
+  "browser-test-runner-probe.ts",
+);
 const BROWSER_LIFECYCLE_BUN = fileURLToPath(
   new URL("fixtures/browser-lifecycle-bun.ts", import.meta.url),
 );
@@ -22,8 +28,17 @@ const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
   new URL("fixtures/playwright-launch-probe.ts", import.meta.url),
 );
 
+const PLAYWRIGHT_LAUNCH_DESCRIPTOR = Object.getOwnPropertyDescriptor(
+  chromium,
+  "launch",
+);
+
 function restorePlaywrightLaunch(): void {
-  Reflect.deleteProperty(chromium, "launch");
+  if (PLAYWRIGHT_LAUNCH_DESCRIPTOR === undefined) {
+    Reflect.deleteProperty(chromium, "launch");
+  } else {
+    Object.defineProperty(chromium, "launch", PLAYWRIGHT_LAUNCH_DESCRIPTOR);
+  }
 }
 
 afterEach(restorePlaywrightLaunch);
@@ -177,7 +192,11 @@ async function runGuardedPlaywrightLaunchProbe(): Promise<PlaywrightLaunchResult
       try {
         exitCode = await Promise.race([probe.exited, aborted]);
       } finally {
-        if (probe.exitCode === null) killProcess(-probe.pid);
+        if (probe.exitCode === null && SUPPORTS_NO_ORPHANS) {
+          killProcess(-probe.pid);
+        } else if (probe.exitCode === null) {
+          killProcess(probe.pid);
+        }
         await probe.exited;
       }
       const [stdout, stderr] = await Promise.all([output, errors]);

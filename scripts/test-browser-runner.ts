@@ -1,4 +1,4 @@
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const BROWSER_LAUNCH_REPORT = "Q_MUSH_BROWSER_LAUNCH_REPORT";
@@ -25,7 +25,7 @@ export interface BrowserTestDependencies {
 }
 
 const defaultDependencies: BrowserTestDependencies = {
-  executable: process.env["Q_MUSH_BROWSER_EXECUTABLE"] ?? process.execPath,
+  executable: process.execPath,
   spawn: (command, options) => Bun.spawn([...command], options),
 };
 
@@ -44,6 +44,9 @@ export async function runBrowserTests(
   arguments_: readonly string[],
   dependencies: BrowserTestDependencies = defaultDependencies,
 ): Promise<number> {
+  // Treat matching tokens anywhere as config flags, even where Vitest might
+  // interpret one as a value: the launcher deliberately fails closed rather
+  // than risk allowing an ambiguous argument sequence to replace its policy.
   if (
     arguments_.some(
       (argument) =>
@@ -55,6 +58,7 @@ export async function runBrowserTests(
   ) {
     throw new Error("Browser tests do not accept Vitest config overrides");
   }
+  const root = dirname(dirname(fileURLToPath(import.meta.url)));
   const browserTests = dependencies.spawn(
     [
       dependencies.executable,
@@ -64,11 +68,11 @@ export async function runBrowserTests(
       "vitest",
       "run",
       "--config",
-      "vitest.browser.config.ts",
+      join(root, "vitest.browser.config.ts"),
       ...arguments_,
     ],
     {
-      cwd: dirname(dirname(fileURLToPath(import.meta.url))),
+      cwd: root,
       env: headlessEnvironment(dependencies.environment),
       stderr: "inherit",
       stdin: "inherit",

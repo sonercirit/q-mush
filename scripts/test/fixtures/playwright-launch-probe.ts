@@ -40,7 +40,7 @@ try {
     process.stdout.write(
       `PLAYWRIGHT_LAUNCH_PROBE=${JSON.stringify({
         effectiveHeadless: launchCommand.includes(" --headless "),
-        playwrightDebug: process.env["PWDEBUG"],
+        playwrightDebug: process.env["PWDEBUG"] ?? "<undefined>",
         workingDirectory: process.cwd(),
       })}\n`,
     );
