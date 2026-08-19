@@ -232,11 +232,13 @@ test("rebases retained model output when a real mutation settles without a block
 test("rebases retained output when a pending-input mutation settles", async () => {
   const commandResult = Promise.withResolvers<unknown>();
   const detail = { ...TEST_SESSION_DETAIL, status: "running" as const };
-  const state: SessionViewState = Object.assign(initialSessionViewState(), {
-    detail,
+  const selectedId = detail.id;
+  const state: SessionViewState = {
+    ...initialSessionViewState(),
     followUp: "Queue this",
-    selectedId: detail.id,
-  });
+    selectedId,
+    detail,
+  };
   const controller = new SessionController(
     createReactiveState(state),
     undefined,

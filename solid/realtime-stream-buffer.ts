@@ -398,6 +398,22 @@ export class RealtimeStreamBuffer {
         : tombstoneEntry(retained);
   }
 
+  #pendingToolEntry(
+    sessionId: string,
+    retainedKey: string,
+  ): ToolStreamEntry | undefined {
+    let entry: ToolStreamEntry | undefined;
+    for (const update of this.#pendingSession(sessionId)?.values() ?? []) {
+      if (
+        update.kind === "tool" &&
+        toolKey(update.value.entry) === retainedKey
+      ) {
+        entry = materializeToolUpdate(update.value);
+      }
+    }
+    return entry;
+  }
+
   #queueToolUpdate(event: ToolStreamDeltaFrame): void {
     const epoch = this.#sessionEpoch(event.sessionId);
     const key = toolKey(event, epoch);
@@ -405,7 +421,10 @@ export class RealtimeStreamBuffer {
     const found = pending?.get(key);
     const buffered = found?.kind === "tool" ? found.value : undefined;
     const retainedKey = toolKey(event);
-    const current = buffered?.entry ?? this.#currentToolEntry(retainedKey);
+    const current =
+      buffered?.entry ??
+      this.#pendingToolEntry(event.sessionId, retainedKey) ??
+      this.#currentToolEntry(retainedKey);
     const result = validatedToolDelta(current, event);
     if (!result.accepted) return;
 
@@ -511,25 +530,20 @@ export class RealtimeStreamBuffer {
     return first?.done === false && updateEpoch(first.value) <= barrier.epoch;
   }
 
-  #oldestToolState(
-    sessionId?: string,
-    tombstoneOnly = false,
-  ): string | undefined {
+  #deleteOldestToolState(sessionId?: string): void {
+    let oldest: string | undefined;
+    let oldestTerminal: string | undefined;
     for (const [key, state] of this.#toolStates) {
-      if (
-        (sessionId === undefined || toolStateSessionId(state) === sessionId) &&
-        (!tombstoneOnly || state.kind === "terminal")
-      ) {
-        return key;
+      if (sessionId !== undefined && toolStateSessionId(state) !== sessionId) {
+        continue;
+      }
+      oldest ??= key;
+      if (state.kind === "terminal") {
+        oldestTerminal = key;
+        break;
       }
     }
-    return undefined;
-  }
-
-  #deleteOldestToolState(sessionId?: string): void {
-    const key =
-      this.#oldestToolState(sessionId, true) ??
-      this.#oldestToolState(sessionId);
+    const key = oldestTerminal ?? oldest;
     if (key !== undefined) this.#toolStates.delete(key);
   }
 

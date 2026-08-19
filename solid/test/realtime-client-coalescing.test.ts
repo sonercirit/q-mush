@@ -45,25 +45,16 @@ test("keeps post-snapshot deltas behind a production-order session barrier", () 
   ]);
 
   expect(stream.events).toEqual([]);
-  runNextRealtimeFrame(stream.setup.requestFrames);
-  expect(stream.events.length).toBe(0);
-  runNextRealtimeFrame(stream.setup.requestFrames);
-  expect(stream.events).toMatchObject([
-    {
-      type: "stream_batch",
-      updates: [{ content: "A", type: "session_delta" }],
-    },
-  ]);
-  runNextRealtimeFrame(stream.setup.requestFrames);
-  expectLatest(stream.events, {
-    session: { id: running.id },
-    type: "session",
-  });
-  runNextRealtimeFrame(stream.setup.requestFrames);
-  expectLatest(stream.events, {
-    type: "stream_batch",
-    updates: [{ content: "B", type: "session_delta" }],
-  });
+  const expectedFrames: readonly Readonly<Record<string, unknown>>[][] = [
+    [],
+    [{ type: "stream_batch", updates: [{ content: "A" }] }],
+    [{ session: { id: running.id }, type: "session" }],
+    [{ type: "stream_batch", updates: [{ content: "B" }] }],
+  ];
+  for (const expected of expectedFrames) {
+    runNextRealtimeFrame(stream.setup.requestFrames);
+    expect(stream.events.slice(-expected.length)).toMatchObject(expected);
+  }
   stream.setup.connection.stop();
 });
 
@@ -85,12 +76,10 @@ test("orders a replaced state key at its latest wire position", () => {
     },
   ]);
 
-  const nextFrame = stream.setup.requestFrames.shift();
-  if (nextFrame === undefined) throw new TypeError("Missing state frame");
-  nextFrame();
+  runNextRealtimeFrame(stream.setup.requestFrames);
   expect(stream.events).toMatchObject([{ type: "session_questions" }]);
   runNextRealtimeFrame(stream.setup.requestFrames);
-  expect(stream.events.at(-1)).toMatchObject({
+  expectLatest(stream.events, {
     session: { updatedAt: running.updatedAt + 1 },
     type: "session",
   });

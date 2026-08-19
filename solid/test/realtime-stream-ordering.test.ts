@@ -96,6 +96,10 @@ function expectNextFrame(stream: StreamingTestConnection): void {
   stream.pendingFrames.shift()?.();
 }
 
+function drainFrames(stream: StreamingTestConnection): void {
+  while (stream.pendingFrames.length !== 0) stream.pendingFrames.shift()?.();
+}
+
 function expectToolSync(
   sent: readonly string[] | undefined,
   streamId = STREAM_ID,
@@ -223,6 +227,33 @@ function expectToolSnapshotBarrier(
   expectSingleSnapshotBarrier(stream);
   stream.stop();
 }
+
+test("keeps tool deltas queued after a questions barrier", () => {
+  const stream = streamingTestConnection("questions-barrier-instance");
+  sendRunningTool(stream, "A");
+  stream.receive({
+    pending: null,
+    sessionId: SESSION_ID,
+    type: "session_questions",
+  });
+  stream.receive(orderedToolDelta(3, { content: "B" }));
+  stream.receive(orderedToolDelta(4, { content: "C" }));
+  const sent = stream.setup.sockets.at(0)?.sent;
+  expect(sent).toBeDefined();
+  sent?.splice(0);
+
+  drainFrames(stream);
+
+  expect(stream.batches()).toMatchObject([
+    { updates: [expectedToolUpdate(2, "A")] },
+    { updates: [expectedToolUpdate(4, "ABC")] },
+  ]);
+  expect(stream.emitted.some(({ type }) => type === "session_questions")).toBe(
+    true,
+  );
+  expect(sent).toEqual([]);
+  stream.stop();
+});
 
 test("bounds sustained mixed streams to one ordered batch per frame", () => {
   const stream = streamingTestConnection("ordered-instance");
