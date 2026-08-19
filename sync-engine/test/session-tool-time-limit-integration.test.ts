@@ -212,10 +212,7 @@ describe("global tool time limit integration", () => {
       const canceled = Promise.withResolvers<string>();
       const finishedErrors: unknown[] = [];
       const factorySelections: unknown[] = [];
-      const deadline = AbortSignal.timeout(60);
-      const timeout = vi
-        .spyOn(AbortSignal, "timeout")
-        .mockReturnValue(deadline);
+      const timeout = vi.spyOn(globalThis, "setTimeout");
       const broker = new RunnerCommandBroker({
         cancel: (_runnerId, commandId) => {
           canceled.resolve(commandId);
@@ -236,16 +233,13 @@ describe("global tool time limit integration", () => {
         finishedErrors,
       );
       expect(timeout).toHaveBeenCalledWith(
+        expect.any(Function),
         toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
       );
       await dispatched.promise;
-      await vi.waitFor(() => {
-        expect(deadline.aborted).toBe(true);
-      });
-      expect(deadline).toMatchObject({
-        aborted: true,
-        reason: { name: "TimeoutError" },
-      });
+      await vi.advanceTimersByTimeAsync(
+        toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
+      );
       await run;
       await expect(canceled.promise).resolves.toBe("loading-command");
       expect(finishedErrors).toHaveLength(1);
@@ -253,7 +247,7 @@ describe("global tool time limit integration", () => {
       expect(finishedError).toBeInstanceOf(Error);
       if (!(finishedError instanceof Error)) throw new Error("Expected error");
       expect(finishedError).toMatchObject({ name: "TimeoutError" });
-      expect(finishedError.cause).toBe(deadline.reason);
+      expect(finishedError.cause).toMatchObject({ name: "TimeoutError" });
       expect(finishedError.message).toContain("global 30-minute limit");
       expect(setup.store.get(TEST_USER_ID, setup.detail.id)).toMatchObject({
         status: "failed",

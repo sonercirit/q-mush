@@ -288,7 +288,10 @@ Project memory.
   20,000 Unicode characters. Each run snapshots both for its prompt, schemas,
   engine/runner deadline, sleep, skills/session tools, and final model-facing
   result bound; changes apply next run and realtime updates stay user-scoped.
-  `parallel` shares one budget; `ask_questions` waits outside it. One truncation
+  Session loading uses a clearable timer: Bun’s `AbortSignal.timeout()` still
+  fires after consumers detach, so successful loading clears its deadline and
+  aborts the composite signal to release consumers immediately. `parallel`
+  shares one budget; `ask_questions` waits outside it. One truncation
   path/notice owns model-facing output; positional pagination keeps valid
   continuation envelopes; input/security/transport bounds stay separate. Shell
   has a runner timer; each POSIX command gets a session and stop/timeout signals

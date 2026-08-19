@@ -13,19 +13,26 @@ export async function withLoadingDeadline<Result>(
   execute: (signal: AbortSignal) => Promise<Result>,
   preservesError: (error: unknown) => boolean,
 ): Promise<Result> {
-  const deadline = AbortSignal.timeout(
-    toolExecutionLimitMilliseconds(settings),
-  );
+  const deadline = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    deadline.abort(
+      new DOMException(loadingTimeLimitMessage(settings), "TimeoutError"),
+    );
+  }, toolExecutionLimitMilliseconds(settings));
   const completed = new AbortController();
   const loadingSignal = AbortSignal.any([
     runtimeSignal,
-    deadline,
+    deadline.signal,
     completed.signal,
   ]);
   try {
     return await execute(loadingSignal);
   } catch (error) {
-    if (deadline.aborted && !runtimeSignal.aborted && !preservesError(error)) {
+    if (
+      deadline.signal.aborted &&
+      !runtimeSignal.aborted &&
+      !preservesError(error)
+    ) {
       const timeout = new DOMException(
         loadingTimeLimitMessage(settings),
         "TimeoutError",
@@ -33,12 +40,13 @@ export async function withLoadingDeadline<Result>(
       Object.defineProperty(timeout, "cause", {
         configurable: true,
         enumerable: true,
-        value: deadline.reason,
+        value: deadline.signal.reason,
       });
       throw timeout;
     }
     throw error;
   } finally {
+    clearTimeout(deadlineTimer);
     completed.abort();
   }
 }
