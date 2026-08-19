@@ -8,7 +8,7 @@ import type { SessionRestartRequester } from "./session-restart-requester.ts";
 
 export type SessionPendingComponent = SessionRuntimePendingComponent;
 
-export type SessionPendingState = SessionRuntimePending;
+type SessionPendingState = SessionRuntimePending;
 
 export type RestartScope =
   | { readonly kind: "server" }

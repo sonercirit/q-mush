@@ -23,6 +23,7 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 const OPEN_STATE = 1;
+const MAX_PRIOR_RESPONSE_IDS = 32;
 
 export class ProviderWebSocketError extends Error {
   readonly reconnectImmediately: boolean;
@@ -86,7 +87,7 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
-  #lastResponseId: string | undefined;
+  readonly #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
 
   close(): void {
@@ -123,8 +124,9 @@ export class ProviderWebSocketSession {
       const socket =
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
-      const previousResponseId =
-        reusedSocket === undefined ? undefined : this.#lastResponseId;
+      const priorResponseIds =
+        reusedSocket === undefined ? new Set<string>() : this.#priorResponseIds;
+      if (reusedSocket === undefined) this.#priorResponseIds.clear();
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
@@ -147,7 +149,13 @@ export class ProviderWebSocketSession {
         // Only a successfully completed step leaves this socket reusable, so
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
-          this.#lastResponseId = currentResponseId;
+          if (currentResponseId !== undefined) {
+            this.#priorResponseIds.add(currentResponseId);
+            if (this.#priorResponseIds.size > MAX_PRIOR_RESPONSE_IDS) {
+              const oldest = this.#priorResponseIds.values().next().value;
+              if (oldest !== undefined) this.#priorResponseIds.delete(oldest);
+            }
+          }
           this.#socket = socket;
           resolve(step);
         } else {
@@ -227,7 +235,7 @@ export class ProviderWebSocketSession {
             if (
               !admitsRequest ||
               eventResponseId === undefined ||
-              eventResponseId === previousResponseId
+              priorResponseIds.has(eventResponseId)
             ) {
               return;
             }

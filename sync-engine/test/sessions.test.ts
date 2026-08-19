@@ -301,13 +301,12 @@ describe("agent sessions", () => {
   });
 
   test("persists image inputs and sends them to the model", async () => {
+    const expiry = TEST_NOW + 7 * 86_400_000;
     let now = TEST_NOW;
     const model = new ScriptedAgentModel([
       { content: "Screenshot implemented.", toolCalls: [] },
     ]);
-    const database = createAuthenticatedTestDatabase({
-      expiresAt: 1.7e12 + 6048e5,
-    });
+    const database = createAuthenticatedTestDatabase({ expiresAt: expiry });
     const setup = connectedSessionSetup(model, "api_key", undefined, {
       database,
       now: () => (now += 3_000),

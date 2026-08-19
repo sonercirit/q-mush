@@ -100,9 +100,10 @@ function responseEvent(
 
 async function expectRequestPending(pending: Promise<unknown>): Promise<void> {
   let settled = false;
-  void pending.finally(() => {
+  const observeSettlement = (): void => {
     settled = true;
-  });
+  };
+  void pending.then(observeSettlement, observeSettlement);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(settled).toBe(false);
 }
@@ -253,6 +254,39 @@ test("correlates realistic delta events on a reused WebSocket", async () => {
   expectDoneStep(await stalled);
   socket.close();
   expectProviderSocketReleased(socket);
+});
+
+test("rejects two-generations-old IDs on a reused socket", async () => {
+  const observed: ("active" | "admission")[] = [];
+  const lifecycle = beginLifecycleRequest(observed);
+  const { model, socket } = lifecycle;
+  acknowledgeProviderSocket(socket, "response-1");
+  socket.receive(responseEvent("response.completed", "response-1"));
+  await lifecycle.pending;
+
+  const second = complete(model);
+  acknowledgeProviderSocket(socket, "response-2");
+  socket.receive(responseEvent("response.completed", "response-2"));
+  await second;
+
+  const third = complete(model);
+  socket.receive({
+    delta: "Two generations stale",
+    response_id: "response-1",
+    type: "response.output_text.delta",
+  });
+  expect(observed.at(-1)).toBe("admission");
+  expect(observed.filter((state) => state === "active")).toHaveLength(2);
+  await expectRequestPending(third);
+  socket.receive(responseEvent("response.created", "response-3"));
+  socket.receive({
+    delta: "Done.",
+    response_id: "response-3",
+    type: "response.output_text.delta",
+  });
+  socket.receive(responseEvent("response.completed", "response-3"));
+  expectDoneStep(await third);
+  socket.close();
 });
 
 test("reuses one WebSocket across steps and reconnects after idle close", async () => {
