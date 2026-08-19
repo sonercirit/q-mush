@@ -1,15 +1,13 @@
 # AGENTS.md
 
-## Project Snapshot
-
-- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
-  the homepage; `/app` is the app.
+- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
+  the homepage, `/app` the app.
 
 ## Working Agreements
 
-- Research provider docs/trackers with Brave Search, then probe APIs, schemas,
-  and metrics. Call capabilities impossible only with excluding evidence;
-  otherwise record an open question.
+- Research provider docs/trackers with Brave Search, then probe APIs/schemas/
+  metrics. Call capabilities impossible only with excluding evidence; otherwise
+  record an open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
   docs, performance, security, and DX. Ship small improvements now; practice
   TDD, DRY, and KISS without premature abstraction.
@@ -20,10 +18,9 @@
 - Never weaken tests, special-case checks, or claim unperformed verification;
   disclose gaps. Fix defects on sight, including pre-existing/out-of-scope
   ones; if harmful, codify why in a test.
-- Record new decisions, gotchas, and lessons here in the same change, unprompted;
-  repeated instructions mean a rule is missing. Condense to fit the cap. When
-  evidence overturns a finding, fix its code and every stale record; act, don't
-  ask.
+- Record new decisions/gotchas/lessons here in the same change, unprompted;
+  repeated instructions mean a rule is missing. Condense to fit the cap. If
+  evidence overturns a finding, fix its code and stale records; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun failures.
 - Never commit secrets, generated artifacts, or env files.
