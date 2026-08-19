@@ -102,6 +102,14 @@ class RestartedSpawnModel implements AgentModel {
   }
 }
 
+async function startChildToolSession(model: AgentModel) {
+  const setup = await startToolSession(model);
+  const childId = await childSessionId(setup);
+  completeChildAgentFile(setup);
+  await waitForChildRunnerTool(setup, childId, "bash");
+  return { childId, setup };
+}
+
 function sessionFor(
   setup: ReturnType<typeof connectedSessionSetup>,
   sessionId: string,
@@ -153,10 +161,7 @@ function completeCurrentRunnerCommand(
 
 test("a spawned session resumes its interrupted step after server recreation", async () => {
   const model = new RestartedSpawnModel();
-  const initial = await startToolSession(model);
-  const childId = await childSessionId(initial);
-  completeChildAgentFile(initial);
-  await waitForChildRunnerTool(initial, childId, "bash");
+  const { childId, setup: initial } = await startChildToolSession(model);
 
   const drain = initial.sessions.drain();
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
@@ -207,10 +212,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
 
 test("a reported child event survives parent compaction and is consumed on resume", async () => {
   const childModel = new RestartedSpawnModel();
-  const initial = await startToolSession(childModel);
-  const childId = await childSessionId(initial);
-  completeChildAgentFile(initial);
-  await waitForChildRunnerTool(initial, childId, "bash");
+  const { childId, setup: initial } = await startChildToolSession(childModel);
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
   await waitForCompletedChild(initial, childId);
   await waitForTerminalParentNote(initial.sessions, childId);
