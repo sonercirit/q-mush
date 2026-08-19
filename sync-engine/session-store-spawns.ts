@@ -172,6 +172,7 @@ export function spawnedSessionLink(
       parentId: agentSessions.parentSessionId,
       reportedGeneration: agentSessions.parentReportedGeneration,
       runnerRequired: agentSessions.runnerRequired,
+      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(ownedActiveSessionCondition(userId, sessionId))
@@ -179,7 +180,11 @@ export function spawnedSessionLink(
   if (
     stored?.parentId == null ||
     stored.parentGeneration === null ||
-    (!stored.runnerRequired && stored.reportedGeneration >= stored.generation)
+    (!stored.runnerRequired &&
+      stored.reportedGeneration >= stored.generation) ||
+    (stored.runnerRequired &&
+      REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
+      stored.reportedGeneration >= stored.generation)
   ) {
     return undefined;
   }
