@@ -279,7 +279,10 @@ export function readSessionTurns(
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
     .map((turn) => {
-      const toolSettings = readToolSettings(turn);
+      const toolSettings = readToolSettings({
+        executionLimitMinutes: turn.executionLimitMinutes,
+        outputLimitCharacters: turn.outputLimitCharacters,
+      });
       if (toolSettings === undefined) {
         throw new Error("The session turn tool settings snapshot is invalid");
       }
