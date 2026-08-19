@@ -256,36 +256,39 @@ test("correlates realistic delta events on a reused WebSocket", async () => {
   expectProviderSocketReleased(socket);
 });
 
-test("rejects two-generations-old IDs on a reused socket", async () => {
+test("rejects IDs from the full lifetime of a reused socket", async () => {
   const observed: ("active" | "admission")[] = [];
   const lifecycle = beginLifecycleRequest(observed);
   const { model, socket } = lifecycle;
-  acknowledgeProviderSocket(socket, "response-1");
-  socket.receive(responseEvent("response.completed", "response-1"));
+  acknowledgeProviderSocket(socket, "response-0");
+  socket.receive(responseEvent("response.completed", "response-0"));
   await lifecycle.pending;
 
-  const second = complete(model);
-  acknowledgeProviderSocket(socket, "response-2");
-  socket.receive(responseEvent("response.completed", "response-2"));
-  await second;
+  for (let generation = 1; generation <= 40; generation += 1) {
+    const responseId = "response-" + String(generation);
+    const pending = complete(model);
+    acknowledgeProviderSocket(socket, responseId);
+    socket.receive(responseEvent("response.completed", responseId));
+    await pending;
+  }
 
-  const third = complete(model);
+  const current = complete(model);
   socket.receive({
-    delta: "Two generations stale",
-    response_id: "response-1",
+    delta: "Oldest generation stale",
+    response_id: "response-0",
     type: "response.output_text.delta",
   });
   expect(observed.at(-1)).toBe("admission");
-  expect(observed.filter((state) => state === "active")).toHaveLength(2);
-  await expectRequestPending(third);
-  socket.receive(responseEvent("response.created", "response-3"));
+  expect(observed.filter((state) => state === "active")).toHaveLength(41);
+  await expectRequestPending(current);
+  socket.receive(responseEvent("response.created", "response-current"));
   socket.receive({
     delta: "Done.",
-    response_id: "response-3",
+    response_id: "response-current",
     type: "response.output_text.delta",
   });
-  socket.receive(responseEvent("response.completed", "response-3"));
-  expectDoneStep(await third);
+  socket.receive(responseEvent("response.completed", "response-current"));
+  expectDoneStep(await current);
   socket.close();
 });
 

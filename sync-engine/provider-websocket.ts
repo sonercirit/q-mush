@@ -23,7 +23,6 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 const OPEN_STATE = 1;
-const MAX_PRIOR_RESPONSE_IDS = 32;
 
 export class ProviderWebSocketError extends Error {
   readonly reconnectImmediately: boolean;
@@ -151,10 +150,6 @@ export class ProviderWebSocketSession {
         if (error === undefined && step !== undefined) {
           if (currentResponseId !== undefined) {
             this.#priorResponseIds.add(currentResponseId);
-            if (this.#priorResponseIds.size > MAX_PRIOR_RESPONSE_IDS) {
-              const oldest = this.#priorResponseIds.values().next().value;
-              if (oldest !== undefined) this.#priorResponseIds.delete(oldest);
-            }
           }
           this.#socket = socket;
           resolve(step);
