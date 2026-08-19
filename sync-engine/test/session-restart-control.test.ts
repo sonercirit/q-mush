@@ -27,6 +27,8 @@ function runnerGate(
 class TestRestartRuntimes implements RestartRuntimeControl {
   readonly blocked = new Set<string>();
   readonly forceParked: string[] = [];
+  forceParkCalls = 0;
+  settleDrainsImmediately = true;
   requestedDrains = 0;
   readonly drains: {
     readonly restartId: string;
@@ -35,6 +37,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   readonly started: (string | undefined)[] = [];
   #runnerRequests = new Map<string, RestartRequest>();
   #serverRequest: RestartRequest | undefined;
+  #settleDrain: (() => void) | undefined;
 
   get draining(): boolean {
     return this.#serverRequest !== undefined;
@@ -77,6 +80,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   }
 
   forcePark(): Promise<readonly string[]> {
+    this.forceParkCalls += 1;
     return Promise.resolve(this.forceParked);
   }
 
@@ -89,7 +93,18 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   } {
     this.requestedDrains += 1;
     const persistence = this.drain(scope, restartId);
-    return { persistence, settled: persistence };
+    if (this.settleDrainsImmediately) {
+      return { persistence, settled: persistence };
+    }
+    const settled = new Promise<void>((resolve) => {
+      this.#settleDrain = resolve;
+    });
+    return { persistence, settled };
+  }
+
+  settleDrain(): void {
+    this.#settleDrain?.();
+    this.#settleDrain = undefined;
   }
 
   drainRequest(scope: RestartScope): RestartRequest | undefined {
@@ -223,6 +238,29 @@ describe("session restart control", () => {
       { restartId: "server-1", scope: { kind: "server" } },
       { restartId: "server-1", scope: { kind: "server" } },
     ]);
+  });
+
+  test("runner drain joins a pending server drain without escalating it", async () => {
+    const { restart, runtimes } = control(() => "server-1");
+    runtimes.settleDrainsImmediately = false;
+    let serverSettled = false;
+    let runnerSettled = false;
+
+    const serverDrain = restart.drainServer().then(() => {
+      serverSettled = true;
+    });
+    const runnerDrain = restart.drainRunner("runner-1", "runner-1").then(() => {
+      runnerSettled = true;
+    });
+    await Promise.resolve();
+
+    expect(runtimes.forceParkCalls).toBe(0);
+    expect(serverSettled).toBe(false);
+    expect(runnerSettled).toBe(false);
+
+    runtimes.settleDrain();
+    await Promise.all([serverDrain, runnerDrain]);
+    expect(runtimes.forceParkCalls).toBe(0);
   });
 
   test("escalates a pending runner drain through its dedicated boundary", async () => {
