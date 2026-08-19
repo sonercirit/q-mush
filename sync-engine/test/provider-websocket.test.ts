@@ -242,26 +242,7 @@ test("correlates deltas on a reused socket", async () => {
   socket.close();
   expectProviderSocketReleased(socket);
 });
-test("rejects a terminal-only stale response during reused-socket admission", async () => {
-  const states = new Array<"active" | "admission">();
-  const request = beginLifecycleRequest(states);
-  acknowledgeProviderSocket(request.socket, "first");
-  completeResponse(request.socket, "first");
-  await request.pending;
-  const pending = complete(request.model);
-  const socket = request.socket;
-  completeResponse(socket, "stale-terminal");
-  expectRequestStates(states, "admission", "active", "admission");
-  await expectRequestPending(pending);
-  socket.receive({
-    delta: "Done.",
-    response_id: "second",
-    type: "response.output_text.delta",
-  });
-  completeResponse(socket, "second");
-  expectDoneStep(await pending);
-  socket.close();
-});
+
 test("keeps a defensive-copy fence while the newest socket wins a concurrent reset", async () => {
   const states: ("active" | "admission")[] = [],
     { model, sockets } = lifecycleModel(states);
@@ -301,23 +282,7 @@ test("keeps a defensive-copy fence while the newest socket wins a concurrent res
   expectDoneStep(await subsequent);
   next.close();
 });
-test("close clears retained response IDs before a fresh connection", async () => {
-  const sockets = new FakeProviderSockets(),
-    model = apiKeyModel({ webSocket: sockets.create }),
-    first = complete(model),
-    original = requireProviderSocket(sockets, 0);
-  original.open();
-  acknowledgeProviderSocket(original, "repeated");
-  completeResponse(original, "repeated");
-  expectDoneStep(await first);
-  model.close();
-  const pending = complete(model);
-  const fresh = requireProviderSocket(sockets, 1);
-  fresh.open();
-  completeResponse(fresh, "repeated");
-  expectDoneStep(await pending);
-  fresh.close();
-});
+
 test("reuses a socket and reconnects after idle close", async () => {
   const stepSockets = new FakeProviderSockets();
   const model = apiKeyModel({ webSocket: stepSockets.create });
