@@ -282,23 +282,25 @@ describe("bounded restart drain", () => {
     expectRunnerRequest(runtimes);
   });
 
-  test("final preparation promotes a bounded runner drain to an unbounded server drain", async () => {
+  test("final preparation retires a bounded runner continuation and leaves final drain unbounded", async () => {
     const { clock, control, runtime } = pendingRunnerDrain();
     const { drained: runnerDrain } = await startedDrain(control, "runner");
     await control.prepareServerShutdown();
     expect(runtime.durable()).toEqual([serverRestartRequest("restart-1")]);
+    const finalDrain = control.drainServerFinal();
     clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
 
-    let runnerSettled = false;
-    void runnerDrain.then(() => {
-      runnerSettled = true;
+    await runnerDrain;
+    let finalSettled = false;
+    void finalDrain.then(() => {
+      finalSettled = true;
     });
     await Promise.resolve();
-    expect(runnerSettled).toBe(false);
+    expect(finalSettled).toBe(false);
     expect(runtime.aborted()).toBe(false);
 
     runtime.finish();
-    await runnerDrain;
+    await finalDrain;
   });
 
   test("filters progress before applying the recipient session cap", () => {

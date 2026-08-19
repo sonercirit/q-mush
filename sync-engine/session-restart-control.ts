@@ -176,11 +176,12 @@ export function createSessionRestartControl(
       now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
       now,
     ),
+    escalateExisting = true,
   ): Promise<void> => {
     const key = escalationKey(scope);
     const existing = boundedDrains.get(key);
     if (existing !== undefined) {
-      existing.escalate();
+      if (escalateExisting) existing.escalate();
       return existing.bounded;
     }
     const requested = runtimes.requestDrain(scope, restartId, durable);
@@ -236,6 +237,7 @@ export function createSessionRestartControl(
       finalShutdownPrepared = true;
       for (const drain of boundedDrains.values()) {
         clearDrainTimer(drain.timer);
+        drain.finish();
       }
       await runtimes.mark({ kind: "server" }, nextServerRestartId());
     },
@@ -246,7 +248,13 @@ export function createSessionRestartControl(
         if (serverId === undefined) {
           throw new Error("The server restart request was lost");
         }
-        await boundedDrain({ kind: "server" }, serverId, true);
+        await boundedDrain(
+          { kind: "server" },
+          serverId,
+          true,
+          undefined,
+          false,
+        );
         return;
       }
       await boundedDrain({ kind: "runner", runnerId }, restartId, false);
