@@ -14,3 +14,13 @@ export function activeDurableSystemPendingInputs(
     .filter(({ createdById }) => createdById === SYSTEM_ID)
     .map(pendingInputForPromotion);
 }
+
+export function activeNonSystemPendingInput(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+): PendingInputForPromotion | undefined {
+  const pending = activeStoredPendingInputs(database, sessionId).find(
+    ({ createdById }) => createdById !== SYSTEM_ID,
+  );
+  return pending === undefined ? undefined : pendingInputForPromotion(pending);
+}
