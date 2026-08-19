@@ -46,7 +46,11 @@ import {
   isRealtimePath,
   type QmushWebSocketData,
 } from "./realtime.ts";
-import { visibleRestartProgress } from "./restart-progress-visibility.ts";
+import {
+  addVisibleRestartSession,
+  type RestartProgressVisibilityCache,
+  visibleRestartProgress,
+} from "./restart-progress-visibility.ts";
 import { buildRunnerExecutableProvider } from "./runner-executable.ts";
 import { createRunnerIntegration } from "./runners.ts";
 import {
@@ -193,7 +197,20 @@ function errorMessage(error: unknown): string {
 
 let shutdownKind: "development_restart" | "final" | undefined;
 let developmentRestart: Promise<void> | undefined;
-const restartVisibleSessionIds = new Map<string, ReadonlySet<string>>();
+const restartVisibleSessionIds: RestartProgressVisibilityCache = new Map();
+sessions.onChange((userId, sessionId) => {
+  if (shutdownKind !== "development_restart") return;
+  for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
+    if (sessions.detailForUser(userId, sessionId, workspaceId) === undefined) {
+      continue;
+    }
+    addVisibleRestartSession(
+      restartVisibleSessionIds,
+      `${userId}\0${workspaceId}`,
+      sessionId,
+    );
+  }
+});
 
 function stopMaintenance(): void {
   clearInterval(recoveryTimer);

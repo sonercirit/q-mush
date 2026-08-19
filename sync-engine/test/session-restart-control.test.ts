@@ -39,7 +39,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   readonly started: (string | undefined)[] = [];
   #runnerRequests = new Map<string, RestartRequest>();
   #serverRequest: RestartRequest | undefined;
-  #settleDrains = new Set<() => void>();
+  #settleDrains = new Map<string, () => void>();
 
   get draining(): boolean {
     return this.#serverRequest !== undefined;
@@ -104,13 +104,20 @@ class TestRestartRuntimes implements RestartRuntimeControl {
       return { persistence, settled: persistence };
     }
     const settled = new Promise<void>((resolve) => {
-      this.#settleDrains.add(resolve);
+      const key =
+        scope.kind === "server" ? "server" : `runner:${scope.runnerId}`;
+      this.#settleDrains.set(key, resolve);
     });
     return { persistence, settled };
   }
 
-  settleDrain(): void {
-    for (const settle of this.#settleDrains) settle();
+  settleDrain(key?: string): void {
+    if (key !== undefined) {
+      this.#settleDrains.get(key)?.();
+      this.#settleDrains.delete(key);
+      return;
+    }
+    for (const settle of this.#settleDrains.values()) settle();
     this.#settleDrains.clear();
   }
 
@@ -343,6 +350,21 @@ describe("session restart control", () => {
     expect(warnings).toEqual([
       "Q Mush restart force-park failed: Error: persistence failed",
     ]);
+  });
+
+  test("a runner-scope drain settling does not drop shared server associations", async () => {
+    const { restart, runtimes } = control(() => "server");
+    runtimes.settleDrainsImmediately = false;
+    const dedicated = restart.drainRunner("runner-dedicated", "dedicated");
+    const server = restart.drainServer();
+    const shared = restart.drainRunner("runner-shared", "shared");
+
+    runtimes.settleDrain("runner:runner-dedicated");
+    await dedicated;
+
+    expect(restart.escalateRunnerDrain("runner-shared", "shared")).toBe(true);
+    await Promise.all([server, shared]);
+    expect(runtimes.forceParkCalls).toBe(1);
   });
 
   test("a late runner escalates the shared server drain with its restart ID", async () => {

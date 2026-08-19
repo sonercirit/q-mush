@@ -269,14 +269,15 @@ export function createSessionRestartControl(
         if (serverId === undefined || serverDeadline === undefined) {
           throw new Error("The server restart request was lost");
         }
-        sharedServerRestartIds.set(runnerId, restartId);
-        await boundedDrain(
+        const sharedDrain = boundedDrain(
           { kind: "server" },
           serverId,
           true,
           serverDeadline,
           false,
         );
+        sharedServerRestartIds.set(runnerId, restartId);
+        await sharedDrain;
         return;
       }
       await boundedDrain({ kind: "runner", runnerId }, restartId, false);
@@ -286,6 +287,10 @@ export function createSessionRestartControl(
       validRestartId(restartId);
       if (finalShutdownPrepared) return true;
       if (runtimes.draining) {
+        // The server drain can settle just before realtime records its local
+        // settlement. Its association is cleared at that boundary, so a
+        // correct-ID escalation in that microtask window is rejected and the
+        // runner reconnects to observe the settled server restart.
         if (sharedServerRestartIds.get(runnerId) !== restartId) return false;
         return escalateScope({ kind: "server" });
       }
