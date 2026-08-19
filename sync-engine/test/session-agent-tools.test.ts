@@ -439,26 +439,12 @@ describe("session agent tools", () => {
     model.resumeParent();
     const resumed = await waitForSessionValue(
       () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-      (value) => {
-        if (!isRecord(value)) return false;
-        const pendingInputs = value["pendingInputs"];
-        const messages = value["messages"];
-        return (
-          Array.isArray(pendingInputs) &&
-          pendingInputs.length === 0 &&
-          Array.isArray(messages) &&
-          messages.some(
-            (message) =>
-              isRecord(message) &&
-              typeof message["content"] === "string" &&
-              message["content"].includes("Child final result."),
-          )
-        );
-      },
+      hasSessionStatus("idle"),
     );
     expect(JSON.stringify(resumed)).toContain("Child final result.");
     const pending = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
-    expect(pending).toMatchObject({ pendingInputs: [] });
+    expect(pending?.pendingInputs).toHaveLength(1);
+    expect(pending?.pendingInputs[0]?.content).toContain("Spawned session");
     closeSessionTestDatabase(setup.database);
   });
 
