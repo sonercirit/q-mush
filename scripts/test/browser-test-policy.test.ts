@@ -93,7 +93,8 @@ async function browserLaunchProbe(
     "vitest",
     "run",
     "--config",
-    "vitest.browser.config.ts",
+    join(ROOT_DIRECTORY, "vitest.browser.config.ts"),
+    "--configLoader=runner",
     ...arguments_,
   ]);
   const vitest = await createVitest("test", parsed.options);
