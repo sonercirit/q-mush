@@ -1,26 +1,25 @@
 # AGENTS.md
 
-- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
-  the homepage, `/app` the app.
+- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
+  home, `/app` the app.
 
 ## Working Agreements
 
-- Research provider docs/trackers with Brave Search, then probe APIs/schemas/
-  metrics. Call capabilities impossible only with excluding evidence; otherwise
-  record an open question.
+- Research provider docs with Brave Search, then probe APIs/schemas/metrics.
+  Call capabilities impossible only with excluding evidence; otherwise record an
+  open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now; practice
-  TDD, DRY, and KISS without premature abstraction.
+  docs, performance, security, and DX. Ship now; practice TDD, DRY, and KISS.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - Never weaken tests, special-case checks, or claim unperformed verification;
-  disclose gaps. Fix defects on sight, including pre-existing/out-of-scope
-  ones; if harmful, codify why in a test.
-- Record new decisions/gotchas/lessons here in the same change, unprompted;
-  repeated instructions mean a rule is missing. Condense to fit the cap. If
-  evidence overturns a finding, fix its code and stale records; act, don't ask.
+  disclose gaps. Fix defects on sight, including pre-existing/out-of-scope ones;
+  if harmful, codify why in a test.
+- Record decisions/gotchas here in the same change; repeated instructions mean a
+  rule is missing. Condense to fit the cap. Fix code and stale records when
+  evidence overturns a finding; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun failures.
 - Never commit secrets, generated artifacts, or env files.

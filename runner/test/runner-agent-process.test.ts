@@ -258,6 +258,15 @@ function terminateRunner(child: RunnerChild): Promise<number> {
   return child.exited;
 }
 
+async function expectConnections(
+  server: ReturnType<typeof runnerServer>,
+  count: number,
+): Promise<void> {
+  expect(
+    await waitUntil(() => server.connections().length === count, 7_000),
+  ).toBe(true);
+}
+
 async function expectRegistered(
   server: ReturnType<typeof runnerServer>,
 ): Promise<void> {
@@ -315,10 +324,7 @@ test("a command executes once and reports through the reconnected socket", async
       }, 2_000),
     ).toBe(true);
     expect(setup.server.disconnect()).toBe(true);
-    expect(await waitUntil(() => setup.server.attempts() === 2, 7_000)).toBe(
-      true,
-    );
-    expect(setup.server.connections()).toHaveLength(2);
+    await expectConnections(setup.server, 2);
     expect(setup.server.connections()[0]?.processNonce).toBeDefined();
     expect(setup.server.connections()[1]?.processNonce).toBe(
       setup.server.connections()[0]?.processNonce,
@@ -352,9 +358,7 @@ test("separate runner process launches use distinct process nonces", async () =>
 
     await terminateRunner(setup.child);
     replacement = spawnRunner(join(setup.directory, "runner.conf"));
-    expect(
-      await waitUntil(() => setup.server.connections().length === 2, 7_000),
-    ).toBe(true);
+    await expectConnections(setup.server, 2);
 
     const secondNonce = setup.server.connections()[1]?.processNonce;
     expect(secondNonce).toBeDefined();
