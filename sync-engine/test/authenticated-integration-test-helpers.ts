@@ -347,12 +347,16 @@ export function createSchemaCompatibleTestDatabase(): AppDatabase {
   return database;
 }
 
-export function createAuthenticatedTestDatabase(path?: string): AppDatabase {
+export function createAuthenticatedTestDatabase(
+  // Persistence-only liveness regressions reopen the fixture database.
+  path?: string,
+): AppDatabase {
   const database =
     path === undefined
       ? createSchemaCompatibleTestDatabase()
       : createDatabase(path);
   if (path !== undefined) ensureWaveOneColumns(database);
+  // A reopened fixture already has its stable authenticated user/session rows.
   const fixtureAlreadyInitialized = database
     .select({ id: users.id })
     .from(users)

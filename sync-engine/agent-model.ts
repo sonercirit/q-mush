@@ -50,7 +50,6 @@ import {
   promptCacheBreakpoints,
   withPromptCacheControl,
 } from "./provider-prompt-cache.ts";
-import { providerRequestStateHandler } from "./provider-request-lifecycle.ts";
 import type {
   ProviderModelRequest,
   ProviderRequestProtocol,
@@ -567,7 +566,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   } {
     return {
       ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
-      onRequestState: providerRequestStateHandler(this.#onRequestState),
+      onRequestState: this.#onRequestState ?? (() => undefined),
       ...(signal === undefined ? {} : { signal }),
     };
   }
@@ -604,7 +603,6 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #completeHttp(...parameters: CompletionArguments): Promise<AgentModelStep> {
     const input = completionInput(parameters);
-    this.#onRequestState?.("active");
     const protocol = this.#httpProtocol();
     return completeProviderHttp(
       {
@@ -616,6 +614,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
           protocol,
         }),
         onDelta: this.#onDelta,
+        onRequestState: this.#onRequestState,
         protocol,
         provider: this.#provider,
         sleep: this.#sleep,

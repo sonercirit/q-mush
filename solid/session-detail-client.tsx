@@ -129,21 +129,6 @@ function sessionCostText(
   }
 }
 
-function stepElapsedTime(startedAt: number, now: number): string {
-  return formatSessionTime(Math.max(0, now - startedAt));
-}
-
-function StepDuration(props: {
-  readonly now: number;
-  readonly startedAt: number;
-}): JSX.Element {
-  return (
-    <span class="text-emerald-200/80" data-session-step-duration="true">
-      {`Step: ${stepElapsedTime(props.startedAt, props.now)}`}
-    </span>
-  );
-}
-
 function SessionMetrics(props: {
   readonly session: Pick<
     AgentSessionSummary,
@@ -178,7 +163,9 @@ function SessionMetrics(props: {
         keyed
       >
         {(stepStartedAt) => (
-          <StepDuration now={now()} startedAt={stepStartedAt} />
+          <span class="text-emerald-200/80" data-session-step-duration="true">
+            {`Step: ${formatSessionTime(Math.max(0, now() - stepStartedAt))}`}
+          </span>
         )}
       </Show>
       <Show when={props.session.runtimePending} keyed>

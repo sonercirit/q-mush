@@ -607,6 +607,37 @@ describe("chat completions agent model", () => {
     expectDoneStep(await completeHello(model));
   });
 
+  test("tracks HTTP admission until response headers arrive", async () => {
+    const states: string[] = [];
+    let releaseResponse: (() => void) | undefined;
+    const responseReady = new Promise<void>((resolve) => {
+      releaseResponse = resolve;
+    });
+    const model = new ChatCompletionsAgentModel({
+      credential: {
+        ...apiKeyCredential("secret"),
+        baseUrl: "https://generic.example/v1",
+      },
+      fetch: async () => {
+        await responseReady;
+        return createJsonResponse({
+          choices: [{ finish_reason: "stop", message: { content: "Done." } }],
+        });
+      },
+      maxOutputTokens: null,
+      model: "generic-model",
+      onRequestState: (state) => states.push(state),
+      provider: "generic",
+    });
+
+    const completion = model.complete([{ content: "Hello", role: "user" }]);
+    await Promise.resolve();
+    expect(states).toEqual(["admission"]);
+    releaseResponse?.();
+    await completion;
+    expect(states).toEqual(["admission", "active"]);
+  });
+
   test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({
       credential: apiKeyCredential("secret"),

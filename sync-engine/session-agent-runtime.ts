@@ -31,7 +31,6 @@ import {
 } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import { providerRequestStateHandler } from "./provider-request-lifecycle.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
@@ -160,7 +159,7 @@ function recordCompaction(
 }
 
 function runtimeProviderStateHandler(runtime: SessionAgentRuntimeDependencies) {
-  return providerRequestStateHandler(runtime.markPending);
+  return runtime.markPending;
 }
 
 function sessionConversation(

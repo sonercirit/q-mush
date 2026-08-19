@@ -3,10 +3,7 @@ import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
-import {
-  providerRequestStateHandler,
-  type ProviderRequestLifecycleOptions,
-} from "../../sync-engine/provider-request-lifecycle.ts";
+import type { ProviderRequestLifecycleOptions } from "../../sync-engine/provider-request-lifecycle.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
@@ -240,7 +237,7 @@ export function apiKeyModel(
     maxOutputTokens: null,
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
-    onRequestState: providerRequestStateHandler(options.onRequestState),
+    onRequestState: options.onRequestState ?? (() => undefined),
     provider: "openai",
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     webSocket: options.webSocket,
