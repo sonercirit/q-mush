@@ -73,20 +73,30 @@ function shrinkStringToFit(options: {
   return selected !== original;
 }
 
-function removeWhileOversized(options: {
+function serializeAfterRemovingOversizedItems(options: {
+  readonly envelope: MutableRecord;
   readonly items: unknown[];
   readonly maximum: number;
-  readonly onRemove: () => void;
-  readonly remove: () => unknown;
-  readonly serialize: () => string;
-}): void {
+  readonly sourceLength?: number;
+  readonly truncation?: MutableRecord;
+}): string | undefined {
+  const serialize = (): string => compact(options.envelope);
   while (
-    unicodeCharacterCount(options.serialize()) > options.maximum &&
+    unicodeCharacterCount(serialize()) > options.maximum &&
     options.items.length > 0
   ) {
-    options.remove();
-    options.onRemove();
+    options.items.pop();
+    options.envelope["returnedItems"] = options.items.length;
+    if (options.sourceLength === undefined) {
+      if (options.truncation !== undefined) {
+        options.truncation["items"] = true;
+      }
+    } else {
+      options.envelope["omittedItems"] =
+        options.sourceLength - options.items.length;
+    }
   }
+  return serializedWithinMaximum(serialize, options.maximum);
 }
 
 function boundedReadSessionOutput(
@@ -219,18 +229,12 @@ function boundedPaginatedOutput(
     truncated: true,
     truncation,
   };
-  const serialize = (): string => compact(envelope);
-  removeWhileOversized({
+  return serializeAfterRemovingOversizedItems({
+    envelope,
     items,
     maximum,
-    onRemove: () => {
-      envelope["returnedItems"] = items.length;
-      truncation["items"] = true;
-    },
-    remove: () => items.pop(),
-    serialize,
+    truncation,
   });
-  return serializedWithinMaximum(serialize, maximum);
 }
 
 function boundedParallelOutput(
@@ -252,20 +256,12 @@ function boundedParallelOutput(
     totalItems: sourceItems.length,
     truncated: true,
   };
-  const serialize = (): string => compact(envelope);
-  removeWhileOversized({
+  return serializeAfterRemovingOversizedItems({
+    envelope,
     items,
     maximum,
-    onRemove: () => {
-      envelope["omittedItems"] = sourceItems.length - items.length;
-      envelope["returnedItems"] = items.length;
-    },
-    remove: () => {
-      items.pop();
-    },
-    serialize,
+    sourceLength: sourceItems.length,
   });
-  return serializedWithinMaximum(serialize, maximum);
 }
 
 export function boundStructuredSessionToolOutput(
