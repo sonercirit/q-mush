@@ -306,10 +306,11 @@ describe("agent sessions", () => {
     const model = new ScriptedAgentModel([
       { content: "Screenshot implemented.", toolCalls: [] },
     ]);
+    const database = createAuthenticatedTestDatabase({
+      expiresAt: 1.7e12 + 6048e5,
+    });
     const setup = connectedSessionSetup(model, "api_key", undefined, {
-      database: createAuthenticatedTestDatabase({
-        expiresAt: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
-      }),
+      database,
       now: () => (now += 3_000),
     });
     const imageRequest = createSessionRequest(true, "high", "gpt-4.1-mini", [
