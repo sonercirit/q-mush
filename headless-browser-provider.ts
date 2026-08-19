@@ -1,9 +1,4 @@
-import { writeFile } from "node:fs/promises";
 import type { BrowserProvider, BrowserProviderOption } from "vitest/node";
-
-interface HeadlessProviderOptions {
-  readonly provider: BrowserProviderOption;
-}
 
 function forceHeadless(
   project: Parameters<BrowserProviderOption["providerFactory"]>[0],
@@ -17,26 +12,11 @@ function forceHeadless(
 
 export function enforceHeadlessBrowser(
   provider: BrowserProviderOption,
-  launchReportPath?: string,
-): BrowserProviderOption<HeadlessProviderOptions> {
+): BrowserProviderOption {
   return {
     ...provider,
-    options: { ...provider.options, provider },
     providerFactory: (project): BrowserProvider => {
       forceHeadless(project);
-      if (launchReportPath !== undefined) {
-        return {
-          close: () => undefined,
-          getCommandsContext: () => ({}),
-          name: "playwright",
-          openPage: () =>
-            writeFile(
-              launchReportPath,
-              JSON.stringify({ headless: project.config.browser.headless }),
-            ).then(() => Promise.reject(new Error("Browser launch captured"))),
-          supportsParallelism: true,
-        };
-      }
       const browser = provider.providerFactory(project);
       const openPage = browser.openPage.bind(browser);
       browser.openPage = (sessionId, url, options) => {

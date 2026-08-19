@@ -26,7 +26,9 @@ export interface BrowserTestDependencies {
 
 const defaultDependencies: BrowserTestDependencies = {
   executable: process.execPath,
-  spawn: (command, options) => Bun.spawn([...command], options),
+  spawn(command, options) {
+    return Bun.spawn([...command], options);
+  },
 };
 
 function headlessEnvironment(
@@ -69,6 +71,7 @@ export async function runBrowserTests(
       "run",
       "--config",
       join(root, "vitest.browser.config.ts"),
+      "--configLoader=runner",
       ...arguments_,
     ],
     {

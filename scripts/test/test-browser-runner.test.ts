@@ -72,6 +72,7 @@ test("browser launcher forwards filters while disabling inherited Playwright deb
     "run",
     "--config",
     join(ROOT_DIRECTORY, "vitest.browser.config.ts"),
+    "--configLoader=runner",
     "session-detail",
     "--browser.headless=false",
   ]);

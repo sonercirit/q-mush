@@ -1,13 +1,22 @@
+import { join } from "node:path";
 import { publishBrowserLifecycleReport } from "./browser-lifecycle-report.ts";
 
-const reportPath = process.env["Q_MUSH_BROWSER_PROBE_REPORT"];
-const realBun = process.env["Q_MUSH_BROWSER_REAL_BUN"];
+const requiredEnvironment = [
+  "Q_MUSH_BROWSER_PROBE_REPORT",
+  "Q_MUSH_BROWSER_REAL_BUN",
+] as const;
+const [reportPath, realBun] = requiredEnvironment.map(
+  (name) => process.env[name],
+);
 if (reportPath === undefined || realBun === undefined) {
   throw new Error("Browser lifecycle Bun shim requires probe paths");
 }
 
 const invocation = process.argv.slice(2);
-const configPath = `${process.env["Q_MUSH_BROWSER_PROBE_ROOT"] ?? ""}/vitest.browser.config.ts`;
+const configPath = join(
+  process.env["Q_MUSH_BROWSER_PROBE_ROOT"] ?? "",
+  "vitest.browser.config.ts",
+);
 const runnerCommand = [
   "--no-orphans",
   "run",
@@ -16,6 +25,7 @@ const runnerCommand = [
   "run",
   "--config",
   configPath,
+  "--configLoader=runner",
 ];
 if (!runnerCommand.every((argument, index) => invocation[index] === argument)) {
   throw new Error(

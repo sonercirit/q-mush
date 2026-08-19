@@ -9,8 +9,7 @@ Living project memory.
 
 ## Working Agreements
 
-- Research online: use brave-search on provider docs/trackers, then probe APIs,
-  schemas, usage metrics.
+- Research online: use brave-search on provider docs; probe APIs.
 - Call capabilities impossible only with excluding evidence; otherwise record an
   open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,

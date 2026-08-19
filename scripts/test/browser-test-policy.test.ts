@@ -28,6 +28,9 @@ const PLAYWRIGHT_LAUNCH_PROBE = fileURLToPath(
   new URL("fixtures/playwright-launch-probe.ts", import.meta.url),
 );
 
+const SUPPORTS_NO_ORPHANS =
+  process.platform === "darwin" || process.platform === "linux";
+
 const PLAYWRIGHT_LAUNCH_DESCRIPTOR = Object.getOwnPropertyDescriptor(
   chromium,
   "launch",
@@ -115,28 +118,30 @@ async function browserLaunchProbe(
 }
 
 test("ordinary Chromium launches stay headless under adversarial overrides", async () => {
-  await expect(browserLaunchProbe([])).resolves.toMatchObject({
-    headless: true,
-  });
-  await expect(
-    browserLaunchProbe([
-      "--browser.instances.0.browser=chromium",
-      "--browser.instances.0.name=forced-headed",
-      "--no-browser.instances.0.headless",
-      "--project=forced-headed",
-    ]),
-  ).resolves.toMatchObject({ headless: true });
-  await expect(
-    browserLaunchProbe([
-      "--browser.instances.0.browser",
-      "chromium",
-      "--browser.instances.0.name",
-      "forced-headed-separated",
-      "--browser.instances.0.headless=false",
-      "--project",
-      "forced-headed-separated",
-    ]),
-  ).resolves.toMatchObject({ headless: true });
+  const launchOptions = async (
+    arguments_: readonly string[],
+  ): Promise<void> => {
+    await expect(browserLaunchProbe(arguments_)).resolves.toMatchObject({
+      headless: true,
+    });
+  };
+  await launchOptions([]);
+  await launchOptions(["--browser.headless=false"]);
+  await launchOptions([
+    "--browser.instances.0.browser=chromium",
+    "--browser.instances.0.name=forced-headed",
+    "--no-browser.instances.0.headless",
+    "--project=forced-headed",
+  ]);
+  await launchOptions([
+    "--browser.instances.0.browser",
+    "chromium",
+    "--browser.instances.0.name",
+    "forced-headed-separated",
+    "--browser.instances.0.headless=false",
+    "--project",
+    "forced-headed-separated",
+  ]);
 });
 
 interface PlaywrightLaunchResult {
@@ -344,9 +349,6 @@ async function readBrowserLifecycleReport(
     vitestPid: Number(processes["vitestPid"]),
   };
 }
-
-const SUPPORTS_NO_ORPHANS =
-  process.platform === "darwin" || process.platform === "linux";
 
 test.runIf(SUPPORTS_NO_ORPHANS)(
   "shipped launcher recursively cleans a detached non-Bun browser",

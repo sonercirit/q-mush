@@ -4,9 +4,7 @@ import solid from "vite-plugin-solid";
 import { defineConfig } from "vitest/config";
 import { enforceHeadlessBrowser } from "./headless-browser-provider.ts";
 
-const BROWSER_LAUNCH_REPORT = "Q_MUSH_BROWSER_LAUNCH_REPORT";
-const launchProbePath = process.env[BROWSER_LAUNCH_REPORT];
-const provider = enforceHeadlessBrowser(playwright(), launchProbePath);
+const provider = enforceHeadlessBrowser(playwright());
 
 export default defineConfig({
   plugins: [solid({ dev: false, hot: false }), tailwindcss()],
