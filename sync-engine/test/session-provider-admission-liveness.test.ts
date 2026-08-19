@@ -18,6 +18,7 @@ import {
   createAuthenticatedRequest,
   createAuthenticatedTestDatabase,
   TEST_AUTHENTICATED_USER,
+  TEST_NOW,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
@@ -352,9 +353,15 @@ test("fails a reused provider socket that stalls after a durable tool result", a
     hasSessionStatus("failed"),
   );
   expect(failed).toMatchObject({ runtimePending: null, status: "failed" });
-  expect(JSON.stringify(failed)).toContain(
-    "provider request was not acknowledged",
-  );
+  if (!isRecord(failed)) throw new TypeError("Expected failed session detail");
+  const messages = failed["messages"];
+  const lastMessage: unknown = Array.isArray(messages)
+    ? messages.at(-1)
+    : undefined;
+  expect(lastMessage).toMatchObject({
+    content:
+      "Session failed: the provider request was not acknowledged during the liveness recovery window",
+  });
   await waitForSessionValue(
     () => hasRealtimeSession(browser.record.sent, isFailedTerminalEvent),
     (published) => published === true,
@@ -379,7 +386,10 @@ test("fails a reused provider socket that stalls after a durable tool result", a
 
 test("process recreation fails the running row without replaying durable tools", async () => {
   const databasePath = join(temporaryDirectory(), "sessions.sqlite");
-  const database = createAuthenticatedTestDatabase(databasePath);
+  const database = createAuthenticatedTestDatabase({
+    expiresAt: TEST_NOW + 7 * 24 * 60 * 60 * 1_000,
+    path: databasePath,
+  });
   const run = await createStalledSession("bare_metal", database);
   const { socket } = await completeDurableTool(run);
   expect(sessionStatus(run.setup.sessions)).toBe("running");
@@ -388,7 +398,7 @@ test("process recreation fails the running row without replaying durable tools",
   expectProviderSocketReleased(socket);
   closeLivenessSession(run.setup);
 
-  const reopened = createAuthenticatedTestDatabase(databasePath);
+  const reopened = createAuthenticatedTestDatabase({ path: databasePath });
   const resumedModel = new ScriptedAgentModel([
     { content: "Recovered from durable tool output.", toolCalls: [] },
   ]);

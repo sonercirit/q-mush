@@ -98,10 +98,13 @@ function responseEvent(
   };
 }
 
-function expectRequestPending(pending: Promise<unknown>): Promise<void> {
-  return expect(
-    Promise.race([pending.then(() => "settled"), Promise.resolve("pending")]),
-  ).resolves.toBe("pending");
+async function expectRequestPending(pending: Promise<unknown>): Promise<void> {
+  let settled = false;
+  void pending.finally(() => {
+    settled = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(settled).toBe(false);
 }
 
 function expectRequestStates(
@@ -165,7 +168,10 @@ test("keeps admission bounded through unknown provider frames", async () => {
     type: "response.output_text.delta",
   });
   expectRequestStates(observedStates, "admission", "active");
-  request.socket.receive(responseEvent("response.completed", "stale"));
+  request.socket.receive({
+    response: { id: "stale", output: [{ content: "Wrong" }] },
+    type: "response.completed",
+  });
   await expectRequestPending(request.pending);
   request.socket.receive(responseEvent("response.completed", "current"));
   expectDoneStep(await request.pending);

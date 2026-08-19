@@ -348,9 +348,9 @@ export function createSchemaCompatibleTestDatabase(): AppDatabase {
 }
 
 export function createAuthenticatedTestDatabase(
-  // Persistence-only liveness regressions reopen the fixture database.
-  path?: string,
+  options: { expiresAt?: number; path?: string } = {},
 ): AppDatabase {
+  const { expiresAt = TEST_NOW + 60_000, path } = options;
   const database =
     path === undefined
       ? createSchemaCompatibleTestDatabase()
@@ -375,13 +375,10 @@ export function createAuthenticatedTestDatabase(
     })
     .run();
   database
-    // The shared fake clock advances for every pending-component report. Keep
-    // authentication valid through long tool-heavy session tests, including
-    // image persistence, rather than expiring after their accumulated ticks.
     .insert(sessions)
     .values({
       ...testAuditFields(),
-      expiresAt: new Date(TEST_NOW + 7 * 24 * 60 * 60 * 1_000),
+      expiresAt: new Date(expiresAt),
       id: SESSION_ID,
       token: SESSION_TOKEN,
       userId: TEST_USER_ID,

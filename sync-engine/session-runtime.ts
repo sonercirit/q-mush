@@ -278,7 +278,8 @@ export class SessionRuntimes {
             if (this.#active.get(sessionId) !== runtime) {
               return "fenced";
             }
-            if (runtime.pending.component === component) {
+            const unchanged = runtime.pending.component === component;
+            if (unchanged && component !== "provider_admission") {
               return "unchanged";
             }
             runtime.pending = { component, since: this.#now() };

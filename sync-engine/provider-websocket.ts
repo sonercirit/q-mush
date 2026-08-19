@@ -2,7 +2,10 @@ import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
-import { createProviderStreamAccumulator } from "./provider-stream.ts";
+import {
+  createProviderStreamAccumulator,
+  RESPONSES_TERMINAL_EVENT_TYPES,
+} from "./provider-stream.ts";
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;
@@ -220,10 +223,7 @@ export class ProviderWebSocketSession {
               eventType === "response.created" ||
               (typeof eventType === "string" &&
                 eventType.startsWith("response.") &&
-                eventType !== "response.completed" &&
-                eventType !== "response.failed" &&
-                eventType !== "response.incomplete" &&
-                eventType !== "response.cancelled");
+                !RESPONSES_TERMINAL_EVENT_TYPES.has(eventType));
             if (
               !admitsRequest ||
               eventResponseId === undefined ||

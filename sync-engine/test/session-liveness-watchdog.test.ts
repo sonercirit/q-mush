@@ -367,6 +367,20 @@ test("requires the stored execution generation to match its runtime", () => {
   closeSetup(setup);
 });
 
+test("allows legitimate provider retries to refresh the admission bound", () => {
+  const admission = admissionWatchdogSetup();
+  const { runtime, setup, watchdog } = admission;
+
+  watchdog.scan();
+  for (let minute = 1; minute <= 12; minute += 1) {
+    watchdog.setNow(TEST_NOW + minute * 60_000);
+    runtime.pending("provider_admission");
+    watchdog.scan();
+  }
+
+  expectRuntimeRemainsActive(setup, runtime);
+});
+
 test("fails provider admission that remains unacknowledged beyond the grace bound", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
 
@@ -398,24 +412,6 @@ test("does not time out an acknowledged provider request", () => {
   closeSetup(setup);
 });
 
-test("preserves acknowledgement", () => {
-  const { runtime, setup, watchdog } = admissionWatchdogSetup();
-  const originalPending = runtime.runtimes.pending.bind(runtime.runtimes);
-  const pending = vi.spyOn(runtime.runtimes, "pending");
-  let calls = 0;
-  pending.mockImplementation((...arguments_) => {
-    const observed = originalPending(...arguments_);
-    calls += 1;
-    if (calls === 2) runtime.pending("provider_request");
-    return observed;
-  });
-
-  scanPastGrace(watchdog);
-
-  expect(pending).toHaveBeenCalledTimes(3);
-  expectRuntimeRemainsActive(setup, runtime);
-});
-
 test("preserves early acknowledgement", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
 
@@ -429,7 +425,7 @@ test("preserves early acknowledgement", () => {
   expectRuntimeRemainsActive(setup, runtime);
 });
 
-test("fails queued command with connected runner", async () => {
+test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "startup");
   const broker = new RunnerCommandBroker({

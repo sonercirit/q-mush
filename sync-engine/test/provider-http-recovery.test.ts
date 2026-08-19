@@ -74,11 +74,15 @@ class ProviderResponses {
   readonly requests: Request[] = [];
   readonly #responses: Response[];
 
-  constructor(responses: Response[]) {
+  constructor(
+    responses: Response[],
+    readonly beforeFetch?: () => Promise<void>,
+  ) {
     this.#responses = responses;
   }
 
-  fetch = async (request: Request): Promise<Response> => {
+  readonly fetch = async (request: Request): Promise<Response> => {
+    await this.beforeFetch?.();
     const response = this.#responses.shift();
     this.requests.push(request);
     if (response === undefined) {
@@ -157,16 +161,13 @@ describe("provider HTTP step recovery", () => {
     const retryResponse = eventStream([
       errorEvent({ code: 502, message: "Retry" }),
     ]);
-    const provider = new ProviderResponses([
-      retryResponse,
-      eventStream([textEvent("Done.")]),
-    ]);
-    const fetch = provider.fetch;
-    provider.fetch = async (request: Request): Promise<Response> => {
-      attempts += 1;
-      if (attempts === 1) await firstHeaders;
-      return fetch(request);
-    };
+    const provider = new ProviderResponses(
+      [retryResponse, eventStream([textEvent("Done.")])],
+      async () => {
+        attempts += 1;
+        if (attempts === 1) await firstHeaders;
+      },
+    );
     const model = openRouterModel(provider, undefined, (state) => {
       states.push(state);
     });
