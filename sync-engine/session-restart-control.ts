@@ -243,6 +243,7 @@ export function createSessionRestartControl(
     },
     drainRunner: async (runnerId, restartId) => {
       validRestartId(restartId);
+      if (finalShutdownPrepared) return;
       if (runtimes.draining) {
         const serverId = serverRestartId();
         if (serverId === undefined) {

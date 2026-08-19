@@ -37,7 +37,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   readonly started: (string | undefined)[] = [];
   #runnerRequests = new Map<string, RestartRequest>();
   #serverRequest: RestartRequest | undefined;
-  #settleDrain: (() => void) | undefined;
+  #settleDrains = new Set<() => void>();
 
   get draining(): boolean {
     return this.#serverRequest !== undefined;
@@ -97,14 +97,14 @@ class TestRestartRuntimes implements RestartRuntimeControl {
       return { persistence, settled: persistence };
     }
     const settled = new Promise<void>((resolve) => {
-      this.#settleDrain = resolve;
+      this.#settleDrains.add(resolve);
     });
     return { persistence, settled };
   }
 
   settleDrain(): void {
-    this.#settleDrain?.();
-    this.#settleDrain = undefined;
+    for (const settle of this.#settleDrains) settle();
+    this.#settleDrains.clear();
   }
 
   drainRequest(scope: RestartScope): RestartRequest | undefined {
@@ -210,6 +210,20 @@ describe("session restart control", () => {
 
     await restart.prepareServerShutdown();
     await restart.drainServerFinal();
+
+    expect(runtimes.requestedDrains).toBe(0);
+    expect(runtimes.drains).toEqual([
+      { restartId: "final-shutdown", scope: { kind: "server" } },
+      { restartId: "final-shutdown", scope: { kind: "server" } },
+    ]);
+  });
+
+  test("does not request another bounded drain during final shutdown", async () => {
+    const { restart, runtimes } = control(() => "final-shutdown");
+
+    await restart.prepareServerShutdown();
+    await restart.drainServerFinal();
+    await restart.drainRunner("runner-1", "runner-restart");
 
     expect(runtimes.requestedDrains).toBe(0);
     expect(runtimes.drains).toEqual([
