@@ -266,19 +266,21 @@ export function createSessionRestartControl(
       }
       if (runtimes.draining) {
         const serverId = serverRestartId();
-        if (serverId === undefined || serverDeadline === undefined) {
-          throw new Error("The server restart request was lost");
+        if (serverId !== undefined && serverDeadline !== undefined) {
+          const sharedDrain = boundedDrain(
+            { kind: "server" },
+            serverId,
+            true,
+            serverDeadline,
+            false,
+          );
+          sharedServerRestartIds.set(runnerId, restartId);
+          await sharedDrain;
+          return;
         }
-        const sharedDrain = boundedDrain(
-          { kind: "server" },
-          serverId,
-          true,
-          serverDeadline,
-          false,
+        warn(
+          "The active server restart deadline was unavailable; starting a dedicated runner drain",
         );
-        sharedServerRestartIds.set(runnerId, restartId);
-        await sharedDrain;
-        return;
       }
       await boundedDrain({ kind: "runner", runnerId }, restartId, false);
     },

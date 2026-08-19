@@ -345,6 +345,25 @@ describe("session restart control", () => {
     expectNoForcePark(runtimes);
   });
 
+  test("a runner drain recovers when the active server deadline is unavailable", async () => {
+    const warnings = new Array<string>();
+    const setup = control(() => "server", {
+      warn: warnings.push.bind(warnings),
+    });
+    const { restart, runtimes } = setup;
+    await runtimes.drain({ kind: "server" }, "external-server");
+
+    await restart.drainRunner("runner-1", "runner-restart");
+
+    expect(runtimes.drains.at(-1)).toEqual({
+      restartId: "runner-restart",
+      scope: { kind: "runner", runnerId: "runner-1" },
+    });
+    expect(warnings).toEqual([
+      "The active server restart deadline was unavailable; starting a dedicated runner drain",
+    ]);
+  });
+
   test("a late runner keeps the original server deadline", async () => {
     let now = 100;
     const delays = new Array<number>();

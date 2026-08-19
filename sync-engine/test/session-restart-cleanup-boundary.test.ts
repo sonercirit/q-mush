@@ -30,6 +30,15 @@ function finishCleanupCommand(
   expect(commandId).toBe("cleanup-command");
 }
 
+function completeCleanup(broker: RunnerCommandBroker): void {
+  expect(
+    broker.complete(TEST_SESSION_DETAIL.runnerId, "cleanup-command", {
+      output: "cleaned",
+      state: "completed",
+    }),
+  ).toBe(true);
+}
+
 function drainExpired(cleanup: SessionExecutionCleanup): Promise<void> {
   return cleanup.drainPending(new RestartDeadline(0, () => 0));
 }
@@ -86,6 +95,23 @@ test("development drain prevents chained terminal cleanup from dispatching", asy
   expectCleanupInactive(broker);
 });
 
+test("cleanup dispatch resumes after a completed development drain", async () => {
+  const broker = new RunnerCommandBroker({
+    commandId: () => "cleanup-command",
+    deliver: () => true,
+  });
+  const cleanup = new SessionExecutionCleanup(broker);
+
+  await drainExpired(cleanup);
+  const promise = containerCleanup(cleanup);
+
+  expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-command")).toBe(
+    true,
+  );
+  completeCleanup(broker);
+  await promise;
+});
+
 test("final shutdown can still await pending execution cleanup", async () => {
   const { broker, promise } = await pendingCleanup();
   let settled = false;
@@ -95,12 +121,7 @@ test("final shutdown can still await pending execution cleanup", async () => {
   await Promise.resolve();
   expect(settled).toBe(false);
 
-  expect(
-    broker.complete(TEST_SESSION_DETAIL.runnerId, "cleanup-command", {
-      output: "cleaned",
-      state: "completed",
-    }),
-  ).toBe(true);
+  completeCleanup(broker);
   await promise;
   expect(settled).toBe(true);
 });

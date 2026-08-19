@@ -255,7 +255,7 @@ function publishRestartProgress(): void {
   }
 }
 
-function restartDevelopment(deadlineAt = Date.now()): Promise<void> {
+function restartDevelopment(deadlineAt: number): Promise<void> {
   if (shutdownKind === "final") {
     return Promise.resolve();
   }

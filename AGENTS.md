@@ -9,7 +9,7 @@
   Call capabilities impossible only with excluding evidence; otherwise record an
   open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship now; practice TDD, DRY, and KISS.
+  docs, performance, security, and DX. Ship now; use TDD, DRY, and KISS.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
@@ -20,15 +20,14 @@
 - Record decisions/gotchas here in the same change; repeated instructions mean a
   rule is missing. Condense to fit the cap. Fix code and stale records when
   evidence overturns a finding; act, don't ask.
-- Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun failures.
+- Keep workflows local-first: narrow checks, then broad suites and focused
+  failure reruns.
 - Never commit secrets, generated artifacts, or env files.
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Test: `bun run test` (unit + Chromium); `test:watch` omits browsers;
-  `test:browser` needs bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
-  fails for `./`/absolute paths. It pins headless and sets `PWDEBUG=0` before
-  real Chromium.
+  `test:browser` uses bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
+  fails for other paths. It pins headless and `PWDEBUG=0`.
 - `bun run check` runs all static checks, each also runnable standalone;
   `format`/`lint:fix` write fixes.
 - `.github/workflows/checks.yml` uses Bun 1.3.14 and a frozen lockfile, with

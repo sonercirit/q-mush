@@ -8,7 +8,8 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 
 export class SessionExecutionCleanup {
   readonly #broker: RunnerCommandBroker;
-  #draining = false;
+  #activeDrains = 0;
+  #drainGeneration = 0;
   readonly #offline = new Set<string>();
   readonly #pending = new Map<
     string,
@@ -37,30 +38,34 @@ export class SessionExecutionCleanup {
   }
 
   async drainPending(deadline: RestartDeadline): Promise<void> {
-    // Development restart always exits this process after draining begins.
-    this.#draining = true;
+    this.#activeDrains += 1;
+    this.#drainGeneration += 1;
     const pending = [...this.pending];
-    if (pending.length === 0) return;
-    if (deadline.expired()) {
-      this.cancelPending();
-      return;
-    }
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const expired = new Promise<false>((resolve) => {
-      timer = setTimeout(() => {
-        resolve(false);
-      }, deadline.remaining());
-    });
     try {
-      const completed = await Promise.race([
-        Promise.allSettled(pending).then(() => true),
-        expired,
-      ]);
-      if (!completed) {
+      if (pending.length === 0) return;
+      if (deadline.expired()) {
         this.cancelPending();
+        return;
+      }
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const expired = new Promise<false>((resolve) => {
+        timer = setTimeout(() => {
+          resolve(false);
+        }, deadline.remaining());
+      });
+      try {
+        const completed = await Promise.race([
+          Promise.allSettled(pending).then(() => true),
+          expired,
+        ]);
+        if (!completed) {
+          this.cancelPending();
+        }
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
       }
     } finally {
-      if (timer !== undefined) clearTimeout(timer);
+      this.#activeDrains -= 1;
     }
   }
 
@@ -84,15 +89,16 @@ export class SessionExecutionCleanup {
   }
 
   #dispatch(detail: AgentSessionDetail, terminal: boolean): Promise<void> {
-    if (this.#offline.delete(detail.id) || this.#draining) {
+    if (this.#offline.delete(detail.id) || this.#activeDrains > 0) {
       return Promise.resolve();
     }
     const existing = this.#pending.get(detail.id);
     if (existing !== undefined && (!terminal || existing.terminal)) {
       return existing.promise;
     }
+    const drainGeneration = this.#drainGeneration;
     const dispatch = (signal: AbortSignal) =>
-      this.#draining
+      this.#activeDrains > 0 || drainGeneration !== this.#drainGeneration
         ? Promise.resolve()
         : this.#broker
             .dispatch(

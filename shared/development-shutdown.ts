@@ -42,8 +42,8 @@ function restartProgressTool(value: unknown) {
   if (typeof value !== "object" || value === null) return undefined;
   const count = "count" in value ? value.count : undefined;
   const name = "name" in value ? value.name : undefined;
-  return Number.isSafeInteger(count) &&
-    typeof count === "number" &&
+  return typeof count === "number" &&
+    Number.isSafeInteger(count) &&
     count > 0 &&
     typeof name === "string" &&
     name.length > 0 &&
