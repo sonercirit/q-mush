@@ -29,27 +29,25 @@ Living project memory.
   fit the size cap. When evidence overturns a recorded finding, fix the code it
   justified and every stale record in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun the narrowest failure.
+  captured, then rerun failures.
 - Never commit secrets, generated artifacts, or env files.
-
-## Setup, Commands
-
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
-- Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` (unit + headless Chromium); `test:watch` omits browsers;
+- Test: `bun run test` (unit + Chromium); `test:watch` omits browsers;
   `test:browser` needs bare `scripts/test-browser.ts`: Bun 1.3.14 no-orphans
   fails for `./`/absolute paths. It pins headless and sets `PWDEBUG=0` before
   real Chromium.
-- `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
-- CI uses Bun 1.3.14, frozen lockfile.
+- `bun run check` runs all static checks, each also runnable standalone;
+  `format`/`lint:fix` write fixes.
+- `.github/workflows/checks.yml` uses Bun 1.3.14 and a frozen lockfile, with
+  tests, static-check, build, and whitespace jobs.
 
 ## Architecture and Conventions
 
-- Four enforced production workspaces: `solid` owns browser UI, `sync-engine`
-  the Bun server/integrations, `runner` the standalone runner, `shared`
-  cross-workspace code. The first three import only themselves and `shared`;
-  `shared` imports no other workspace; only `scripts` may import `scripts`.
+- Four production workspaces: `solid` owns browser UI, `sync-engine` server
+  integrations, `runner` the standalone runner, `shared` cross-workspace code.
+  The first three import only themselves and `shared`; `shared` imports no other
+  workspace; only `scripts` may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
@@ -198,17 +196,17 @@ Living project memory.
   production and browser-test imports of `solid/styles.css`) are rejected.
   First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
   and HTML-like `Response` bodies; HTML-like data and TSX pass.
-- Knip checks every issue type and entry export in test and production graphs;
-  browser-only runtime roots are explicit production `ignoreFiles`; tests cannot
-  keep production alive, and unused test helpers fail.
+- Knip checks every issue type and entry export in separate test and production
+  graphs; shipped browser scripts are production roots, tests cannot keep
+  production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
   deliberately matches native CPD's crude whole-file fallback tokenizer.
   Native-token and complete-function alpha matches of ≥20 tokens spanning a line
   boundary fail the zero threshold; alpha ignores locally bound names but
   preserves free names, member APIs, and literals.
-- Repository policy scans tracked, unignored files: 20,000-code-point maximum
-  (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
-  outside `test`/`fixtures`.
+- Repository policy scans tracked files: 20,000-code-point maximum (`bun.lock`,
+  `drizzle/` excepted), tests only under `test`, no app HTML outside
+  `test`/`fixtures`.
 
 ## Decisions and Gotchas
 

@@ -38,6 +38,7 @@ function headlessEnvironment(
     ...base,
     PWDEBUG: "0",
   };
+  // Never inherit environment controls used by browser-launch probes.
   Reflect.deleteProperty(environment, BROWSER_LAUNCH_REPORT);
   return environment;
 }
@@ -55,7 +56,11 @@ export async function runBrowserTests(
         argument === "--config" ||
         argument.startsWith("--config=") ||
         argument === "-c" ||
-        argument.startsWith("-c="),
+        argument.startsWith("-c=") ||
+        argument === "--configLoader" ||
+        argument.startsWith("--configLoader=") ||
+        argument === "--browser.provider" ||
+        argument.startsWith("--browser.provider="),
     )
   ) {
     throw new Error("Browser tests do not accept Vitest config overrides");
