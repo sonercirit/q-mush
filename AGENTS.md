@@ -282,12 +282,14 @@ Living project memory.
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. Local send is admission: bound until correlated
   `response.created`; discard unknown, pre-creation, mismatched-ID frames.
-  Retain IDs for the socket's 60-minute life, not an arbitrary cap. Acknowledged
-  work is unbound. Diagnostics are fenced; watchdog failure aborts without
-  replaying tools. Other WebSocket/accepted-HTTP interruptions or provider
-  errors retry before persistence; replays reset partial UI deltas and exhausted
-  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  WebSocket settlement is generation-owned so an older concurrent request cannot
+  replace the newest reusable socket. Retain IDs for the socket's 60-minute
+  life, not an arbitrary cap. Acknowledged work is unbound. Diagnostics are
+  fenced; watchdog failure aborts without replaying tools. Other
+  WebSocket/accepted-HTTP interruptions or provider errors retry before
+  persistence; replays reset partial UI deltas and exhausted WebSockets fall
+  back to HTTP. Permanent errors and aborts do not retry; terminal failures
+  persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

@@ -88,10 +88,12 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 export class ProviderWebSocketSession {
   readonly #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
+  #socketGeneration = 0;
 
   close(): void {
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#socketGeneration += 1;
     this.#priorResponseIds.clear();
     socket?.close(1000, "Session complete");
   }
@@ -120,6 +122,7 @@ export class ProviderWebSocketSession {
         "responses",
         options.onDelta,
       );
+      const requestGeneration = ++this.#socketGeneration;
       const reusedSocket = this.#takeOpenSocket();
       const socket =
         reusedSocket ??
@@ -151,7 +154,7 @@ export class ProviderWebSocketSession {
         // Only a successfully completed step leaves this socket reusable, so
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
-          if (this.#socket === undefined || this.#socket === socket) {
+          if (requestGeneration === this.#socketGeneration) {
             this.#priorResponseIds.clear();
             for (const id of priorResponseIds) this.#priorResponseIds.add(id);
             if (currentResponseId !== undefined) {

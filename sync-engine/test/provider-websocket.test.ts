@@ -90,6 +90,9 @@ function responseEvent(
     type,
   };
 }
+function completeResponse(socket: FakeProviderSocket, id: string): void {
+  socket.receive(responseEvent("response.completed", id));
+}
 async function expectRequestPending(pending: Promise<unknown>): Promise<void> {
   let settled = false;
   const observeSettlement = (): void => {
@@ -146,7 +149,7 @@ test("accepts terminal-only responses on a fresh socket", async () => {
   const pending = complete(apiKeyModel({ webSocket: sockets.create }));
   const socket = requireProviderSocket(sockets, 0);
   socket.open();
-  socket.receive(responseEvent("response.completed", "terminal-only"));
+  completeResponse(socket, "terminal-only");
   expectDoneStep(await pending);
   socket.close();
 });
@@ -168,7 +171,7 @@ test("bounds admission through unknown frames", async () => {
     type: "response.completed",
   });
   await expectRequestPending(request.pending);
-  request.socket.receive(responseEvent("response.completed", "current"));
+  completeResponse(request.socket, "current");
   expectDoneStep(await request.pending);
 });
 test("removes abort listener after success", async () => {
@@ -205,7 +208,7 @@ test("correlates deltas on a reused socket", async () => {
   const { model, pending: first, socket } = beginLifecycleRequest(states);
   acknowledgeProviderSocket(socket, "response-1");
   expectRequestStates(states, "admission", "active");
-  socket.receive(responseEvent("response.completed", "response-1"));
+  completeResponse(socket, "response-1");
   await first;
   const controller = new AbortController();
   const stalled = model.complete(
@@ -234,25 +237,45 @@ test("correlates deltas on a reused socket", async () => {
     response_id: "response-1",
     type: "response.output_text.delta",
   });
-  socket.receive(responseEvent("response.completed", "response-2"));
+  completeResponse(socket, "response-2");
   expectDoneStep(await stalled);
   socket.close();
   expectProviderSocketReleased(socket);
 });
-test("keeps an in-flight fence across a fresh socket reset", async () => {
+test("rejects a terminal-only stale response during reused-socket admission", async () => {
+  const states = new Array<"active" | "admission">();
+  const request = beginLifecycleRequest(states);
+  acknowledgeProviderSocket(request.socket, "first");
+  completeResponse(request.socket, "first");
+  await request.pending;
+  const pending = complete(request.model);
+  const socket = request.socket;
+  completeResponse(socket, "stale-terminal");
+  expectRequestStates(states, "admission", "active", "admission");
+  await expectRequestPending(pending);
+  socket.receive({
+    delta: "Done.",
+    response_id: "second",
+    type: "response.output_text.delta",
+  });
+  completeResponse(socket, "second");
+  expectDoneStep(await pending);
+  socket.close();
+});
+test("keeps a defensive-copy fence while the newest socket wins a concurrent reset", async () => {
   const states: ("active" | "admission")[] = [],
     { model, sockets } = lifecycleModel(states);
   const first = complete(model),
     old = requireProviderSocket(sockets, 0);
   old.open();
   acknowledgeProviderSocket(old, "old");
-  old.receive(responseEvent("response.completed", "old"));
+  completeResponse(old, "old");
   await first;
   for (let generation = 0; generation < 40; generation += 1) {
     const id = String(generation);
     const pending = complete(model);
     acknowledgeProviderSocket(old, id);
-    old.receive(responseEvent("response.completed", id));
+    completeResponse(old, id);
     await pending;
   }
   const reused = complete(model),
@@ -265,13 +288,35 @@ test("keeps an in-flight fence across a fresh socket reset", async () => {
     type: "response.output_text.delta",
   });
   acknowledgeProviderSocket(old, "current");
-  old.receive(responseEvent("response.completed", "current"));
+  completeResponse(old, "current");
   expectDoneStep(await reused);
   acknowledgeProviderSocket(next, "fresh");
-  next.receive(responseEvent("response.completed", "fresh"));
+  completeResponse(next, "fresh");
   expectDoneStep(await fresh);
-  old.close();
+  expect(old.readyState).toBe(WebSocket.CLOSED);
+  const subsequent = complete(model);
+  expect(next.sent).toHaveLength(2);
+  acknowledgeProviderSocket(next, "subsequent");
+  completeResponse(next, "subsequent");
+  expectDoneStep(await subsequent);
   next.close();
+});
+test("close clears retained response IDs before a fresh connection", async () => {
+  const sockets = new FakeProviderSockets(),
+    model = apiKeyModel({ webSocket: sockets.create }),
+    first = complete(model),
+    original = requireProviderSocket(sockets, 0);
+  original.open();
+  acknowledgeProviderSocket(original, "repeated");
+  completeResponse(original, "repeated");
+  expectDoneStep(await first);
+  model.close();
+  const pending = complete(model);
+  const fresh = requireProviderSocket(sockets, 1);
+  fresh.open();
+  completeResponse(fresh, "repeated");
+  expectDoneStep(await pending);
+  fresh.close();
 });
 test("reuses a socket and reconnects after idle close", async () => {
   const stepSockets = new FakeProviderSockets();
