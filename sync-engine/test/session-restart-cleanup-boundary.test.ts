@@ -110,6 +110,8 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
     commandId: () => `cleanup-${String(++commandSequence)}`,
     deliver: () => true,
   });
+  // Keep cancellation inert so the first cleanup remains pending while each
+  // drain deadline is advanced independently.
   vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
   const cleanup = new SessionExecutionCleanup(broker);
   const first = containerCleanup(cleanup);
