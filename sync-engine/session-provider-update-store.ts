@@ -87,15 +87,19 @@ export function updateStoredSessionProvider(
     { ...input },
     input.expectedGeneration,
   );
+  const generationChange = {
+    condition,
+    database: resources.database,
+    generateId: resources.generateId,
+    mode: "administrative" as const,
+    now: input.now,
+    sessionId: input.sessionId,
+    values: { ...values, ...timing },
+  };
   const changed = resources.database.transaction((transaction) =>
     advanceStoredSessionGeneration({
-      condition,
+      ...generationChange,
       database: transaction,
-      generateId: resources.generateId,
-      mode: "administrative",
-      now: input.now,
-      sessionId: input.sessionId,
-      values: { ...values, ...timing },
     }),
   );
   if (changed === undefined) return { status: "conflict" };

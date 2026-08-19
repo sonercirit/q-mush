@@ -56,8 +56,7 @@ export function readStoredSessionGenerationTranscript(
               generationTurnCondition(sessionId, generation),
             ),
           )
-          .orderBy(asc(agentMessages.createdAt))
-          .orderBy(asc(agentMessages.id))
+          .orderBy(...[asc(agentMessages.createdAt), asc(agentMessages.id)])
           .all();
   const messages = storedMessages.map(summarizeStoredMessage);
   return { messages, turns };
