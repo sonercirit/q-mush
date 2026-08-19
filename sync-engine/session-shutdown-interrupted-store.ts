@@ -55,33 +55,6 @@ export class ShutdownInterruptedSessionStore {
     this.#options = options;
   }
 
-  advanceGeneration(
-    sessionId: string,
-    generation: number,
-    values: Parameters<typeof advanceStoredSessionGeneration>[0]["values"],
-    now: number,
-  ): SessionGenerationAdvanceResult | undefined {
-    const generationChange = {
-      database: this.#options.database,
-      generateId: this.#options.generateId,
-      mode: "attempt" as const,
-      now,
-      sessionId,
-      startTurn: {},
-      values,
-    };
-    return this.#options.database.transaction((transaction) =>
-      advanceStoredSessionGeneration({
-        ...generationChange,
-        condition: sessionGenerationCondition(
-          { id: sessionId, status: "running" },
-          generation,
-        ),
-        database: transaction,
-      }),
-    );
-  }
-
   mark(
     sessionId: string,
     generation: number,
@@ -225,7 +198,7 @@ export class ShutdownInterruptedSessionStore {
           ...marker,
           executionGeneration: advanced.generation,
         };
-        const changed = updateStoredSessions(
+        updateStoredSessions(
           transaction,
           and(
             sessionGenerationCondition(
@@ -240,9 +213,6 @@ export class ShutdownInterruptedSessionStore {
           ),
           { restartHandoff: canonicalRestartHandoff(handoff) },
         );
-        if (!changed) {
-          throw new Error("The shutdown handoff generation changed");
-        }
         appendUnknownRestartToolResults({
           database: transaction,
           generateId: this.#options.generateId,

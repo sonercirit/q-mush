@@ -1,4 +1,4 @@
-import { and, asc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessionTurns } from "../shared/database/schema.ts";
 import type {
@@ -56,8 +56,10 @@ export function readStoredSessionGenerationTranscript(
               generationTurnCondition(sessionId, generation),
             ),
           )
-          .orderBy(...[asc(agentMessages.createdAt), asc(agentMessages.id)])
-          .all();
+          .orderBy(desc(agentMessages.id), desc(agentMessages.createdAt))
+          .limit(3)
+          .all()
+          .reverse();
   const messages = storedMessages.map(summarizeStoredMessage);
   return { messages, turns };
 }

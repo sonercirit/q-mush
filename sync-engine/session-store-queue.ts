@@ -21,10 +21,7 @@ import {
   type SessionStoreWriteResources,
 } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
-import {
-  readStoredSessionGeneration,
-  readStoredSessionState,
-} from "./session-store-state.ts";
+import { readStoredSessionState } from "./session-store-state.ts";
 import { userMessageValues } from "./session-store-values.ts";
 import { activeDurableSystemPendingInputs } from "./session-system-pending-inputs.ts";
 
@@ -115,15 +112,6 @@ export function queueStoredSession(options: {
     ) {
       return "pending_input_conflict" as const;
     }
-    const parentId = stored.parentSessionId;
-    const parentGeneration = stored.parentExecutionGeneration;
-    const continuedParentGeneration =
-      parentId === null || parentGeneration !== null
-        ? parentGeneration
-        : (readStoredSessionGeneration({
-            condition: activeSessionCondition({ id: parentId, userId }),
-            database: transaction,
-          }) ?? null);
     const advanced = advanceStoredSessionGeneration({
       condition: sessionCondition,
       database: transaction,
@@ -136,13 +124,15 @@ export function queueStoredSession(options: {
         activeStartedAt: null,
         stepStartedAt: null,
         interruptedHandoff: null,
-        parentExecutionGeneration: continuedParentGeneration,
+        parentExecutionGeneration: stored.parentExecutionGeneration,
         status: "queued",
         ...updatedAuditFields(userId, now),
       },
     });
     if (advanced?.turnId === undefined) {
-      return "callback_pending" as const;
+      return durableReports.length === 0
+        ? ("busy" as const)
+        : ("callback_pending" as const);
     }
     if (prompt !== undefined && messageId !== undefined) {
       transaction
@@ -175,7 +165,6 @@ export function queueStoredSession(options: {
     }
     const pendingAfterReport = activePendingInput(transaction, sessionId);
     if (
-      authorization?.deferSystemPendingInputs !== true &&
       pendingAfterReport !== undefined &&
       !durableReports.some(({ id }) => id === pendingAfterReport.id)
     ) {

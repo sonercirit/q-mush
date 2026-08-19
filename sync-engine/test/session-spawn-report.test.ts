@@ -71,7 +71,6 @@ describe("spawned session reports", () => {
     expect(content).not.toContain("s".repeat(32));
     expect(content).not.toContain("k".repeat(32));
     expect(content).not.toContain("github_pat_");
-    expect(content?.length).toBeLessThan(2_300);
   });
 
   test("redacts generic and provider-prefixed assignment names", () => {
@@ -99,6 +98,32 @@ describe("spawned session reports", () => {
     for (const secret of Object.values(secrets)) {
       expect(content).not.toContain(secret);
     }
+  });
+
+  test("preserves assistant formatting and length while redacting secrets", () => {
+    const answer = `\u0060\u0060\u0060ts\nconst token = "secret";\n\u0060\u0060\u0060\n\n- first\n- second\n${"x".repeat(2_100)}`;
+    const content = completedReport([
+      testSessionMessage("message-answer", answer, "assistant", 1),
+    ]);
+
+    expect(content).toContain("```ts\\nconst token=[redacted];\\n```");
+    expect(content).toContain("- first\\n- second");
+    expect(content).toContain("x".repeat(2_100));
+  });
+
+  test("uses only an unbound fallback failure", () => {
+    const content = failedReport([
+      {
+        ...testSessionMessage("old", "Old generation failure", "error", 1),
+        turnId: "old-turn",
+      },
+      {
+        ...testSessionMessage("current", "Current unbound failure", "error", 2),
+        turnId: null,
+      },
+    ]);
+    expect(content).toContain("Current unbound failure");
+    expect(content).not.toContain("Old generation failure");
   });
 
   test("always includes the terminal error after a partial failed answer", () => {

@@ -297,19 +297,15 @@ export class RestartHandoffStore {
         requestedBy: options.requestedBy,
         restartId: options.restartId,
       });
-      if (
-        !updateStoredSessions(
-          transaction,
-          restartSessionCondition({
-            generation: advanced.generation,
-            sessionId: options.authority.sessionId,
-            status: "paused",
-          }),
-          { restartHandoff },
-        )
-      ) {
-        throw new Error("The restart handoff generation changed");
-      }
+      updateStoredSessions(
+        transaction,
+        restartSessionCondition({
+          generation: advanced.generation,
+          sessionId: options.authority.sessionId,
+          status: "paused",
+        }),
+        { restartHandoff },
+      );
       if (from === "running") {
         this.#options.interruptUnknownTools?.(
           transaction,

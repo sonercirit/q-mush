@@ -71,7 +71,9 @@ export function spawnedSessionReport(
   );
   const failure = failed
     ? (currentMessages.findLast(({ role }) => role === "error") ??
-      completed.messages.findLast(({ role }) => role === "error"))
+      completed.messages.findLast(
+        ({ role, turnId }) => role === "error" && turnId === null,
+      ))
     : undefined;
   const lastMessage = failed
     ? assistant

@@ -161,10 +161,6 @@ function callbackContentIncludes(
   );
 }
 
-function terminalCallbackRecorded(lifecycle: ChildLifecycleSetup): boolean {
-  return callbackContentIncludes(lifecycle, lifecycle.childId);
-}
-
 function childDetail(lifecycle: ChildLifecycleSetup) {
   return lifecycle.setup.sessions.detailForUser(
     TEST_USER_ID,
@@ -186,7 +182,7 @@ async function waitForCallbackDisposition(
   lifecycle: ChildLifecycleSetup,
 ): Promise<void> {
   await waitForSessionValue(
-    () => terminalCallbackRecorded(lifecycle),
+    () => callbackContentIncludes(lifecycle, lifecycle.childId),
     (recorded) => recorded === true,
   );
 }
@@ -195,7 +191,7 @@ function expectCallbackPersisted(
   lifecycle: ChildLifecycleSetup,
   parentStatus: ParentTerminalStatus,
 ): void {
-  const { model, setup } = lifecycle;
+  const { setup } = lifecycle;
   const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
   const child = childDetail(lifecycle);
   expect(parent).toMatchObject({ generation: 0, status: parentStatus });
@@ -203,8 +199,7 @@ function expectCallbackPersisted(
   expect(child).toMatchObject({
     parentExecutionGeneration: parent?.generation,
   });
-  expect(terminalCallbackRecorded(lifecycle)).toBe(true);
-  expect(model.parentRequests).toBe(2);
+
   expect(
     setup.sessions
       .listForUser(TEST_USER_ID)

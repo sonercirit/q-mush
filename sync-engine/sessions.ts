@@ -163,7 +163,7 @@ class DrizzleSessionIntegration
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
-      reportParent("notifyReportedParent"),
+      reportParent("reportedParent"),
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,

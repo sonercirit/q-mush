@@ -129,7 +129,7 @@ export class SessionStore extends SessionStoreRestarts {
   writeResources(workspaceId?: string) {
     return this.#writeResources(workspaceId);
   }
-  generateId(now: number): string {
+  #generateId(now: number): string {
     return this.#resources[1](now);
   }
   create(input: CreateAgentSession, now: number): CreateSessionResult {
@@ -496,7 +496,7 @@ export class SessionStore extends SessionStoreRestarts {
       failInterruptedStoredSession(
         this.#database,
         session,
-        this.generateId(now),
+        this.#generateId(now),
         now,
       );
     }
