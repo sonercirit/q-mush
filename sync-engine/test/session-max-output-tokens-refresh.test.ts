@@ -286,7 +286,8 @@ describe("lazy Anthropic request metadata refresh", () => {
         _credential: unknown,
         signal?: AbortSignal,
       ) => {
-        expect(signal).toBe(abort.signal);
+        expect(signal).not.toBe(abort.signal);
+        expect(signal?.aborted).toBe(false);
         abort.abort(new DOMException("Stopped", "AbortError"));
         return Promise.reject(
           new DOMException("The agent session was stopped", "AbortError"),

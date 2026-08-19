@@ -211,16 +211,16 @@ async function loadModels(
   } = {},
 ): Promise<SessionAgentModels> {
   const settings = runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS;
-  const loadingDeadline = AbortSignal.timeout(
+  const deadline = AbortSignal.timeout(
     toolExecutionLimitMilliseconds(settings),
   );
-  const loadingSignal = AbortSignal.any([runtime.signal, loadingDeadline]);
+  const signal = AbortSignal.any([runtime.signal, deadline]);
   try {
     const agentFile = await executeForSession(runtime, () =>
       loadSessionAgentFile(
         runtime.broker,
         runtime.detail,
-        loadingSignal,
+        signal,
         runtime.isCurrent,
       ),
     );
@@ -232,9 +232,9 @@ async function loadModels(
       (apply) => {
         writeRuntime(runtime, apply);
       },
-      loadingSignal,
+      signal,
     );
-    const models = createSessionAgentModels({
+    return createSessionAgentModels({
       agentFile,
       credential: runtime.credential,
       detail: { ...runtime.detail, ...metadata },
@@ -251,18 +251,15 @@ async function loadModels(
       toolSettings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
       userId: runtime.userId,
     });
-    return models;
   } catch (error) {
-    if (loadingDeadline.aborted && !runtime.signal.aborted) {
-      throw loadingDeadline.reason;
-    }
+    if (deadline.aborted && !runtime.signal.aborted) throw deadline.reason;
     throw error;
   }
 }
 
 export async function compactSessionConversation(
   runtime: SessionAgentRuntimeDependencies,
-  continueAfterCompaction = false,
+  continueAfter = false,
 ): Promise<"complete" | "handoff"> {
   await Promise.resolve();
   if (runtime.restartHandoffRequested()) {
@@ -290,13 +287,7 @@ export async function compactSessionConversation(
     const usage = compactionUsage(final, (step) =>
       estimateAgentStepCost(runtime.detail, step.tokenUsage),
     );
-    recordCompaction(
-      runtime,
-      final.summary,
-      usage,
-      startedAt,
-      !continueAfterCompaction,
-    );
+    recordCompaction(runtime, final.summary, usage, startedAt, !continueAfter);
     return "complete";
   } finally {
     models.publishCompactionSettled();
@@ -468,8 +459,6 @@ export async function runSessionAgent(
       throw new Error("The runner returned invalid file attachment data");
     }
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
-    // Discovery may ignore cancellation and settle after the wrapper already
-    // reported timed-out; never start explanation model work afterward.
     throwIfAgentAborted(signal);
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
