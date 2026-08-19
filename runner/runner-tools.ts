@@ -50,7 +50,6 @@ import {
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const DEFAULT_READ_LINES = 2_000;
 const MAXIMUM_EDITS = 100;
 
 function throwIfRunnerToolStopped(signal: AbortSignal | undefined): void {
@@ -183,10 +182,11 @@ async function readTool(
   const content = await readTextFile(path, MAX_FILE_BYTES);
   const lineBounds = { maximum: 1_000_000_000, minimum: 1 };
   const offset = optionalInteger(arguments_, "offset", 1, lineBounds);
+  const explicitLimit = arguments_["limit"] !== undefined;
   const limit = optionalInteger(
     arguments_,
     "limit",
-    DEFAULT_READ_LINES,
+    Number.MAX_SAFE_INTEGER,
     lineBounds,
   );
   return readContinuation(
@@ -194,6 +194,7 @@ async function readTool(
     offset,
     limit,
     options?.outputLimitCharacters,
+    explicitLimit,
   );
 }
 

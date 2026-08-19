@@ -15,6 +15,7 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
@@ -414,8 +415,15 @@ export function SessionTranscript(props: {
     () => props.tools,
   );
   const counts = (): SessionTranscriptCounts => props.counts ?? localCounts();
+  const transcriptToolSettings = createMemo(
+    () => props.turns?.at(-1)?.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+  );
   const serializedTools = createMemo(() =>
-    JSON.stringify(selectedAgentTools(props.tools), null, 2),
+    JSON.stringify(
+      selectedAgentTools(props.tools, transcriptToolSettings()),
+      null,
+      2,
+    ),
   );
   const stepTiming = createSessionStepTiming(
     () => props.messages,
@@ -491,7 +499,11 @@ export function SessionTranscript(props: {
       <Show when={props.filters.systemPrompt}>
         {renderTranscriptInstruction({
           boundaryKey: "system-prompt",
-          content: createAgentSystemPrompt(null, props.executionEnvironment),
+          content: createAgentSystemPrompt(
+            null,
+            props.executionEnvironment,
+            transcriptToolSettings(),
+          ),
           label: "System prompt",
         })}
       </Show>

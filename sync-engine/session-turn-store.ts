@@ -261,6 +261,7 @@ export function readSessionTurns(
       executionGeneration: agentSessionTurns.executionGeneration,
       id: agentSessionTurns.id,
       startedAt: agentSessionTurns.startedAt,
+      ...selectedToolSettingsColumns(),
     })
     .from(agentSessionTurns)
     .where(
@@ -277,9 +278,16 @@ export function readSessionTurns(
     )
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
-    .map((turn) => ({
-      ...turn,
-      endedAt: turn.endedAt?.getTime() ?? null,
-      startedAt: turn.startedAt.getTime(),
-    }));
+    .map((turn) => {
+      const toolSettings = readToolSettings(turn);
+      if (toolSettings === undefined) {
+        throw new Error("The session turn tool settings snapshot is invalid");
+      }
+      return {
+        ...turn,
+        endedAt: turn.endedAt?.getTime() ?? null,
+        startedAt: turn.startedAt.getTime(),
+        toolSettings,
+      };
+    });
 }

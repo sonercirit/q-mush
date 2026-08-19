@@ -57,11 +57,11 @@ const FILE_PATH_PARAMETER = {
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read a bounded page from a UTF-8 text file, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
+      "Read UTF-8 text from a file, including q-mush-attachment links supplied in messages. Omit limit to read as many complete lines as fit the Unicode output budget; set limit for explicit positional pagination. Use offset to continue.",
     name: "read",
     properties: {
       limit: {
-        description: "Maximum number of lines to read",
+        description: "Explicit maximum number of lines to read",
         type: "number",
       },
       offset: {

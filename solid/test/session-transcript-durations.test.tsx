@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
 import {
   assistantToolCall,
@@ -111,6 +112,7 @@ test("renders durable settlement time for a terminal step", () => {
         executionGeneration: 1,
         id: durableTurnId,
         startedAt: durableStartedAt,
+        toolSettings: DEFAULT_TOOL_SETTINGS,
       },
     ],
   );

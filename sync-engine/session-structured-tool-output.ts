@@ -6,7 +6,7 @@ import {
 } from "../shared/tool-output-limits.ts";
 
 export type StructuredSessionToolName =
-  "get_session_options" | "list_sessions" | "read_session";
+  "get_session_options" | "list_sessions" | "parallel" | "read_session";
 
 type MutableRecord = Record<string, unknown>;
 
@@ -16,6 +16,7 @@ export function isStructuredSessionToolName(
   return (
     value === "get_session_options" ||
     value === "list_sessions" ||
+    value === "parallel" ||
     value === "read_session"
   );
 }
@@ -232,12 +233,58 @@ function boundedPaginatedOutput(
   return serializedWithinMaximum(serialize, maximum);
 }
 
+function boundedParallelOutput(
+  parsed: MutableRecord | unknown[],
+  maximum: number,
+): string | undefined {
+  const sourceItems: unknown[] | undefined = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed["items"])
+      ? parsed["items"]
+      : undefined;
+  if (sourceItems === undefined) return undefined;
+  const items = [...sourceItems];
+  const envelope: MutableRecord = {
+    items,
+    notice: toolOutputTruncationNotice(maximum),
+    omittedItems: 0,
+    returnedItems: items.length,
+    totalItems: sourceItems.length,
+    truncated: true,
+  };
+  const serialize = (): string => compact(envelope);
+  removeWhileOversized({
+    items,
+    maximum,
+    onRemove: () => {
+      envelope["omittedItems"] = sourceItems.length - items.length;
+      envelope["returnedItems"] = items.length;
+    },
+    remove: () => {
+      items.pop();
+    },
+    serialize,
+  });
+  return serializedWithinMaximum(serialize, maximum);
+}
+
 export function boundStructuredSessionToolOutput(
   output: string,
   maximum: number,
   tool: StructuredSessionToolName,
 ): string | undefined {
   if (unicodeCharacterCount(output) <= maximum) return output;
+  if (tool === "parallel") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(output);
+    } catch {
+      return undefined;
+    }
+    return Array.isArray(parsed) || isRecord(parsed)
+      ? boundedParallelOutput(parsed, maximum)
+      : undefined;
+  }
   const parsed = parseObject(output);
   if (parsed === undefined) return undefined;
   return tool === "read_session"

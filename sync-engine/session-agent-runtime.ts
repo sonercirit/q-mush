@@ -22,6 +22,7 @@ import type {
 } from "../shared/session-model.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitMilliseconds,
   toolExecutionLimitSeconds,
   type ToolSettings,
 } from "../shared/tool-limits.ts";
@@ -210,11 +211,16 @@ async function loadModels(
     readonly toolStream?: ToolStreamPublisher;
   } = {},
 ): Promise<SessionAgentModels> {
+  const settings = runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS;
+  const loadingDeadline = AbortSignal.timeout(
+    toolExecutionLimitMilliseconds(settings),
+  );
+  const loadingSignal = AbortSignal.any([runtime.signal, loadingDeadline]);
   const agentFile = await executeForSession(runtime, () =>
     loadSessionAgentFile(
       runtime.broker,
       runtime.detail,
-      runtime.signal,
+      loadingSignal,
       runtime.isCurrent,
     ),
   );

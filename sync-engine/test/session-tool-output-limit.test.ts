@@ -17,6 +17,32 @@ describe("session tool output limit", () => {
     expect(boundSessionToolOutput(original, SETTINGS)).toBe(original);
   });
 
+  test("keeps an oversized parallel finalizer result as valid JSON", () => {
+    const result = boundSessionToolOutput(
+      {
+        output: JSON.stringify(
+          Array.from({ length: 20 }, (_value, index) => ({
+            index,
+            output: "😀".repeat(500),
+          })),
+        ),
+        state: "completed",
+      },
+      SETTINGS,
+      "parallel",
+    );
+    const parsed: unknown = JSON.parse(result.output);
+    expect(parsed).toMatchObject({
+      truncated: true,
+      totalItems: 20,
+    });
+
+    expect(unicodeCharacterCount(result.output)).toBeLessThanOrEqual(
+      MINIMUM_TOOL_OUTPUT_CHARACTERS,
+    );
+    expect(JSON.stringify(parsed)).toContain("omittedItems");
+  });
+
   test("adds the sole notice after raw runner overflow", () => {
     const result = boundSessionToolOutput(
       {

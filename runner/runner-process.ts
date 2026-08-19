@@ -106,10 +106,9 @@ async function readStream(
     }
     const content = decoder.decode(part.value, { stream: true });
     publish(content);
-    if (!retain(content) || capture.remainingCharacters === 0) {
-      await reader.cancel();
-      break;
-    }
+    // Continue draining after retained capture overflows. Canceling a pipe can
+    // leave a verbose child blocked on the other/full pipe and prevent exit.
+    retain(content);
   }
 
   return output;
