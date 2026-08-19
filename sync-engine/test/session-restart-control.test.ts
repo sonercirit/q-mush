@@ -372,10 +372,16 @@ describe("session restart control", () => {
       false,
     );
 
-    expect(runtimes.drains).toContainEqual({
-      restartId: "runner-restart",
-      scope: { kind: "runner", runnerId: "runner-1" },
-    });
+    expect(runtimes.drains).toEqual([
+      {
+        restartId: "external-server",
+        scope: { kind: "server" },
+      },
+      {
+        restartId: "runner-restart",
+        scope: { kind: "runner", runnerId: "runner-1" },
+      },
+    ]);
     expect(warnings).toEqual([
       "The active server restart deadline was unavailable; starting a dedicated runner drain",
     ]);
