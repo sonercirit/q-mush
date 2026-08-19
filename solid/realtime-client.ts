@@ -311,8 +311,9 @@ export class RealtimeConnection {
         return `session_questions:${event.sessionId}`;
       case "session_compaction_request":
       case "session_compaction_settled":
-      case "tool_stream_snapshot":
         return `${event.type}:${event.sessionId}`;
+      case "tool_stream_snapshot":
+        return `${event.type}:${event.sessionId}:${event.streamId}`;
       case "runners":
       case "sessions":
       case "sessions_changed":
@@ -567,14 +568,6 @@ export class RealtimeConnection {
     }
     if (event.type === "session_delta" || event.type === "tool_stream") {
       this.#queueStreamEvent(event);
-      return;
-    }
-    if (
-      event.type === "session_compaction_request" ||
-      event.type === "session_compaction_settled" ||
-      event.type === "tool_stream_snapshot"
-    ) {
-      this.#queueStateEvent(event);
       return;
     }
     this.#queueStateEvent(event);

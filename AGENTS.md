@@ -12,10 +12,10 @@ Project memory.
 - Research provider docs via Brave Search, then probe APIs/schemas/usage.
 - Call capabilities impossible only with excluding evidence; else record an open
   question.
-- Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship small improvements now.
-- TDD: fail first, implement, refactor green.
-- DRY/KISS: authoritative logic, no premature abstraction.
+- Preserve patterns; add tools only as needed. Improve touched code, tests,
+  docs, performance, security, and DX now.
+- TDD: fail first, implement, refactor green. Keep authoritative logic simple;
+  avoid premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each

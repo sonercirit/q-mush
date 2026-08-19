@@ -107,6 +107,33 @@ test("retains current and remaining requests after a send failure", () => {
   stream.stop();
 });
 
+test("delivers and resolves concurrent stream snapshots independently", () => {
+  const stream = streamingRealtimeFixture("concurrent-sync-instance");
+  const streamIds = ["flushed", "pending"];
+  stream.receive(preparingToolDelta(0, streamIds[0] ?? "", "call-flushed"));
+  flushOne(stream);
+  stream.receive(preparingToolDelta(1, streamIds[1] ?? "", "call-pending"));
+  flushOne(stream);
+  const reconnected = stream.reconnect("concurrent-sync-reconnected");
+  for (const streamId of streamIds) {
+    reconnected.receive({
+      sessionId: SESSION_ID,
+      streamId,
+      streams: [],
+      type: "tool_stream_snapshot",
+    });
+  }
+  while (stream.pendingFrames.length > 0) flushOne(stream);
+
+  expect(
+    stream.emitted.flatMap((event) =>
+      event.type === "tool_stream_snapshot" ? [event.streamId] : [],
+    ),
+  ).toEqual(streamIds);
+  expect(stream.reconnect("concurrent-sync-terminal").sent).toHaveLength(0);
+  stream.stop();
+});
+
 test("resolves snapshot synchronization before terminal reconnect", () => {
   const stream = streamingRealtimeFixture("resolved-sync-instance");
   stream.receive(preparingToolDelta(0, STREAM_ID, "resolved-call"));
