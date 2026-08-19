@@ -161,7 +161,7 @@ test("keeps admission bounded through unknown provider frames", async () => {
 
   request.socket.receive({
     delta: "Done.",
-    response: { id: "current" },
+    response_id: "current",
     type: "response.output_text.delta",
   });
   expectRequestStates(observedStates, "admission", "active");
@@ -206,7 +206,7 @@ test("closes a fresh socket and releases listeners when send throws", async () =
   expect(controller.abortListenerCount).toBe(0);
 });
 
-test("reports reused WebSocket admission until the provider acknowledges it", async () => {
+test("correlates realistic delta events on a reused WebSocket", async () => {
   const states: ("active" | "admission")[] = [];
   const { model, pending: first, socket } = beginLifecycleRequest(states);
   acknowledgeProviderSocket(socket, "response-1");
@@ -226,14 +226,26 @@ test("reports reused WebSocket admission until the provider acknowledges it", as
   socket.receive(responseEvent("response.created", "response-1"));
   socket.receive({
     delta: "Stale",
-    response: { id: "response-1" },
+    response_id: "response-1",
     type: "response.output_text.delta",
   });
   expectRequestStates(states, "admission", "active", "admission");
   await expectRequestPending(stalled);
 
-  controller.abort();
-  await expect(stalled).rejects.toMatchObject({ name: "AbortError" });
+  socket.receive({
+    delta: "Done.",
+    response_id: "response-2",
+    type: "response.output_text.delta",
+  });
+  expectRequestStates(states, "admission", "active", "admission", "active");
+  socket.receive({
+    delta: " stale",
+    response_id: "response-1",
+    type: "response.output_text.delta",
+  });
+  socket.receive(responseEvent("response.completed", "response-2"));
+  expectDoneStep(await stalled);
+  socket.close();
   expectProviderSocketReleased(socket);
 });
 

@@ -59,6 +59,10 @@ function messageText(event: Event): string {
 function providerResponseId(
   event: Readonly<Record<string, unknown>>,
 ): string | undefined {
+  const responseId = event["response_id"];
+  if (typeof responseId === "string" && responseId.length > 0) {
+    return responseId;
+  }
   const response = event["response"];
   const id = isRecord(response) ? response["id"] : undefined;
   return typeof id === "string" && id.length > 0 ? id : undefined;
