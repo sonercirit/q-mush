@@ -130,7 +130,7 @@ function retainedSelectionOptions(
 function modelAvailabilityAttributes(
   creating: boolean,
   models: AgentModelCatalog["models"],
-) {
+): { readonly disabled: boolean } {
   return { disabled: creating || models.length === 0 };
 }
 

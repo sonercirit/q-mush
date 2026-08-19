@@ -9,6 +9,7 @@ import type {
   AgentSessionDetail,
   AgentSessionMessage,
 } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
@@ -205,6 +206,7 @@ describe("session store", () => {
         executionGeneration: 0,
         id: USER_MESSAGE_ID,
         startedAt: TEST_NOW,
+        toolSettings: DEFAULT_TOOL_SETTINGS,
       },
     ]);
     expect(detail?.messages.slice(1)).toEqual([

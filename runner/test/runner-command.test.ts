@@ -350,7 +350,7 @@ describe("runner WebSocket protocol", () => {
       sessionCommand({
         arguments: {
           command:
-            "printf '%*s' 400 '' | tr ' ' o; printf '%*s' 400 '' | tr ' ' e >&2",
+            "printf '%*s' 1048576 '' | tr ' ' o; printf '%*s' 1048576 '' | tr ' ' e >&2",
           timeout: 5,
         },
         outputLimitCharacters: outputLimit,

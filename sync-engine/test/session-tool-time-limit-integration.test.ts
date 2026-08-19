@@ -1,4 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
@@ -58,6 +59,7 @@ async function withLimitSetup(
     const detail = requireCompactionSession(setup.store);
     await run({ database: setup.database, detail, store: setup.store });
   } finally {
+    vi.restoreAllMocks();
     vi.useRealTimers();
   }
 }
@@ -115,6 +117,47 @@ function observedBroker(options: {
 }
 
 describe("global tool time limit integration", () => {
+  test("aborts agent-file loading at the limit before starting a model", () =>
+    withLimitSetup(async (setup) => {
+      const dispatched = Promise.withResolvers<undefined>();
+      const canceled = Promise.withResolvers<undefined>();
+      const factorySelections: unknown[] = [];
+      const loadingDeadline = new AbortController();
+      vi.spyOn(AbortSignal, "timeout").mockImplementation((milliseconds) => {
+        setTimeout(() => {
+          loadingDeadline.abort();
+        }, milliseconds);
+        return loadingDeadline.signal;
+      });
+      const broker = new RunnerCommandBroker({
+        cancel: () => {
+          canceled.resolve();
+        },
+        deliver: (_runnerId, command) => {
+          expect(command.tool).toBe("read_agent_file");
+          dispatched.resolve();
+          return true;
+        },
+      });
+      const run = runSessionAgent({
+        ...limitRuntimeOptions(setup, "Agent file deadline credential"),
+        broker,
+        modelFactory: (options) => {
+          factorySelections.push(options);
+          return new ScriptedAgentModel([]);
+        },
+      });
+      const rejectedRun = expect(run).rejects.toMatchObject({
+        name: "AbortError",
+      });
+      await advancePastLimit(dispatched.promise);
+
+      await rejectedRun;
+      await expect(canceled.promise).resolves.toBeUndefined();
+      expect(factorySelections).toHaveLength(0);
+      closeSessionTestDatabase(setup.database);
+    }));
+
   test("fails a hung runner tool call at the limit and finishes the run", () =>
     withLimitSetup(async (setup) => {
       const hungReadCall = {

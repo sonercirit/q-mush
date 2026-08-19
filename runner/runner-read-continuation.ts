@@ -32,6 +32,7 @@ function boundedContinuationPage(
     shownLines = candidateLines;
   }
   if (shownLines === 0) {
+    // Keep one extra code point so the caller can distinguish exact fit from overflow.
     return unicodeCharacterPrefix(requested.join("\n"), maximum + 1);
   }
   return `${requested.slice(0, shownLines).join("\n")}${continuationMarker(
