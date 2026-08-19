@@ -302,66 +302,75 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
       expect(serialized).toContain('"requiresReauthentication":true');
       expect(serialized).not.toContain("revoked-access");
       expect(serialized).not.toContain("revoked-refresh");
-      const cannotUpdate = setup.store.updateSecret(
-        "another-user",
-        CREDENTIAL_ID,
-        "attacker-secret",
-        TEST_NOW + 1,
-      );
-      expect(cannotUpdate).toBe(false);
-      const cannotMark = setup.store.markRequiresReauthentication(
-        "another-user",
-        CREDENTIAL_ID,
-        TEST_NOW + 1,
-      );
-      expect(cannotMark).toBe(false);
-      expect(
-        setup.store.updateSecret(
-          TEST_USER_ID,
-          CREDENTIAL_ID,
-          "missing-account-secret",
-          TEST_NOW + 2,
-          true,
-        ),
-      ).toBe(false);
-      expect(
-        setup.store.updateSecret(
-          TEST_USER_ID,
-          CREDENTIAL_ID,
-          "mismatched-account-secret",
-          TEST_NOW + 2,
-          true,
-          "another-account",
-        ),
-      ).toBe(false);
-      expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
-        REVOKED_SECRET,
-      );
-      expectReauthenticationState(setup.store, true);
-      expect(
-        setup.store.updateSecret(
-          TEST_USER_ID,
-          CREDENTIAL_ID,
-          replacementSecret(),
-          TEST_NOW + 2,
-          true,
-          "account",
-        ),
-      ).toBe(true);
-      expect(
-        setup.store.updateSecret(
-          TEST_USER_ID,
-          CREDENTIAL_ID,
-          "stale-callback-secret",
-          TEST_NOW + 3,
-          true,
-          "account",
-        ),
-      ).toBe(false);
-      expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
-        replacementSecret(),
-      );
-      expectReauthenticationState(setup.store, false);
     },
   );
+
+  test("only replaces a flagged credential for its verified account once", () => {
+    const setup = setupRefresh(Response.json({ error: "unused" }));
+    setup.store.markRequiresReauthentication(
+      TEST_USER_ID,
+      CREDENTIAL_ID,
+      TEST_NOW + 1,
+    );
+    const cannotUpdate = setup.store.updateSecret(
+      "another-user",
+      CREDENTIAL_ID,
+      "attacker-secret",
+      TEST_NOW + 1,
+    );
+    expect(cannotUpdate).toBe(false);
+    const cannotMark = setup.store.markRequiresReauthentication(
+      "another-user",
+      CREDENTIAL_ID,
+      TEST_NOW + 1,
+    );
+    expect(cannotMark).toBe(false);
+    expect(
+      setup.store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        "missing-account-secret",
+        TEST_NOW + 2,
+        true,
+      ),
+    ).toBe(false);
+    expect(
+      setup.store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        "mismatched-account-secret",
+        TEST_NOW + 2,
+        true,
+        "another-account",
+      ),
+    ).toBe(false);
+    expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
+      REVOKED_SECRET,
+    );
+    expectReauthenticationState(setup.store, true);
+    expect(
+      setup.store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        replacementSecret(),
+        TEST_NOW + 2,
+        true,
+        "account",
+      ),
+    ).toBe(true);
+    expect(
+      setup.store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        "stale-callback-secret",
+        TEST_NOW + 3,
+        true,
+        "account",
+      ),
+    ).toBe(false);
+    expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
+      replacementSecret(),
+    );
+    expectReauthenticationState(setup.store, false);
+  });
 });

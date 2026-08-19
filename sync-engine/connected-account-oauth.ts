@@ -117,7 +117,7 @@ export class ConnectedAccountOAuth {
     const requestedCredentialId = requestUrl.searchParams.get("credentialId");
     if (
       requestedCredentialId !== null &&
-      this.#credentials.readCredential(
+      this.#credentials.readCredentialMetadata(
         user.id,
         requestedCredentialId,
         workspaceId,
@@ -226,6 +226,14 @@ export class ConnectedAccountOAuth {
         redirectUri,
         verifier: callback.verifier,
       });
+      const reconnecting =
+        credentialId === undefined || credentialId.length === 0
+          ? undefined
+          : this.#credentials.readCredentialMetadata(
+              user.id,
+              credentialId,
+              workspaceId,
+            );
       if (credentialId === undefined || credentialId.length === 0) {
         this.#credentials.addConnectedAccount(
           user,
@@ -234,26 +242,42 @@ export class ConnectedAccountOAuth {
           [workspaceId],
         );
       } else if (
+        reconnecting?.requiresReauthentication !== true ||
         credential.details.accountId === null ||
+        (reconnecting.accountId !== null &&
+          reconnecting.accountId !== credential.details.accountId) ||
         !this.#credentials.reconnectCredential(
           user.id,
           credentialId,
           credential.secret,
           this.#runtime.now(),
-          credential.details.accountId,
+          credential.details,
         )
       ) {
-        return invalidState();
+        return this.#appRedirect(request, "wrong_account", clearedCookies);
       }
       return this.#appRedirect(request, "connected", clearedCookies);
-    } catch {
-      return this.#appRedirect(request, "failed", clearedCookies);
+    } catch (error) {
+      return this.#appRedirect(
+        request,
+        error instanceof Error &&
+          error.message.includes("UNIQUE constraint failed")
+          ? "credential_conflict"
+          : "failed",
+        clearedCookies,
+      );
     }
   }
 
   #appRedirect(
     request: Request,
-    result: "connected" | "denied" | "failed" | "invalid_state",
+    result:
+      | "connected"
+      | "credential_conflict"
+      | "denied"
+      | "failed"
+      | "invalid_state"
+      | "wrong_account",
     cookies: readonly string[],
   ): Response {
     return redirectToApp(

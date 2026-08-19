@@ -95,12 +95,10 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
 }
 
 function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
+  const reconnectUnavailable = (): boolean =>
+    props.credential.source === "oauth" && props.credential.accountId === null;
   const reconnectPath = (): string | undefined =>
-    props.configuration.id === "openrouter" &&
-    props.credential.source === "oauth" &&
-    props.credential.accountId === null
-      ? undefined
-      : props.configuration.oauthPath;
+    reconnectUnavailable() ? undefined : props.configuration.oauthPath;
 
   return (
     <li
@@ -135,10 +133,8 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
             {`This ${props.configuration.name} login has expired. `}
             <Show
               fallback={
-                props.configuration.id === "openrouter" &&
-                props.credential.source === "oauth" &&
-                props.credential.accountId === null
-                  ? "This connection has no verified OpenRouter account ID, so it cannot be reconnected. Remove it, then connect OpenRouter again as a new credential."
+                reconnectUnavailable()
+                  ? `This connection has no verified ${props.configuration.name} account ID, so it cannot be reconnected. Remove it, then connect ${props.configuration.name} again as a new credential.`
                   : "Connect the account again before using it in a session."
               }
               when={reconnectPath()}

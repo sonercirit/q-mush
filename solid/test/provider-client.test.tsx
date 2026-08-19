@@ -134,24 +134,30 @@ test("uses the configured provider name in the shared re-login state", () => {
   expect(html).not.toContain("This OpenAI login has expired");
 });
 
-test("directs an unverifiable OpenRouter account through viable recovery", () => {
-  const html = renderedProviderPanel(
-    OPENROUTER_PANEL,
-    credentialState({
-      accountId: null,
-      id: "unverified-openrouter-credential",
-      label: "Unverified OpenRouter account",
-    }),
-  );
+test.each([
+  [OPENAI_PANEL, "OpenAI", "unverified-openai-credential"],
+  [OPENROUTER_PANEL, "OpenRouter", "unverified-openrouter-credential"],
+])(
+  "directs an unverifiable %s account through viable recovery",
+  (panel, providerName, credentialId) => {
+    const html = renderedProviderPanel(
+      panel,
+      credentialState({
+        accountId: null,
+        id: credentialId,
+        label: `Unverified ${providerName} account`,
+      }),
+    );
 
-  expect(html).toContain("This OpenRouter login has expired.");
-  expect(html).toContain("has no verified OpenRouter account ID");
-  expect(html).toContain(
-    "Remove it, then connect OpenRouter again as a new credential.",
-  );
-  expect(html).not.toContain("Reconnect this account");
-  expect(html).not.toContain("credentialId=unverified-openrouter-credential");
-});
+    expect(html).toContain(`This ${providerName} login has expired.`);
+    expect(html).toContain(`has no verified ${providerName} account ID`);
+    expect(html).toContain(
+      `Remove it, then connect ${providerName} again as a new credential.`,
+    );
+    expect(html).not.toContain("Reconnect this account");
+    expect(html).not.toContain(`credentialId=${credentialId}`);
+  },
+);
 
 test("renders provider default controls", () => {
   const controller = new ProviderController(

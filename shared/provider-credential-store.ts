@@ -481,6 +481,7 @@ export class ProviderCredentialStore {
       now: number,
       requireReauthentication?: boolean,
       accountId?: string,
+      label?: string,
     ]
   ): boolean {
     const [
@@ -490,6 +491,7 @@ export class ProviderCredentialStore {
       now,
       requireReauthentication,
       accountId,
+      label,
     ] = parameters;
     return updateCredentialSecret({
       ...this.#credentialState(userId, credentialId, now),
@@ -499,6 +501,7 @@ export class ProviderCredentialStore {
         ? {}
         : { requireReauthentication }),
       ...(accountId === undefined ? {} : { accountId }),
+      ...(label === undefined ? {} : { label }),
     });
   }
 

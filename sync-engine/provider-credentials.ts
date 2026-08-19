@@ -264,6 +264,16 @@ export class ProviderCredentialEndpoints {
     }
   }
 
+  readCredentialMetadata(
+    userId: string,
+    credentialId: string,
+    workspaceId?: string,
+  ): ProviderCredentialSummary | undefined {
+    return this.#store
+      ?.list(userId, workspaceId)
+      .find((credential) => credential.id === credentialId);
+  }
+
   readCredential(
     userId: string,
     credentialId: string,
@@ -297,7 +307,7 @@ export class ProviderCredentialEndpoints {
     credentialId: string,
     secret: string,
     now: number,
-    accountId: string,
+    details: ProviderCredentialDetails,
   ): boolean {
     return (
       this.#store?.updateSecret(
@@ -306,7 +316,8 @@ export class ProviderCredentialEndpoints {
         secret,
         now,
         true,
-        accountId,
+        details.accountId ?? undefined,
+        details.label,
       ) === true
     );
   }

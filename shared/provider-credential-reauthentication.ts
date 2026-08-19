@@ -62,14 +62,29 @@ export function updateCredentialSecret(
   options: CredentialStateOptions & {
     readonly accountId?: string;
     readonly cipher: CredentialCipher;
+    readonly label?: string;
     readonly requireReauthentication?: boolean;
     readonly secret: string;
   },
 ): boolean {
+  const stored = options.database
+    .select({
+      apiFormat: providerCredentials.apiFormat,
+      baseUrl: providerCredentials.baseUrl,
+    })
+    .from(providerCredentials)
+    .where(ownedActiveCredentialCondition(options))
+    .get();
+  if (stored === undefined) {
+    return false;
+  }
+
   return credentialStateUpdated(
     options,
     {
       credentialFingerprint: storedCredentialFingerprint({
+        ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
+        ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
         credential: options.secret,
       }),
       encryptedCredential: encryptedCredentialValue({
@@ -79,6 +94,7 @@ export function updateCredentialSecret(
         userId: options.userId,
       }),
       requiresReauthentication: false,
+      ...(options.label === undefined ? {} : { label: options.label }),
       ...updatedAuditFields(SYSTEM_ID, options.now),
     },
     options.requireReauthentication ?? false,

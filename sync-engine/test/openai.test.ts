@@ -209,7 +209,20 @@ const setupIntegration = createProviderTestSetup(
     createOpenAiIntegrationFromEnvironment,
     [FIRST_OAUTH_ID, SECOND_OAUTH_ID, FIRST_KEY_ID, SECOND_KEY_ID],
     "openai",
-    [FIRST_STATE, FIRST_VERIFIER, SECOND_STATE, SECOND_VERIFIER],
+    [
+      FIRST_STATE,
+      FIRST_VERIFIER,
+      SECOND_STATE,
+      SECOND_VERIFIER,
+      "openai-state-three",
+      "openai-verifier-three",
+      "openai-state-four",
+      "openai-verifier-four",
+      "openai-state-five",
+      "openai-verifier-five",
+      "openai-state-six",
+      "openai-verifier-six",
+    ],
   ),
 );
 const connectAccount = createProviderAccountConnector(TEST_ROUTES);
@@ -367,6 +380,80 @@ describe("OpenAI credentials", () => {
     } finally {
       database.$client.close();
     }
+  });
+
+  test("reconnects only the flagged credential for the same verified account", async () => {
+    const { database, integration } = setupIntegration();
+    await connectAccount(integration, FIRST_STATE, "authorization-code-one");
+    const store = new ProviderCredentialStore(
+      database,
+      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
+      "openai",
+    );
+
+    expect(
+      integration.begin(
+        createAuthenticatedRequest(
+          `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+        ),
+      ).status,
+    ).toBe(409);
+    expect(
+      integration.begin(
+        createAuthenticatedRequest(
+          `${TEST_ROUTES.oauthPath}?credentialId=another-users-credential`,
+        ),
+      ).status,
+    ).toBe(409);
+    expect(
+      integration.begin(
+        createAuthenticatedRequest(
+          `${TEST_ROUTES.oauthPath}?workspaceId=out-of-scope&credentialId=${FIRST_OAUTH_ID}`,
+        ),
+      ).status,
+    ).toBe(409);
+
+    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
+    const reconnect = beginProviderAccount({
+      callbackPath: TEST_ROUTES.callbackPath,
+      code: "authorization-code-one",
+      integration,
+      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+      state: "openai-state-five",
+    });
+    expect(readFlowCookies(reconnect.beginResponse)).toContain(
+      `q_mush_openai_credential=${FIRST_OAUTH_ID}`,
+    );
+    expectRedirect(
+      await integration.complete(reconnect.callbackRequest),
+      "http://localhost:3000/app?openai=connected",
+    );
+    expect(store.list(TEST_USER_ID)).toContainEqual(
+      expect.objectContaining({
+        accountId: "chatgpt-workspace-one",
+        id: FIRST_OAUTH_ID,
+        isDefault: false,
+        requiresReauthentication: false,
+      }),
+    );
+
+    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
+    const unchangedSecret = store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
+    const wrongAccount = beginProviderAccount({
+      callbackPath: TEST_ROUTES.callbackPath,
+      code: "authorization-code-two",
+      integration,
+      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+      state: "openai-state-six",
+    });
+    expectRedirect(
+      await integration.complete(wrongAccount.callbackRequest),
+      "http://localhost:3000/app?openai=wrong_account",
+    );
+    expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
+      unchangedSecret,
+    );
+    database.$client.close();
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>
