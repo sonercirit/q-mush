@@ -59,8 +59,8 @@ export async function runBrowserTests(
         argument.startsWith("-c=") ||
         argument === "--configLoader" ||
         argument.startsWith("--configLoader=") ||
-        argument === "--browser.provider" ||
-        argument.startsWith("--browser.provider="),
+        argument.startsWith("--browser.provider") ||
+        argument.startsWith("--no-browser.provider"),
     )
   ) {
     throw new Error("Browser tests do not accept Vitest config overrides");

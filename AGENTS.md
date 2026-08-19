@@ -4,26 +4,25 @@ Living project memory.
 
 ## Project Snapshot
 
-- Strict-TypeScript ESM Bun/SolidJS project; tests live under `test/`, no `src`.
-  `/` is the homepage, `/app` the app.
+- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`. `/` is
+  the homepage; `/app` is the app.
 
 ## Working Agreements
 
-- Research online: use brave-search on provider docs; probe APIs.
-- Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
+- Research provider docs with Brave Search; probe APIs.
+- Don't call capabilities impossible without excluding evidence; otherwise
+  record an open question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
   docs, performance, security, and DX. Ship small improvements now.
-- TDD: fail first, implement, refactor green.
-- DRY/KISS: authoritative logic, no premature abstraction.
+- TDD: fail first, implement, refactor green. DRY/KISS: authoritative logic, no
+  premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- No reward hacking: never weaken tests, special-case checks, or claim
-  unperformed verification; disclose unverified work. Fix defects on sight,
-  including pre-existing/out-of-scope ones; if a fix proves harmful, codify why
-  in a test.
+- Never weaken tests, special-case checks, or claim unperformed verification;
+  disclose gaps. Fix defects on sight, including pre-existing ones; if a fix is
+  harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it

@@ -93,6 +93,9 @@ test("browser launcher rejects config shaping", async () => {
     ["--configLoader=native"],
     ["--browser.provider", "webdriverio"],
     ["--browser.provider=webdriverio"],
+    ["--browser.provider.name=webdriverio"],
+    ["--no-browser.provider"],
+    ["--no-browser.provider.name"],
   ]) {
     const probe = dependencyProbe();
     await expect(
