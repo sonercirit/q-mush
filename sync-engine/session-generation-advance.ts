@@ -164,15 +164,11 @@ export function advanceStoredSessionGeneration(
     return undefined;
   }
   const report = reportTerminalGeneration(options, state);
-  if (report.status === "blocked" && options.mode === "attempt") {
+  if (report.status === "blocked") {
     return undefined;
   }
   const reportedGeneration =
-    report.status === "blocked"
-      ? state.parentReportedGeneration
-      : options.mode === "attempt"
-        ? state.executionGeneration
-        : generation;
+    options.mode === "attempt" ? state.executionGeneration : generation;
   if (
     !updateStoredSessions(
       options.database,
