@@ -4,18 +4,17 @@ Project memory.
 
 ## Project Snapshot
 
-- Strict-TypeScript ESM Bun/SolidJS; tests under `test/`, no `src`. `/` is the
+- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`. `/` is the
   homepage, `/app` the app.
 
 ## Working Agreements
 
 - Research provider docs/trackers online, then probe.
-- Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
-- Preserve patterns; improve touched code and tests.
-- TDD: fail first, implement, refactor green. DRY/KISS: one authoritative path.
-- Never invent tunables: probe omission, prefer provider defaults, else docs or
-  metadata.
+- Call capabilities impossible only with evidence; otherwise note an open
+  question.
+- Preserve patterns; improve touched code.
+- TDD: fail first, implement, refactor green. Keep one path.
+- Never invent tunables: probe omission, then use provider defaults or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - No reward hacking: never weaken tests, special-case checks, or claim
