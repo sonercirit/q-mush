@@ -332,13 +332,7 @@ async function connectRunner(
           installOperationalHandlers(socket);
         },
         {
-          onOperational: (restartId) => {
-            if (!runnerRestart.operational(restartId)) {
-              throw new RunnerConnectionError(
-                "The runner restart settlement was invalid",
-              );
-            }
-          },
+          onOperational: (restartId) => runnerRestart.operational(restartId),
           onVersion: (version) => {
             if (version !== Q_MUSH_RUNNER_VERSION) {
               runnerUpdateTrigger.observe(

@@ -1,6 +1,5 @@
 import {
   abortSignalIsAborted,
-  abortSignalOptions,
   optionalAbortSignal,
 } from "../shared/abort-signal.ts";
 import {
@@ -117,7 +116,7 @@ export async function openRouterProvidersForUser(
         options.user.id,
         credential,
         model,
-        abortSignalOptions(options.signal),
+        optionalAbortSignal(options.signal),
       );
       throwIfAgentAborted(options.signal);
       const response = createJsonResponse(catalog);

@@ -249,6 +249,7 @@ test("reports the settled restart identity only after operational registration",
     {
       onOperational: (restartId) => {
         operationalRestartIds.push(restartId);
+        return true;
       },
     },
   );
@@ -259,6 +260,21 @@ test("reports the settled restart identity only after operational registration",
   await expect(setup.promise).resolves.toBeUndefined();
 
   expect(operationalRestartIds).toEqual(["restart-operational"]);
+});
+
+test("rejects registration when operational restart settlement is invalid", async () => {
+  const setup = registrationForStartup(
+    new RunnerStartupRestart("restart-invalid"),
+    [],
+    "operational",
+    { onOperational: () => false },
+  );
+  receiveThroughFinalized(setup, "registration-invalid", "receipt-final");
+  setup.socket.receive(operational("registration-invalid"));
+
+  await expect(setup.promise).rejects.toThrow(
+    "The runner restart settlement was invalid",
+  );
 });
 
 test("installs command handling before operational acknowledgement and resolution", async () => {

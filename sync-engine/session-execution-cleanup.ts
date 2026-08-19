@@ -37,6 +37,7 @@ export class SessionExecutionCleanup {
   }
 
   async drainPending(deadline: RestartDeadline): Promise<void> {
+    // Development restart always exits this process after draining begins.
     this.#draining = true;
     const pending = [...this.pending];
     if (pending.length === 0) return;

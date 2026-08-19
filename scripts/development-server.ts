@@ -182,7 +182,6 @@ export function startDevelopmentServer(
 
   const terminateChild = async (
     waitMilliseconds: number,
-    deadline?: RestartDeadline,
     cancelForFinalShutdown = false,
   ): Promise<void> => {
     if (cancelForFinalShutdown && finalShutdownRequested) return;
@@ -190,13 +189,7 @@ export function startDevelopmentServer(
     if (await childSettledWithin(waitMilliseconds)) return;
     if (cancelForFinalShutdown && finalShutdownRequested) return;
     signalChild("SIGKILL");
-    const forceWait =
-      deadline === undefined
-        ? forceMilliseconds
-        : deadline.remaining() === 0
-          ? 0
-          : Math.min(forceMilliseconds, deadline.remaining());
-    if (forceWait > 0 && !(await childSettledWithin(forceWait))) {
+    if (!(await childSettledWithin(forceMilliseconds))) {
       child.unref();
       throw new Error("The development server did not terminate after SIGKILL");
     }
@@ -217,7 +210,6 @@ export function startDevelopmentServer(
     if (child.exitCode !== null || finalShutdownRequested) return;
     await terminateChild(
       restartReadyOrExited ? restartDeadline.remaining() : 0,
-      restartDeadline,
       true,
     );
   };

@@ -215,18 +215,27 @@ test("development restart bounds the complete pre-kill lifecycle to one deadline
     async (directory, triggerPath) => {
       const childPath = join(directory, "bounded-child.ts");
       const startsPath = join(directory, "bounded-starts.txt");
+      const overlapPath = join(directory, "bounded-overlap.txt");
       await Bun.write(
         childPath,
-        `import { appendFileSync } from "node:fs";
+        `import { appendFileSync, existsSync, readFileSync } from "node:fs";
 const startsPath = process.argv[2];
-if (startsPath === undefined) throw new Error("Missing starts path");
-appendFileSync(startsPath, "started\\n");
+const overlapPath = process.argv[3];
+if (startsPath === undefined || overlapPath === undefined) throw new Error("Missing path");
+if (existsSync(startsPath)) {
+  const priorPid = Number(readFileSync(startsPath, "utf8").trim().split("\\n").at(-1));
+  try {
+    process.kill(priorPid, 0);
+    appendFileSync(overlapPath, "overlap\\n");
+  } catch {}
+}
+appendFileSync(startsPath, "started\\n" + String(process.pid) + "\\n");
 process.on("SIGTERM", () => undefined);
 setInterval(() => undefined, 1_000);
 `,
       );
       const serverOptions = {
-        command: [process.execPath, childPath, startsPath],
+        command: [process.execPath, childPath, startsPath, overlapPath],
         cwd: directory,
         restartDelayMilliseconds: 10,
         restartTriggerPath: triggerPath,
@@ -241,6 +250,7 @@ setInterval(() => undefined, 1_000);
         await waitForStartCount(startsPath, 2);
         const elapsed = performance.now() - startedAt;
         expect(elapsed).toBeLessThan(250);
+        expect(await Bun.file(overlapPath).exists()).toBe(false);
       } finally {
         await server.stop();
       }

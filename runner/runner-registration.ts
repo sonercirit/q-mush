@@ -74,7 +74,8 @@ interface RegistrationState {
 
 interface RegistrationContext {
   readonly installOperationalHandlers: () => void;
-  readonly onOperational: ((restartId: string | undefined) => void) | undefined;
+  readonly onOperational:
+    ((restartId: string | undefined) => boolean) | undefined;
   readonly onVersion: ((version: string) => void) | undefined;
   readonly send: (message: string) => boolean;
   readonly settle: (error?: RunnerConnectionError) => void;
@@ -269,14 +270,23 @@ function receiveRegistrationMessage(
         invalidRegistration(context);
         return;
       }
-      context.onOperational?.(context.startupConnection.restartId);
+      if (
+        context.onOperational?.(context.startupConnection.restartId) === false
+      ) {
+        context.settle(
+          new RunnerConnectionError(
+            "The runner restart settlement was invalid",
+          ),
+        );
+        return;
+      }
       context.settle();
     }
   }
 }
 
 export interface RunnerRegistrationHandlers {
-  readonly onOperational?: (restartId: string | undefined) => void;
+  readonly onOperational?: (restartId: string | undefined) => boolean;
   readonly onVersion?: (version: string) => void;
 }
 
