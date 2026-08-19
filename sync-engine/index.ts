@@ -46,6 +46,7 @@ import {
   isRealtimePath,
   type QmushWebSocketData,
 } from "./realtime.ts";
+import { visibleRestartProgress } from "./restart-progress-visibility.ts";
 import { buildRunnerExecutableProvider } from "./runner-executable.ts";
 import { createRunnerIntegration } from "./runners.ts";
 import {
@@ -192,10 +193,7 @@ function errorMessage(error: unknown): string {
 
 let shutdownKind: "development_restart" | "final" | undefined;
 let developmentRestart: Promise<void> | undefined;
-const restartVisibleProgress = new Map<
-  string,
-  ReturnType<typeof sessions.drainProgress>
->();
+const restartVisibleSessionIds = new Map<string, ReadonlySet<string>>();
 
 function stopMaintenance(): void {
   clearInterval(recoveryTimer);
@@ -224,11 +222,12 @@ function publishRestartProgress(): void {
   for (const userId of realtimeHub.userIds()) {
     for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
       const visibilityKey = `${userId}\0${workspaceId}`;
-      let visibleProgress = restartVisibleProgress.get(visibilityKey);
-      if (visibleProgress === undefined) {
-        visibleProgress = sessions.drainProgress(userId, workspaceId);
-        restartVisibleProgress.set(visibilityKey, visibleProgress);
-      }
+      const visibleProgress = visibleRestartProgress(
+        restartVisibleSessionIds,
+        visibilityKey,
+        () => sessions.listForUser(userId, workspaceId).map(({ id }) => id),
+        (sessionIds) => sessions.drainProgressForSessions(sessionIds),
+      );
       realtimeHub.publishUser(
         userId,
         restartProgressMessage(visibleProgress),
@@ -269,7 +268,7 @@ function restartDevelopment(deadlineAt = Date.now()): Promise<void> {
     })
     .finally(() => {
       clearInterval(progressTimer);
-      restartVisibleProgress.clear();
+      restartVisibleSessionIds.clear();
     });
   return developmentRestart;
 }

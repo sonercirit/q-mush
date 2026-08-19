@@ -276,11 +276,18 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     workspaceId?: string,
   ): readonly RestartDrainSessionProgress[] {
     if (userId === undefined) return this.resources.restart.drainProgress();
-    const visible = new Set(
-      this.resources.store.list(userId, workspaceId).map(({ id }) => id),
+    return this.drainProgressForSessions(
+      new Set(
+        this.resources.store.list(userId, workspaceId).map(({ id }) => id),
+      ),
     );
+  }
+
+  drainProgressForSessions(
+    sessionIds: ReadonlySet<string>,
+  ): readonly RestartDrainSessionProgress[] {
     return this.resources.restart.drainProgress(undefined, (sessionId) =>
-      visible.has(sessionId),
+      sessionIds.has(sessionId),
     );
   }
 

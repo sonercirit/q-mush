@@ -340,6 +340,7 @@ export function realtimeTestSessions(
     drain: () => Promise.resolve(),
     drainFinal: () => Promise.resolve(),
     drainProgress: () => [],
+    drainProgressForSessions: () => [],
     drainRunner: () => Promise.resolve(),
     escalateDrain: () => false,
     escalateRunnerDrain: () => false,

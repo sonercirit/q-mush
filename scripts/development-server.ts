@@ -284,6 +284,7 @@ export function startDevelopmentServer(
             child = spawn();
           }
         } catch (error) {
+          // A later trigger retries the operation and spawns a fresh child.
           console.error("Q Mush development server restart failed", error);
         } finally {
           restarting = false;

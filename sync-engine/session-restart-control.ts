@@ -194,7 +194,11 @@ export function createSessionRestartControl(
       escalation.resolve(undefined);
     };
     const escalate = () => {
+      // Once the durable final-shutdown mark exists, force-parking is harmless
+      // but redundant, including while marker persistence is still pending.
       if (escalated || finalShutdownPrepared) return;
+      // A failed force-park still finishes this bounded drain immediately, so
+      // keeping it escalated only prevents duplicate work before cleanup.
       escalated = true;
       void forcePark(scope, requested.persistence).then(
         finish,
@@ -262,7 +266,7 @@ export function createSessionRestartControl(
       }
       if (runtimes.draining) {
         const serverId = serverRestartId();
-        if (serverId === undefined) {
+        if (serverId === undefined || serverDeadline === undefined) {
           throw new Error("The server restart request was lost");
         }
         sharedServerRestartIds.set(runnerId, restartId);
@@ -270,10 +274,7 @@ export function createSessionRestartControl(
           { kind: "server" },
           serverId,
           true,
-          (serverDeadline ??= new RestartDeadline(
-            now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
-            now,
-          )),
+          serverDeadline,
           false,
         );
         return;

@@ -49,6 +49,9 @@ export interface SessionIntegration extends SessionDetailReader {
     userId?: string,
     workspaceId?: string,
   ) => readonly RestartDrainSessionProgress[];
+  readonly drainProgressForSessions: (
+    sessionIds: ReadonlySet<string>,
+  ) => readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
   hasPendingDatabaseWrites(): boolean;
   reconcileDatabaseWrites(): boolean;
