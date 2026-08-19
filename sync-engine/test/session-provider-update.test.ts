@@ -16,6 +16,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { testStoreReadResources } from "./session-store-test-helpers.ts";
 
 function createProviderUpdateSession(
   store: SessionStore,
@@ -94,12 +95,7 @@ function setup(userContextTokenCap?: number) {
     },
     runtimes: { abortForGeneration },
     store: {
-      resources: {
-        database,
-        generateId: () => crypto.randomUUID(),
-        read: (userId: string, sessionId: string, workspaceId?: string) =>
-          store.get(userId, sessionId, workspaceId),
-      },
+      resources: testStoreReadResources(database, store),
     },
   };
   const input = {

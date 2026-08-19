@@ -1,3 +1,4 @@
+import type { AppDatabase } from "../../shared/database.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -48,4 +49,16 @@ export function createSessionStoreTestSetup() {
     SESSION_ID,
   );
   return setup;
+}
+
+export function testStoreReadResources(
+  database: AppDatabase,
+  store: SessionStore,
+) {
+  return {
+    database,
+    generateId: () => crypto.randomUUID(),
+    read: (userId: string, sessionId: string, workspaceId?: string) =>
+      store.get(userId, sessionId, workspaceId),
+  };
 }
