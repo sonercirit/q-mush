@@ -109,6 +109,18 @@ function sessionFor(
   return setup.sessions.detailForUser(TEST_USER_ID, sessionId);
 }
 
+async function waitForCompletedChild(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  childId: string,
+) {
+  return waitForSessionValue(
+    () => sessionFor(setup, childId),
+    (value) =>
+      hasSessionStatus("completed")(value) &&
+      JSON.stringify(value).includes(CHILD_SUMMARY),
+  );
+}
+
 function completionReports(
   setup: ReturnType<typeof connectedSessionSetup>,
 ): readonly string[] {
@@ -160,12 +172,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
   expect(completionReports(recreated)).toHaveLength(0);
   await waitForChildRunnerTool(recreated, childId);
   completeCurrentRunnerCommand(recreated, "null");
-  await waitForSessionValue(
-    () => sessionFor(recreated, childId),
-    (value) =>
-      hasSessionStatus("completed")(value) &&
-      JSON.stringify(value).includes(CHILD_SUMMARY),
-  );
+  await waitForCompletedChild(recreated, childId);
 
   const resumed = model.requests.find((request) =>
     request.some(
@@ -205,12 +212,7 @@ test("a reported child event survives parent compaction and is consumed on resum
   completeChildAgentFile(initial);
   await waitForChildRunnerTool(initial, childId, "bash");
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
-  await waitForSessionValue(
-    () => sessionFor(initial, childId),
-    (value) =>
-      hasSessionStatus("completed")(value) &&
-      JSON.stringify(value).includes(CHILD_SUMMARY),
-  );
+  await waitForCompletedChild(initial, childId);
   await waitForTerminalParentNote(initial.sessions, childId);
   expect(completionReports(initial)).toHaveLength(1);
 
