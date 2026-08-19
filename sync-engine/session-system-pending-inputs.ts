@@ -1,6 +1,7 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { SYSTEM_ID } from "../shared/ids.ts";
 import {
+  activePendingInput,
   activeStoredPendingInputs,
   pendingInputForPromotion,
   type PendingInputForPromotion,
@@ -19,8 +20,10 @@ export function activeNonSystemPendingInput(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): PendingInputForPromotion | undefined {
-  const pending = activeStoredPendingInputs(database, sessionId).find(
+  const pending = activePendingInput(
+    database,
+    sessionId,
     ({ createdById }) => createdById !== SYSTEM_ID,
   );
-  return pending === undefined ? undefined : pendingInputForPromotion(pending);
+  return pending;
 }

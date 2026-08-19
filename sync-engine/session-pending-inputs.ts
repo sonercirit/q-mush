@@ -172,8 +172,9 @@ export function pendingInputForPromotion(
 export function activePendingInput(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
+  accepts: (pending: StoredPendingInput) => boolean = () => true,
 ): PendingInputForPromotion | undefined {
-  const pending = firstPendingInput(database, sessionId);
+  const pending = activeStoredPendingInputs(database, sessionId).find(accepts);
   return pending === undefined ? undefined : pendingInputForPromotion(pending);
 }
 
