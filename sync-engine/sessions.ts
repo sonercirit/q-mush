@@ -19,6 +19,7 @@ import {
 } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
+import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { SessionAgentActions } from "./session-agent-actions.ts";
 import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
@@ -148,25 +149,24 @@ class DrizzleSessionIntegration
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
-    this.#store = new SessionStore(
-      database,
-      dependencies.randomId ?? createUuidV7,
-      (userId, report) => {
-        this.#actions.notifyReportedParent(
+    const reportParent = (
+      notify: "notifyReportedParent" | "reportedParent",
+    ) =>
+      (userId: string, report: { disposition: SpawnedReportDisposition; parentId: string }) => {
+        this.#actions[notify](
           { disposition: report.disposition, parentId: report.parentId },
           userId,
         );
-      },
+      };
+    this.#store = new SessionStore(
+      database,
+      dependencies.randomId ?? createUuidV7,
+      reportParent("notifyReportedParent"),
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
-      reportParent: (userId, report) => {
-        this.#actions.reportedParent(
-          { disposition: report.disposition, parentId: report.parentId },
-          userId,
-        );
-      },
+      reportParent: reportParent("reportedParent"),
     });
     this.#fallbacks = createAttachmentFallbackIntegration({
       database,
