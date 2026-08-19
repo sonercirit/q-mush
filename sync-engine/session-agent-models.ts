@@ -33,7 +33,7 @@ export interface SessionAgentModels {
   readonly agent: AgentModel;
   readonly createCompactor: () => ModelConversationCompactor;
   readonly publishCompactionSettled: () => void;
-  readonly resolvedModel?: string;
+  readonly resolvedModel?: string | null;
 }
 
 function agentModelRoutingOptions(
@@ -89,7 +89,7 @@ function modelOptions(
   detail: AgentSessionDetail,
   credential: ProviderCredentialAccess,
   systemPrompt: string,
-  resolvedModel: string | undefined,
+  resolvedModel: string | null | undefined,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
 ): AgentModelFactoryOptions {
@@ -113,7 +113,7 @@ function modelOptions(
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
-    resolvedModel: resolvedModel ?? null,
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
     systemPrompt,
     tools: detail.tools,
   };
@@ -146,7 +146,7 @@ export function createSessionAgentModels(options: {
   readonly isCurrent: () => boolean;
   readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
-  readonly resolvedModel?: string;
+  readonly resolvedModel?: string | null;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
   readonly userId: string;

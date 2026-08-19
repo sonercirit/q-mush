@@ -10,7 +10,7 @@ export function readSessionConversation(
     readonly detail: AgentSessionDetail;
     readonly store: Pick<SessionStore, "conversation">;
   },
-  resolvedModel?: string,
+  resolvedModel?: string | null,
 ) {
   const { credential, detail } = runtime;
   const identity = anthropicReplayIdentityFrom({
@@ -18,7 +18,7 @@ export function readSessionConversation(
     credentialFingerprint: agentCredentialFingerprint(credential),
     model: detail.model,
     provider: detail.provider,
-    ...(resolvedModel === undefined ? {} : { resolvedModel }),
+    ...(typeof resolvedModel === "string" ? { resolvedModel } : {}),
   });
   return runtime.store.conversation(
     detail.id,

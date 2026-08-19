@@ -16,7 +16,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import { createAgentSkills } from "./agent-skills.ts";
-import { resolveAnthropicModel } from "./anthropic-model-resolution.ts";
+import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import {
   isAskQuestionsPause,
   isAskQuestionsToolName,
@@ -194,8 +194,8 @@ async function loadModels(
     },
     runtime.signal,
   );
-  const resolvedModel = await executeForSession(runtime, () =>
-    resolveAnthropicModel({
+  const resolution = await executeForSession(runtime, () =>
+    resolveAnthropicModelAttempt({
       credential: runtime.credential,
       fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
       model: runtime.detail.model,
@@ -203,6 +203,8 @@ async function loadModels(
       signal: runtime.signal,
     }),
   );
+  const resolvedModel =
+    resolution.model ?? (resolution.retryable ? undefined : null);
   const models = createSessionAgentModels({
     agentFile,
     credential: runtime.credential,
