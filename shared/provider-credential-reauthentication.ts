@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { updatedAuditFields } from "./audit.ts";
 import type { CredentialCipher } from "./credential-cipher.ts";
 import type { AppDatabase } from "./database.ts";
@@ -7,8 +7,10 @@ import { SYSTEM_ID } from "./ids.ts";
 import { ownedActiveCredentialCondition } from "./provider-credential-condition.ts";
 import {
   encryptedCredentialValue,
+  presentProviderEndpointMetadata,
   storedCredentialFingerprint,
 } from "./provider-credential-secret.ts";
+import type { ProviderApiFormat } from "./provider-id.ts";
 
 type CredentialProviderId = typeof providerCredentials.$inferSelect.provider;
 
@@ -25,6 +27,10 @@ function credentialStateUpdated(
   values: Partial<typeof providerCredentials.$inferInsert>,
   requireReauthentication = false,
   accountId?: string,
+  endpoint?: {
+    readonly apiFormat: ProviderApiFormat | null;
+    readonly baseUrl: string | null;
+  },
 ): boolean {
   if (requireReauthentication && accountId === undefined) {
     return false;
@@ -42,6 +48,16 @@ function credentialStateUpdated(
         accountId === undefined
           ? undefined
           : eq(providerCredentials.providerAccountId, accountId),
+        endpoint === undefined
+          ? undefined
+          : endpoint.apiFormat === null
+            ? isNull(providerCredentials.apiFormat)
+            : eq(providerCredentials.apiFormat, endpoint.apiFormat),
+        endpoint === undefined
+          ? undefined
+          : endpoint.baseUrl === null
+            ? isNull(providerCredentials.baseUrl)
+            : eq(providerCredentials.baseUrl, endpoint.baseUrl),
       ),
     )
     .returning({ id: providerCredentials.id })
@@ -83,8 +99,7 @@ export function updateCredentialSecret(
     options,
     {
       credentialFingerprint: storedCredentialFingerprint({
-        ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
-        ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
+        ...presentProviderEndpointMetadata(stored),
         credential: options.secret,
       }),
       encryptedCredential: encryptedCredentialValue({
@@ -99,5 +114,6 @@ export function updateCredentialSecret(
     },
     options.requireReauthentication ?? false,
     options.accountId,
+    stored,
   );
 }

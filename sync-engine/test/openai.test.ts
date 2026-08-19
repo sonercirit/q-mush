@@ -233,6 +233,59 @@ const setupIntegration = createProviderTestSetup(
 );
 const connectAccount = createProviderAccountConnector(TEST_ROUTES);
 
+function beginReconnect(
+  integration: ReturnType<typeof setupIntegration>["integration"],
+  state: string,
+  code = "authorization-code-one",
+) {
+  return beginProviderAccount({
+    callbackPath: TEST_ROUTES.callbackPath,
+    code,
+    integration,
+    oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
+    state,
+  });
+}
+
+async function setupConnectedCredential() {
+  const setup = setupIntegration();
+  await connectAccount(
+    setup.integration,
+    FIRST_STATE,
+    "authorization-code-one",
+  );
+  return {
+    ...setup,
+    store: new ProviderCredentialStore(
+      setup.database,
+      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
+      "openai",
+    ),
+  };
+}
+
+function markForReconnect(store: ProviderCredentialStore): string | undefined {
+  store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
+  return store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
+}
+
+function expectStoredSecret(
+  store: ProviderCredentialStore,
+  expected: string | undefined,
+): void {
+  expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(expected);
+}
+
+async function expectWrongAccount(
+  integration: ReturnType<typeof setupIntegration>["integration"],
+  reconnect: ReturnType<typeof beginReconnect>,
+): Promise<void> {
+  expectRedirect(
+    await integration.complete(reconnect.callbackRequest),
+    "http://localhost:3000/app?openai=wrong_account",
+  );
+}
+
 describe("OpenAI credentials", () => {
   test("connects multiple accounts with OAuth PKCE and stores multiple API keys", async () => {
     const { database, integration, providerRequests } = setupIntegration({
@@ -389,44 +442,22 @@ describe("OpenAI credentials", () => {
   });
 
   test("reconnects only the flagged credential for the same verified account", async () => {
-    const { database, integration } = setupIntegration();
-    await connectAccount(integration, FIRST_STATE, "authorization-code-one");
-    const store = new ProviderCredentialStore(
-      database,
-      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
-      "openai",
-    );
+    const { database, integration, store } = await setupConnectedCredential();
 
-    expect(
-      integration.begin(
-        createAuthenticatedRequest(
-          `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-        ),
-      ).status,
-    ).toBe(409);
-    expect(
-      integration.begin(
-        createAuthenticatedRequest(
-          `${TEST_ROUTES.oauthPath}?credentialId=another-users-credential`,
-        ),
-      ).status,
-    ).toBe(409);
-    expect(
-      integration.begin(
-        createAuthenticatedRequest(
-          `${TEST_ROUTES.oauthPath}?workspaceId=out-of-scope&credentialId=${FIRST_OAUTH_ID}`,
-        ),
-      ).status,
-    ).toBe(409);
+    for (const query of [
+      `credentialId=${FIRST_OAUTH_ID}`,
+      "credentialId=another-users-credential",
+      `workspaceId=out-of-scope&credentialId=${FIRST_OAUTH_ID}`,
+    ]) {
+      expect(
+        integration.begin(
+          createAuthenticatedRequest(`${TEST_ROUTES.oauthPath}?${query}`),
+        ).status,
+      ).toBe(409);
+    }
 
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
-    const reconnect = beginProviderAccount({
-      callbackPath: TEST_ROUTES.callbackPath,
-      code: "authorization-code-one",
-      integration,
-      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-      state: "openai-state-five",
-    });
+    const reconnect = beginReconnect(integration, "openai-state-five");
     expect(readFlowCookies(reconnect.beginResponse)).toContain(
       `q_mush_openai_credential=${FIRST_OAUTH_ID}`,
     );
@@ -447,76 +478,48 @@ describe("OpenAI credentials", () => {
       .spyOn(ProviderCredentialStore.prototype, "updateSecret")
       .mockReturnValue(true);
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
-    const unflagged = beginProviderAccount({
-      callbackPath: TEST_ROUTES.callbackPath,
-      code: "authorization-code-one",
-      integration,
-      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-      state: "openai-state-six",
-    });
+    const unflagged = beginReconnect(integration, "openai-state-six");
     database
       .update(providerCredentials)
       .set({ requiresReauthentication: false })
       .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
       .run();
-    expectRedirect(
-      await integration.complete(unflagged.callbackRequest),
-      "http://localhost:3000/app?openai=wrong_account",
-    );
+    await expectWrongAccount(integration, unflagged);
 
-    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
-    const unchangedSecret = store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
-    const wrongAccount = beginProviderAccount({
-      callbackPath: TEST_ROUTES.callbackPath,
-      code: "authorization-code-two",
+    const unchangedSecret = markForReconnect(store);
+    const wrongAccount = beginReconnect(
       integration,
-      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-      state: "openai-state-seven",
-    });
-    expectRedirect(
-      await integration.complete(wrongAccount.callbackRequest),
-      "http://localhost:3000/app?openai=wrong_account",
+      "openai-state-seven",
+      "authorization-code-two",
     );
-    expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
-      unchangedSecret,
-    );
+    await expectWrongAccount(integration, wrongAccount);
+    expectStoredSecret(store, unchangedSecret);
 
     database
       .update(providerCredentials)
       .set({ providerAccountId: null })
       .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
       .run();
-    const missingStoredIdentity = beginProviderAccount({
-      callbackPath: TEST_ROUTES.callbackPath,
-      code: "authorization-code-one",
+    const missingStoredIdentity = beginReconnect(
       integration,
-      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-      state: "openai-state-eight",
-    });
-    expectRedirect(
-      await integration.complete(missingStoredIdentity.callbackRequest),
-      "http://localhost:3000/app?openai=wrong_account",
+      "openai-state-eight",
     );
+    await expectWrongAccount(integration, missingStoredIdentity);
     expect(endpointReconnect).not.toHaveBeenCalled();
     endpointReconnect.mockRestore();
     database.$client.close();
   });
 
-  test("rejects reconnect when the stored account changes during the callback", async () => {
-    const { database, integration } = setupIntegration();
-    await connectAccount(integration, FIRST_STATE, "authorization-code-one");
-    const store = new ProviderCredentialStore(
-      database,
-      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
-      "openai",
-    );
-    store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
-    const unchangedSecret = store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
+  test("rejects an account changed during the callback", async () => {
+    const setup = await setupConnectedCredential();
+    const { database, integration, store } = setup;
+    const unchangedSecret = markForReconnect(store);
     const originalUpdateSecret = store.updateSecret.bind(store);
     const updateSecret = vi
       .spyOn(ProviderCredentialStore.prototype, "updateSecret")
       .mockImplementation((...parameters) => {
-        if (parameters[4] === true) {
+        const reconnectOnly = parameters[4] === true;
+        if (reconnectOnly) {
           database
             .update(providerCredentials)
             .set({ providerAccountId: "chatgpt-workspace-two" })
@@ -527,17 +530,8 @@ describe("OpenAI credentials", () => {
       });
 
     try {
-      const reconnect = beginProviderAccount({
-        callbackPath: TEST_ROUTES.callbackPath,
-        code: "authorization-code-one",
-        integration,
-        oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${FIRST_OAUTH_ID}`,
-        state: SECOND_STATE,
-      });
-      expectRedirect(
-        await integration.complete(reconnect.callbackRequest),
-        "http://localhost:3000/app?openai=wrong_account",
-      );
+      const reconnect = beginReconnect(integration, SECOND_STATE);
+      await expectWrongAccount(integration, reconnect);
       expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
         unchangedSecret,
       );

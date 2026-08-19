@@ -344,9 +344,9 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
         "another-account",
       ),
     ).toBe(false);
-    expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
-      REVOKED_SECRET,
-    );
+    const readSecret = (): string | undefined =>
+      setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID);
+    expect(readSecret()).toBe(REVOKED_SECRET);
     expectReauthenticationState(setup.store, true);
     expect(
       setup.store.updateSecret(
@@ -368,9 +368,7 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
         "account",
       ),
     ).toBe(false);
-    expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
-      replacementSecret(),
-    );
+    expect(readSecret()).toBe(replacementSecret());
     expectReauthenticationState(setup.store, false);
   });
 });

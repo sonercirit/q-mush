@@ -2,6 +2,7 @@ import {
   fingerprintCredential,
   type CredentialCipher,
 } from "./credential-cipher.ts";
+import type { ProviderApiFormat } from "./provider-id.ts";
 
 function encryptionContext(userId: string, credentialId: string): string {
   return `${userId}:${credentialId}`;
@@ -31,11 +32,26 @@ export function decryptedCredentialValue(options: {
   );
 }
 
-export function storedCredentialFingerprint(options: {
-  readonly apiFormat?: string;
+export interface ProviderEndpointMetadata {
+  readonly apiFormat?: ProviderApiFormat;
   readonly baseUrl?: string;
-  readonly credential: string;
-}): string {
+}
+
+export function presentProviderEndpointMetadata(options: {
+  readonly apiFormat: ProviderApiFormat | null;
+  readonly baseUrl: string | null;
+}): ProviderEndpointMetadata {
+  return {
+    ...(options.apiFormat === null ? {} : { apiFormat: options.apiFormat }),
+    ...(options.baseUrl === null ? {} : { baseUrl: options.baseUrl }),
+  };
+}
+
+export function storedCredentialFingerprint(
+  options: ProviderEndpointMetadata & {
+    readonly credential: string;
+  },
+): string {
   const formatted =
     options.apiFormat === "anthropic"
       ? `${options.credential}\n${options.apiFormat}`

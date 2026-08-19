@@ -40,6 +40,7 @@ import {
 import {
   decryptedCredentialValue,
   encryptedCredentialValue,
+  presentProviderEndpointMetadata,
   storedCredentialFingerprint,
 } from "./provider-credential-secret.ts";
 import {
@@ -356,8 +357,7 @@ export class ProviderCredentialStore {
 
     const summary: ProviderCredentialAccess = {
       accountId: stored.providerAccountId,
-      ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
-      ...(stored.baseUrl === null ? {} : { baseUrl: stored.baseUrl }),
+      ...presentProviderEndpointMetadata(stored),
       id: stored.id,
       isDefault: stored.isDefault,
       isGlobal: stored.isGlobal,

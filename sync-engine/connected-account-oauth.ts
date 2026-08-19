@@ -165,26 +165,12 @@ export class ConnectedAccountOAuth {
     const secure = usesSecureCookies(redirectUri);
     const clearedCookies = [
       ...clearPkceCookies(this.#configuration.flowCookies, secure),
-      createCookie(
+      ...[
         this.#configuration.userCookie,
-        "",
-        0,
-        this.#configuration.flowCookies.path,
-        secure,
-      ),
-      createCookie(
         this.#configuration.credentialCookie,
-        "",
-        0,
-        this.#configuration.flowCookies.path,
-        secure,
-      ),
-      createCookie(
         this.#configuration.workspaceCookie,
-        "",
-        0,
-        this.#configuration.flowCookies.path,
-        secure,
+      ].map((name) =>
+        createCookie(name, "", 0, this.#configuration.flowCookies.path, secure),
       ),
     ];
     const callback = readOAuthCallback(

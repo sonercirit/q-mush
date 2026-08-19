@@ -297,9 +297,11 @@ export class ProviderCredentialEndpoints {
     secret: string,
     now: number,
   ): boolean {
-    return (
-      this.#store?.updateSecret(userId, credentialId, secret, now) === true
-    );
+    const store = this.#store;
+    if (store === undefined) {
+      return false;
+    }
+    return store.updateSecret(userId, credentialId, secret, now);
   }
 
   reconnectCredential(
@@ -309,16 +311,17 @@ export class ProviderCredentialEndpoints {
     now: number,
     details: ProviderCredentialDetails,
   ): boolean {
-    return (
-      this.#store?.updateSecret(
-        userId,
-        credentialId,
-        secret,
-        now,
-        true,
-        details.accountId ?? undefined,
-        details.label,
-      ) === true
+    if (this.#store === undefined) {
+      return false;
+    }
+    return this.#store.updateSecret(
+      userId,
+      credentialId,
+      secret,
+      now,
+      true,
+      details.accountId ?? undefined,
+      details.label,
     );
   }
 
