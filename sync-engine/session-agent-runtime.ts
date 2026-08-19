@@ -61,6 +61,7 @@ import {
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
+import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -97,7 +98,7 @@ function writeRuntime(
   runtime.notify();
 }
 
-function markStepStart(runtime: SessionAgentRuntimeDependencies): void {
+function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
@@ -173,7 +174,7 @@ function handoffError(): DOMException {
   );
 }
 
-async function executeSession<Result>(
+async function executeForSession<Result>(
   runtime: SessionAgentRuntimeDependencies,
   execute: () => Promise<Result>,
   handoff?: (error: DOMException) => void,
@@ -194,15 +195,6 @@ export function isRestartHandoffError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "RestartHandoff";
 }
 
-function getConversation(
-  runtime: SessionAgentRuntimeDependencies,
-): ReturnType<SessionStore["conversation"]> {
-  return runtime.store.conversation(
-    runtime.detail.id,
-    runtime.detail.restartHandoff === null,
-  );
-}
-
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -215,7 +207,7 @@ async function loadModels(
     runtime.signal,
     settings,
     async (signal) => {
-      const agentFile = await executeSession(runtime, () =>
+      const agentFile = await executeForSession(runtime, () =>
         loadSessionAgentFile(
           runtime.broker,
           runtime.detail,
@@ -245,7 +237,7 @@ async function loadModels(
         factory: runtime.modelFactory,
         isCurrent: runtime.isCurrent,
         onStepStart: () => {
-          markStepStart(runtime);
+          markSessionStepStart(runtime);
         },
         realtime: runtime.realtime,
         ...(options.streamId === undefined
@@ -274,7 +266,7 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = getConversation(runtime);
+  const conversation = sessionRuntimeConversation(runtime);
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -308,11 +300,11 @@ export async function compactSessionConversation(
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
   "Error: the runner disconnected before this tool call returned; retry it after restart.";
 
-function interruptedResult(): RunnerCommandResult {
+function restartInterruptedToolResult(): RunnerCommandResult {
   return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
 }
 
-function boundToolOutput(
+function boundRuntimeToolOutput(
   runtime: SessionAgentRuntimeDependencies,
   result: RunnerCommandResult,
   toolName?: string,
@@ -338,7 +330,7 @@ async function executeAgentTool(
     : never,
 ): Promise<RunnerCommandResult> {
   if (isRestartHandoffError(toolSignal.reason)) {
-    return interruptedResult();
+    return restartInterruptedToolResult();
   }
   try {
     if (
@@ -368,7 +360,7 @@ async function executeAgentTool(
       isRestartHandoffError(error) ||
       isRestartHandoffError(toolSignal.reason)
     ) {
-      return interruptedResult();
+      return restartInterruptedToolResult();
     }
     throw error;
   }
@@ -378,7 +370,7 @@ export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
   const streamId = createUuidV7();
-  const initialMessages = getConversation(runtime);
+  const initialMessages = sessionRuntimeConversation(runtime);
   const messages =
     runtime.continuous && initialMessages.at(-1)?.role === "assistant"
       ? [...initialMessages, { content: "Continue.", role: "user" as const }]
@@ -415,7 +407,7 @@ export async function runSessionAgent(
     signal: AbortSignal = toolSignal,
     callId?: string,
   ): Promise<RunnerCommandResult> => {
-    const result = await executeSession(
+    const result = await executeForSession(
       runtime,
       () =>
         runtime.broker.dispatch(
@@ -487,7 +479,7 @@ export async function runSessionAgent(
         currentProviderTag: runtime.detail.openRouterProviderTag,
         factory: runtime.modelFactory,
         onStepStart: () => {
-          markStepStart(runtime);
+          markSessionStepStart(runtime);
         },
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
@@ -570,7 +562,7 @@ export async function runSessionAgent(
     return messages;
   };
   const finalizeToolResult = (result: RunnerCommandResult, toolName: string) =>
-    boundToolOutput(runtime, result, toolName);
+    boundRuntimeToolOutput(runtime, result, toolName);
   try {
     return await runCompactingAgentLoop({
       agentCost: (step) =>

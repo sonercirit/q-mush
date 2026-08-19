@@ -213,7 +213,9 @@ describe("global tool time limit integration", () => {
       const finishedErrors: unknown[] = [];
       const factorySelections: unknown[] = [];
       const deadline = AbortSignal.timeout(60);
-      vi.spyOn(AbortSignal, "timeout").mockReturnValue(deadline);
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockReturnValue(deadline);
       const broker = new RunnerCommandBroker({
         cancel: (_runnerId, commandId) => {
           canceled.resolve(commandId);
@@ -232,6 +234,9 @@ describe("global tool time limit integration", () => {
         controller,
         factorySelections,
         finishedErrors,
+      );
+      expect(timeout).toHaveBeenCalledWith(
+        toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
       );
       await dispatched.promise;
       await vi.waitFor(() => {
