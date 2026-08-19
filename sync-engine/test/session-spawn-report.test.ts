@@ -123,57 +123,29 @@ describe("spawned session reports", () => {
     expect(content).toContain("Partial work before failure");
   });
 
-  test("uses an unbound terminal failure instead of an earlier generation", () => {
-    const content = spawnedSessionReport(
-      {
-        ...TEST_SESSION_DETAIL,
-        generation: 1,
-        messages: [
-          {
-            ...testSessionMessage(
-              "message-old",
-              "Old successful answer",
-              "assistant",
-              1,
-            ),
-            turnId: "turn-0",
-          },
-          {
-            ...testSessionMessage(
-              "message-unbound-error",
-              "Session failed: server interrupted the current attempt",
-              "error",
-              4,
-            ),
-            turnId: null,
-          },
-        ],
-        status: "failed",
-        turns: [
-          {
-            boundaryMessageId: "message-old",
-            endedAt: 2,
-            executionGeneration: 0,
-            id: "turn-0",
-            startedAt: 0,
-          },
-          {
-            boundaryMessageId: null,
-            endedAt: 4,
-            executionGeneration: 1,
-            id: "turn-1",
-            startedAt: 3,
-          },
-        ],
+  test.each([
+    {
+      error: {
+        content: "Session failed: server interrupted the current attempt",
+        createdAt: 4,
+        id: "message-unbound-error",
+        turnId: null,
       },
-      "parent-1",
-    )?.content;
-
-    expect(content).toContain("server interrupted the current attempt");
-    expect(content).not.toContain("Old successful answer");
-  });
-
-  test("uses only the current attempt's final error", () => {
+      title:
+        "uses an unbound terminal failure instead of an earlier generation",
+      turn: { endedAt: 4, id: "turn-1", startedAt: 3 },
+    },
+    {
+      error: {
+        content: "Session failed: credential_rate_limited",
+        createdAt: 3,
+        id: "message-current",
+        turnId: "turn-1",
+      },
+      title: "uses only the current attempt's final error",
+      turn: { endedAt: 3, id: "turn-1", startedAt: 2 },
+    },
+  ])("$title", ({ error, turn }) => {
     const content = spawnedSessionReport(
       {
         ...TEST_SESSION_DETAIL,
@@ -190,12 +162,12 @@ describe("spawned session reports", () => {
           },
           {
             ...testSessionMessage(
-              "message-current",
-              "Session failed: credential_rate_limited",
+              error.id,
+              error.content,
               "error",
-              3,
+              error.createdAt,
             ),
-            turnId: "turn-1",
+            turnId: error.turnId,
           },
         ],
         status: "failed",
@@ -209,17 +181,15 @@ describe("spawned session reports", () => {
           },
           {
             boundaryMessageId: null,
-            endedAt: 3,
             executionGeneration: 1,
-            id: "turn-1",
-            startedAt: 2,
+            ...turn,
           },
         ],
       },
       "parent-1",
     )?.content;
 
-    expect(content).toContain("credential_rate_limited");
+    expect(content).toContain(error.content.replace("Session failed: ", ""));
     expect(content).not.toContain("Old successful answer");
   });
 
