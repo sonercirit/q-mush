@@ -23,7 +23,9 @@ function progress(
 test("publishes late visible drain progress without repeating the listing", () => {
   const cache: RestartProgressVisibilityCache = new Map();
   const key = "user\0workspace";
+  const otherKey = "other-user\0other-workspace";
   const listSessionIds = vi.fn(() => ["session-initial"]);
+  const listOtherSessionIds = vi.fn(() => ["session-other"]);
   const draining = new Map([
     ["session-initial", progress("session-initial", 1)],
   ]);
@@ -41,6 +43,10 @@ test("publishes late visible drain progress without repeating the listing", () =
   };
 
   publish();
+  draining.set("session-other", progress("session-other", 3));
+  expect(
+    visibleRestartProgress(cache, otherKey, listOtherSessionIds, readProgress),
+  ).toEqual([progress("session-other", 3)]);
   draining.set("session-late", progress("session-late", 2));
   addVisibleRestartSession(cache, key, "session-late");
   publish();
@@ -50,7 +56,8 @@ test("publishes late visible drain progress without repeating the listing", () =
     [progress("session-initial", 1), progress("session-late", 2)],
   ]);
   expect(listSessionIds).toHaveBeenCalledTimes(1);
-  expect(readProgress).toHaveBeenCalledTimes(2);
+  expect(listOtherSessionIds).toHaveBeenCalledOnce();
+  expect(readProgress).toHaveBeenCalledTimes(3);
 });
 
 test("keeps a session added before the initial visibility listing", () => {

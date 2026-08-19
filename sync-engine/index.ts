@@ -243,7 +243,8 @@ function publishRestartProgress(): void {
         restartVisibleSessionIds,
         visibilityKey,
         () => sessions.listForUser(userId, workspaceId).map(({ id }) => id),
-        (sessionIds) => sessions.drainProgressForSessions(sessionIds),
+        (sessionIds) =>
+          progress.filter(({ sessionId }) => sessionIds.has(sessionId)),
       );
       realtimeHub.publishUser(
         userId,

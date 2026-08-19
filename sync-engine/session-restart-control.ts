@@ -194,8 +194,8 @@ export function createSessionRestartControl(
       escalation.resolve(undefined);
     };
     const escalate = () => {
-      // Once the durable final-shutdown mark exists, force-parking is harmless
-      // but redundant, including while marker persistence is still pending.
+      // Once the durable final-shutdown mark has been persisted,
+      // force-parking is harmless but redundant.
       if (escalated || finalShutdownPrepared) return;
       // A failed force-park still finishes this bounded drain immediately, so
       // keeping it escalated only prevents duplicate work before cleanup.
