@@ -8,6 +8,7 @@ import {
 } from "./session-store-persistence.ts";
 import {
   emitReportedParent,
+  readUpdatedSessionDetail,
   type SessionStoreWriteResources,
 } from "./session-store-resources.ts";
 
@@ -69,9 +70,12 @@ export function updateStoredSessionTools(
     return { status: "conflict" };
   }
   emitReportedParent(options, input.userId, changed.reportedParent);
-  const detail = options.read(input.userId, input.sessionId, input.workspaceId);
-  if (detail === undefined) {
-    throw new Error("The updated agent session could not be read");
-  }
+  const detail = readUpdatedSessionDetail(
+    options,
+    input.userId,
+    input.sessionId,
+    input.workspaceId,
+    "The updated agent session could not be read",
+  );
   return { detail, status: "updated" };
 }

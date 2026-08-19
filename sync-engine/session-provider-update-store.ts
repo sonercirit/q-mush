@@ -16,6 +16,7 @@ import {
 import { serializeProviderPricing } from "./session-store-read.ts";
 import {
   emitReportedParent,
+  readUpdatedSessionDetail,
   type SessionStoreWriteResources,
 } from "./session-store-resources.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
@@ -97,13 +98,12 @@ export function updateStoredSessionProvider(
   if (changed === undefined) return { status: "conflict" };
   emitReportedParent(resources, input.userId, changed.reportedParent);
 
-  const detail = resources.read(
+  const detail = readUpdatedSessionDetail(
+    resources,
     input.userId,
     input.sessionId,
     input.workspaceId,
+    "Provider update committed but the session disappeared",
   );
-  if (detail === undefined) {
-    throw new Error("Provider update committed but the session disappeared");
-  }
   return { detail, status: "updated" };
 }
