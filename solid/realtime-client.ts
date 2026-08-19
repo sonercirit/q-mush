@@ -92,13 +92,13 @@ export class RealtimeConnection {
   readonly #now: () => number;
   readonly #requestFrame: FrameCallback;
   readonly #setTimeout: (callback: () => void, delay: number) => number;
-  readonly #selectedSession: () => string | undefined;
+  readonly #selected: () => string | undefined;
   readonly #clearTimeout: (id: number) => void;
   #instanceId: string | undefined;
   #hasConnected = false;
   #lastInstanceId: string | undefined;
-  readonly #reconnectListeners = new Set<() => void>();
-  #pendingCommandBytes = 0;
+  readonly #reconnects = new Set<() => void>();
+  #commandBytes = 0;
   #pendingCommands = new Map<string, PendingCommand>();
   #queuedCommands: QueuedCommand[] = [];
   #reconnectAttempt = 0;
@@ -108,8 +108,8 @@ export class RealtimeConnection {
   readonly #stateEvents = new Map<string, DeferredStateEvent>();
   readonly #stateBarriers = new Map<string, RealtimeStreamBarrier>();
   readonly #stateWaiters: ((available: boolean) => void)[] = [];
-  #streamGeneration = 0;
-  readonly #streamBuffer = new RealtimeStreamBuffer();
+  #generation = 0;
+  readonly #buffer = new RealtimeStreamBuffer();
   #streamFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
   readonly #toolSync = new ToolSyncTracker();
@@ -136,12 +136,12 @@ export class RealtimeConnection {
       ((callback) => window.requestAnimationFrame(callback));
     this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
-    this.#selectedSession = options.selectedSession ?? noSelectedSession;
+    this.#selected = options.selectedSession ?? noSelectedSession;
   }
   onReconnect(listener: () => void): () => void {
-    this.#reconnectListeners.add(listener);
+    this.#reconnects.add(listener);
     return () => {
-      this.#reconnectListeners.delete(listener);
+      this.#reconnects.delete(listener);
     };
   }
   yieldToStateApplication(): Promise<boolean> {
@@ -161,7 +161,7 @@ export class RealtimeConnection {
   }
   syncTools(sessionId: string): void {
     for (const request of this.#toolSync.unresolved(
-      this.#streamBuffer.activeToolStreams(sessionId),
+      this.#buffer.activeToolStreams(sessionId),
     )) {
       if (!this.#sendToolSync(request)) return;
     }
@@ -180,7 +180,7 @@ export class RealtimeConnection {
     this.#lastInstanceId = undefined;
     this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
     this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
-    this.#pendingCommandBytes = 0;
+    this.#commandBytes = 0;
     this.#instanceId = undefined;
     if (this.#reconnectTimer !== undefined) {
       this.#clearTimeout(this.#reconnectTimer);
@@ -189,9 +189,9 @@ export class RealtimeConnection {
     const socket = this.#socket;
     this.#socket = undefined;
     this.#discardStateEvents();
-    this.#streamGeneration += 1;
+    this.#generation += 1;
     this.#streamFrame = undefined;
-    this.#streamBuffer.clear();
+    this.#buffer.clear();
     this.#toolSync.clear();
     socket?.close();
   }
@@ -221,7 +221,7 @@ export class RealtimeConnection {
     if (
       this.#queuedCommands.length + this.#pendingCommands.size >=
         MAXIMUM_PENDING_COMMANDS ||
-      bytes > MAXIMUM_PENDING_COMMAND_BYTES - this.#pendingCommandBytes
+      bytes > MAXIMUM_PENDING_COMMAND_BYTES - this.#commandBytes
     ) {
       return Promise.reject(new Error("command_capacity_exceeded"));
     }
@@ -233,7 +233,7 @@ export class RealtimeConnection {
         resolve,
         sentInstanceId: undefined,
       };
-      this.#pendingCommandBytes += bytes;
+      this.#commandBytes += bytes;
       if (
         socket?.readyState !== WebSocket.OPEN ||
         this.#instanceId === undefined
@@ -247,16 +247,16 @@ export class RealtimeConnection {
         socket.send(envelope);
       } catch {
         this.#pendingCommands.delete(commandId);
-        this.#pendingCommandBytes -= pending.bytes;
+        this.#commandBytes -= pending.bytes;
         reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
         socket.close();
       }
     });
   }
   #clearDisconnectedStreams(): void {
-    this.#streamGeneration += 1;
+    this.#generation += 1;
     this.#streamFrame = undefined;
-    this.#streamBuffer.clearPending();
+    this.#buffer.clearPending();
   }
   #connect(): void {
     if (this.#stopped) {
@@ -359,7 +359,7 @@ export class RealtimeConnection {
           ? event.sessionId
           : undefined;
     if (sessionId !== undefined) {
-      this.#stateBarriers.set(key, this.#streamBuffer.markBarrier(sessionId));
+      this.#stateBarriers.set(key, this.#buffer.markBarrier(sessionId));
       this.#invalidateStreamFrame();
     }
     this.#scheduleStateEvent();
@@ -385,16 +385,13 @@ export class RealtimeConnection {
         const barrier = this.#stateBarriers.get(key);
         if (barrier !== undefined) {
           const frameStartedAt = this.#now();
-          const batch = this.#streamBuffer.takeBarrier(
+          const batch = this.#buffer.takeBarrier(
             barrier,
             STREAM_UPDATES_PER_FRAME,
             () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
           );
           this.#deliverStreamBatch(batch);
-          if (
-            batch !== undefined ||
-            this.#streamBuffer.barrierPending(barrier)
-          ) {
+          if (batch !== undefined || this.#buffer.barrierPending(barrier)) {
             this.#scheduleStateEvent();
             return;
           }
@@ -409,7 +406,7 @@ export class RealtimeConnection {
   }
   #deliverDeferredStateEvent(event: DeferredStateEvent): void {
     if (event.type === "tool_stream_snapshot") {
-      const snapshot = this.#streamBuffer.applyToolSnapshot(event);
+      const snapshot = this.#buffer.applyToolSnapshot(event);
       this.#toolSync.resolve(event);
       this.#deliver(snapshot);
       return;
@@ -419,7 +416,8 @@ export class RealtimeConnection {
         !sessionIsActive(event.session.status) &&
         event.session.status !== "paused"
       ) {
-        this.#streamBuffer.clearToolSession(event.session.id);
+        this.#buffer.clearToolSession(event.session.id);
+        this.#toolSync.resolveSession(event.session.id);
       } else {
         this.syncTools(event.session.id);
       }
@@ -437,9 +435,9 @@ export class RealtimeConnection {
     if (!this.#stopped) {
       const frameStartedAt = this.#now();
       this.#deliverStreamBatch(
-        this.#streamBuffer.takeNext(
+        this.#buffer.takeNext(
           STREAM_UPDATES_PER_FRAME,
-          this.#selectedSession(),
+          this.#selected(),
           () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
         ),
       );
@@ -447,20 +445,20 @@ export class RealtimeConnection {
     }
   }
   #invalidateStreamFrame(): void {
-    this.#streamGeneration += 1;
+    this.#generation += 1;
     this.#streamFrame = undefined;
   }
   #scheduleFrame(): void {
     if (
       this.#streamFrame !== undefined ||
-      !this.#streamBuffer.pending ||
+      !this.#buffer.pending ||
       this.#stateEvents.size > 0
     ) {
       return;
     }
-    const generation = this.#streamGeneration;
+    const generation = this.#generation;
     this.#streamFrame = this.#requestFrame(() => {
-      if (generation === this.#streamGeneration) {
+      if (generation === this.#generation) {
         this.#flushStreamFrame();
       }
     });
@@ -471,35 +469,34 @@ export class RealtimeConnection {
       { readonly type: "session_delta" | "tool_stream" }
     >,
   ): void {
-    this.#streamBuffer.queue(event);
-    const requests = this.#streamBuffer.takeToolResyncRequests();
+    this.#buffer.queue(event);
+    const requests = this.#buffer.takeToolResyncRequests();
     this.#syncTools(requests);
     this.#scheduleFrame();
   }
-
   #syncTools(requests: readonly ToolSyncRequest[]): void {
-    const unique = new Map(
-      requests.map((request) => [
-        JSON.stringify([request.sessionId, request.streamId]),
-        request,
-      ]),
-    );
-    for (const request of unique.values()) {
-      if (!this.#sendToolSync(request)) return;
+    const unresolved = this.#toolSync.unresolved(requests);
+    for (const [index, request] of unresolved.entries()) {
+      if (!this.#sendToolSync(request)) {
+        for (const remaining of unresolved.slice(index)) {
+          this.#toolSync.remember(remaining);
+        }
+        return;
+      }
       this.#toolSync.remember(request);
     }
   }
   #rejectPendingCommands(code: string): void {
     for (const pending of this.#pendingCommands.values()) {
       pending.reject(commandFailure(code));
-      this.#pendingCommandBytes -= pending.bytes;
+      this.#commandBytes -= pending.bytes;
     }
     this.#pendingCommands.clear();
   }
   #rejectQueuedCommands(code: string): void {
     for (const queued of this.#queuedCommands) {
       queued.pending.reject(commandFailure(code));
-      this.#pendingCommandBytes -= queued.pending.bytes;
+      this.#commandBytes -= queued.pending.bytes;
     }
     this.#queuedCommands = [];
   }
@@ -514,7 +511,7 @@ export class RealtimeConnection {
       return;
     }
     this.#pendingCommands.delete(event.commandId);
-    this.#pendingCommandBytes -= pending.bytes;
+    this.#commandBytes -= pending.bytes;
     if (event.type === "command_success") {
       pending.resolve(event.result);
     } else {
@@ -541,8 +538,8 @@ export class RealtimeConnection {
         this.#toolSync.clear();
         this.#syncTools([
           ...remembered,
-          ...this.#streamBuffer.activeToolStreams(),
-          ...this.#streamBuffer.takeToolResyncRequests(),
+          ...this.#buffer.activeToolStreams(),
+          ...this.#buffer.takeToolResyncRequests(),
         ]);
       }
       const pendingCommandIds = [...this.#pendingCommands.keys()];
@@ -557,7 +554,7 @@ export class RealtimeConnection {
           previousInstanceId !== event.instanceId
         ) {
           this.#pendingCommands.delete(commandId);
-          this.#pendingCommandBytes -= pending.bytes;
+          this.#commandBytes -= pending.bytes;
           pending.reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
           continue;
         }
@@ -572,7 +569,7 @@ export class RealtimeConnection {
         }
       }
       if (reconnected) {
-        for (const listener of this.#reconnectListeners) {
+        for (const listener of this.#reconnects) {
           listener();
         }
       }
@@ -608,6 +605,14 @@ export class RealtimeConnection {
       { type: "session_delta" | "tool_stream" }
     >,
   ): void {
+    if (
+      event.type === "tool_stream" &&
+      event.state !== undefined &&
+      event.state !== "preparing" &&
+      event.state !== "running"
+    ) {
+      this.#toolSync.resolve(event);
+    }
     this.#queueStreamDelta(event);
   }
   #scheduleReconnect(): void {

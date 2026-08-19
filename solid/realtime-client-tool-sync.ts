@@ -8,7 +8,7 @@ export interface ToolSyncRequest {
   readonly streamId: string;
 }
 
-function requestKey(request: ToolSyncRequest): string {
+function toolSyncKey(request: ToolSyncRequest): string {
   return JSON.stringify([request.sessionId, request.streamId]);
 }
 
@@ -24,7 +24,7 @@ export class ToolSyncTracker {
   }
 
   remember(request: ToolSyncRequest): void {
-    const key = requestKey(request);
+    const key = toolSyncKey(request);
     this.#pending.delete(key);
     this.#pending.set(key, request);
     let sessionEntries = 0;
@@ -47,12 +47,18 @@ export class ToolSyncTracker {
   }
 
   resolve(request: ToolSyncRequest): void {
-    this.#pending.delete(requestKey(request));
+    this.#pending.delete(toolSyncKey(request));
+  }
+
+  resolveSession(sessionId: string): void {
+    for (const [key, request] of this.#pending) {
+      if (request.sessionId === sessionId) this.#pending.delete(key);
+    }
   }
 
   unresolved(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[] {
     return requests.filter(
-      (request) => !this.#pending.has(requestKey(request)),
+      (request) => !this.#pending.has(toolSyncKey(request)),
     );
   }
 }
