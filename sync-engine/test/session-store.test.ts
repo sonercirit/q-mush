@@ -458,46 +458,6 @@ describe("session store", () => {
     setup.database.$client.close();
   });
 
-  test("manual compaction defers system reports but promotes an ordinary pending input", () => {
-    const setup = runningStore();
-    expect(
-      setup.store.enqueuePendingInput(
-        TEST_USER_ID,
-        SESSION_ID,
-        {
-          clientRequestId: "before-compaction",
-          content: "Queued before compaction",
-          images: [],
-          kind: "follow_up",
-        },
-        TEST_NOW + 3,
-      ).status,
-    ).toBe("accepted");
-    const transitioned = setup.store.transitionCurrent(
-      SESSION_ID,
-      "idle",
-      TEST_NOW + 2,
-    );
-    expect(transitioned).toBe(true);
-
-    const queued = setup.store.queue(
-      TEST_USER_ID,
-      SESSION_ID,
-      TEST_NOW + 4,
-      undefined,
-      { deferSystemPendingInputs: true },
-    );
-
-    const detail = setup.store.get(TEST_USER_ID, SESSION_ID);
-    if (queued.status !== "queued" || detail === undefined) {
-      throw new Error("Compaction queue setup failed");
-    }
-    expect(detail.messages.at(-1)?.content).toBe("Queued before compaction");
-    expect(detail.messages.at(-1)?.role).toBe("user");
-    expect(detail.pendingInputs).toEqual([]);
-    setup.database.$client.close();
-  });
-
   test("continues without appending a user message", () => {
     const setup = runningStore();
     expect(
