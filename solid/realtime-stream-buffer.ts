@@ -4,7 +4,6 @@ import {
   type ToolStreamDeltaFrame,
   type ToolStreamEntry,
   type ToolStreamSnapshotFrame,
-  type ToolStreamTerminalState,
 } from "../shared/tool-stream.ts";
 import { USER_REALTIME_MAX_PAYLOAD_LENGTH } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
@@ -23,6 +22,12 @@ import {
   type RealtimeToolStreamUpdate,
   type SessionStreamDelta,
 } from "./realtime-stream-buffer-update.ts";
+import {
+  terminalToolState,
+  tombstoneEntry,
+  toolStateSessionId,
+  type RetainedToolState,
+} from "./realtime-stream-tool-state.ts";
 export type { RealtimeStreamUpdate, RealtimeToolStreamUpdate };
 type SessionDelta = SessionStreamDelta;
 type StreamServerEvent = SessionDelta | ToolStreamDeltaFrame;
@@ -40,20 +45,6 @@ interface ToolStreamRequest {
   readonly sessionId: string;
   readonly streamId: string;
 }
-interface ActiveToolState {
-  readonly entry: ToolStreamEntry;
-  readonly kind: "active";
-}
-interface TerminalToolState {
-  readonly callId: string;
-  readonly index: number;
-  readonly kind: "terminal";
-  readonly sequence: number;
-  readonly sessionId: string;
-  readonly state: ToolStreamTerminalState;
-  readonly streamId: string;
-}
-type RetainedToolState = ActiveToolState | TerminalToolState;
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
 const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
 const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
@@ -80,9 +71,6 @@ function pendingWithinLimit(
     updates.length < maximumUpdates && (updates.length === 0 || withinBudget())
   );
 }
-function toolStateSessionId(state: RetainedToolState): string {
-  return state.kind === "active" ? state.entry.sessionId : state.sessionId;
-}
 function drainUpdates(
   maximumUpdates: number,
   withinBudget: () => boolean,
@@ -95,34 +83,6 @@ function drainUpdates(
     updates.push(update);
   }
   return streamBatch(updates);
-}
-function terminalToolState(entry: ToolStreamEntry): TerminalToolState {
-  if (entry.state === "preparing" || entry.state === "running") {
-    throw new TypeError("A tool tombstone must be terminal");
-  }
-  return {
-    callId: entry.callId,
-    index: entry.index,
-    kind: "terminal",
-    sequence: entry.sequence,
-    sessionId: entry.sessionId,
-    state: entry.state,
-    streamId: entry.streamId,
-  };
-}
-function tombstoneEntry(tombstone: TerminalToolState): ToolStreamEntry {
-  return {
-    arguments: "",
-    callId: tombstone.callId,
-    index: tombstone.index,
-    name: "",
-    sequence: tombstone.sequence,
-    sessionId: tombstone.sessionId,
-    state: tombstone.state,
-    stderr: "",
-    stdout: "",
-    streamId: tombstone.streamId,
-  };
 }
 function retainedToolEntry(
   local: RetainedToolState | undefined,

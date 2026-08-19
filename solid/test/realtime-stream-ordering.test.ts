@@ -528,25 +528,6 @@ test("synchronizes only active tool streams on session state", () => {
   ]);
   stream.stop();
 });
-test("reconnect synchronizes every observed tool stream", () => {
-  const firstId = "tool-stream-a";
-  const secondId = "tool-stream-b";
-  const stream = streamingTestConnection("multi-stream-instance");
-  stream.receive({
-    ...preparingToolDelta(0, firstId, "call-0"),
-    state: "preparing",
-  });
-  expectNextFrame(stream);
-  stream.receive({
-    ...preparingToolDelta(1, secondId, "call-1"),
-    state: "preparing",
-  });
-  const reconnected = stream.reconnect("multi-stream-reconnected");
-  expectToolSync(reconnected.sent, firstId);
-  expectToolSync(reconnected.sent, secondId);
-  expect(reconnected.sent).toHaveLength(2);
-  stream.stop();
-});
 function selectedRunningController(): SessionController {
   const detail = {
     ...TEST_SESSION_DETAIL,

@@ -4,6 +4,7 @@ import {
   preparingToolDelta,
 } from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
+import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 const SESSION_ID = "session-ordered";
 const STREAM_ID = "stream-ordered";
@@ -26,15 +27,43 @@ function flushOne(stream: ReturnType<typeof streamingRealtimeFixture>): void {
   stream.pendingFrames.shift()?.();
 }
 
+test("reconnect deduplicates flushed and pending tool streams", () => {
+  const stream = streamingRealtimeFixture("deduplicated-reconnect");
+  for (const [index, streamId] of ["flushed", "pending"].entries()) {
+    stream.receive(preparingToolDelta(index, streamId, `call-${streamId}`));
+    if (index === 0) flushOne(stream);
+  }
+  const reconnected = stream.reconnect("deduplicated-again");
+  expect(reconnected.sent).toHaveLength(2);
+  for (const streamId of ["flushed", "pending"]) {
+    expect(reconnected.sent.some((frame) => frame.includes(streamId))).toBe(
+      true,
+    );
+  }
+  stream.stop();
+});
+
 test("does not resend unresolved session synchronization", () => {
   const stream = streamingRealtimeFixture("bounded-session-sync");
   stream.receive(preparingToolDelta(0, STREAM_ID, "bounded-call"));
   flushOne(stream);
   const socket = firstSocket(stream);
   socket.sent.length = 0;
-  stream.setup.connection.syncTools(SESSION_ID);
-  stream.setup.connection.syncTools(SESSION_ID);
-  expect(socket.sent).toHaveLength(1);
+  const state = {
+    session: {
+      ...TEST_SESSION_DETAIL,
+      id: SESSION_ID,
+      status: "running" as const,
+    },
+    type: "session" as const,
+  };
+  stream.receive(state);
+  flushOne(stream);
+  const firstCount = socket.sent.length;
+  expect(firstCount).toBe(1);
+  stream.receive(state);
+  flushOne(stream);
+  expect(socket.sent).toHaveLength(firstCount);
   stream.stop();
 });
 

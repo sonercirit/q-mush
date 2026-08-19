@@ -10,6 +10,15 @@ import {
   type RealtimeServerEvent,
 } from "./realtime-client-codec.ts";
 import {
+  commandFailure,
+  MAXIMUM_PENDING_COMMAND_BYTES,
+  MAXIMUM_PENDING_COMMANDS,
+  normalizedCommandError,
+  UNKNOWN_OUTCOME_ERROR,
+  type PendingCommand,
+  type QueuedCommand,
+} from "./realtime-client-command.ts";
+import {
   ToolSyncTracker,
   type ToolSyncRequest,
 } from "./realtime-client-tool-sync.ts";
@@ -45,22 +54,8 @@ type DeferredStateEvent = Extract<
 const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
 const STREAM_UPDATES_PER_FRAME = 4;
 const STREAM_PREP_BUDGET_MS = 8;
-const MAXIMUM_PENDING_COMMANDS = 1_000;
-const MAXIMUM_PENDING_COMMAND_BYTES = 128 * 1024 * 1024;
-const UNKNOWN_OUTCOME_ERROR = "outcome_unknown";
 function noSelectedSession(): undefined {
   return undefined;
-}
-function normalizedCommandError(error: string): string {
-  return error === "command_outcome_unknown" || error === UNKNOWN_OUTCOME_ERROR
-    ? UNKNOWN_OUTCOME_ERROR
-    : error;
-}
-function commandFailure(
-  code: string,
-  detail?: string,
-): Error & { readonly code: string } {
-  return Object.assign(new Error(detail ?? code), { code });
 }
 interface RealtimeLocation {
   readonly href: string;
@@ -73,17 +68,6 @@ function realtimeUrl(location: RealtimeLocation, workspaceId: string): string {
   }
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
-}
-interface PendingCommand {
-  readonly bytes: number;
-  readonly envelope: string;
-  readonly reject: (error: Error) => void;
-  readonly resolve: (value: unknown) => void;
-  sentInstanceId: string | undefined;
-}
-interface QueuedCommand {
-  readonly commandId: string;
-  readonly pending: PendingCommand;
 }
 export class RealtimeConnection {
   readonly #createSocket: BrowserWebSocketFactory;
