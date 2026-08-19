@@ -33,14 +33,14 @@ export function readStoredSessionGenerationTranscript(
   readonly messages: readonly AgentSessionMessage[];
   readonly turns: readonly AgentSessionTurn[];
 } {
-  const turns = database
+  const storedTurns = database
     .select(STORED_SESSION_TURN_SELECTION)
     .from(agentSessionTurns)
     .where(generationTurnCondition(sessionId, generation))
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
-    .all()
-    .map(summarizeStoredTurn);
-  const messages =
+    .all();
+  const turns = storedTurns.map(summarizeStoredTurn);
+  const storedMessages =
     turns.length === 0
       ? []
       : database
@@ -57,7 +57,7 @@ export function readStoredSessionGenerationTranscript(
             ),
           )
           .orderBy(asc(agentMessages.createdAt), asc(agentMessages.id))
-          .all()
-          .map(summarizeStoredMessage);
+          .all();
+  const messages = storedMessages.map(summarizeStoredMessage);
   return { messages, turns };
 }
