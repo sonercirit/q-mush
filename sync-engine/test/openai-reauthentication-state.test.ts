@@ -321,8 +321,23 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
           CREDENTIAL_ID,
           replacementSecret(),
           TEST_NOW + 2,
+          true,
+          "account",
         ),
       ).toBe(true);
+      expect(
+        setup.store.updateSecret(
+          TEST_USER_ID,
+          CREDENTIAL_ID,
+          "stale-callback-secret",
+          TEST_NOW + 3,
+          true,
+          "account",
+        ),
+      ).toBe(false);
+      expect(setup.store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe(
+        replacementSecret(),
+      );
       expectReauthenticationState(setup.store, false);
     },
   );

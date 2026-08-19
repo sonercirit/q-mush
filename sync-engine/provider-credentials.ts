@@ -292,6 +292,25 @@ export class ProviderCredentialEndpoints {
     );
   }
 
+  reconnectCredential(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+    accountId?: string,
+  ): boolean {
+    return (
+      this.#store?.updateSecret(
+        userId,
+        credentialId,
+        secret,
+        now,
+        true,
+        accountId,
+      ) === true
+    );
+  }
+
   addConnectedAccount(
     user: AuthenticatedUser,
     secret: string,

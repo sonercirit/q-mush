@@ -184,8 +184,11 @@ export function modelCredentialIsActive(
       .select({ id: providerCredentials.id })
       .from(providerCredentials)
       .where(
-        credentialScope(
-          workspaceId === undefined ? options : { ...options, workspaceId },
+        and(
+          credentialScope(
+            workspaceId === undefined ? options : { ...options, workspaceId },
+          ),
+          eq(providerCredentials.requiresReauthentication, false),
         ),
       )
       .get() !== undefined

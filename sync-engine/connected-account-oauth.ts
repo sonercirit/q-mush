@@ -3,6 +3,7 @@ import type { ProviderCredentialDetails } from "../shared/provider-credential-st
 import { APP_PATH } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
+  createApiError,
   createCookie,
   createMethodNotAllowedResponse,
   createRedirect,
@@ -107,15 +108,22 @@ export class ConnectedAccountOAuth {
       secure,
     );
 
-    const requestedCredentialId = new URL(request.url).searchParams.get(
-      "credentialId",
-    );
+    const requestUrl = new URL(request.url);
+    const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId");
+    const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
+    if (!this.#validWorkspaceScope(workspaceId, user.id)) {
+      return createApiError("invalid_workspace_scope", 409);
+    }
+    const requestedCredentialId = requestUrl.searchParams.get("credentialId");
     if (
       requestedCredentialId !== null &&
-      this.#credentials.readCredential(user.id, requestedCredentialId)
-        ?.requiresReauthentication !== true
+      this.#credentials.readCredential(
+        user.id,
+        requestedCredentialId,
+        workspaceId,
+      )?.requiresReauthentication !== true
     ) {
-      return new Response("Invalid credential", { status: 409 });
+      return createApiError("invalid_credential", 409);
     }
     const credentialCookie = createFlowCookie(
       this.#configuration.credentialCookie,
@@ -124,13 +132,6 @@ export class ConnectedAccountOAuth {
       secure,
     );
 
-    const requestedWorkspaceId = new URL(request.url).searchParams.get(
-      "workspaceId",
-    );
-    const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
-    if (!this.#validWorkspaceScope(workspaceId, user.id)) {
-      return new Response("Invalid workspace scope", { status: 409 });
-    }
     const workspaceCookie = createFlowCookie(
       this.#configuration.workspaceCookie,
       workspaceId,
@@ -233,11 +234,12 @@ export class ConnectedAccountOAuth {
           [workspaceId],
         );
       } else if (
-        !this.#credentials.updateCredentialSecret(
+        !this.#credentials.reconnectCredential(
           user.id,
           credentialId,
           credential.secret,
           this.#runtime.now(),
+          credential.details.accountId ?? undefined,
         )
       ) {
         return invalidState();

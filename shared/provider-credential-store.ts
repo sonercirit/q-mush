@@ -479,13 +479,26 @@ export class ProviderCredentialStore {
       credentialId: string,
       secret: string,
       now: number,
+      requireReauthentication?: boolean,
+      accountId?: string,
     ]
   ): boolean {
-    const [userId, credentialId, secret, now] = parameters;
+    const [
+      userId,
+      credentialId,
+      secret,
+      now,
+      requireReauthentication,
+      accountId,
+    ] = parameters;
     return updateCredentialSecret({
       ...this.#credentialState(userId, credentialId, now),
       cipher: this.#cipher,
       secret,
+      ...(requireReauthentication === undefined
+        ? {}
+        : { requireReauthentication }),
+      ...(accountId === undefined ? {} : { accountId }),
     });
   }
 

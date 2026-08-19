@@ -1,6 +1,9 @@
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import type { ProviderQuotaResetOutcome } from "../shared/provider-quota.ts";
-import type { WorkspaceList } from "../shared/workspace-model.ts";
+import {
+  GLOBAL_WORKSPACE_ID,
+  type WorkspaceList,
+} from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { optionalWorkspaces } from "./connection-client.ts";
@@ -130,7 +133,7 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
               {(oauthPath) => (
                 <a
                   class="underline decoration-amber-200/60 underline-offset-2 hover:text-white"
-                  href={`${oauthPath()}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? "global")}&credentialId=${encodeURIComponent(props.credential.id)}`}
+                  href={`${oauthPath()}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? GLOBAL_WORKSPACE_ID)}&credentialId=${encodeURIComponent(props.credential.id)}`}
                 >
                   Reconnect this account
                 </a>
