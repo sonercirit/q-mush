@@ -160,11 +160,7 @@ export class RealtimeConnection {
     }
   }
   syncTools(sessionId: string): void {
-    for (const request of this.#toolSync.unresolved(
-      this.#buffer.activeToolStreams(sessionId),
-    )) {
-      if (!this.#sendToolSync(request)) return;
-    }
+    this.#syncTools(this.#buffer.activeToolStreams(sessionId));
   }
   start(workspaceId = this.#workspaceId): void {
     if (!this.#stopped) {
