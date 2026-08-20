@@ -112,6 +112,22 @@ function expectPartialLineOverflow(output: string, maximum: number): void {
   ]);
 }
 
+async function expectReadOverflow(fixture: {
+  readonly content: string;
+  readonly maximum: number;
+  readonly path: string;
+  readonly sessionId: string;
+}): Promise<void> {
+  const session = await readSession(fixture);
+  const output = await executeSession(
+    session,
+    "read",
+    { limit: 2, path: fixture.path },
+    fixture.maximum,
+  );
+  expectPartialLineOverflow(output, fixture.maximum);
+}
+
 describe("runner WebSocket protocol", () => {
   test("defaults legacy commands and preserves configured settings", () => {
     expect(parsedCommand()).toMatchObject({
@@ -198,20 +214,21 @@ describe("runner WebSocket protocol", () => {
   });
 
   test("retains detectable overflow without advertising past a partially shown line", async () => {
-    const maximum = 120;
-    const session = await readSession({
+    await expectReadOverflow({
       content: `${"😀".repeat(500)}\ntail`,
+      maximum: 120,
       path: "long-line.txt",
       sessionId: "session-long-line",
     });
-    const output = await executeSession(
-      session,
-      "read",
-      { limit: 2, path: "long-line.txt" },
-      maximum,
-    );
+  });
 
-    expectPartialLineOverflow(output, maximum);
+  test("retains detectable overflow when a complete first line crowds out continuation metadata", async () => {
+    await expectReadOverflow({
+      content: `${"a".repeat(1_950)}\n${"b".repeat(100)}\ntail`,
+      maximum: 2_000,
+      path: "crowded-marker.txt",
+      sessionId: "session-crowded-marker",
+    });
   });
 
   test("uses offset and limit only to select a page", async () => {
