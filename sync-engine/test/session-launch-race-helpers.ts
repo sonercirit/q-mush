@@ -1,11 +1,17 @@
 import { expect } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
+import type { AppDatabase } from "../../shared/database.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type {
+  AgentSessionDetail,
+  RestartHandoffOperation,
+} from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createTestProviderCredential,
   TEST_NOW,
@@ -17,13 +23,6 @@ import {
   createStore,
   createTestSession,
 } from "./session-store-test-fixtures.ts";
-
-import type { AppDatabase } from "../../shared/database.ts";
-import type {
-  AgentSessionDetail,
-  RestartHandoffOperation,
-} from "../../shared/session-model.ts";
-import type { SessionStore } from "../../sync-engine/session-store.ts";
 
 export interface SessionStoreTestSetup {
   readonly database: AppDatabase;

@@ -470,7 +470,7 @@ test("launcher settles recovered success before terminal reporting", async () =>
       complete: () => Promise.resolve(modelTurn("Recovered successfully.")),
     },
     {
-      notifications: 6,
+      notifications: 4,
       settlement: { status: "idle" },
       transcript: [
         { role: "user" },
@@ -487,7 +487,7 @@ test("launcher settles recovered error before terminal reporting", async () => {
       complete: () => Promise.reject(new Error("recovered provider failed")),
     },
     {
-      notifications: 5,
+      notifications: 3,
       settlement: { error, status: "failed" },
       transcript: [{ role: "user" }, { content: error, role: "error" }],
     },

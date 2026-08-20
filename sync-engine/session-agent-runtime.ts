@@ -27,6 +27,7 @@ import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import type { ActiveSessionTools } from "./active-session-tools.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
@@ -100,6 +101,15 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly userId: string;
 }
 
+function markProviderPending(
+  runtime: SessionAgentRuntimeDependencies,
+  state: ProviderRequestState,
+): void {
+  runtime.pendingComponent(
+    state === "admission" ? "provider_admission" : "provider_request",
+  );
+}
+
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -137,12 +147,16 @@ async function loadModels(
         signal,
       );
       throwIfRestartRequested(runtime);
+      const onRequestState = (state: ProviderRequestState) => {
+        markProviderPending(runtime, state);
+      };
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
         detail: { ...runtime.detail, ...metadata },
         factory: runtime.modelFactory,
         isCurrent: runtime.isCurrent,
+        onRequestState,
         onStepStart: () => {
           markSessionStepStart(runtime);
         },
