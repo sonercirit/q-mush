@@ -16,15 +16,16 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   user's default across providers. Shared: `provider-credentials.ts`,
   `connected-account-oauth.ts`, the `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
-  fresh tool output); persistent shortfalls are defects, while lone misses are
-  late-write/128-token noise. Codex sockets remain open per run (cache-neutral),
-  reconnect after failure, close afterward. UI rates divide by summed input
-  minus final request (summary) or prior step's input (per step), capped at
-  100%, counting fully reported steps. OpenAI/Codex requests carry the session
-  ID as `prompt_cache_key` and the Codex `session_id` header (cache routing);
-  that surface rejects `prompt_cache_breakpoint`/`prompt_cache_retention`.
-  OpenRouter and Anthropic-format requests mark 1-hour `cache_control` points on
-  the system prompt, transcript tail, and Anthropic tool definitions
+  fresh tool output); persistent shortfalls are defects, while lone misses can
+  reflect observed late cache writes or documented 128-token block granularity.
+  Codex sockets remain open per run (cache-neutral), reconnect after failure,
+  close afterward. UI rates divide by summed input minus final request (summary)
+  or prior step's input (per step), capped at 100%, counting fully reported
+  steps. OpenAI/Codex requests carry the session ID as `prompt_cache_key` and
+  the Codex `session_id` header (cache routing); that surface rejects
+  `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
+  Anthropic-format requests mark 1-hour `cache_control` points on the system
+  prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects them, generic OpenAI-format
   endpoints get neither markers nor `prompt_cache_key` (Ollama rejects array
   content; strict servers reject unknown fields). Requests send catalog

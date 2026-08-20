@@ -13,10 +13,12 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   why in a test. Integrate each session capability with every protocol's native
   control, recording gaps.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
-  decisions/lessons in the appropriate memory file: provider protocol facts
-  belong in `PROVIDER_PROTOCOLS.md`; all others here. Repeated guidance means a
-  missing rule. If evidence overturns a finding, fix code and stale records;
-  act, don't ask. Never commit secrets, artifacts, or env files.
+  decisions/lessons in the appropriate memory file: facts about provider
+  discovery, requests, streaming, caching, retries, or model capability handling
+  belong in `PROVIDER_PROTOCOLS.md`; provider credential and OAuth configuration
+  stays here. Repeated guidance means a missing rule. If evidence overturns a
+  finding, fix code and stale records; act, don't ask. Never commit secrets,
+  artifacts, or env files.
 - Keep workflows local-first: narrow checks, then broad, then failures.
 
 ## Setup, Commands
