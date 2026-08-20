@@ -9,6 +9,10 @@ import { USER_REALTIME_MAX_PAYLOAD_LENGTH } from "../shared/user-realtime-protoc
 import { utf8ByteLength } from "../shared/utf8.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import {
+  toolSyncKey,
+  type ToolSyncRequest,
+} from "./realtime-client-tool-sync.ts";
+import {
   appendToolDelta,
   emptyChannelChunks,
   initialBufferedToolUpdate,
@@ -40,10 +44,6 @@ export type RealtimeClientEvent =
 export interface RealtimeStreamBarrier {
   readonly epoch: number;
   readonly sessionId: string;
-}
-interface ToolStreamRequest {
-  readonly sessionId: string;
-  readonly streamId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
 const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
@@ -181,7 +181,7 @@ export class RealtimeStreamBuffer {
       if (include(state)) this.#toolStates.delete(key);
     }
   }
-  activeToolStreams(sessionId?: string): readonly ToolStreamRequest[] {
+  activeToolStreams(sessionId?: string): readonly ToolSyncRequest[] {
     const streams = new Map<string, { sessionId: string; streamId: string }>();
     for (const state of this.#toolStates.values()) {
       if (
@@ -194,12 +194,11 @@ export class RealtimeStreamBuffer {
         sessionId: state.entry.sessionId,
         streamId: state.entry.streamId,
       };
-      const streamKey = JSON.stringify([value.sessionId, value.streamId]);
-      streams.set(streamKey, value);
+      streams.set(toolSyncKey(value), value);
     }
     return [...streams.values()];
   }
-  takeToolResyncRequests(): readonly ToolStreamRequest[] {
+  takeToolResyncRequests(): readonly ToolSyncRequest[] {
     const requests = [...this.#resync.values()];
     this.#resync.clear();
     return requests;
@@ -354,12 +353,12 @@ export class RealtimeStreamBuffer {
       ? materializeToolUpdate(update.value)
       : undefined;
   }
-  #requestToolResync(request: ToolStreamRequest): void {
+  #requestToolResync(request: ToolSyncRequest): void {
     const value = {
       sessionId: request.sessionId,
       streamId: request.streamId,
     };
-    this.#resync.set(JSON.stringify([value.sessionId, value.streamId]), value);
+    this.#resync.set(toolSyncKey(value), value);
   }
   #queueToolUpdate(event: ToolStreamDeltaFrame): void {
     const epoch = this.#sessionEpoch(event.sessionId);

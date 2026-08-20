@@ -8,7 +8,7 @@ export interface ToolSyncRequest {
   readonly streamId: string;
 }
 
-function toolSyncKey(request: ToolSyncRequest): string {
+export function toolSyncKey(request: ToolSyncRequest): string {
   return JSON.stringify([request.sessionId, request.streamId]);
 }
 

@@ -1,5 +1,8 @@
 import { expect, test, vi } from "vitest";
-import { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
+import {
+  ToolSyncTracker,
+  type ToolSyncRequest,
+} from "../realtime-client-tool-sync.ts";
 import {
   orderedToolDelta,
   preparingToolDelta,
@@ -30,9 +33,15 @@ function flushOne(stream: ReturnType<typeof streamingRealtimeFixture>): void {
 
 test("reconnect deduplicates remembered, active, and resync tool streams", () => {
   const stream = streamingRealtimeFixture("deduplicated-reconnect");
-  stream.receive(preparingToolDelta(0, STREAM_ID, "deduplicated-call"));
+  const callId = "deduplicated-call";
+  // Flushing the initial delta commits an active tool state.
+  stream.receive(preparingToolDelta(0, STREAM_ID, callId));
   flushOne(stream);
-  stream.receive(orderedToolDelta(2, { content: "sequence gap" }));
+  // A gap sends a synchronization request the tracker remembers.
+  stream.receive(orderedToolDelta(2, { content: "sequence gap" }, callId));
+  expectToolSync(firstSocket(stream).sent);
+  // An unflushed delta becomes a resync request when the socket closes.
+  stream.receive(orderedToolDelta(1, { state: "running" }, callId));
 
   const reconnected = stream.reconnect("deduplicated-again");
   const identities = reconnected.sent.flatMap((frame) => {
@@ -95,12 +104,18 @@ test("retains current and remaining requests after a send failure", () => {
   const pendingSpy = vi
     .spyOn(ToolSyncTracker.prototype, "pending")
     .mockImplementation(function (this: ToolSyncTracker) {
+      // Restoring first avoids recursing into the mock.
       pendingSpy.mockRestore();
-      const result = this.pending();
+      const result: readonly ToolSyncRequest[] = this.pending();
       pendingCalls.push(result);
       return result;
     });
-  stream.reconnect("failed-sync-reconnected");
+  try {
+    stream.reconnect("failed-sync-reconnected");
+  } finally {
+    // Idempotent: guards the leak when reconnect never calls pending().
+    pendingSpy.mockRestore();
+  }
   expect(pendingCalls.at(-1)).toEqual(
     failedStreams.map((streamId) => ({ sessionId: SESSION_ID, streamId })),
   );
@@ -109,10 +124,11 @@ test("retains current and remaining requests after a send failure", () => {
 
 test("delivers and resolves concurrent stream snapshots independently", () => {
   const stream = streamingRealtimeFixture("concurrent-sync-instance");
-  const streamIds = ["flushed", "pending"];
-  stream.receive(preparingToolDelta(0, streamIds[0] ?? "", "call-flushed"));
+  const [flushedId, pendingId] = ["flushed", "pending"] as const;
+  const streamIds = [flushedId, pendingId];
+  stream.receive(preparingToolDelta(0, flushedId, "call-flushed"));
   flushOne(stream);
-  stream.receive(preparingToolDelta(1, streamIds[1] ?? "", "call-pending"));
+  stream.receive(preparingToolDelta(1, pendingId, "call-pending"));
   flushOne(stream);
   const reconnected = stream.reconnect("concurrent-sync-reconnected");
   for (const streamId of streamIds) {

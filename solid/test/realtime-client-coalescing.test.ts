@@ -76,9 +76,12 @@ test("orders a replaced state key at its latest wire position", () => {
     },
   ]);
 
+  // One frame drains the whole deferred state queue in wire order.
   runNextRealtimeFrame(stream.setup.requestFrames);
-  expect(stream.events).toMatchObject([{ type: "session_questions" }]);
-  runNextRealtimeFrame(stream.setup.requestFrames);
+  expect(stream.events).toMatchObject([
+    { type: "session_questions" },
+    { session: { updatedAt: running.updatedAt + 1 }, type: "session" },
+  ]);
   expectLatest(stream.events, {
     session: { updatedAt: running.updatedAt + 1 },
     type: "session",

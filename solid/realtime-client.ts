@@ -358,32 +358,41 @@ export class RealtimeConnection {
       if (generation !== this.#stateEventGeneration || this.#stopped) {
         return;
       }
-      const next = this.#stateEvents.entries().next();
-      if (next.done) {
-        this.#stateWaiters.shift()?.(true);
-      } else {
-        const [key, queued] = next.value;
-        const barrier = this.#stateBarriers.get(key);
-        if (barrier !== undefined) {
-          const frameStartedAt = this.#now();
-          const batch = this.#buffer.takeBarrier(
-            barrier,
-            STREAM_UPDATES_PER_FRAME,
-            () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
-          );
-          this.#deliverStreamBatch(batch);
-          if (batch !== undefined || this.#buffer.barrierPending(barrier)) {
-            this.#scheduleStateEvent();
-            return;
-          }
+      const frameStartedAt = this.#now();
+      const withinBudget = (): boolean =>
+        this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS;
+      while (withinBudget()) {
+        const next = this.#stateEvents.entries().next();
+        if (next.done) {
+          this.#stateWaiters.shift()?.(true);
+          break;
         }
-        this.#stateEvents.delete(key);
-        this.#stateBarriers.delete(key);
-        this.#deliverDeferredStateEvent(queued);
+        if (!this.#applyDeferredStateEntry(next.value, withinBudget)) break;
       }
       this.#scheduleStateEvent();
       this.#scheduleFrame();
     });
+  }
+  #applyDeferredStateEntry(
+    [key, queued]: readonly [string, DeferredStateEvent],
+    withinBudget: () => boolean,
+  ): boolean {
+    const barrier = this.#stateBarriers.get(key);
+    if (barrier !== undefined) {
+      const batch = this.#buffer.takeBarrier(
+        barrier,
+        STREAM_UPDATES_PER_FRAME,
+        withinBudget,
+      );
+      this.#deliverStreamBatch(batch);
+      if (batch !== undefined || this.#buffer.barrierPending(barrier)) {
+        return false;
+      }
+    }
+    this.#stateEvents.delete(key);
+    this.#stateBarriers.delete(key);
+    this.#deliverDeferredStateEvent(queued);
+    return true;
   }
   #deliverDeferredStateEvent(event: DeferredStateEvent): void {
     if (event.type === "tool_stream_snapshot") {

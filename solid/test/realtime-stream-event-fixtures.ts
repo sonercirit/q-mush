@@ -57,9 +57,10 @@ export function orderedToolDelta(
   change:
     | { readonly state: "completed" | "preparing" | "running" }
     | { readonly content: string },
+  callId = "ordered-call",
 ): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
   const identity = {
-    callId: "ordered-call",
+    callId,
     index: 0,
     sequence,
     sessionId: SESSION_ID,
