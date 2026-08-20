@@ -3,6 +3,7 @@ import {
   ToolSyncTracker,
   type ToolSyncRequest,
 } from "../realtime-client-tool-sync.ts";
+import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
 import {
   orderedToolDelta,
   preparingToolDelta,
@@ -32,6 +33,15 @@ function flushOne(stream: ReturnType<typeof streamingRealtimeFixture>): void {
 }
 
 test("reconnect deduplicates remembered, active, and resync tool streams", () => {
+  const activeSpy = vi.spyOn(
+    RealtimeStreamBuffer.prototype,
+    "activeToolStreams",
+  );
+  const resyncSpy = vi.spyOn(
+    RealtimeStreamBuffer.prototype,
+    "takeToolResyncRequests",
+  );
+  const pendingSpy = vi.spyOn(ToolSyncTracker.prototype, "pending");
   const stream = streamingRealtimeFixture("deduplicated-reconnect");
   const callId = "deduplicated-call";
   // Flushing the initial delta commits an active tool state.
@@ -44,6 +54,11 @@ test("reconnect deduplicates remembered, active, and resync tool streams", () =>
   stream.receive(orderedToolDelta(1, { state: "running" }, callId));
 
   const reconnected = stream.reconnect("deduplicated-again");
+  const identity = { sessionId: SESSION_ID, streamId: STREAM_ID };
+  expect(activeSpy.mock.results.at(-1)?.value).toEqual([identity]);
+  expect(pendingSpy.mock.results.at(-1)?.value).toEqual([identity]);
+  expect(resyncSpy.mock.results.at(-1)?.value).toEqual([identity]);
+
   const identities = reconnected.sent.flatMap((frame) => {
     const parsed: unknown = JSON.parse(frame);
     if (
