@@ -5,13 +5,17 @@ import {
   type ToolStreamEntry,
   type ToolStreamSnapshotFrame,
 } from "../shared/tool-stream.ts";
-import { USER_REALTIME_MAX_PAYLOAD_LENGTH } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import {
   toolSyncKey,
   type ToolSyncRequest,
 } from "./realtime-client-tool-sync.ts";
+import {
+  MAXIMUM_PENDING_STREAM_BYTES,
+  MAXIMUM_PENDING_STREAM_FRAGMENTS,
+  MAXIMUM_PENDING_STREAM_KEYS,
+} from "./realtime-stream-buffer-limits.ts";
 import {
   appendToolDelta,
   emptyChannelChunks,
@@ -45,11 +49,6 @@ export interface RealtimeStreamBarrier {
   readonly epoch: number;
   readonly sessionId: string;
 }
-const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
-// Keep both queue dimensions at the protocol's per-user stream ceiling while
-// naming them independently: one bounds buffered identities, the other chunks.
-const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
-const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
 ): RealtimeStreamBatch | undefined {
