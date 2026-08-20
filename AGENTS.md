@@ -270,11 +270,11 @@ the UI displays it.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs. Frozen clocks may collapse admission
-  transitions; production cannot. The first identified non-terminal `response.*`
-  admits servers omitting `response.created`. WebSocket Mode expires after 60
-  minutes; either observed limit error replaces the socket once per step, then
-  retries replay it. WebSocket sends have bounded admission until
-  `response.created`; HTTP header waits do not. Discard unknown, pre-creation,
+  transitions; production cannot. An identified non-terminal `response.*` admits
+  when `response.created` is omitted. WebSocket Mode expires in 60 minutes;
+  either observed limit error replaces the socket once per step, then retries
+  replay it. Admission is bounded until `response.created` or another identified
+  response event; HTTP waits are not. Discard unknown, pre-creation,
   mismatched-ID, and retained-ID frames/errors. On a reused socket, an
   uncorrelated pre-admission error retries fresh unless permanent, which
   surfaces; after admission, including ID-less admission, an unidentified error
