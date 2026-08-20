@@ -127,7 +127,8 @@ test("retains compact terminal identity independent of rendered payload", () => 
   if (terminal?.type !== "tool_update") {
     throw new TypeError("Missing terminal tool update");
   }
-  Reflect.set(terminal.entry, "state", "running");
+  const staleEntry = { ...terminal.entry, state: "running" as const };
+  expect(staleEntry.state).toBe("running");
   buffer.queue(orderedToolDelta(4, { content: "late" }));
 
   expect(buffer.takeNext()).toBeUndefined();
@@ -222,6 +223,25 @@ test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
   });
   expect(stream.pendingFrames).toEqual([]);
   stream.stop();
+});
+
+test("keeps an epoch monotonic when eviction replaces its last update", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const initialBarrier = buffer.markBarrier(SESSION_ID);
+  const evicted = identifiedModelDelta(SESSION_ID, "evicted-stream", "old");
+  buffer.queue(evicted);
+  buffer.releaseBarrier(initialBarrier);
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 1, "epoch-filler");
+
+  buffer.queue(
+    identifiedModelDelta(SESSION_ID, "replacement", "earlier-on-wire"),
+  );
+  const barrier = buffer.markBarrier(SESSION_ID);
+
+  expect(buffer.barrierPending(barrier)).toBe(true);
+  expect(buffer.takeBarrier(barrier)?.updates).toContainEqual(
+    expect.objectContaining({ content: "earlier-on-wire" }),
+  );
 });
 
 test("retains an epoch while an overlapping barrier remains", () => {

@@ -150,6 +150,7 @@ export function appendToolDelta(
   const bytes = event.content === undefined ? 0 : utf8ByteLength(event.content);
   if (event.channel !== undefined && event.content !== undefined) {
     const channelTotal = buffered.bytes[event.channel] + bytes;
+    // Mirrors the server's rejection of the same field-bound overflow.
     if (channelTotal > MAXIMUM_TOOL_STREAM_FIELD_BYTES) return false;
     buffered.bytes[event.channel] = channelTotal;
     buffered.chunks[event.channel].push(event.content);

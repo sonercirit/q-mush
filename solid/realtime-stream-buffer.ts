@@ -331,8 +331,8 @@ export class RealtimeStreamBuffer {
     this.#fragments += updateFragments(update);
   }
   #queueSessionDelta(event: SessionDelta): void {
-    const epoch = this.#sessionEpoch(event.sessionId);
-    const key = modelKey(event, epoch);
+    let epoch = this.#sessionEpoch(event.sessionId);
+    let key = modelKey(event, epoch);
     if (event.reset === true) {
       this.#deletePending(
         event.sessionId,
@@ -354,6 +354,8 @@ export class RealtimeStreamBuffer {
       this.#fragments += 1;
       return;
     }
+    epoch = this.#sessionEpoch(event.sessionId);
+    key = modelKey(event, epoch);
     this.#storePending(event.sessionId, key, {
       kind: "model",
       value: {
@@ -393,8 +395,8 @@ export class RealtimeStreamBuffer {
     this.#resync.set(toolSyncKey(value), value);
   }
   #queueToolUpdate(event: ToolStreamDeltaFrame): void {
-    const epoch = this.#sessionEpoch(event.sessionId);
-    const key = toolKey(event, epoch);
+    let epoch = this.#sessionEpoch(event.sessionId);
+    let key = toolKey(event, epoch);
     const pending = this.#pendingSession(event.sessionId);
     const found = pending?.get(key);
     const buffered = found?.kind === "tool" ? found.value : undefined;
@@ -421,6 +423,10 @@ export class RealtimeStreamBuffer {
         this.#requestToolResync(event);
         return;
       }
+    }
+    if (buffered === undefined) {
+      epoch = this.#sessionEpoch(event.sessionId);
+      key = toolKey(event, epoch);
     }
     const next = buffered ?? initialBufferedToolUpdate(result.entry, epoch);
     if (!appendToolDelta(next, event, result.entry)) return;
