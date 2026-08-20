@@ -49,9 +49,11 @@ export interface RestartRuntimeControl {
   readonly start: (runnerId?: string) => void;
 }
 
-interface RestartDrainOptions extends ClockedTimeoutOptions<RestartTimer> {
+interface RestartDrainOptions extends ClockedTimeoutOptions<
+  RestartTimer,
+  RestartSetTimeout
+> {
   readonly pendingTools: (sessionId: string) => readonly RestartProgressTool[];
-  readonly setTimeout: RestartSetTimeout;
   readonly warn: (message: string) => void;
 }
 
@@ -216,8 +218,20 @@ export function createSessionRestartControl(
         },
       );
     };
-    const timeout = setDrainTimer(escalate, deadline.remaining());
-    const bounded = Promise.race([requested.settled, escalation.promise])
+    // Raced before the timer is armed, so a throwing timer cannot leave the
+    // requested drain's persistence rejection unobserved.
+    const settlement = Promise.race([requested.settled, escalation.promise]);
+    let timeout: RestartTimer;
+    try {
+      timeout = setDrainTimer(escalate, deadline.remaining(), {
+        kind: "bounded_drain",
+        scope,
+      });
+    } catch (error) {
+      settlement.catch(() => undefined);
+      throw error;
+    }
+    const bounded = settlement
       .then(() => undefined)
       .finally(() => {
         clearDrainTimer(timeout);
@@ -240,6 +254,12 @@ export function createSessionRestartControl(
     },
     drainProgress,
     drainServer: async (deadline) => {
+      // A drain already in flight keeps its deadline so a late runner joining
+      // it stays bounded by the original restart; a new restart in a surviving
+      // process gets its own, instead of the elapsed remainder of the last.
+      if (!boundedDrains.has(escalationKey({ kind: "server" }))) {
+        serverDeadline = undefined;
+      }
       serverDeadline ??=
         deadline ??
         new RestartDeadline(now() + DEVELOPMENT_RESTART_LIFECYCLE_MS, now);

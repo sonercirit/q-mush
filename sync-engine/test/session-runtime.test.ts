@@ -39,6 +39,18 @@ function deferredRuntime(
   };
 }
 
+function runnerRequest(restartId: string): RestartRequest {
+  return { boundary: "handoff", requestedBy: "runner", restartId };
+}
+
+function expectOnlyFirstRunnerScoped(
+  active: readonly [DeferredRuntime, DeferredRuntime],
+  restartId: string,
+): void {
+  expect(active[0].request()).toEqual(runnerRequest(restartId));
+  expect(active[1].request()).toBeUndefined();
+}
+
 function activeRuntimes(runtimes: SessionRuntimes) {
   return [
     deferredRuntime(runtimes, "session-1", "runner-1"),
@@ -197,12 +209,7 @@ describe("session runtimes", () => {
     await Promise.resolve();
 
     const drain = runtimes.drain(runnerScope(), "restart-1");
-    expect(active[0].request()).toEqual({
-      boundary: "handoff",
-      requestedBy: "runner",
-      restartId: "restart-1",
-    });
-    expect(active[1].request()).toBeUndefined();
+    expectOnlyFirstRunnerScoped(active, "restart-1");
     expect([
       runtimes.accepts("runner-1"),
       runtimes.accepts("runner-2"),
@@ -280,11 +287,9 @@ describe("session runtimes", () => {
     expect(() =>
       runtimes.restoreRunner("runner-1", "restart-conflict"),
     ).toThrow("different restart");
-    expect(runtimes.drainRequest(runnerScope())).toEqual({
-      boundary: "handoff",
-      requestedBy: "runner",
-      restartId: "restart-restored",
-    });
+    expect(runtimes.drainRequest(runnerScope())).toEqual(
+      runnerRequest("restart-restored"),
+    );
     expectRunnerBlocked(runtimes);
     releaseRunner(runtimes, "wrong-restart", false);
     releaseRunner(runtimes, "restart-restored", true);
@@ -300,6 +305,28 @@ describe("session runtimes", () => {
 
     expectRunnerAccepts(runtimes, false);
     releaseRunner(runtimes, "runner-restart", true);
+  });
+
+  test("starting the server clears only the abandoned drain's requests", async () => {
+    const runtimes = new SessionRuntimes(() => 5_000);
+    const active = await activeRuntimePair(runtimes);
+    const abandoned = runtimes.drain({ kind: "server" }, "abandoned-restart");
+
+    // A newer runner drain covers only the first runtime's runner.
+    const runnerDrain = runtimes.drain(runnerScope(), "runner-restart");
+    runtimes.start();
+
+    // The abandoned server request is gone, but the still-gated runner drain
+    // keeps its session as pending work it can force-park.
+    expectOnlyFirstRunnerScoped(active, "runner-restart");
+    expect(runtimes.drainProgress().map(({ sessionId }) => sessionId)).toEqual([
+      "session-1",
+    ]);
+    expectRunnerAccepts(runtimes, false);
+    expect(runtimes.accepts("runner-2")).toBe(true);
+
+    await settleAll(abandoned, ...active);
+    await runnerDrain;
   });
 
   test("rejects conflicting restart IDs for one scope", async () => {

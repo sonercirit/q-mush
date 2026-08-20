@@ -46,18 +46,20 @@
   `dev:restart` writes; plain `dev` restarts only from that.
   `runner-executable.ts` fingerprints runner source/compiler, then builds,
   caches and serves `/runner/executable` privately. Development restarts use one
-  supervisor-issued absolute 120-second deadline, reject new steps and
-  provider/auxiliary requests, report scoped active-tool counts, force-park
-  stragglers only after durable handoffs, then bound cleanup/termination;
-  repeats escalate. `DevelopmentRestartLifecycle` owns it; a rejected drain
-  keeps serving, so it restores maintenance, shutdown state, recovery, the abort
+  supervisor-issued absolute 120-second deadline (fresh per restart, shared only
+  in flight), reject new steps and provider/auxiliary requests, report scoped
+  active-tool counts, force-park stragglers only after durable handoffs, then
+  bound cleanup/termination; repeats escalate. Restart timers name a purpose
+  tests target. `DevelopmentRestartLifecycle` owns it; a rejected drain keeps
+  serving, so it restores maintenance, shutdown state, recovery, the abort
   signal (`SessionRestartAbort`: aborted controllers stay aborted) and the gate,
-  clears each session's abandoned server request, then reruns handoff recovery
-  and the queued launcher, unless a concurrent final shutdown won and it only
-  logs. Failed chains release. Final shutdown cancels that deadline, promotes
-  runner handoffs to a server marker, then stays unbounded, fencing live markers
-  from liveness scans. Text handlers precompress once, negotiating zstd, Brotli,
-  gzip and deflate; `/favicon.svg` revalidates by ETag.
+  clears each session's abandoned server request (a still-gating runner request
+  is kept), then reruns handoff recovery and the queued launcher unless a final
+  shutdown won and it only logs. Failed chains release. Final shutdown cancels
+  that deadline, promotes runner handoffs to a server marker, then stays
+  unbounded, fencing live markers from liveness scans. Text handlers precompress
+  once, negotiating zstd, Brotli, gzip and deflate; `/favicon.svg` revalidates
+  by ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -89,7 +91,7 @@
   the executable; development restarts drain first. Reinstalling for the same
   user and machine rotates the registration to its new token instead of adding a
   runner; others stay protected, and tokens never appear in lists.
-- Browser messages sort by time then ID; live output anchors at its initiator;
+- Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` byte-bounds
   transcript/system/tool data.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
@@ -97,16 +99,15 @@
   active time, cost, token usage, and context limit; reported charges win.
   Auto-compaction defaults on at 95%; truncation enters only its immediate
   compactor context, including persisted manual/idle compaction, so partial
-  output stays unfinished without marking a retry. Idle sessions compact
-  manually or, opted in, at 30 idle minutes; compaction soft-deletes messages
-  into a replayable handoff, and replays say deliver drafts, don't re-verify.
-  The composer stays mounted across statuses, explaining unavailable actions,
-  keeping drafts; draft fields echo a local signal debounced into the shared
-  draft — submit paths flush first; local prefs filter transcript categories.
-  Provider secrets never reach browser or runner work payloads. The directory
-  field opens `solid/directory-picker-client.tsx`
-  (`/api/runners/:id/directories`). Each run, `read_agent_file` loads exact-root
-  `AGENTS.md` (else `CLAUDE.md`).
+  output stays unfinished without a retry mark. Idle sessions compact manually
+  or, opted in, at 30 idle minutes; compaction soft-deletes messages into a
+  replayable handoff; replays say deliver drafts, don't re-verify. The composer
+  stays mounted across statuses, explains unavailable actions and keeps drafts;
+  draft fields echo a local signal debounced into the shared draft — submit
+  paths flush first; local prefs filter transcript categories. Provider secrets
+  never reach browser or runner work payloads. The directory field opens
+  `solid/directory-picker-client.tsx` (`/api/runners/:id/directories`). Each
+  run, `read_agent_file` loads exact-root `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
@@ -114,8 +115,7 @@
   categories and definitions; `get_session_options` pages spawn choices. Grouped
   tools manage non-blocking owned children, report final messages, resume idle
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. Assistant transcript/system/tool reads are
-  byte-bounded. `solid/session-transcript.tsx` renders prompts, tool
+  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
   definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
   preserving user line breaks; lists page by ten. Live sessions use
   `solid/realtime-client.ts`, `session-client.tsx`, and `session-controller.ts`:
@@ -126,7 +126,7 @@
   transcripts follow live output. `agent-model-discovery.ts` queries metadata,
   signal-cancelable; `shared/agent-configuration.ts` owns catalog
   types/validation. New sessions take the default online runner (else the first)
-  and credential, the first discovered model, latest working directory, and top
+  and credential, the first discovered model, latest working directory and top
   reported effort. Unknown modalities imply no attachment support; choices show
   provider and Q Mush modalities. `solid/custom-select.tsx` shares search
   normalization, paginates past ten items, and owns accessible keyboard/focus.
@@ -140,7 +140,7 @@
   mark active sessions failed for resumption, and rebuilds add tool errors on
   resume.
 
-- `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
+- `openai.ts`, `openrouter.ts` and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
   an `apiFormat` toggle: the default OpenAI format uses `/models` plus streamed
   `/chat/completions`; the Anthropic format sends `x-api-key` and
@@ -152,7 +152,7 @@
   `provider-credentials.ts`, `connected-account-oauth.ts`, the
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
-  fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
+  fresh tool output); persistent shortfalls are bugs, lone misses noise: writes
   land late and 128-token blocks hide small growth. Codex sockets stay open per
   run (cache-neutral), reconnect on failure, close at run end. UI rates divide
   by summed input minus the final request (summary) or the prior step's input
@@ -176,7 +176,7 @@
 - `sync-engine/brave-search.ts` implements the authenticated server-side
   `brave_search` skill and key API. Users keep multiple encrypted keys in
   `provider_credentials`; failures fall through keys in creation order; secrets
-  never reach browser, runner, or model provider.
+  never reach browser, runner or model provider.
 - Solid browser entry/shell/styles are `client.tsx`, `pages.tsx`, `styles.css`.
   Vitest uses SSR Solid transforms and a Happy DOM project; run under Bun
   because app/tests use Bun APIs and `bun:sqlite`. Fixtures stub discovery; no
@@ -185,21 +185,21 @@
   declarations stay unchecked due to Drizzle's broken optional dialect types.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions, enforces exhaustive
-  switches and canonical named imports (one declaration per module with inline
+  switches and canonical named imports (one declaration per module, inline
   `type` markers). Default imports: only `@eslint/js`, `@tailwindcss/vite`,
   `vite-plugin-solid`; aliases, namespaces, dynamic imports, import attributes,
-  import-equals, `import()` types, and side-effect imports (except the
-  production and browser-test imports of `solid/styles.css`) are rejected.
-  First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
-  and HTML-like `Response` bodies; HTML-like data and TSX pass.
+  import-equals, `import()` types and side-effect imports (except the production
+  and browser-test imports of `solid/styles.css`) are rejected. First-party code
+  rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML` and HTML-like
+  `Response` bodies; HTML-like data and TSX pass.
 - Knip checks every issue type and entry export in separate test and production
   graphs; shipped browser scripts are production roots, tests cannot keep
   production alive, and unused test helpers fail.
 - CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
-  deliberately matches native CPD's crude whole-file fallback tokenizer.
-  Native-token and complete-function alpha matches of ≥20 tokens spanning a line
-  boundary fail the zero threshold; alpha ignores locally bound names but
-  preserves free names, member APIs, and literals.
+  deliberately matches native CPD's whole-file fallback tokenizer. Native-token
+  and complete-function alpha matches of ≥20 tokens spanning a line boundary
+  fail the zero threshold; alpha ignores locally bound names but keeps free
+  names, member APIs and literals.
 - Repository policy scans tracked files: 20,000-code-point maximum (`bun.lock`,
   `drizzle/` excepted), tests only under `test`, no app HTML outside
   `test`/`fixtures`.
@@ -218,7 +218,7 @@
   Node; never transitively import `bun:sqlite` there. Drizzle's migration
   transaction nullifies its foreign-key PRAGMAs, so `createDatabase` disables
   foreign keys first, reenabling after.
-- Credential storage needs stable, private, 32-byte base64url `*_CREDENTIAL_KEY`
+- Credential storage needs stable, private 32-byte base64url `*_CREDENTIAL_KEY`
   secrets per provider; provider redirect URIs end in
   `/api/<provider>/oauth/callback`. OpenAI defaults to the Codex public OAuth
   client with a localhost-only callback on its registered
@@ -233,10 +233,10 @@
   active queries. Audit actor fields are not foreign keys — `SYSTEM` is not a
   user row.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
-  connects bound at 10s, subordinate to the tool deadline.
+  connects bound at 10s, under the tool deadline.
 - Knip severities alone do not activate default-off issue types; keep the
-  included-issue list complete. Never run the full test suite parallel to lint
-  or repository scans; tooling-policy tests probe `solid`.
+  included-issue list complete. Never run the full suite parallel to lint or
+  repository scans; tooling-policy tests probe `solid`.
 - Runner install commands use the HTTP request origin: connect other machines
   through a reachable origin, not `localhost`; removing a runner leaves
   `~/.q-mush/runner`.
@@ -258,7 +258,7 @@
   expiry. Session creation needs an explicit model ID. Catalogs: OpenAI
   `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
   the generic `/models`; Anthropic-format catalogs read `display_name`,
-  `max_input_tokens`, `max_tokens`, and the `capabilities` tree
+  `max_input_tokens`, `max_tokens` and the `capabilities` tree
   (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
   are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count

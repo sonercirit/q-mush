@@ -28,9 +28,10 @@ interface SessionLivenessOptions {
   readonly testScan?: (scan: () => void) => void;
 }
 
-interface SessionRestartTimingOptions extends ClockedTimeoutOptions<RestartTimer> {
-  readonly setTimeout: RestartSetTimeout;
-}
+type SessionRestartTimingOptions = ClockedTimeoutOptions<
+  RestartTimer,
+  RestartSetTimeout
+>;
 
 export interface SessionDependencies {
   readonly activeTools?: ActiveSessionTools;

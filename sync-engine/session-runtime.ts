@@ -500,12 +500,24 @@ export class SessionRuntimes {
       if (abandoned === undefined) return;
       for (const runtime of this.#active.values()) {
         if (
-          runtime.restartRequest?.requestedBy === "server" &&
-          runtime.restartRequest.restartId === abandoned.restartId
+          runtime.restartRequest?.requestedBy !== "server" ||
+          runtime.restartRequest.restartId !== abandoned.restartId
         ) {
-          runtime.restartRequest = undefined;
-          runtime.restartRequestedAt = undefined;
+          continue;
         }
+        // A runner drain the server request had taken authority over is still
+        // gating this runner, so the session stays its pending work instead of
+        // vanishing from that drain's progress and force-park candidates.
+        const runnerGate = this.#drainingRunners.get(runtime.runnerId);
+        if (runnerGate !== undefined && runnerGate !== BLOCKED_RUNNER_RESTART) {
+          runtime.restartRequest = {
+            ...runnerGate,
+            boundary: runtime.boundary,
+          };
+          continue;
+        }
+        runtime.restartRequest = undefined;
+        runtime.restartRequestedAt = undefined;
       }
       return;
     }

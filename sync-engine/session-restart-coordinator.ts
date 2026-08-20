@@ -350,10 +350,14 @@ export class SessionRestartCoordinator {
       CREDENTIAL_RETRY_MAX_DELAY_MS,
     );
     this.#attempts.set(runnerId, attempt + 1);
-    const timer = this.#setTimeout(() => {
-      this.#clearRetry(runnerId);
-      this.recover(runnerId, restartId, false);
-    }, delay);
+    const timer = this.#setTimeout(
+      () => {
+        this.#clearRetry(runnerId);
+        this.recover(runnerId, restartId, false);
+      },
+      delay,
+      { kind: "credential_retry", runnerId },
+    );
     this.#retryTimers.set(runnerId, timer);
   }
 }

@@ -30,6 +30,7 @@ class TestRestartRuntimes implements RestartRuntimeControl {
   readonly forceParkScopes: RestartScope[] = [];
   forceParkCalls = 0;
   forceParkFailure: Error | undefined;
+  persistenceFailure: Error | undefined;
   markGate: Promise<void> | undefined;
   settleDrainsImmediately = true;
   requestedDrains = 0;
@@ -101,7 +102,11 @@ class TestRestartRuntimes implements RestartRuntimeControl {
     readonly settled: Promise<unknown>;
   } {
     this.requestedDrains += 1;
-    const persistence = this.drain(scope, restartId);
+    const persistence = this.drain(scope, restartId).then(() => {
+      if (this.persistenceFailure !== undefined) {
+        throw this.persistenceFailure;
+      }
+    });
     if (this.settleDrainsImmediately) {
       return { persistence, settled: persistence };
     }
@@ -170,6 +175,32 @@ function control(
     restart: createSessionRestartControl(runtimes, generateRestartId, options),
     runtimes,
   };
+}
+
+function recordedDeadlineControl() {
+  const clock = { now: 100 };
+  const delays = new Array<number>();
+  const setup = control(() => "server", {
+    clearTimeout: () => undefined,
+    now: () => clock.now,
+    setTimeout: (_callback, delay) => {
+      delays.push(delay);
+      return delays.length;
+    },
+  });
+  setup.runtimes.settleDrainsImmediately = false;
+  return { ...setup, clock, delays };
+}
+
+async function settledServerDrainAfter(
+  elapsedMs: number,
+): Promise<ReturnType<typeof recordedDeadlineControl>> {
+  const setup = recordedDeadlineControl();
+  const drain = setup.restart.drainServer();
+  setup.runtimes.settleDrain();
+  await drain;
+  setup.clock.now += elapsedMs;
+  return setup;
 }
 
 function expectRecovery(
@@ -391,26 +422,48 @@ describe("session restart control", () => {
     ]);
   });
 
-  test("a late runner keeps the original server deadline", async () => {
-    let now = 100;
-    const delays = new Array<number>();
-    const { restart, runtimes } = control(() => "server", {
-      clearTimeout: () => undefined,
-      now: () => now,
-      setTimeout: (_callback, delay) => {
-        delays.push(delay);
-        return delays.length;
-      },
-    });
-    runtimes.settleDrainsImmediately = false;
-    const server = restart.drainServer();
+  // A late runner joins the restart already in flight, so it stays bounded by
+  // the original deadline; a second server restart in a surviving process is a
+  // new restart, so it arms its own full bound instead of the remainder.
+  test.each([
+    ["a late runner keeps the original server deadline", drainRunner, 60_000],
+    [
+      "a later server drain arms its own full bound",
+      (restart: ReturnType<typeof createSessionRestartControl>) =>
+        restart.drainServer(),
+      120_000,
+    ],
+  ] as const)("%s", async (_name, secondDrain, expectedBound) => {
+    const { delays, restart, runtimes } = await settledServerDrainAfter(60_000);
+
+    const second = secondDrain(restart);
+    expect(delays).toEqual([120_000, expectedBound]);
     runtimes.settleDrain();
-    await server;
-    now += 60_000;
-    const runner = drainRunner(restart);
-    expect(delays).toEqual([120_000, 60_000]);
-    runtimes.settleDrain();
-    await runner;
+    await second;
+  });
+
+  test("a throwing drain timer still observes the request's rejection", async () => {
+    const unhandled: unknown[] = [];
+    const record = (reason: unknown) => unhandled.push(reason);
+    process.on("unhandledRejection", record);
+    try {
+      const { restart, runtimes } = control(() => "server", {
+        clearTimeout: () => undefined,
+        setTimeout: () => {
+          throw new Error("the drain timer failed");
+        },
+      });
+      runtimes.persistenceFailure = new Error("the restart marker failed");
+
+      await expect(restart.drainServer()).rejects.toThrow(
+        "the drain timer failed",
+      );
+      // Let any unobserved rejection surface before the listener is removed.
+      await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off("unhandledRejection", record);
+    }
   });
 
   test("force-park failure still settles the bounded drain", async () => {
