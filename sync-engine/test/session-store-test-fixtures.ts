@@ -69,7 +69,9 @@ export function createStore() {
   return {
     database,
     generateId,
-    store: new SessionStore(database, generateId, () => DEFAULT_TOOL_SETTINGS),
+    store: new SessionStore(database, generateId, () => DEFAULT_TOOL_SETTINGS, {
+      pending: () => undefined,
+    }),
   };
 }
 

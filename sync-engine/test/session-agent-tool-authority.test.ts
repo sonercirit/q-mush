@@ -75,6 +75,7 @@ describe("session agent tool authority", () => {
     const authorityRun = runSessionAgent({
       braveSearch: { execute: () => Promise.resolve("unused search") },
       broker,
+      pendingComponent: () => undefined,
       credential: runtimeTestCredential(
         detail.credentialId,
         "Tool authority credential",

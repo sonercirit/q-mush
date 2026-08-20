@@ -95,13 +95,13 @@ export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  readonly #runtimes: Pick<SessionRuntimes, "pending"> | undefined;
+  readonly #runtimes: Pick<SessionRuntimes, "pending">;
   readonly #toolSettings: (userId: string) => ToolSettings;
   constructor(
     database: AppDatabase,
     generateId: IdGenerator = createUuidV7,
     toolSettings: (userId: string) => ToolSettings,
-    runtimes?: Pick<SessionRuntimes, "pending">,
+    runtimes: Pick<SessionRuntimes, "pending">,
   ) {
     super(database, generateId);
     this.#resources = [database, generateId];
@@ -184,7 +184,7 @@ export class SessionStore extends SessionStoreRestarts {
       userId,
       sessionId,
       workspaceId,
-      this.#runtimes?.pending.bind(this.#runtimes),
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
@@ -193,7 +193,7 @@ export class SessionStore extends SessionStoreRestarts {
       this.#readPendingQuestions.bind(this),
       userId,
       workspaceId,
-      this.#runtimes?.pending.bind(this.#runtimes),
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   history(

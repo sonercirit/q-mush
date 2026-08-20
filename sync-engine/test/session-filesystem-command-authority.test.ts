@@ -25,6 +25,7 @@ import {
   sessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 const RUNNER_ID = "runner-filesystem";
 const SESSION_ID = "session-filesystem";
 const WORKING_DIRECTORY = "/work/project";
@@ -256,6 +257,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const session = testSession();
   const actions = new SessionAgentActions({

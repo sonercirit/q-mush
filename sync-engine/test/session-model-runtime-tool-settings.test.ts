@@ -66,7 +66,9 @@ function configuredStore(read: () => ToolSettings): SettingsStoreSetup {
   const setup = createStore();
   return {
     ...setup,
-    store: new SessionStore(setup.database, setup.generateId, read),
+    store: new SessionStore(setup.database, setup.generateId, read, {
+      pending: () => undefined,
+    }),
   };
 }
 

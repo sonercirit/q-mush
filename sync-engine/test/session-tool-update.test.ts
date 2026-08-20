@@ -17,6 +17,7 @@ import {
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 function setup() {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "tool-update-machine", "runner-1");
@@ -25,6 +26,7 @@ function setup() {
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const created = store.create(
     {
@@ -149,6 +151,7 @@ describe("session tool update", () => {
         setupValue.database,
         undefined,
         () => DEFAULT_TOOL_SETTINGS,
+        emptyRuntimes,
       ).get(TEST_USER_ID, setupValue.created.detail.id, TEST_WORKSPACE_ID)
         ?.tools,
     ).toEqual(["read", "bash"]);

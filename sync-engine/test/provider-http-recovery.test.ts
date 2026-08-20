@@ -111,13 +111,13 @@ function openRouterModel(
   onRequestState?: (state: "active" | "admission") => void,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
-    toolSettings: DEFAULT_TOOL_SETTINGS,
     credential: {
       accountId: null,
       secret: "sk-or-secret",
       source: "api_key",
     },
     fetch: provider.fetch,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",
     ...(onRequestState === undefined ? {} : { onRequestState }),

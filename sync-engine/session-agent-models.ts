@@ -77,10 +77,10 @@ export function createFallbackModel(
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
-    toolSettings: selection.toolSettings,
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
+    toolSettings: selection.toolSettings,
     tools: [],
   });
 }

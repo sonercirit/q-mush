@@ -260,6 +260,8 @@ describe("agent sessions", () => {
         credentialReads += 1;
       },
     });
+    // Fail closed: no credential is read (or decrypted) for a runner the user
+    // cannot reach, and the restart gate shares this ordering.
     const input = await sessionRequestInput();
     const response = await setup.sessions.collection(
       createAuthenticatedRequest(

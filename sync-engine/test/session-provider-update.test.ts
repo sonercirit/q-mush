@@ -52,7 +52,9 @@ function setup(userContextTokenCap?: number) {
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
   const readSettings = () => DEFAULT_TOOL_SETTINGS;
-  const store = new SessionStore(database, undefined, readSettings);
+  const store = new SessionStore(database, undefined, readSettings, {
+    pending: () => undefined,
+  });
   const created = createProviderUpdateSession(store, userContextTokenCap);
   if (created.status !== "created") throw new Error("Fixture failed");
   const cancelSessionGeneration = vi.fn<

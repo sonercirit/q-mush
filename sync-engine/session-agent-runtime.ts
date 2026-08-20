@@ -85,7 +85,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly manualCompactionRequested: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
-  readonly pendingComponent?: (
+  readonly pendingComponent: (
     component: SessionRuntimePendingComponent,
   ) => void;
   readonly restartHandoffRequested: () => boolean;
@@ -102,7 +102,7 @@ function markProviderPending(
   runtime: SessionAgentRuntimeDependencies,
   state: ProviderRequestState,
 ): void {
-  runtime.pendingComponent?.(sessionPendingComponentFromProviderState(state));
+  runtime.pendingComponent(sessionPendingComponentFromProviderState(state));
 }
 
 function writeRuntime(
@@ -187,7 +187,7 @@ async function loadModels(
     settings,
     async (signal) => {
       const agentFile = await executeForSession(runtime, () => {
-        runtime.pendingComponent?.("runner_command");
+        runtime.pendingComponent("runner_command");
         return loadSessionAgentFile(
           runtime.broker,
           runtime.detail,
@@ -203,7 +203,7 @@ async function loadModels(
           generation,
         );
       });
-      runtime.pendingComponent?.("provider_request");
+      runtime.pendingComponent("provider_request");
       const metadata = await sessionRequestMetadata(
         runtime,
         (apply) => {
@@ -211,13 +211,14 @@ async function loadModels(
         },
         signal,
       );
+      const onRequestState = markProviderPending.bind(undefined, runtime);
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
         detail: { ...runtime.detail, ...metadata },
         factory: runtime.modelFactory,
         isCurrent: runtime.isCurrent,
-        onRequestState: markProviderPending.bind(undefined, runtime),
+        onRequestState,
         onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         realtime: runtime.realtime,
         ...(options.streamId === undefined
@@ -309,7 +310,7 @@ async function executeAgentTool(
     return restartInterruptedToolResult();
   }
   try {
-    runtime.pendingComponent?.("engine_tool");
+    runtime.pendingComponent("engine_tool");
     if (
       !isAgentSessionToolName(call.name) ||
       !stepTools.has(call.name) ||
@@ -385,7 +386,7 @@ export async function runSessionAgent(
     signal: AbortSignal = toolSignal,
     callId?: string,
   ): Promise<RunnerCommandResult> => {
-    runtime.pendingComponent?.("runner_command");
+    runtime.pendingComponent("runner_command");
     const result = await executeForSession(
       runtime,
       () =>
@@ -436,7 +437,7 @@ export async function runSessionAgent(
     if (attachment === undefined) {
       throw new Error("The runner returned invalid file attachment data");
     }
-    runtime.pendingComponent?.("provider_request");
+    runtime.pendingComponent("provider_request");
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
     // Discovery may ignore cancellation and settle after the wrapper already
     // reported timed-out; never start explanation model work afterward.
@@ -444,6 +445,7 @@ export async function runSessionAgent(
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
+    const onRequestState = markProviderPending.bind(undefined, runtime);
     const explanation = await explainAttachment(
       {
         attachment,
@@ -453,8 +455,8 @@ export async function runSessionAgent(
         currentProvider: runtime.detail.provider,
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
-        onRequestState: markProviderPending.bind(undefined, runtime),
         factory: runtime.modelFactory,
+        onRequestState,
         onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,

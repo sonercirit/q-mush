@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Project memory. Strict TypeScript ESM Bun/SolidJS; tests under `test/`; `/` is home, `/app` the app.
+TS Bun/Solid; tests `test/`; `/`, `/app`.
 
 ## Working Agreements
 

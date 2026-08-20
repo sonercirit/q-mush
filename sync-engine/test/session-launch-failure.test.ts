@@ -36,6 +36,7 @@ import {
   createTestSession,
 } from "./session-store-test-fixtures.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 function markerlessStartupSession(database: AppDatabase): void {
   const ids = [
     SESSION_ID,
@@ -54,6 +55,7 @@ function markerlessStartupSession(database: AppDatabase): void {
       return id;
     },
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   createTestSession(startupStore, TEST_NOW, {
     credentialId: CREDENTIAL_ID,

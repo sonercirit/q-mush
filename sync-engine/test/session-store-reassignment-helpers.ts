@@ -12,6 +12,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { expectRunnerRequired } from "./session-integration-helpers.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 export interface SessionStoreTestSetup {
   readonly database: AppDatabase;
   readonly store: SessionStore;
@@ -105,6 +106,7 @@ export function expectRecoveredSession(
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   expect(restarted.failInterrupted(TEST_NOW + 3)).toEqual([]);
   expect(restarted.get(TEST_USER_ID, sessionId)).toEqual(before);

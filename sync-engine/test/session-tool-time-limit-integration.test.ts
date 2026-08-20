@@ -50,6 +50,7 @@ function limitRuntimeOptions(
     sessionTools: unusedSessionToolActions(),
     now: () => (now += 1),
     isCurrent: () => true,
+    pendingComponent: () => undefined,
     ...IDLE_RUNTIME_SIGNALS,
     detail: setup.detail,
     credential: runtimeTestCredential(setup.detail.credentialId, label),
