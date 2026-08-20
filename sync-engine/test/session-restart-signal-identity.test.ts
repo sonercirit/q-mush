@@ -158,9 +158,10 @@ test("already-aborted restart returns structured spawn error", async () => {
   );
   const parsed: unknown = parseToolOutput(result);
   expect(parsed).toEqual({ error: "server_restarting" });
-  expect(setup.store.list(TEST_USER_ID).at(1)).toBeUndefined();
-  const closed = setup.database.$client.close();
-  expect(closed).toBeUndefined();
+  const sessionsAfterAttempt = setup.store.list(TEST_USER_ID);
+  expect(sessionsAfterAttempt).toHaveLength(1);
+  const sqlite = setup.database.$client;
+  sqlite.close();
 });
 
 test("restart-aborted credential candidates return server restarting", async () => {
