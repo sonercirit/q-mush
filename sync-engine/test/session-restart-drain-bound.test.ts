@@ -340,13 +340,11 @@ describe("bounded restart drain", () => {
   });
 
   test("a later escalation does not re-park restored force-parked work", async () => {
-    expect.hasAssertions();
-    const logged: string[] = [];
-    const {
-      clock,
-      control,
-      session: runtime,
-    } = await singleSessionDrain(logged);
+    const logged = new Array<string>();
+    const fixture = await singleSessionDrain(logged);
+    const clock = fixture.clock;
+    const control = fixture.control;
+    const runtime = fixture.session;
     const { drained } = await startedDrain(control);
     clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
     await drained;

@@ -177,7 +177,7 @@ function control(
   };
 }
 
-function throwingTimerOptions(setTimer: () => number = () => 0) {
+function throwingTimerOptions(setTimer: () => number) {
   return {
     clearTimeout: () => undefined,
     setTimeout: setTimer,
@@ -440,6 +440,7 @@ describe("session restart control", () => {
     ]);
   });
 
+  // A late runner gets the server remainder; a later server drain gets its own full bound.
   test.each([
     ["a late runner keeps the original server deadline", drainRunner, 60_000],
     [
