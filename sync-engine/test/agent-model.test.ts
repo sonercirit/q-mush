@@ -3,6 +3,7 @@ import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -151,6 +152,7 @@ function respondingModel(
   capture: RequestCapture,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     fetch: captureRequest(capture, () => createJsonResponse(responseBody)),
   });
@@ -160,6 +162,7 @@ function codexModel(
   options: Omit<ModelOptions, "credential" | "maxOutputTokens" | "provider">,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     credential: {
       accountId: "chatgpt-account",

@@ -30,10 +30,12 @@ function storeWithRunner() {
   ];
   const generateId = () =>
     takeValue(credentialIds, "The hardening test ran out of IDs");
-  return {
+  const store = new SessionStore(
     database,
-    store: new SessionStore(database, generateId, () => DEFAULT_TOOL_SETTINGS),
-  };
+    generateId,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
+  return { database, store };
 }
 
 export function createSessionStoreTestSetup() {
