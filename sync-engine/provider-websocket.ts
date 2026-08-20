@@ -309,10 +309,10 @@ export class ProviderWebSocketSession {
             if (!admitsRequest) {
               return;
             }
-            // response.created is the canonical correlation event. Servers
-            // that omit it can still correlate the request with an identified
-            // non-terminal event; only an unidentified unfamiliar terminal
-            // frame is discarded as potentially stale from the reused socket.
+            // response.created is canonical. Otherwise, a fresh socket's
+            // response event or an identified non-retained response event
+            // correlates the request; unidentified events on a reused socket
+            // are potentially stale and discarded.
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");

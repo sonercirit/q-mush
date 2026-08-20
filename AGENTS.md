@@ -101,39 +101,36 @@
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads exact-root
   `AGENTS.md` (else `CLAUDE.md`).
 
-`runner/runner-workspace.ts` owns canonical workspace and tool path resolution.
-Tool, skill, model, and effort choices persist per session; pickers use
-canonical schemas. `read_session` byte-bounds transcript categories and
-definitions; `get_session_options` pages spawn choices. Grouped tools manage
-non-blocking owned children, report final messages, resume idle parents;
-`parallel` uses four ordered workers, bounds output, and propagates
-cancellation. `solid/session-transcript.tsx` renders prompts, tool definitions,
-raw details, Markdown, code/JSON, diffs, and contextual results, preserving user
-line breaks; session lists page by ten. Live sessions use
-`solid/realtime-client.ts`, `solid/session-client.tsx`,
+`runner/runner-workspace.ts` owns workspace/tool path resolution. Session tool,
+skill, model, and effort choices persist; pickers use canonical schemas.
+`read_session` byte-bounds transcript categories/definitions;
+`get_session_options` pages spawn choices. Grouped tools manage non-blocking
+children, report finals, resume idle parents; `parallel` takes 2+ calls on four
+ordered workers, bounds output, propagates cancellation.
+`solid/session-transcript.tsx` renders prompts, tools, details, Markdown,
+code/JSON, diffs, and results, preserving line breaks; session lists page by
+ten. Live sessions use `solid/realtime-client.ts`, `solid/session-client.tsx`,
 `solid/session-controller.ts`: model deltas combine once per frame per session,
 other events are immediate, unchanged snapshots suppress notifications, keyed
 messages rerender only changes. The long-lived Solid root preserves focus and
 scroll; the changing session detail is not a document scroll anchor, and only
 bottom-pinned transcripts follow live output. `agent-model-discovery.ts` queries
-metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
-types/validation. New sessions take the default online runner (else the first)
-and credential, first discovered model, last directory, top reported effort.
-Unknown modalities mean no attachment support; choices show provider and Q Mush
-modalities. `solid/custom-select.tsx` shares search normalization, paginates
-past ten items, owns accessible keyboard/focus. Focus mode fills the app
-viewport (not browser Fullscreen), keeping drafts and scroll; its rail overlays
-on desktop, becomes a drawer, collapses on selection, and closes with Escape
-first. `shared/agent-prompt.ts` builds the model system prompt and transcript
-display; reasoning summaries persist as `thinking` messages omitted from replay.
-Session and transcript rows sit in `agent_sessions` and `agent_messages`;
-`step_started_at` sets per model step, clears with `activeStartedAt` (live Step
-timer); interrupted processes mark active sessions failed for resumption;
-rebuilds add interrupted tool errors. Replays reset partial UI deltas; terminal
-failures persist as non-replayed errors. While running, server-derived
-`runtimePending` is `startup`, `runner_command`, `engine_tool`,
-`provider_request`, or `provider_admission`; the codec rejects it otherwise and
-the UI displays it.
+metadata with cancellation; `shared/agent-configuration.ts` owns catalog types.
+New sessions take the default online runner (else first), credential, first
+model, last directory, and top effort. Unknown modalities mean no attachments;
+choices show provider/Q Mush modalities. `solid/custom-select.tsx` shares
+search, paginates past ten, owns keyboard/focus. Focus mode fills the app
+viewport; its rail overlays on desktop, becomes a drawer, collapses on
+selection, and closes with Escape first. `shared/agent-prompt.ts` builds the
+model system prompt and transcript display; reasoning summaries persist as
+`thinking` messages omitted from replay. Session and transcript rows sit in
+`agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
+clears with `activeStartedAt` (live Step timer); interrupted processes mark
+active sessions failed for resumption; rebuilds add interrupted tool errors.
+Replays reset partial UI deltas; terminal failures persist as non-replayed
+errors. While running, server-derived `runtimePending` is `startup`,
+`runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
+the codec rejects it otherwise and the UI displays it.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -146,13 +143,15 @@ the UI displays it.
   be the user's default across providers. Shared behavior:
   `provider-credentials.ts`, `connected-account-oauth.ts`, the
   `solid/provider-*` client modules.
-- Measure cache hits against the cacheable prefix; total input dilutes with
-  fresh tool output. UI rates divide by summed input minus the final request
-  (summary) or the prior step's input (per step), clamped at 100%, counting only
-  fully reported steps. OpenAI/Codex requests carry the session ID as
-  `prompt_cache_key` and the Codex `session_id` header (cache routing); that
-  surface rejects `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter
-  and Anthropic-format requests mark one-hour `cache_control` breakpoints on the
+- Cache hits use the cacheable prefix; total input dilutes with fresh tool
+  output. Persistent shortfalls are bugs; lone misses are late-write/128-token
+  block noise. Codex sockets persist per run, reconnect on failure, then close.
+  UI rates divide by summed input minus the final request (summary) or prior
+  step input (per step), clamp at 100%, and count only fully reported steps.
+  OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
+  `session_id` header (cache routing); that surface rejects
+  `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
+  Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects markers, and generic
   OpenAI-format endpoints get neither markers nor `prompt_cache_key` (Ollama
@@ -241,16 +240,16 @@ the UI displays it.
   records stay contained (they run on the host). Container shells run as root in
   a disposable per-session Arch container (default `archlinux:latest`) with
   network and default capabilities, so pacman works; only the workspace mounts.
-  `read` pages its source. The directory picker browses beyond workspaces with
-  runner permissions. Stopping a session aborts model requests and runner
-  commands, ending active shells. OpenAI API-key and OAuth requests prefer
-  Responses WebSockets, falling back to HTTP streaming; OpenRouter and generic
-  endpoints stream chat completions, Anthropic-format endpoints Messages events.
-  OpenAI OAuth refreshes its token bundle before expiry. Session creation needs
-  an explicit model ID. Catalogs: OpenAI `/v1/models`, OpenRouter
-  `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic `/models`;
-  Anthropic-format catalogs read `display_name`, `max_input_tokens`,
-  `max_tokens`, and the `capabilities` tree
+  `read` pages source. The directory picker uses runner permissions beyond
+  workspaces, returns bounded directory-only results, and times out at 15s.
+  Stopping a session aborts model requests and commands, ending active shells.
+  OpenAI API-key and OAuth requests prefer Responses WebSockets, falling back to
+  HTTP streaming; OpenRouter and generic endpoints stream chat completions,
+  Anthropic-format endpoints Messages events. OpenAI OAuth refreshes its token
+  bundle before expiry. Session creation needs an explicit model ID. Catalogs:
+  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
+  `/models`, or the generic `/models`; Anthropic-format catalogs read
+  `display_name`, `max_input_tokens`, `max_tokens`, and the `capabilities` tree
   (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
   are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
@@ -270,21 +269,21 @@ the UI displays it.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs. Frozen clocks may collapse admission
-  transitions; production cannot. An identified non-terminal `response.*` admits
-  when `response.created` is omitted. WebSocket Mode expires in 60 minutes;
-  either observed limit error replaces the socket once per step, then retries
-  replay it. Admission is bounded until `response.created` or another identified
-  response event; HTTP waits are not. Discard unknown, pre-creation,
+  transitions; production cannot. An identified, non-retained `response.*`
+  admits when `response.created` is omitted. WebSocket Mode expires in 60
+  minutes; an observed limit error replaces the socket once per step, then
+  retries replay it. Admission is bounded until `response.created` or another
+  qualifying response event; HTTP waits are not. Discard unknown, pre-creation,
   mismatched-ID, and retained-ID frames/errors. On a reused socket, an
   uncorrelated pre-admission error retries fresh unless permanent, which
   surfaces; after admission, including ID-less admission, an unidentified error
-  retires the reused socket and retries fresh. Provider IDs are unbounded; use a
-  16 MiB fence, then retire. ID-less admission skips retained IDs until a new
-  ID; completion retires the socket. Concurrency closes superseded sockets.
-  Fenced watchdog failures abort. Requests unacknowledged through the
-  five-minute liveness grace fail without retry but remain resumable via
-  `continue`. Other provider errors retry before persistence; exhausted sockets
-  use HTTP. Permanent errors/aborts do not retry.
+  retires the reused socket and retries fresh. Provider IDs (~53 bytes normally)
+  are unbounded; fence at 16 MiB, then retire. ID-less admission skips retained
+  IDs until a new one; completion retires the socket. Concurrency closes
+  superseded sockets. Fenced watchdog failures abort. Requests unacknowledged
+  through the five-minute liveness grace fail without retry but remain resumable
+  via `continue`. Other provider errors retry before persistence; exhausted
+  sockets use HTTP. Permanent errors/aborts do not retry.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
