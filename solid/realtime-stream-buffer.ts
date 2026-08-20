@@ -342,9 +342,7 @@ export class RealtimeStreamBuffer {
     const previous = this.#pendingSession(event.sessionId)?.get(key);
     const bytes =
       utf8ByteLength(event.content) + utf8ByteLength(event.thinking);
-    if (!this.#makeRoom(bytes, 1, previous === undefined, key)) {
-      return;
-    }
+    if (!this.#makeRoom(bytes, 1, previous === undefined, key)) return;
     if (previous?.kind === "model") {
       previous.value.content.push(event.content);
       previous.value.thinking.push(event.thinking);
@@ -500,9 +498,6 @@ export class RealtimeStreamBuffer {
   ): RealtimeStreamBatch | undefined {
     return drainUpdates(maximumUpdates, withinBudget, () => {
       const pending = this.#pending.get(barrier.sessionId);
-      // Barrier correctness requires epochs to remain monotonic per session
-      // while any barrier is outstanding. Map insertion order then makes the
-      // first entry the one with the lowest epoch.
       const first = pending?.values().next();
       if (
         pending === undefined ||
