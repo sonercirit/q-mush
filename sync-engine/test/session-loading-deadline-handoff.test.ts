@@ -91,6 +91,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
     );
     const run = runPersistedSession(runOptions);
     await dispatched.promise;
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
     await vi.advanceTimersByTimeAsync(
       toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
     );

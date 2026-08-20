@@ -199,7 +199,7 @@ function ConversationTranscriptMessage(props: {
   readonly liveToolStreams?: readonly ToolStreamEntry[];
   readonly message: AgentSessionMessage;
   readonly onFork?: ((messageId: string) => void) | undefined;
-  readonly settings: ToolSettings;
+  readonly settings?: ToolSettings;
   readonly showContent?: boolean;
   readonly showTools?: boolean;
   readonly toolStreams?: Accessor<ReadonlyMap<string, ToolStreamEntry>>;
@@ -282,14 +282,14 @@ function ConversationTranscriptMessage(props: {
                     {renderToolArguments(
                       call.name,
                       call.arguments,
-                      props.settings,
+                      props.settings ?? DEFAULT_TOOL_SETTINGS,
                     )}
                   </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent
                         includeArguments={false}
-                        settings={props.settings}
+                        settings={props.settings ?? DEFAULT_TOOL_SETTINGS}
                         stream={liveStream()}
                       />
                     )}
@@ -303,7 +303,7 @@ function ConversationTranscriptMessage(props: {
       <Show when={showTools() && (props.liveToolStreams?.length ?? 0) > 0}>
         <ul class="mt-3 space-y-2">
           <LiveToolStreamList
-            settings={props.settings}
+            settings={props.settings ?? DEFAULT_TOOL_SETTINGS}
             streams={props.liveToolStreams ?? []}
           />
         </ul>
@@ -351,18 +351,12 @@ function renderTranscriptMessage(
         />
       );
     case "system":
-      return (
-        <ConversationTranscriptMessage
-          message={props.message}
-          settings={props.settings}
-        />
-      );
+      return <ConversationTranscriptMessage message={props.message} />;
     case "user":
       return (
         <ConversationTranscriptMessage
           onFork={props.onForkMessage}
           message={props.message}
-          settings={props.settings}
         />
       );
   }
@@ -436,6 +430,21 @@ export function SessionTranscript(props: {
   const transcriptToolSettings = createMemo(
     () => props.turns?.at(-1)?.toolSettings ?? DEFAULT_TOOL_SETTINGS,
   );
+  const turnToolSettings = createMemo(
+    () =>
+      new Map(
+        (props.turns ?? []).map(
+          (turn) => [turn.id, turn.toolSettings] as const,
+        ),
+      ),
+  );
+  const messageToolSettings = (
+    message: AgentSessionMessage,
+    liveToolStreams: readonly ToolStreamEntry[],
+  ): ToolSettings =>
+    liveToolStreams.length > 0
+      ? transcriptToolSettings()
+      : (turnToolSettings().get(message.turnId ?? "") ?? DEFAULT_TOOL_SETTINGS);
   const serializedTools = createMemo(() =>
     JSON.stringify(
       selectedAgentTools(props.tools, transcriptToolSettings()),
@@ -487,7 +496,7 @@ export function SessionTranscript(props: {
           filters={props.filters}
           liveToolStreams={liveToolStreams()}
           message={message()}
-          settings={transcriptToolSettings()}
+          settings={messageToolSettings(message(), liveToolStreams())}
           nestedScrollKey={
             messageNestedScrollKeys().byMessageId.get(message().id) ??
             message().id

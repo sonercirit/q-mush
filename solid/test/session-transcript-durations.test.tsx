@@ -3,6 +3,7 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
+import { testToolStream } from "./session-tool-stream-fixtures.ts";
 import {
   assistantToolCall,
   message,
@@ -245,4 +246,88 @@ test("falls back to raw sleep arguments when the duration is malformed", () => {
       expectedJson,
     );
   }
+});
+
+test("uses each persisted turn's configured sleep limit", () => {
+  const historicalCall = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "historical-configured-sleep",
+      name: "sleep",
+    }),
+    turnId: "historical-turn",
+  };
+  const latestCall = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "latest-configured-sleep",
+      name: "sleep",
+    }),
+    turnId: "latest-turn",
+  };
+  const html = renderMessages(
+    [historicalCall, latestCall],
+    AGENT_SESSION_TOOL_NAMES,
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    undefined,
+    [
+      {
+        boundaryMessageId: historicalCall.id,
+        endedAt: 2,
+        executionGeneration: 1,
+        id: "historical-turn",
+        startedAt: 1,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
+      },
+      {
+        boundaryMessageId: latestCall.id,
+        endedAt: 4,
+        executionGeneration: 2,
+        id: "latest-turn",
+        startedAt: 3,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 30 },
+      },
+    ],
+  );
+
+  expect(renderedElementTexts(html, SLEEP_DURATION_ELEMENT_PATTERN)).toEqual([
+    "Duration: 2h",
+  ]);
+  expect(
+    renderedElementTexts(html, JSON_CODE_ELEMENT_PATTERN).join(" "),
+  ).toContain('"durationSeconds": 7200');
+});
+
+test("uses the latest configured limit for live sleep streams", () => {
+  const liveMessage = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "live-sleep",
+      name: "sleep",
+    }),
+    id: "stream:live-assistant",
+    turnId: "live-turn",
+  };
+  const html = renderMessages(
+    [liveMessage],
+    AGENT_SESSION_TOOL_NAMES,
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    undefined,
+    [
+      {
+        boundaryMessageId: liveMessage.id,
+        endedAt: null,
+        executionGeneration: 2,
+        id: "live-turn",
+        startedAt: 1,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
+      },
+    ],
+    [testToolStream("live-sleep", '{"durationSeconds":7200}', "sleep")],
+    "running",
+  );
+
+  expect(html).toContain("Duration: 2h");
 });
