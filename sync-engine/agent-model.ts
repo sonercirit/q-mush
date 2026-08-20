@@ -401,8 +401,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #maxOutputTokens: number | null;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
-  readonly #onRequestState:
-    AgentModelRequestOptions["onRequestState"] | undefined;
+  readonly #onRequestState: AgentModelRequestOptions["onRequestState"];
   readonly #onStepStart: () => void;
   readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
   readonly #promptCacheKey: string | undefined;

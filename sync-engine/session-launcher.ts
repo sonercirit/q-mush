@@ -132,6 +132,7 @@ export class SessionLauncher {
           notify: this.#dependencies.notify,
           now: this.#dependencies.now,
           operation,
+          pendingComponent: reportPending,
           resources: {
             actions: this.#dependencies.actions,
             ...(this.#dependencies.attachmentFallbacks === undefined
@@ -157,7 +158,6 @@ export class SessionLauncher {
           restartPersistence,
           store: this.#dependencies.store,
           userId,
-          pendingComponent: reportPending,
         });
       },
     );

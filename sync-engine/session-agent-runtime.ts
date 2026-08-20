@@ -23,6 +23,7 @@ import type {
 } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
 import {
   isAskQuestionsPause,
@@ -92,7 +93,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
 
 function markProviderPending(
   runtime: SessionAgentRuntimeDependencies,
-  state: Parameters<typeof sessionPendingComponentFromProviderState>[0],
+  state: ProviderRequestState,
 ): void {
   runtime.pendingComponent?.(sessionPendingComponentFromProviderState(state));
 }
