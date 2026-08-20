@@ -17,13 +17,6 @@ import { providerEventIndex, providerStep } from "./provider-stream-helpers.ts";
 type ProviderStreamProtocol =
   "anthropic" | "chat_completions" | "chat_completions_json" | "responses";
 
-export const RESPONSES_TERMINAL_EVENT_TYPES: ReadonlySet<string> = new Set([
-  "response.cancelled",
-  "response.completed",
-  "response.failed",
-  "response.incomplete",
-]);
-
 export interface ProviderTextDelta {
   readonly content: string;
   readonly reset?: true;

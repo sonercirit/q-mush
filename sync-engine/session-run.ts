@@ -2,6 +2,7 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
@@ -22,10 +23,7 @@ import type {
 } from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { isRestartHandoffError } from "./session-runner-execution.ts";
-import type {
-  RestartRequest,
-  SessionPendingComponent,
-} from "./session-runtime.ts";
+import type { RestartRequest } from "./session-runtime.ts";
 import { sessionHasStatus } from "./session-status.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -37,7 +35,9 @@ interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly operation: RestartHandoffOperation;
-  readonly pendingComponent: (component: SessionPendingComponent) => void;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly resources: SessionModelRuntimeResources;
   readonly restartPersistence: DurableRestartPersistence;
   readonly store: SessionStore;

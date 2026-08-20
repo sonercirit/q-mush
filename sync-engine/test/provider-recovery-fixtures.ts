@@ -10,7 +10,6 @@ import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 export const COMPLETED_EVENT = {
   response: {
-    id: "response-complete",
     output: [
       {
         content: [{ text: "Done.", type: "output_text" }],

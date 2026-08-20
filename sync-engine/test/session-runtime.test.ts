@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
+import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import {
   SessionRuntimes,
   type RestartRequest,
   type RestartScope,
-  type SessionPendingComponent,
 } from "../../sync-engine/session-runtime.ts";
 
 interface DeferredRuntime {
@@ -42,7 +42,8 @@ function deferredRuntime(
 
 function pendingRuntime(runtimes: SessionRuntimes, generation: number) {
   let finish: (() => void) | undefined;
-  let pending: ((component: SessionPendingComponent) => void) | undefined;
+  let pending:
+    ((component: SessionRuntimePendingComponent) => void) | undefined;
   const launched = runtimes.launch(
     "session-1",
     "runner-1",
@@ -57,7 +58,7 @@ function pendingRuntime(runtimes: SessionRuntimes, generation: number) {
   return {
     finish: () => finish?.(),
     launched,
-    pending: (value: SessionPendingComponent) => pending?.(value),
+    pending: (value: SessionRuntimePendingComponent) => pending?.(value),
   };
 }
 

@@ -19,6 +19,7 @@ import {
 import type {
   AgentSessionDetail,
   AgentSessionUsageUpdate,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
@@ -59,7 +60,6 @@ import {
   executeForSession,
   isRestartHandoffError,
 } from "./session-runner-execution.ts";
-import type { SessionPendingComponent } from "./session-runtime.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -79,7 +79,9 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly markPending?: (state: ProviderRequestState) => void;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
-  readonly pendingComponent?: (component: SessionPendingComponent) => void;
+  readonly pendingComponent?: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly restartHandoffRequested: () => boolean;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;

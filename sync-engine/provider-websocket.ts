@@ -2,10 +2,7 @@ import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { ProviderStreamError } from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
-import {
-  createProviderStreamAccumulator,
-  RESPONSES_TERMINAL_EVENT_TYPES,
-} from "./provider-stream.ts";
+import { createProviderStreamAccumulator } from "./provider-stream.ts";
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;
@@ -237,17 +234,19 @@ export class ProviderWebSocketSession {
               return;
             }
             const eventType = value["type"];
+            const responseEvent =
+              typeof eventType === "string" &&
+              eventType.startsWith("response.");
+            const retainedResponse =
+              eventResponseId !== undefined &&
+              priorResponseIds.has(eventResponseId);
             const admitsRequest =
-              eventType === "response.created" ||
-              (typeof eventType === "string" &&
-                eventType.startsWith("response.") &&
-                (reusedSocket === undefined ||
-                  !RESPONSES_TERMINAL_EVENT_TYPES.has(eventType)));
-            if (
-              !admitsRequest ||
-              eventResponseId === undefined ||
-              priorResponseIds.has(eventResponseId)
-            ) {
+              responseEvent &&
+              !retainedResponse &&
+              (reusedSocket === undefined ||
+                eventResponseId !== undefined ||
+                eventType === "response.created");
+            if (!admitsRequest) {
               return;
             }
             // response.created is the canonical correlation event. Servers

@@ -1,6 +1,9 @@
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
@@ -8,10 +11,7 @@ import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { hasPendingSteeringInput } from "./session-pending-inputs.ts";
-import {
-  sessionPendingComponentFromProviderState,
-  type SessionPendingComponent,
-} from "./session-runtime.ts";
+import { sessionPendingComponentFromProviderState } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
 export interface SessionModelRuntimeResources extends Omit<
@@ -38,7 +38,8 @@ export function sessionModelRuntime(
   userId: string,
   controller: AbortController,
   restartHandoffRequested: () => boolean = () => false,
-  markPending: (component: SessionPendingComponent) => void = () => undefined,
+  markPending: (component: SessionRuntimePendingComponent) => void = () =>
+    undefined,
 ): SessionAgentRuntimeDependencies {
   return {
     ...(resources.attachmentFallbacks === undefined

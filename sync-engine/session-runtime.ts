@@ -6,8 +6,6 @@ import type {
 import type { ProviderRequestState } from "./agent-model-options.ts";
 import type { SessionRestartRequester } from "./session-restart-requester.ts";
 
-export type SessionPendingComponent = SessionRuntimePendingComponent;
-
 type SessionPendingState = SessionRuntimePending;
 
 export type RestartScope =
@@ -43,7 +41,7 @@ interface ActiveSessionRuntime {
 interface SessionRuntimeContext extends SessionRestartRequester {
   readonly controller: AbortController;
   readonly pendingComponent: (
-    component: SessionPendingComponent,
+    component: SessionRuntimePendingComponent,
   ) => "fenced" | "unchanged" | "updated";
   readonly settled: (clearDurable: () => Promise<void> | void) => void;
 }
@@ -52,7 +50,7 @@ type SessionRuntime = (context: SessionRuntimeContext) => Promise<void>;
 
 export function sessionPendingComponentFromProviderState(
   state: ProviderRequestState,
-): SessionPendingComponent {
+): SessionRuntimePendingComponent {
   return state === "admission" ? "provider_admission" : "provider_request";
 }
 

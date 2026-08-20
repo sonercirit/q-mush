@@ -30,7 +30,8 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
-  `bun run test:browser` for Chromium alone.
+  `bun run test:browser` for Chromium; its bare path needs `--no-orphans`;
+  Playwright 1.62.1/Vitest 4.1.10 stay pinned for compatibility.
 - `bun run check` runs every static check, each standalone too; `bun run format`
   / `lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
@@ -38,10 +39,10 @@ Living project memory.
 
 ## Architecture and Conventions
 
-- Four enforced production workspaces: `solid` owns browser UI, `sync-engine`
-  the Bun server/integrations, `runner` the standalone runner, `shared`
-  cross-workspace code. The first three import only themselves and `shared`;
-  `shared` imports no other workspace; only `scripts` may import `scripts`.
+- Four enforced production workspaces: `solid` owns UI, `sync-engine` the Bun
+  server, `runner` the runner, `shared` shared code. The first three import only
+  themselves and `shared`; `shared` imports no other workspace; only `scripts`
+  may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
@@ -56,18 +57,18 @@ Living project memory.
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
 - `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
-    discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
-    SQLite to upsert users and persist seven-day sessions. Primary keys are
-    UUIDv7; Google subjects and session cookie tokens are separate unique
-    fields; every table has created/updated timestamps, actor IDs, `isDeleted`.
-    `shared/database.ts` applies committed `drizzle/` migrations on open;
-    `sync-engine/index.ts` injects the persistent connection; the auth factory
-    falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
-    live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
-    use real Chromium/Tailwind and production state/UI mutations, never
-    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
+- PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
+  discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
+  SQLite to upsert users and persist seven-day sessions. Primary keys are
+  UUIDv7; Google subjects and session cookie tokens are separate unique fields;
+  every table has created/updated timestamps, actor IDs, `isDeleted`.
+  `shared/database.ts` applies committed `drizzle/` migrations on open;
+  `sync-engine/index.ts` injects the persistent connection; the auth factory
+  falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
+  live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
+  reads `/api/auth/session`, gates the app, posts logout. Browser regressions
+  use real Chromium/Tailwind and production state/UI mutations, never synthetic
+  layout or CSS-only assertions; CI rejects `.only` and zero tests.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
@@ -86,7 +87,7 @@ Living project memory.
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` byte-bounds transcript messages,
   assistant calls, the system prompt, tool definitions.
-- `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
+- `sync-engine/sessions.ts` and `session-store.ts` persist sessions. User
   messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
   Sessions record active time, cost, token usage, and context limit; reported
   charges win. Auto-compaction defaults on at 95%; truncation enters only its
@@ -167,10 +168,10 @@ Living project memory.
   (`session-current-model.ts`) only while the credential stays attached,
   propagating stops, not degrading; generic reassignment nulls limits to
   re-probe; otherwise they snapshot like context limits.
-- `sync-engine/brave-search.ts` implements the authenticated server-side
-  `brave_search` skill and key API. Users keep multiple encrypted keys in
-  `provider_credentials`; failures fall through keys in creation order; secrets
-  never reach browser, runner, or model provider.
+- `sync-engine/brave-search.ts` implements the server-side `brave_search` skill
+  and key API. Users keep multiple encrypted keys in `provider_credentials`;
+  failures fall through keys in creation order; secrets never reach browser,
+  runner, or model provider.
 - `solid/client.tsx` is the browser entry, `solid/pages.tsx` owns
   server-rendered shells, `solid/styles.css` is Tailwind's source. Vitest uses
   an SSR Solid transform for string rendering and a Happy DOM project for

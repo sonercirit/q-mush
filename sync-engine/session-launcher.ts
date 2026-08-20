@@ -2,6 +2,7 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
@@ -12,10 +13,7 @@ import type { SessionModelRuntimeResources } from "./session-model-runtime.ts";
 import type { DurableRestartPersistence } from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { runPersistedSession } from "./session-run.ts";
-import type {
-  SessionPendingComponent,
-  SessionRuntimes,
-} from "./session-runtime.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -75,7 +73,9 @@ export class SessionLauncher {
       detail.generation,
       operation === "agent" ? "step" : "handoff",
       async ({ controller, pendingComponent, restartRequest, settled }) => {
-        const reportPending = (component: SessionPendingComponent): void => {
+        const reportPending = (
+          component: SessionRuntimePendingComponent,
+        ): void => {
           // Repeated provider admission reports refresh watchdog liveness and
           // intentionally publish each bounded retry to realtime clients.
           if (pendingComponent(component) !== "updated") {

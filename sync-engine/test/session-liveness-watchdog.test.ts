@@ -2,13 +2,11 @@ import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions, runners } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { SessionLivenessWatchdog } from "../../sync-engine/session-liveness-watchdog.ts";
-import {
-  SessionRuntimes,
-  type SessionPendingComponent,
-} from "../../sync-engine/session-runtime.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import { notifySessionSteeringInput } from "../../sync-engine/session-steering-wakeup.ts";
 import {
@@ -127,11 +125,12 @@ function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
   generation: number,
-  component?: SessionPendingComponent,
+  component?: SessionRuntimePendingComponent,
 ) {
   const deferred = Promise.withResolvers<undefined>();
   let signal: AbortSignal | undefined;
-  let setPending: ((component: SessionPendingComponent) => void) | undefined;
+  let setPending:
+    ((component: SessionRuntimePendingComponent) => void) | undefined;
   expect(
     runtimes.launch(
       setup.detail.id,
@@ -158,7 +157,7 @@ function launchRuntime(
   ).toBe(true);
   return {
     ...deferred,
-    pending: (pending: SessionPendingComponent) => {
+    pending: (pending: SessionRuntimePendingComponent) => {
       setPending?.(pending);
     },
     get signal() {
@@ -169,7 +168,7 @@ function launchRuntime(
 
 function launchPendingRuntime(
   setup: ReturnType<typeof runningSetup>,
-  component: SessionPendingComponent,
+  component: SessionRuntimePendingComponent,
 ) {
   const runtimes = new SessionRuntimes(() => Date.now());
   const runtime = launchRuntime(
