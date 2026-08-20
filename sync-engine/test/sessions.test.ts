@@ -302,7 +302,7 @@ describe("agent sessions", () => {
     );
   });
 
-  test("persists image inputs and active timing and sends images to the model", async () => {
+  test("persists images and active timing and sends them to the model", async () => {
     const expiry = TEST_NOW + 7 * 86_400_000;
     let now = TEST_NOW;
     const model = new ScriptedAgentModel([
