@@ -29,6 +29,8 @@ function integrationResources(
   rejectDrain: () => Promise<void>,
 ): SessionIntegrationApiResources {
   const resources = new Proxy<SessionIntegrationApiResources>(
+    // The proxy supplies every property before its target is observed.
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
     Object.create(null),
     {
       get: (_target, property) => {
