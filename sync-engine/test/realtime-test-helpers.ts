@@ -352,6 +352,7 @@ export function realtimeTestSessions(
     openRouterProviders: () => Promise.resolve(new Response()),
     pendingQuestionForUser: () => null,
     prepareFinalShutdown: () => Promise.resolve(),
+    restoreDevelopmentDrainRecovery: () => undefined,
     hasPendingDatabaseWrites: () => false,
     reconcileDatabaseWrites: () => true,
     pendingRunnerRestart: () => ({ status: "none" }),

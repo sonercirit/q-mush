@@ -33,6 +33,7 @@ export class SessionExecutionCleanup {
       pending.controller.abort(
         new DOMException("The server is restarting", "RestartHandoff"),
       );
+      // Dispatch settlement owns removal from #pending after this cancellation.
       this.#broker.cancelSessionCommands(sessionId);
     }
   }

@@ -53,6 +53,7 @@ export interface SessionIntegration extends SessionDetailReader {
     sessionIds: ReadonlySet<string>,
   ) => readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
+  restoreDevelopmentDrainRecovery(): void;
   hasPendingDatabaseWrites(): boolean;
   reconcileDatabaseWrites(): boolean;
   item(request: Request, sessionId: string): Response;

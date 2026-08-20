@@ -291,6 +291,10 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     );
   }
 
+  restoreDevelopmentDrainRecovery(): void {
+    this.resources.shutdownInterrupted.enableRecovery();
+  }
+
   async prepareFinalShutdown(): Promise<void> {
     this.resources.stopLivenessScans();
     this.resources.shutdownInterrupted.enableRecovery();

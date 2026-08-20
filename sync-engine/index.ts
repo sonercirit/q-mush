@@ -30,6 +30,7 @@ import {
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
+import { restoreRejectedDevelopmentDrainRecovery } from "./development-restart-recovery.ts";
 import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
@@ -277,6 +278,7 @@ function restartDevelopment(deadlineAt: number): Promise<void> {
   developmentRestart = sessions
     .drain(deadline)
     .catch((error: unknown) => {
+      restoreRejectedDevelopmentDrainRecovery(sessions);
       console.warn(
         `Q Mush development restart drain failed: ${errorMessage(error)}`,
       );
