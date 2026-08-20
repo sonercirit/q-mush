@@ -106,7 +106,7 @@ function expectRawOverflow(output: string, maximum: number): void {
 
 function expectPartialLineOverflow(output: string, maximum: number): void {
   const outputLength = unicodeCharacterCount(output);
-  expect([outputLength, output.includes("Use offset=2 to continue.")]).toEqual([
+  expect([outputLength, output.includes("Showing lines")]).toEqual([
     maximum + 1,
     false,
   ]);
