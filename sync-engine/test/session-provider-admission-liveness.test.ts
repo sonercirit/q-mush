@@ -335,7 +335,7 @@ test("fails a reused provider socket that stalls after a durable tool result", a
   });
   socket.receive({ type: "provider.keepalive" });
   socket.receive({
-    response: { id: "stale-response", output: [] },
+    response: { id: "response-tool", output: [] },
     type: "response.completed",
   });
   expect(currentDetail(run)?.runtimePending).toMatchObject({
