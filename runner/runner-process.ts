@@ -86,14 +86,14 @@ async function readStream(
     }
   };
 
-  const retain = (content: string): boolean => {
-    const available = capture.remainingCharacters;
+  const retain = (content: string): void => {
     const contentCharacters = unicodeCharacterCount(content);
-    const accepted = unicodeCharacterPrefix(content, available);
-    output += accepted;
-    const acceptedCharacters = unicodeCharacterCount(accepted);
+    const acceptedCharacters = Math.min(
+      contentCharacters,
+      capture.remainingCharacters,
+    );
+    output += unicodeCharacterPrefix(content, acceptedCharacters);
     capture.remainingCharacters -= acceptedCharacters;
-    return contentCharacters <= available;
   };
 
   for (;;) {
@@ -166,13 +166,12 @@ export async function runRunnerProcess(
       readStream(child.stderr, "stderr", capture, options.onOutput),
       readStream(child.stdout, "stdout", capture, options.onOutput),
     ]);
-    const result = {
+    return {
       exitCode,
       standardError,
       standardOutput,
       termination: state.termination,
     };
-    return result;
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);

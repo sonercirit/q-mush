@@ -369,6 +369,7 @@ async function executeAgentTool(
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
+  const settings = runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS;
   const streamId = createUuidV7();
   const initialMessages = sessionRuntimeConversation(runtime);
   const messages =
@@ -417,13 +418,9 @@ export async function runSessionAgent(
               currentToolNames()?.some((candidate) => candidate === name) ===
               true,
             executionEnvironment: runtime.detail.executionEnvironment,
-            executionLimitSeconds: toolExecutionLimitSeconds(
-              runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
-            ),
+            executionLimitSeconds: toolExecutionLimitSeconds(settings),
             generation: runtime.detail.generation,
-            outputLimitCharacters: (
-              runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS
-            ).outputLimitCharacters,
+            outputLimitCharacters: settings.outputLimitCharacters,
             runnerId: runtime.detail.runnerId,
             sessionId: runtime.detail.id,
             tool: name,
@@ -522,7 +519,7 @@ export async function runSessionAgent(
           (sleepSignal) =>
             waitForSessionSteeringInput(runtime.detail.id, sleepSignal),
           runtime.now,
-          runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+          settings,
         ).then((output) => ({ output, state: "completed" }));
       }
       return executeSessionAgentTool(

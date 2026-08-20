@@ -207,6 +207,7 @@ type SessionTurnRotationOptions = Omit<
   readonly toolSettings: ToolSettings | "inherit";
 };
 
+// Turn-column defaults are DEFAULT_TOOL_SETTINGS in shared/tool-limits.ts.
 function selectedToolSettingsColumns() {
   return {
     executionLimitMinutes: agentSessionTurns.toolExecutionLimitMinutes,

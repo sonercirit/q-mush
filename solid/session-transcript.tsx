@@ -435,12 +435,9 @@ export function SessionTranscript(props: {
         ),
       ),
   );
-  const messageToolSettings = (
-    message: AgentSessionMessage,
-    liveToolStreams: readonly ToolStreamEntry[],
-  ): ToolSettings =>
+  const messageToolSettings = (message: AgentSessionMessage): ToolSettings =>
     // Stream rows may not have a persisted, ended turn yet; current settings win.
-    liveToolStreams.length > 0 || isStreamedMessage(message)
+    isStreamedMessage(message)
       ? transcriptToolSettings()
       : (turnToolSettings().get(message.turnId ?? "") ?? DEFAULT_TOOL_SETTINGS);
   const serializedTools = createMemo(() =>
@@ -487,9 +484,7 @@ export function SessionTranscript(props: {
     message,
     liveToolStreams,
   ) => {
-    const settings = createMemo(() =>
-      messageToolSettings(message(), liveToolStreams()),
-    );
+    const settings = createMemo(() => messageToolSettings(message()));
     return (
       <>
         <Show when={transcriptMessageIsVisible(message(), props.filters)}>
