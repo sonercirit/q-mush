@@ -1,5 +1,6 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   onCleanup,
@@ -143,19 +144,21 @@ export function SessionToolPicker(props: {
         : props.tools.filter((name) => !names.includes(name)),
     );
   };
-  const configuredOptions = (): readonly AgentSessionToolOption[] => {
-    const settings = props.settings;
-    if (settings === undefined) return AGENT_SESSION_TOOL_OPTIONS;
-    const definitions = new Map(
-      selectedAgentTools(AGENT_SESSION_TOOL_NAMES, settings).map(
-        ({ function: definition }) => [definition.name, definition],
-      ),
-    );
-    return AGENT_SESSION_TOOL_OPTIONS.map((option) => ({
-      ...option,
-      definition: definitions.get(option.name) ?? option.definition,
-    }));
-  };
+  const configuredOptions = createMemo<readonly AgentSessionToolOption[]>(
+    () => {
+      const settings = props.settings;
+      if (settings === undefined) return AGENT_SESSION_TOOL_OPTIONS;
+      const definitions = new Map(
+        selectedAgentTools(AGENT_SESSION_TOOL_NAMES, settings).map(
+          ({ function: definition }) => [definition.name, definition],
+        ),
+      );
+      return AGENT_SESSION_TOOL_OPTIONS.map((option) => ({
+        ...option,
+        definition: definitions.get(option.name) ?? option.definition,
+      }));
+    },
+  );
   const sessionOptions = () =>
     configuredOptions().filter(({ name }) =>
       SESSION_AGENT_TOOL_NAMES.includes(name),

@@ -320,7 +320,6 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
 
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
-  settings: Accessor<ToolSettings>,
 ): JSX.Element {
   switch (untrack(() => props.message.role)) {
     case "assistant":
@@ -328,7 +327,7 @@ function renderTranscriptMessage(
         <ConversationTranscriptMessage
           liveToolStreams={props.liveToolStreams}
           message={props.message}
-          settings={settings()}
+          settings={props.settings()}
           onFork={props.onForkMessage}
           showContent={props.filters.assistantMessages}
           showTools={props.filters.toolActivity}
@@ -364,10 +363,9 @@ function TranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
   const nestedScrollRef = createNestedScrollRef(() => props.nestedScrollKey);
-  const settings = createMemo(() => props.settings());
   return (
     <li class="contents" ref={nestedScrollRef}>
-      {renderTranscriptMessage(props, settings)}
+      {renderTranscriptMessage(props)}
     </li>
   );
 }
@@ -441,7 +439,7 @@ export function SessionTranscript(props: {
     message: AgentSessionMessage,
     liveToolStreams: readonly ToolStreamEntry[],
   ): ToolSettings =>
-    liveToolStreams.length > 0
+    liveToolStreams.length > 0 || isStreamedMessage(message)
       ? transcriptToolSettings()
       : (turnToolSettings().get(message.turnId ?? "") ?? DEFAULT_TOOL_SETTINGS);
   const serializedTools = createMemo(() =>

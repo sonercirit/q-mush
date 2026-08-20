@@ -324,7 +324,7 @@ test("uses the latest configured limit for live sleep streams", () => {
         toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
       },
     ],
-    [testToolStream("live-sleep", '{"durationSeconds":7200}', "sleep")],
+    [testToolStream("message-sleep", '{"durationSeconds":7200}', "sleep")],
     "running",
   );
 
