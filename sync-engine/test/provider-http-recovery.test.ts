@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   runAgentLoop,
   type AgentRecordedMessage,
@@ -7,6 +7,11 @@ import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
+import {
+  failWebSocketAttempts,
+  FakeProviderSockets,
+  recordDelay,
+} from "./provider-recovery-fixtures.ts";
 
 const FIRST_REQUEST_ID = "d128368f-4052-4f00-9233-61153d3f5953";
 const SECOND_REQUEST_ID = "5a18ebce-f9b5-4375-9beb-833abb711910";
@@ -151,6 +156,49 @@ function resetDeltas(
 }
 
 describe("provider HTTP step recovery", () => {
+  test("transfers stalled-admission ownership to a healthy HTTP fallback", async () => {
+    const sockets = new FakeProviderSockets();
+    const states: ("active" | "admission")[] = [];
+    const controller = new AbortController();
+    let releaseHeaders: (() => void) | undefined;
+    const headers = new Promise<void>((resolve) => {
+      releaseHeaders = resolve;
+    });
+    const model = new ChatCompletionsAgentModel({
+      credential: { accountId: null, secret: "sk-openai", source: "api_key" },
+      fetch: async () => {
+        await headers;
+        return eventStream([textEvent("Done.")]);
+      },
+      maxOutputTokens: null,
+      model: "gpt-test",
+      onRequestState: (state) => states.push(state),
+      provider: "openai",
+      sleep: recordDelay([]),
+      webSocket: sockets.create,
+    });
+
+    const completion = model.complete(USER_MESSAGE, controller.signal);
+    await failWebSocketAttempts(sockets);
+    await vi.waitFor(() => {
+      expect(states.at(-1)).toBe("active");
+    });
+    expect(states).toEqual([
+      "admission",
+      "admission",
+      "admission",
+      "admission",
+      "active",
+    ]);
+
+    // Model the session liveness scan after its grace: only admission is
+    // bounded, while an active HTTP header wait remains provider-owned.
+    if (states.at(-1) === "admission") controller.abort();
+    await Promise.resolve();
+    expect(controller.signal.aborted).toBe(false);
+    releaseHeaders?.();
+    await expect(completion).resolves.toMatchObject({ content: "Done." });
+  });
   test("leaves a long HTTP header wait outside bounded admission", async () => {
     const states: string[] = [];
     let releaseFirst: (() => void) | undefined;

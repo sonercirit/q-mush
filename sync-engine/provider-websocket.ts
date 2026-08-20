@@ -20,8 +20,10 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 const OPEN_STATE = 1;
-// Bun rejects inbound WebSocket messages above 16 MiB by default. Reuse that
-// transport resource boundary for cumulative response-ID payloads.
+// Bun documents 16 MiB as the default `Bun.serve` WebSocket
+// `maxPayloadLength`, not as a client WebSocket limit. Borrow that documented
+// transport-scale value as an application memory budget for the client fence;
+// crossing it retires the socket without evicting IDs or weakening the fence.
 const MAX_RETAINED_RESPONSE_ID_BYTES = 16 * 1024 * 1024;
 
 export class ProviderWebSocketError extends Error {
@@ -86,12 +88,13 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
-  // A provider controls both response-ID length and model latency, so the
-  // 60-minute socket lifetime alone cannot bound this stale-frame fence. Keep
-  // at most one Bun default maximum inbound-frame payload (16 MiB) of IDs; on
-  // crossing it, retire the socket rather than evict an ID and reopening the
-  // stale-frame admission race. Normal OpenAI `resp_…` IDs are about 53 bytes.
-  readonly #priorResponseIds = new Set<string>();
+  // A provider controls response-ID length and request completion rate, so the
+  // documented 60-minute socket lifetime cannot by itself bound this fence.
+  // Retain at most the explicit memory budget above, then retire rather than
+  // evicting an ID and reopening the stale-frame admission race. Observed
+  // OpenAI `resp_…` IDs are about 53 bytes; correctness does not rely on that.
+  #priorResponseIdBytes = 0;
+  #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;
 
@@ -100,6 +103,7 @@ export class ProviderWebSocketSession {
     this.#socket = undefined;
     this.#socketGeneration += 1;
     this.#priorResponseIds.clear();
+    this.#priorResponseIdBytes = 0;
     socket?.close(1000, "Session complete");
   }
 
@@ -133,12 +137,13 @@ export class ProviderWebSocketSession {
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
       const priorResponseIds =
-        reusedSocket === undefined
-          ? new Set<string>()
-          : new Set(this.#priorResponseIds);
-      if (reusedSocket === undefined) {
-        this.#priorResponseIds.clear();
-      }
+        reusedSocket === undefined ? new Set<string>() : this.#priorResponseIds;
+      let retainedBytes =
+        reusedSocket === undefined ? 0 : this.#priorResponseIdBytes;
+      // Transfer the fence to this request. The session field accumulates no
+      // duplicate copy while the request owns the only reusable socket.
+      this.#priorResponseIds = new Set<string>();
+      this.#priorResponseIdBytes = 0;
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
@@ -162,20 +167,20 @@ export class ProviderWebSocketSession {
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
           if (requestGeneration === this.#socketGeneration) {
-            this.#priorResponseIds.clear();
-            let retainedBytes = 0;
-            for (const id of priorResponseIds) {
-              this.#priorResponseIds.add(id);
-              retainedBytes += Buffer.byteLength(id);
-            }
-            if (currentResponseId !== undefined) {
-              this.#priorResponseIds.add(currentResponseId);
-              retainedBytes += Buffer.byteLength(currentResponseId);
+            if (
+              currentResponseId !== undefined &&
+              !priorResponseIds.has(currentResponseId)
+            ) {
+              priorResponseIds.add(currentResponseId);
+              retainedBytes += Buffer.byteLength(currentResponseId, "utf8");
             }
             if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
+              this.#priorResponseIds = priorResponseIds;
+              this.#priorResponseIdBytes = retainedBytes;
               this.#socket = socket;
             } else {
               this.#priorResponseIds.clear();
+              this.#priorResponseIdBytes = 0;
               socket.close(1000, "Response ID retention limit reached");
             }
           } else {

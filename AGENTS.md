@@ -280,12 +280,16 @@
   the unpersisted step. WebSocket send enters bounded admission until
   `response.created`; HTTP header waits stay unbounded. Discard unknown,
   pre-creation, and mismatched-ID frames. Since 60 minutes cannot bound
-  provider-controlled ID size/rate, retain at most Bun's default 16 MiB inbound
-  frame of ID payload, then retire (never evict) the fence; OpenAI IDs are ~53
-  bytes. After ID-less admission, skip retained IDs until a new ID. Fenced
-  watchdog failures abort without replaying tools. Other interruptions/provider
-  errors retry before persistence; replays reset partial UI; exhausted sockets
-  use HTTP. Permanent errors/aborts do not retry; terminal failures persist.
+  provider-controlled ID size/rate, retain at most an explicit 16 MiB
+  application memory budget of ID payload, then retire (never evict) the fence;
+  OpenAI IDs are observed at ~53 bytes. Bun documents 16 MiB as the default
+  `Bun.serve` WebSocket `maxPayloadLength`, not as a client limit; this
+  explicitly borrows that documented transport-scale value as the client fence's
+  memory budget. After ID-less admission, skip retained IDs until a new ID.
+  Fenced watchdog failures abort without replaying tools. Other
+  interruptions/provider errors retry before persistence; replays reset partial
+  UI; exhausted sockets use HTTP. Permanent errors/aborts do not retry; terminal
+  failures persist.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

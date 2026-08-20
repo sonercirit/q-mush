@@ -218,8 +218,15 @@ test("retires rather than evicts a socket whose response-ID fence exceeds one fr
   const second = complete(model);
   const replacement = requireProviderSocket(request.sockets, 1);
   replacement.open();
-  acknowledgeProviderSocket(replacement, "replacement");
-  completeResponse(replacement, "replacement");
+  socket.receive(responseEvent("response.created", oversizedId));
+  socket.receive({
+    delta: "Late stale output",
+    response_id: oversizedId,
+    type: "response.output_text.delta",
+  });
+  await expectRequestPending(second);
+  acknowledgeProviderSocket(replacement, oversizedId);
+  completeResponse(replacement, oversizedId);
   expectDoneStep(await second);
   replacement.close();
 });
