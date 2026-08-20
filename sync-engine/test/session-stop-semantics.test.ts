@@ -145,7 +145,7 @@ describe("agent session stop semantics", () => {
     setup.database.$client.close();
   });
 
-  test("rejects malformed stop semantics", async () => {
+  test("rejects malformed HTTP stop semantics", async () => {
     const setup = connectedSessionSetup(new BlockingModel());
     await setup.sessions.collection(createSessionRequest());
 

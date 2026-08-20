@@ -7,20 +7,22 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 - Call capabilities impossible only with excluding evidence; otherwise record an
   open question. Research provider docs via Brave, probe APIs; for tunables
   probe omission, prefer defaults, then metadata/docs.
-- Preserve patterns. TDD: fail, implement, refactor green. Keep one
-  authoritative path; avoid premature abstraction.
-- Fix defects on sight; if harmful, codify why in a test. Integrate every
-  session capability with each protocol's native control, recording gaps.
+- Preserve patterns; improve touched code. TDD: fail, implement, refactor green.
+  Keep one authoritative path; avoid premature abstraction.
+- Fix defects on sight, even pre-existing/out-of-scope ones; if harmful, codify
+  why in a test. Integrate every session capability with each protocol's native
+  control, recording gaps.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
   decisions/lessons here; repeated guidance means a missing rule. If evidence
-  overturns a finding, fix code and stale records. Never commit secrets,
-  artifacts, or env files.
+  overturns a finding, fix code and stale records; act, don't ask. Never commit
+  secrets, artifacts, or env files.
+- Keep workflows local-first: narrow checks, then broad, then failures.
 
 ## Setup, Commands
 
-- Install/run: `bun install`; `bun run sync-engine/index.ts`. Develop:
-  `bun run dev` (`dev:restart`, `dev:watch`); build: `bun run build`;
-  migrations: `db:generate` / `db:migrate`.
+- Install/run: `bun install`; `bun run sync-engine/index.ts`. Dev: `bun run dev`
+  (`dev:restart`, `dev:watch`); build: `bun run build`; migrations:
+  `db:generate` / `db:migrate`.
 - Tests: `bun run test`; `test:watch` omits browsers; `test:browser` uses bare
   `scripts/test-browser.ts` (Bun no-orphans rejects `./`/absolute paths), pins
   headless, clears `PWDEBUG`.
@@ -29,44 +31,40 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 
 ## Architecture
 
-- Four workspaces: `solid` owns browser UI, `sync-engine` the Bun
-  server/integrations, `runner` the runner, `shared` shared code. They import
-  only themselves/`shared`; `shared` imports none; only `scripts` may import
-  `scripts`.
+- Four workspaces: `solid` browser UI, `sync-engine` Bun server/integrations,
+  `runner`, `shared`. They import only themselves/`shared`; `shared` imports
+  none; only `scripts` may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser/runner
-  state; no polling/SSE. `dev:watch` watches source and `.env`, coalescing
-  bursts into the ignored restart trigger; `dev:restart` writes it, plain `dev`
-  restarts only from it. `runner-executable.ts` fingerprints/builds/caches
-  runner source, serving `/runner/executable`. Restarts drain active steps,
-  queue new work, so sessions may request their own restart. Text handlers
-  precompress, negotiating zstd/Brotli/gzip/deflate; `/favicon.svg` revalidates
-  by ETag.
-- `solid/pages.tsx` SSR-renders both page shells; `sync-engine/pages.ts` loads
-  it with Vite's SSR runner. The app mounts from `solid/client.tsx`; routes live
-  in `shared/routes.ts`. Browser tests use real Chromium/Tailwind and production
-  mutations, not synthetic layout/CSS assertions; CI rejects `.only` and zero
-  tests.
+  state; no polling/SSE. `dev:watch` coalesces source/`.env` bursts into the
+  ignored restart trigger; `dev:restart` writes it, plain `dev` only reacts to
+  it. `runner-executable.ts` caches fingerprinted runner source at
+  `/runner/executable`. Restarts drain active steps and queue new work, so
+  sessions may request restart. Text handlers precompress, negotiating
+  zstd/Brotli/gzip/deflate; favicon revalidates by ETag.
+- `solid/pages.tsx` SSR-renders both shells; `sync-engine/pages.ts` loads it
+  with Vite SSR. App mounts from `solid/client.tsx`; routes are in
+  `shared/routes.ts`. Browser tests use real Chromium/Tailwind and production
+  mutations, not synthetic layout/CSS assertions; CI rejects `.only`/zero tests.
 - `sync-engine/auth.ts` implements Google OIDC (code + PKCE) with HttpOnly
   state/verifier cookies, fetching the profile and discarding provider tokens.
   `auth-store.ts` uses Drizzle/Bun SQLite, upserting users and persisting 7-day
-  sessions. Keys are UUIDv7; Google subjects/session tokens are separate unique
-  fields; tables have created/updated timestamps, actor IDs, `isDeleted`.
-  `shared/database.ts` applies committed `drizzle/` migrations on open;
-  `sync-engine/index.ts` injects the connection; the auth factory falls back on
-  SQLite. Shared PKCE, provider parsing, redirects live in `oauth.ts`; cookie
-  helpers in `http.ts`. `solid/client.tsx` reads `/api/auth/session`, gates the
-  app, posts logout.
+  sessions. Keys are UUIDv7; Google subjects/session tokens are distinct unique
+  fields; tables have timestamps, actor IDs, `isDeleted`. `shared/database.ts`
+  applies committed migrations on open; `sync-engine/index.ts` injects it; auth
+  falls back on in-memory SQLite. Shared PKCE/provider parsing/redirects live in
+  `oauth.ts`; cookie helpers in `http.ts`. Client reads `/api/auth/session`,
+  gates app, logs out.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
   `runners.ts` issues hashed opaque setup tokens, owns management and
   token-authenticated callbacks, deriving installers from the origin.
-  `runner-installer.ts` emits the installer: it picks an x64/ARM64 glibc/musl
-  target and starts a executable under `~/.q-mush/runner`; Bun not needed.
-  Runners report metadata and 15-second heartbeats over WebSockets, check
-  updates at startup/5-minute intervals, recheck via handshake version after
-  restarts, replacing an older socket on reconnect. Updates use source/compiler
-  ETags and SHA-256, replace/restart it; dev restarts drain sessions first.
+  `runner-installer.ts` emits the macOS/Linux one-liner: it picks an x64/ARM64
+  glibc/musl target and starts an executable under `~/.q-mush/runner`; Bun isn't
+  needed. Runners report metadata and 15-second heartbeats over WebSockets,
+  check updates at startup/5-minute intervals, recheck via handshake version
+  after restarts, replacing an older socket on reconnect. Updates use ETags and
+  SHA-256, atomically replace and restart it; dev restarts drain sessions first.
   Reinstalling for the same user and machine rotates the registration to its new
   token instead of adding a runner; others stay protected; tokens never list.
 - Browser messages sort by time then ID; live output anchors at its initiator,
