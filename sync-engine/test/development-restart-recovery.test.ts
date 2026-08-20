@@ -29,9 +29,14 @@ function integrationResources(
   rejectDrain: () => Promise<void>,
 ): SessionIntegrationApiResources {
   const resources = new Proxy<SessionIntegrationApiResources>(
-    // The proxy supplies every property before its target is observed.
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-argument
-    Object.create(null),
+    new Proxy(
+      {},
+      {
+        get: () => {
+          throw new Error("The resource proxy target must not be read");
+        },
+      },
+    ),
     {
       get: (_target, property) => {
         if (property === "shutdownInterrupted") return shutdownInterrupted;
