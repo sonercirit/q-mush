@@ -7,8 +7,11 @@ import {
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
 import { createProviderStreamAccumulator } from "./provider-stream.ts";
 
-function uncorrelatedError(message: string): ProviderWebSocketError {
-  return new ProviderWebSocketError(message, false, {
+function uncorrelatedError(
+  message: string,
+  started: boolean,
+): ProviderWebSocketError {
+  return new ProviderWebSocketError(message, started, {
     reconnectImmediately: true,
   });
 }
@@ -98,7 +101,6 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
-  readonly #maxRetainedResponseIdBytes: number;
   // A provider controls response-ID length and request completion rate, so the
   // documented 60-minute socket lifetime cannot by itself bound this fence.
   // Retain at most the explicit memory budget above, then retire rather than
@@ -108,11 +110,6 @@ export class ProviderWebSocketSession {
   #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;
-
-  // Injectable only so tests can exercise retirement without a 16 MiB ID.
-  constructor(maxRetainedResponseIdBytes = MAX_RETAINED_RESPONSE_ID_BYTES) {
-    this.#maxRetainedResponseIdBytes = maxRetainedResponseIdBytes;
-  }
 
   close(): void {
     const socket = this.#socket;
@@ -192,7 +189,7 @@ export class ProviderWebSocketSession {
             }
             if (
               currentResponseId !== undefined &&
-              retainedBytes <= this.#maxRetainedResponseIdBytes
+              retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES
             ) {
               this.#priorResponseIds = priorResponseIds;
               this.#priorResponseIdBytes = retainedBytes;
@@ -274,6 +271,13 @@ export class ProviderWebSocketSession {
           const eventResponseId = providerResponseId(value);
           if (!requestActive) {
             if (value["type"] === "error") {
+              if (
+                reusedSocket !== undefined &&
+                eventResponseId !== undefined &&
+                priorResponseIds.has(eventResponseId)
+              ) {
+                return;
+              }
               if (reusedSocket !== undefined) {
                 const providerError = readProviderStreamError(value);
                 if (!providerError.transient) {
@@ -286,6 +290,7 @@ export class ProviderWebSocketSession {
                 fail(
                   uncorrelatedError(
                     "The reused provider WebSocket returned an uncorrelated error",
+                    false,
                   ),
                 );
                 socket.close(1011, "Uncorrelated provider error");
@@ -318,6 +323,7 @@ export class ProviderWebSocketSession {
             requestActive = true;
             options.onRequestState?.("active");
           } else if (
+            reusedSocket !== undefined &&
             value["type"] === "error" &&
             currentResponseId !== undefined &&
             eventResponseId === undefined &&
@@ -326,6 +332,7 @@ export class ProviderWebSocketSession {
             fail(
               uncorrelatedError(
                 "The provider WebSocket returned an uncorrelated error",
+                receivedEvent,
               ),
             );
             socket.close(1011, "Uncorrelated provider error");

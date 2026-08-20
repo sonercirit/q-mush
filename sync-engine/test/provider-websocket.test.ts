@@ -225,7 +225,7 @@ test.each([
 
 test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
   const sockets = new FakeProviderSockets();
-  const session = new ProviderWebSocketSession(2);
+  const session = new ProviderWebSocketSession();
   const completeSession = () =>
     session.complete({
       body: {},
@@ -236,8 +236,9 @@ test("retires rather than evicts a socket whose response-ID fence exceeds one fr
   const first = completeSession();
   const socket = requireProviderSocket(sockets, 0);
   socket.open();
-  acknowledgeProviderSocket(socket, "big");
-  completeResponse(socket, "big");
+  const oversizedId = "x".repeat(16 * 1024 * 1024 + 1);
+  acknowledgeProviderSocket(socket, oversizedId);
+  completeResponse(socket, oversizedId);
   expectDoneStep(await first);
   expect(socket.readyState).toBe(WebSocket.CLOSED);
   expect(socket.closeReason).toBe("Response ID retention limit reached");
