@@ -253,6 +253,9 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
+  if (restartSignal.aborted) {
+    return responseToolOutput(serverRestartingResponse());
+  }
   if (pool !== undefined && balanced) {
     let credentials: readonly ProviderCredentialAccess[];
     try {

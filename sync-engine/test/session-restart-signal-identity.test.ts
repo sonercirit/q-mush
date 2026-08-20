@@ -100,6 +100,8 @@ test("recovery replacement cannot create a child", async () => {
   const restart = new SessionRestartAbort();
   const credential = createTestProviderCredential("spawn-restart-credential");
   const launchSession = vi.fn(() => true);
+  // The pool uses its own database so its credential rows remain representative
+  // while the spawned-session setup independently owns the session store.
   const poolSetup = agentActionsSetup("none", false, {
     launchSession,
     restartSignal: () => restart.signal,
@@ -138,6 +140,27 @@ test("recovery replacement cannot create a child", async () => {
   expect(launchSession).not.toHaveBeenCalled();
   poolSetup.database.$client.close();
   setup.database.$client.close();
+});
+
+test("already-aborted restart returns structured spawn error", async () => {
+  const restart = new SessionRestartAbort();
+  restart.abort(new DOMException("restart", "AbortError"));
+  const setup = agentActionsSetup("none", false, {
+    restartSignal: () => restart.signal,
+  });
+  const input = spawnInput(setup, "already restarting");
+  input.credentialId = balancedCredentialId(setup.parent.provider);
+  const result = await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    input,
+    new AbortController().signal,
+  );
+  const parsed: unknown = parseToolOutput(result);
+  expect(parsed).toEqual({ error: "server_restarting" });
+  expect(setup.store.list(TEST_USER_ID).at(1)).toBeUndefined();
+  const closed = setup.database.$client.close();
+  expect(closed).toBeUndefined();
 });
 
 test("restart-aborted credential candidates return server restarting", async () => {
