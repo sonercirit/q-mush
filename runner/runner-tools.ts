@@ -1,5 +1,5 @@
-import { mkdir, readFile, realpath, stat, writeFile } from "node:fs/promises";
-import { basename, dirname, relative, resolve, sep } from "node:path";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { basename, dirname, relative, sep } from "node:path";
 import {
   agentAttachmentMediaTypeFromName,
   MAXIMUM_AGENT_ATTACHMENT_BYTES,
@@ -17,11 +17,12 @@ import {
   executeParallelResultCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "../shared/runner-command-broker.ts";
-import { MAXIMUM_TOOL_OUTPUT_LINES } from "../shared/tool-output-limits.ts";
+import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../shared/tool-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import {
   createPageFetchRunnerTool,
   PAGE_FETCH_TOOL_NAME,
@@ -29,15 +30,18 @@ import {
 } from "./page-fetch.ts";
 import { attachmentPathFromReference } from "./runner-attachments.ts";
 import {
-  readContinuation,
-  type RunnerOutputSpills,
-} from "./runner-output-spills.ts";
-import {
   formatRunnerProcessResult,
   runnerCommandResultFromOutput,
   runRunnerProcess,
   throwIfRunnerCommandStopped,
 } from "./runner-process.ts";
+import { readContinuation } from "./runner-read-continuation.ts";
+import {
+  optionalInteger,
+  requiredInteger,
+  requiredString,
+  type ToolArguments,
+} from "./runner-tool-arguments.ts";
 import {
   containedRunnerPath,
   openSecureRunnerPath,
@@ -46,10 +50,7 @@ import {
 } from "./runner-workspace.ts";
 
 const MAX_FILE_BYTES = 1024 * 1024;
-const DEFAULT_READ_LINES = MAXIMUM_TOOL_OUTPUT_LINES;
 const MAXIMUM_EDITS = 100;
-
-type ToolArguments = Readonly<Record<string, unknown>>;
 
 type RunnerToolStream = (
   delta: Omit<RunnerCommandOutputDelta, "sequence">,
@@ -64,80 +65,14 @@ type RunnerShellExecutor = (
 ) => Promise<RunnerCommandResult | string>;
 
 export interface RunnerToolExecutionOptions {
+  readonly executionLimitSeconds?: number;
   /** Container sessions confine host-side file tools to the workspace. */
   readonly containPaths?: boolean;
   readonly mapAbsolutePath?: (path: string) => string;
-  readonly outputSpills?: RunnerOutputSpills;
+  readonly outputLimitCharacters?: number;
   readonly pageFetch?: PageFetchRunnerTool;
   readonly shell?: RunnerShellExecutor;
   readonly stream?: RunnerToolStream;
-}
-
-function requiredString(
-  arguments_: ToolArguments,
-  name: string,
-  maximumLength: number,
-  allowEmpty = false,
-): string {
-  const value = arguments_[name];
-
-  if (
-    typeof value !== "string" ||
-    (!allowEmpty && value.length === 0) ||
-    value.length > maximumLength
-  ) {
-    throw new Error(`Tool argument ${name} must be a valid string`);
-  }
-
-  return value;
-}
-
-function readOptionalInteger(
-  arguments_: ToolArguments,
-  name: string,
-  minimum: number,
-  maximum = Number.MAX_SAFE_INTEGER,
-): number | undefined {
-  const value = arguments_[name];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < minimum ||
-    value > maximum
-  ) {
-    throw new Error(`Tool argument ${name} must be an integer`);
-  }
-
-  return value;
-}
-
-function optionalInteger(
-  arguments_: ToolArguments,
-  name: string,
-  fallback: number,
-  minimum: number,
-  maximum: number,
-): number {
-  return readOptionalInteger(arguments_, name, minimum, maximum) ?? fallback;
-}
-
-function requiredInteger(
-  arguments_: ToolArguments,
-  name: string,
-  minimum: number,
-): number {
-  const value = readOptionalInteger(arguments_, name, minimum);
-
-  if (value === undefined) {
-    throw new Error(`Tool argument ${name} must be an integer`);
-  }
-
-  return value;
 }
 
 function pathResolutionOptions(
@@ -152,7 +87,6 @@ function pathResolutionOptions(
 }
 
 interface PathArgumentOptions {
-  readonly allowedExternalPath?: (path: string) => boolean;
   readonly containPaths?: boolean;
   readonly mapAbsolutePath?: (path: string) => string;
   readonly mayNotExist?: boolean;
@@ -171,13 +105,6 @@ async function pathArgument(
   }
   if (options.containPaths !== true) {
     return resolveRunnerPath(root, mapped, options.mayNotExist);
-  }
-  if (options.allowedExternalPath?.(resolve(root, mapped)) === true) {
-    const canonical = await realpath(mapped);
-    // Re-check after canonicalization so a symlink swap cannot widen access.
-    if (options.allowedExternalPath(canonical)) {
-      return canonical;
-    }
   }
   return containedRunnerPath(root, mapped, options.mayNotExist);
 }
@@ -218,13 +145,14 @@ interface RunnerFileToolArguments {
   readonly arguments_: ToolArguments;
   readonly options: RunnerToolExecutionOptions | undefined;
   readonly root: string;
+  readonly signal: AbortSignal | undefined;
 }
 
 function runnerFileToolArguments(
   parameters: Parameters<RunnerFileTool>,
 ): RunnerFileToolArguments {
-  const [root, arguments_, , options] = parameters;
-  return { arguments_, options, root };
+  const [root, arguments_, signal, options] = parameters;
+  return { arguments_, options, root, signal };
 }
 
 function resolvedFileToolArguments(
@@ -241,25 +169,26 @@ function resolvedFileToolArguments(
 async function readTool(
   ...[root, arguments_, , options]: Parameters<RunnerFileTool>
 ): Promise<string> {
-  const ownedSpillPath = (candidate: string): boolean =>
-    options?.outputSpills?.ownsPath(candidate) === true;
-  const path = await pathArgument(root, arguments_, {
-    allowedExternalPath: ownedSpillPath,
-    ...pathResolutionOptions(options),
-  });
-  const content = await readTextFile(
-    path,
-    ownedSpillPath(path) ? undefined : MAX_FILE_BYTES,
+  const path = await pathArgument(
+    root,
+    arguments_,
+    pathResolutionOptions(options),
   );
-  const offset = optionalInteger(arguments_, "offset", 1, 1, 1_000_000_000);
+  const content = await readTextFile(path, MAX_FILE_BYTES);
+  const lineBounds = { maximum: 1_000_000_000, minimum: 1 };
+  const offset = optionalInteger(arguments_, "offset", 1, lineBounds);
   const limit = optionalInteger(
     arguments_,
     "limit",
-    DEFAULT_READ_LINES,
-    1,
-    1_000_000_000,
+    Number.MAX_SAFE_INTEGER,
+    lineBounds,
   );
-  return readContinuation(content, offset, limit);
+  return readContinuation(
+    content,
+    offset,
+    limit,
+    options?.outputLimitCharacters,
+  );
 }
 
 async function explainFileTool(
@@ -326,9 +255,15 @@ async function writeTool(
     context.arguments_,
     "content",
     MAX_FILE_BYTES,
-    true,
+    { allowEmpty: true },
   );
+  // Cancellation may fire while path resolution is in flight; do not begin
+  // any filesystem mutation after the caller has already stopped waiting.
+  throwIfRunnerCommandStopped(context.signal);
   await mkdir(dirname(context.path), { recursive: true });
+  // Directory creation can outlive the caller's deadline; fence the content
+  // write independently so no new file mutation starts after cancellation.
+  throwIfRunnerCommandStopped(context.signal);
   await writeFile(context.path, content, "utf8");
   return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(context.root, context.path)}.`;
 }
@@ -362,7 +297,9 @@ function editReplacements(
     }
 
     return {
-      newText: requiredString(replacement, "newText", MAX_FILE_BYTES, true),
+      newText: requiredString(replacement, "newText", MAX_FILE_BYTES, {
+        allowEmpty: true,
+      }),
       oldText: requiredString(replacement, "oldText", MAX_FILE_BYTES),
     };
   });
@@ -415,6 +352,9 @@ async function editTool(
   const context = await resolvedFileToolArguments(editParameters, false);
   const replacements = editReplacements(context.arguments_);
   const content = await readTextFile(context.path, MAX_FILE_BYTES);
+  // Cancellation may fire while the reads above are in flight; fence before
+  // mutating the file.
+  throwIfRunnerCommandStopped(context.signal);
   const edits = locateEdits(content, replacements);
   let updated = content;
 
@@ -422,6 +362,8 @@ async function editTool(
     updated = `${updated.slice(0, edit.start)}${edit.newText}${updated.slice(edit.end)}`;
   }
 
+  // Replacement construction may be substantial; fence the actual write too.
+  throwIfRunnerCommandStopped(context.signal);
   await writeFile(context.path, updated, "utf8");
   return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(context.root, context.path)}.`;
 }
@@ -433,7 +375,12 @@ async function bashTool(
   options?: RunnerToolExecutionOptions,
 ): Promise<string> {
   const command = requiredString(arguments_, "command", 32_768);
-  const timeoutSeconds = requiredInteger(arguments_, "timeout", 1);
+  const timeoutSeconds = requiredInteger(arguments_, "timeout", {
+    maximum:
+      options?.executionLimitSeconds ??
+      toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
+    minimum: 1,
+  });
   if (options?.shell !== undefined) {
     const result = await options.shell(
       root,
@@ -449,6 +396,9 @@ async function bashTool(
     cwd: root,
     executable: "/bin/sh",
     ...(options?.stream === undefined ? {} : { onOutput: options.stream }),
+    ...(options?.outputLimitCharacters === undefined
+      ? {}
+      : { outputLimitCharacters: options.outputLimitCharacters }),
     ...(signal === undefined ? {} : { signal }),
     timeoutSeconds,
   });
@@ -516,12 +466,8 @@ type ParallelToolArguments = readonly [
   options: RunnerToolExecutionOptions | undefined,
 ];
 
-interface ParallelToolContext {
-  readonly arguments_: ToolArguments;
+interface ParallelToolContext extends RunnerFileToolArguments {
   readonly execution: RunnerParallelExecutionOptions | undefined;
-  readonly options: RunnerToolExecutionOptions | undefined;
-  readonly root: string;
-  readonly signal: AbortSignal | undefined;
 }
 
 function parallelToolContext(
@@ -585,17 +531,7 @@ async function parallelToolResult(
       ),
     signal,
   );
-  const aggregate = aggregateParallelToolResults(results);
-  return options?.outputSpills === undefined
-    ? aggregate
-    : {
-        ...aggregate,
-        output: JSON.stringify(
-          results.map(({ canonical }) => canonical),
-          null,
-          2,
-        ),
-      };
+  return aggregateParallelToolResults(results);
 }
 
 interface ResolvedRunnerTool {
@@ -681,6 +617,7 @@ export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
   const resolved = await resolvedRunnerTool(parameters);
+  throwIfRunnerCommandStopped(resolved.signal);
   return executeResolvedRunnerTool(resolved);
 }
 
@@ -688,22 +625,12 @@ export async function executeRunnerToolResult(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<RunnerCommandResult> {
   const resolved = await resolvedRunnerTool(parameters);
-  const spills = resolved.options?.outputSpills;
+  throwIfRunnerCommandStopped(resolved.signal);
   if (resolved.name === "parallel") {
-    const result = await parallelToolResult(...parallelArguments(resolved));
-    if (spills !== undefined) {
-      return { ...result, output: await spills.apply(result.output) };
-    }
-    return result;
+    return parallelToolResult(...parallelArguments(resolved));
   }
   const output = await executeResolvedRunnerTool(resolved);
-  const result =
-    resolved.name === "bash"
-      ? runnerCommandResultFromOutput(output)
-      : { output, state: "completed" as const };
-  return spills !== undefined &&
-    resolved.name !== "read" &&
-    resolved.name !== "explain_file"
-    ? { ...result, output: await spills.apply(result.output) }
-    : result;
+  return resolved.name === "bash"
+    ? runnerCommandResultFromOutput(output)
+    : { output, state: "completed" as const };
 }

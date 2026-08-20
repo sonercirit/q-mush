@@ -77,6 +77,7 @@ import {
   type SessionUserActionDependencies,
 } from "./session-user-actions.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
+import { ToolSettingsStore } from "./tool-settings-store.ts";
 
 export type { SessionIntegration } from "./session-integration.ts";
 
@@ -110,6 +111,7 @@ class DrizzleSessionIntegration
   readonly #removal: RunnerRemovalCoordinator;
   readonly #shutdown: ShutdownInterruptedSessionStore;
   readonly #store: SessionStore;
+  readonly #toolSettings: Pick<ToolSettingsStore, "read">;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
   readonly #fallbacks: ReturnType<typeof createAttachmentFallbackIntegration>;
@@ -149,9 +151,12 @@ class DrizzleSessionIntegration
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
+    this.#toolSettings =
+      dependencies.toolSettings ?? new ToolSettingsStore(database);
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
+      (userId) => this.#toolSettings.read(userId),
       this.#runtimes,
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
@@ -433,6 +438,7 @@ class DrizzleSessionIntegration
         credential,
         userId,
         rejectCredentialErrors,
+        signal,
       ) =>
         discoverSessionAgentMetadata(
           {
@@ -443,6 +449,7 @@ class DrizzleSessionIntegration
           credential,
           userId,
           rejectCredentialErrors,
+          signal,
         ),
       launchSession: (credential, detail, userId, operation) =>
         this.#launch(detail, credential, userId, operation),

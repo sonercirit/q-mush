@@ -47,6 +47,7 @@ import {
 } from "./server.ts";
 import { createSessionsChangedPublisher } from "./session-credential-reassignment-realtime.ts";
 import { createSessionIntegration } from "./sessions.ts";
+import { createToolSettingsIntegration } from "./tool-settings.ts";
 
 const databasePath = readDatabasePath(Bun.env);
 const health = new EngineHealth();
@@ -112,11 +113,21 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
 );
 const runners = createRunnerIntegration(googleAuth, { database });
 const prompts = createPromptIntegration(googleAuth, { database });
+const toolSettings = createToolSettingsIntegration(googleAuth, {
+  database,
+  realtime: realtimeHub,
+});
 const sessions = createSessionIntegration(
   googleAuth,
   runners,
   { generic, openai: openAi, openrouter: openRouter },
-  { braveSearch, database, realtime: realtimeHub, workspaces },
+  {
+    braveSearch,
+    database,
+    realtime: realtimeHub,
+    toolSettings: toolSettings.store,
+    workspaces,
+  },
 );
 const recoveryTimer = startDatabaseRecoveryWatcher(
   database.$client,
@@ -134,20 +145,24 @@ const realtime = createRealtimeIntegration({
   workspaceExists: (userId, workspaceId) =>
     workspaceStore.exists(userId, workspaceId),
 });
+const requestHandlerIntegrations = Object.freeze({
+  googleAuth,
+  braveSearch,
+  generic,
+  prompts,
+  openAi,
+  openRouter,
+  runnerExecutables,
+  runners,
+  sessions,
+  workspaces,
+  toolSettings,
+});
 const handleRequest = createRequestHandler(
   clientJavaScript,
   stylesheet,
   pages,
-  googleAuth,
-  openAi,
-  openRouter,
-  braveSearch,
-  runners,
-  sessions,
-  prompts,
-  workspaces,
-  runnerExecutables,
-  generic,
+  requestHandlerIntegrations,
 );
 let callbackServer: Bun.Server<undefined> | undefined;
 const server = Bun.serve<QmushWebSocketData>({

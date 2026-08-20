@@ -4,6 +4,7 @@ import { CredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
+import { optionalSignal } from "../shared/validation.ts";
 import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
@@ -118,7 +119,7 @@ async function searchResponse(
       accept: "application/json",
       "x-subscription-token": apiKey,
     },
-    ...(signal === undefined ? {} : { signal }),
+    ...optionalSignal(signal),
   });
 }
 

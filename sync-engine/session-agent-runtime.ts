@@ -14,22 +14,22 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import {
   type RunnerCommandBroker,
   type RunnerCommandOutputDelta,
-  type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionUsageUpdate,
   SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
+import {
+  toolExecutionLimitSeconds,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import type { ProviderRequestState } from "./agent-model-options.ts";
-import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
-import {
-  isAskQuestionsPause,
-  isAskQuestionsToolName,
-  pauseForAskQuestions,
-} from "./ask-questions-pause.ts";
+import { createAgentSkills } from "./agent-skills.ts";
+import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
@@ -41,6 +41,10 @@ import {
   type SessionAgentModels,
 } from "./session-agent-models.ts";
 import { currentExecutionTools } from "./session-agent-tool-authority.ts";
+import {
+  executeAuthorizedRuntimeTool,
+  type AgentToolDispatcher,
+} from "./session-agent-tool-execution.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
@@ -54,12 +58,14 @@ import {
   discoverCurrentSessionModel,
   sessionRequestMetadata,
 } from "./session-current-model.ts";
+import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import {
   executeForSession,
   isRestartHandoffError,
 } from "./session-runner-execution.ts";
+import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
 import { sessionPendingComponentFromProviderState } from "./session-runtime.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
@@ -88,6 +94,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
   readonly store: SessionStore;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }
 
@@ -113,7 +120,7 @@ function markRuntimeStepStart(runtime: SessionAgentRuntimeDependencies): void {
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
 
-function recordRuntimeUsage(
+function recordUsage(
   runtime: SessionAgentRuntimeDependencies,
   usage: AgentSessionUsageUpdate,
 ): void {
@@ -122,12 +129,12 @@ function recordRuntimeUsage(
   });
 }
 
-function recordCompactionContext(
+function recordContext(
   runtime: SessionAgentRuntimeDependencies,
   contextTokens: number | null,
 ): void {
   if (contextTokens !== null) {
-    recordRuntimeUsage(runtime, {
+    recordUsage(runtime, {
       contextTokens,
       costBasis: null,
       costUsd: null,
@@ -142,7 +149,7 @@ function recordCompaction(
   startedAt: number,
   terminal = false,
 ): void {
-  recordCompactionContext(runtime, usage.contextTokens);
+  recordContext(runtime, usage.contextTokens);
   writeRuntime(runtime, (sessionId, now, generation) => {
     if (terminal) {
       runtime.store.compactRuntimeTerminal(
@@ -167,15 +174,6 @@ function recordCompaction(
   });
 }
 
-function sessionConversation(
-  runtime: SessionAgentRuntimeDependencies,
-): ReturnType<SessionStore["conversation"]> {
-  return runtime.store.conversation(
-    runtime.detail.id,
-    runtime.detail.restartHandoff === null,
-  );
-}
-
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -183,42 +181,57 @@ async function loadModels(
     readonly toolStream?: ToolStreamPublisher;
   } = {},
 ): Promise<SessionAgentModels> {
-  const agentFile = await executeForSession(runtime, () => {
-    runtime.pendingComponent?.("runner_command");
-    return loadSessionAgentFile(
-      runtime.broker,
-      runtime.detail,
-      runtime.signal,
-      runtime.isCurrent,
-    );
-  });
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
-  });
-  runtime.pendingComponent?.("provider_request");
-  const metadata = await sessionRequestMetadata(
-    runtime,
-    (apply) => {
-      writeRuntime(runtime, apply);
-    },
+  const settings = runtime.toolSettings;
+  return withLoadingDeadline(
     runtime.signal,
+    settings,
+    async (signal) => {
+      const agentFile = await executeForSession(runtime, () => {
+        runtime.pendingComponent?.("runner_command");
+        return loadSessionAgentFile(
+          runtime.broker,
+          runtime.detail,
+          signal,
+          runtime.isCurrent,
+        );
+      });
+      writeRuntime(runtime, (sessionId, now, generation) => {
+        runtime.store.setRuntimeAgentFile(
+          sessionId,
+          agentFile,
+          now,
+          generation,
+        );
+      });
+      runtime.pendingComponent?.("provider_request");
+      const metadata = await sessionRequestMetadata(
+        runtime,
+        (apply) => {
+          writeRuntime(runtime, apply);
+        },
+        signal,
+      );
+      return createSessionAgentModels({
+        agentFile,
+        credential: runtime.credential,
+        detail: { ...runtime.detail, ...metadata },
+        factory: runtime.modelFactory,
+        isCurrent: runtime.isCurrent,
+        onRequestState: markProviderPending.bind(undefined, runtime),
+        onStepStart: markRuntimeStepStart.bind(undefined, runtime),
+        realtime: runtime.realtime,
+        ...(options.streamId === undefined
+          ? {}
+          : { streamId: options.streamId }),
+        ...(options.toolStream === undefined
+          ? {}
+          : { toolStream: options.toolStream }),
+        toolSettings: settings,
+        userId: runtime.userId,
+      });
+    },
+    isRestartHandoffError,
   );
-  const models = createSessionAgentModels({
-    agentFile,
-    credential: runtime.credential,
-    detail: { ...runtime.detail, ...metadata },
-    factory: runtime.modelFactory,
-    isCurrent: runtime.isCurrent,
-    onRequestState: markProviderPending.bind(undefined, runtime),
-    onStepStart: markRuntimeStepStart.bind(undefined, runtime),
-    realtime: runtime.realtime,
-    ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
-    ...(options.toolStream === undefined
-      ? {}
-      : { toolStream: options.toolStream }),
-    userId: runtime.userId,
-  });
-  return models;
 }
 
 export async function compactSessionConversation(
@@ -233,7 +246,7 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = sessionConversation(runtime);
+  const conversation = sessionRuntimeConversation(runtime);
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -267,28 +280,16 @@ export async function compactSessionConversation(
 const RESTART_INTERRUPTED_TOOL_OUTPUT =
   "Error: the runner disconnected before this tool call returned; retry it after restart.";
 
-type AgentToolDispatcher = (
-  ...parameters: Parameters<AgentSkillExecutor>
-) => Promise<RunnerCommandResult>;
-
 function restartInterruptedToolResult(): RunnerCommandResult {
   return { output: RESTART_INTERRUPTED_TOOL_OUTPUT, state: "canceled" };
 }
 
 function boundRuntimeToolOutput(
   runtime: SessionAgentRuntimeDependencies,
-  signal: AbortSignal,
   result: RunnerCommandResult,
-): Promise<RunnerCommandResult> {
-  return boundSessionToolOutput(
-    {
-      broker: runtime.broker,
-      detail: runtime.detail,
-      isCurrent: runtime.isCurrent,
-      signal,
-    },
-    result,
-  );
+  toolName?: string,
+): RunnerCommandResult {
+  return boundSessionToolOutput(result, runtime.toolSettings, toolName);
 }
 
 async function executeAgentTool(
@@ -319,45 +320,15 @@ async function executeAgentTool(
         state: "failed",
       };
     }
-    if (isAskQuestionsToolName(call.name)) {
-      return {
-        output: pauseForAskQuestions(
-          {
-            notify: (userId, sessionId) => {
-              if (
-                userId === runtime.userId &&
-                sessionId === runtime.detail.id
-              ) {
-                runtime.notify();
-              }
-            },
-            now: runtime.now,
-            questions: runtime.store.questions(),
-          },
-          {
-            arguments: call.arguments,
-            executionGeneration: runtime.detail.generation,
-            selected: stepTools.has("ask_questions"),
-            sessionId: runtime.detail.id,
-            source: "direct",
-            toolCallId: call.id,
-            userId: runtime.userId,
-          },
-        ),
-        state: "completed",
-      };
-    }
-    const skillOutput = skills.executeResult(
-      call.name,
-      call.arguments,
-      toolSignal,
-      call.id,
-    );
-    const result = await (skillOutput ??
-      dispatchTool(call.name, call.arguments, toolSignal, call.id));
-    return skillOutput === undefined
-      ? result
-      : await boundRuntimeToolOutput(runtime, toolSignal, result);
+    return await executeAuthorizedRuntimeTool({
+      call,
+      dispatch: dispatchTool,
+      executeSkill: skills.executeResult,
+      outerSignal: toolSignal,
+      settings: runtime.toolSettings,
+      runtime,
+      stepTools,
+    });
   } catch (error) {
     if (isAskQuestionsPause(error)) {
       throw error;
@@ -375,8 +346,9 @@ async function executeAgentTool(
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
+  const settings = runtime.toolSettings;
   const streamId = createUuidV7();
-  const initialMessages = sessionConversation(runtime);
+  const initialMessages = sessionRuntimeConversation(runtime);
   const messages =
     runtime.continuous && initialMessages.at(-1)?.role === "assistant"
       ? [...initialMessages, { content: "Continue.", role: "user" as const }]
@@ -424,7 +396,9 @@ export async function runSessionAgent(
               currentToolNames()?.some((candidate) => candidate === name) ===
               true,
             executionEnvironment: runtime.detail.executionEnvironment,
+            executionLimitSeconds: toolExecutionLimitSeconds(settings),
             generation: runtime.detail.generation,
+            outputLimitCharacters: settings.outputLimitCharacters,
             runnerId: runtime.detail.runnerId,
             sessionId: runtime.detail.id,
             tool: name,
@@ -464,6 +438,9 @@ export async function runSessionAgent(
     }
     runtime.pendingComponent?.("provider_request");
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
+    // Discovery may ignore cancellation and settle after the wrapper already
+    // reported timed-out; never start explanation model work afterward.
+    throwIfAgentAborted(signal);
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
@@ -481,6 +458,7 @@ export async function runSessionAgent(
         onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
+        toolSettings: runtime.toolSettings,
         userId: runtime.userId,
         workspaceId: runtime.detail.workspaceId,
       },
@@ -495,9 +473,12 @@ export async function runSessionAgent(
         ),
     );
     if (usage !== undefined) {
-      recordRuntimeUsage(runtime, usage);
+      recordUsage(runtime, usage);
     }
-    return { output: explanation.content, state: "completed" };
+    return {
+      output: explanation.content,
+      state: "completed",
+    };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -517,13 +498,15 @@ export async function runSessionAgent(
           (sleepSignal) =>
             waitForSessionSteeringInput(runtime.detail.id, sleepSignal),
           runtime.now,
+          settings,
         ).then((output) => ({ output, state: "completed" }));
       }
       return executeSessionAgentTool(
         runtime.sessionTools,
         name,
         toolArguments,
-      ).then((result) => boundRuntimeToolOutput(runtime, signal, result));
+        signal,
+      );
     }
     return dispatchRunnerTool(name, toolArguments, signal, callId);
   };
@@ -554,6 +537,8 @@ export async function runSessionAgent(
     }
     return messages;
   };
+  const finalizeToolResult = (result: RunnerCommandResult, toolName: string) =>
+    boundRuntimeToolOutput(runtime, result, toolName);
   try {
     return await runCompactingAgentLoop({
       agentCost: (step) =>
@@ -571,6 +556,7 @@ export async function runSessionAgent(
           toolSignal,
           call,
         ),
+      finalizeToolResult,
       ...(runtime.detail.restartHandoff?.operation === "agent"
         ? { initialContextTokens: runtime.detail.currentContextTokens }
         : {}),

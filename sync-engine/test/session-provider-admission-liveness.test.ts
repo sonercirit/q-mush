@@ -11,6 +11,7 @@ import {
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { AgentModelRequestOptions } from "../../sync-engine/agent-model-options.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
@@ -79,6 +80,7 @@ class StalledReusedSocketModel implements AgentModel {
       ...(onDelta === undefined ? {} : { onDelta }),
       ...(onRequestState === undefined ? {} : { onRequestState }),
       provider: "openai",
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       webSocket: this.sockets.create,
     });
   }

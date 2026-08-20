@@ -307,6 +307,9 @@ export function SessionDetailBody(props: {
             onApply={(tools, confirmedCacheDrop) =>
               view().controller.updateTools(tools, confirmedCacheDrop)
             }
+            {...(view().toolSettings === undefined
+              ? {}
+              : { settings: view().toolSettings })}
           />
         }
       />

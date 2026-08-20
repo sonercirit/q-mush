@@ -30,7 +30,9 @@ export function readSessionProviderUpdateInput(
     return undefined;
   }
   const confirmedCacheDrop = value["confirmedCacheDrop"];
-  const credentialId = readBoundedString(value["credentialId"], 200);
+  const credentialId = readBoundedString(value["credentialId"], {
+    maximumLength: 200,
+  });
   const expectedGeneration = readNonNegativeSafeInteger(
     value["expectedGeneration"],
   );
@@ -39,8 +41,12 @@ export function readSessionProviderUpdateInput(
     value["openRouterProviderTag"],
   );
   const provider = value["provider"];
-  const sessionId = readBoundedString(value["sessionId"], 200);
-  const workspaceId = readBoundedString(value["workspaceId"], 200);
+  const sessionId = readBoundedString(value["sessionId"], {
+    maximumLength: 200,
+  });
+  const workspaceId = readBoundedString(value["workspaceId"], {
+    maximumLength: 200,
+  });
   if (
     typeof confirmedCacheDrop !== "boolean" ||
     credentialId === undefined ||

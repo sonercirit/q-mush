@@ -1,11 +1,20 @@
 import { expect, test } from "vitest";
 import type { PendingAskQuestions } from "../../shared/ask-questions.ts";
+import { CONFIGURED_TOOL_SETTINGS } from "../../shared/test/tool-settings-fixtures.ts";
 import { readRealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
 import { runnerSummary } from "./runner-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 function roundTrip(payload: Readonly<Record<string, unknown>>): unknown {
   return readRealtimeServerEvent(JSON.stringify(payload));
+}
+
+function expectRoundTrip(payload: Readonly<Record<string, unknown>>): void {
+  expect(roundTrip(payload)).toEqual(payload);
+}
+
+function invalidEvent(payload: Readonly<Record<string, unknown>>): void {
+  expect(() => roundTrip(payload)).toThrow("invalid");
 }
 
 test("reads storage-health warnings", () => {
@@ -16,13 +25,11 @@ test("reads storage-health warnings", () => {
     },
     type: "health",
   } as const;
-  expect(roundTrip(expected)).toEqual(expected);
-  expect(() =>
-    roundTrip({
-      health: { degraded: true, reasons: ["unknown"] },
-      type: "health",
-    }),
-  ).toThrow("invalid");
+  expectRoundTrip(expected);
+  invalidEvent({
+    health: { degraded: true, reasons: ["unknown"] },
+    type: "health",
+  });
 });
 
 test("reads complete session snapshots from realtime messages", () => {
@@ -77,6 +84,18 @@ test("reads runner snapshots from realtime messages", () => {
   expect(roundTrip({ runners: [runnerSummary(1)], type: "runners" })).toEqual({
     runners: [runnerSummary(1)],
     type: "runners",
+  });
+});
+
+test("reads and validates user tool-settings updates", () => {
+  const expected = {
+    settings: CONFIGURED_TOOL_SETTINGS,
+    type: "tool_settings",
+  } as const;
+  expectRoundTrip(expected);
+  invalidEvent({
+    settings: { ...CONFIGURED_TOOL_SETTINGS, executionLimitMinutes: 0 },
+    type: "tool_settings",
   });
 });
 

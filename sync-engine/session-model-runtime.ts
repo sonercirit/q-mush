@@ -4,20 +4,29 @@ import type {
   AgentSessionDetail,
   SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
-import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { hasPendingSteeringInput } from "./session-pending-inputs.ts";
 import type { SessionStore } from "./session-store.ts";
 
+interface SessionAgentActionsLike {
+  actions(
+    parentSessionId: string,
+    userId: string,
+    parentGeneration: number,
+    toolSettings?: ToolSettings,
+  ): SessionAgentRuntimeDependencies["sessionTools"];
+}
+
 export interface SessionModelRuntimeResources extends Omit<
   AttachmentFallbackRuntimeResources,
   "attachmentFallbacks"
 > {
-  readonly actions: SessionAgentActions;
+  readonly actions: SessionAgentActionsLike;
   readonly attachmentFallbacks?: (
     userId: string,
   ) => readonly AttachmentFallbackSelection[];
@@ -40,6 +49,10 @@ export function sessionModelRuntime(
   markPending: (component: SessionRuntimePendingComponent) => void = () =>
     undefined,
 ): SessionAgentRuntimeDependencies {
+  const toolSettings = resources.store.toolSettings(
+    detail.id,
+    detail.generation,
+  );
   return {
     ...(resources.attachmentFallbacks === undefined
       ? {}
@@ -83,10 +96,11 @@ export function sessionModelRuntime(
       detail.id,
       userId,
       detail.generation,
-      controller.signal,
+      toolSettings,
     ),
     signal: controller.signal,
     store: resources.store,
+    toolSettings,
     userId,
   };
 }

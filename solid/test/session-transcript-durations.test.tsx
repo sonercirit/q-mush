@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
+import { testToolStream } from "./session-tool-stream-fixtures.ts";
 import {
   assistantToolCall,
   message,
@@ -111,6 +113,7 @@ test("renders durable settlement time for a terminal step", () => {
         executionGeneration: 1,
         id: durableTurnId,
         startedAt: durableStartedAt,
+        toolSettings: DEFAULT_TOOL_SETTINGS,
       },
     ],
   );
@@ -160,9 +163,16 @@ test("renders sleep calls and results with human-readable durations", () => {
       id: "seconds-over-minute",
     },
     {
+      arguments: '{"durationSeconds":1800}',
+      duration: "30m",
+      id: "seconds-maximum",
+    },
+    {
+      // Transcripts recorded under the historical 3,600s schema keep
+      // their friendly rendering.
       arguments: '{"durationSeconds":3600}',
       duration: "1h",
-      id: "seconds-hour",
+      id: "seconds-historical-hour",
     },
     {
       arguments: '{"durationSeconds":90}',
@@ -236,4 +246,102 @@ test("falls back to raw sleep arguments when the duration is malformed", () => {
       expectedJson,
     );
   }
+});
+
+test("uses each persisted turn's configured sleep limit", () => {
+  const historicalCall = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "historical-configured-sleep",
+      name: "sleep",
+    }),
+    turnId: "historical-turn",
+  };
+  const latestCall = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "latest-configured-sleep",
+      name: "sleep",
+    }),
+    turnId: "latest-turn",
+  };
+  const html = renderMessages(
+    [historicalCall, latestCall],
+    AGENT_SESSION_TOOL_NAMES,
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    undefined,
+    [
+      {
+        boundaryMessageId: historicalCall.id,
+        endedAt: 2,
+        executionGeneration: 1,
+        id: "historical-turn",
+        startedAt: 1,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
+      },
+      {
+        boundaryMessageId: latestCall.id,
+        endedAt: 4,
+        executionGeneration: 2,
+        id: "latest-turn",
+        startedAt: 3,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 30 },
+      },
+    ],
+  );
+
+  expect(renderedElementTexts(html, SLEEP_DURATION_ELEMENT_PATTERN)).toEqual([
+    "Duration: 2h",
+  ]);
+  expect(
+    renderedElementTexts(html, JSON_CODE_ELEMENT_PATTERN).join(" "),
+  ).toContain('"durationSeconds": 7200');
+});
+
+const renderLatestConfiguredSleep = (
+  messageId: string,
+  liveStreams: readonly ReturnType<typeof testToolStream>[],
+): string => {
+  const streamedMessage = {
+    ...assistantToolCall({
+      arguments: '{"durationSeconds":7200}',
+      id: "message-sleep",
+      name: "sleep",
+    }),
+    id: messageId,
+  };
+  return renderMessages(
+    [streamedMessage],
+    AGENT_SESSION_TOOL_NAMES,
+    DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+    null,
+    undefined,
+    [
+      {
+        boundaryMessageId: streamedMessage.id,
+        endedAt: null,
+        executionGeneration: 2,
+        id: "latest-turn",
+        startedAt: 1,
+        toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
+      },
+    ],
+    liveStreams,
+    "running",
+  );
+};
+
+test("uses the latest configured limit for inline streamed messages without a live tool stream", () => {
+  const html = renderLatestConfiguredSleep("stream:assistant", []);
+
+  expect(html).toContain("Duration: 2h");
+});
+
+test("uses the latest configured limit for inline live sleep streams", () => {
+  const html = renderLatestConfiguredSleep("stream:live-assistant", [
+    testToolStream("message-sleep", '{"durationSeconds":7200}', "sleep"),
+  ]);
+
+  expect(html).toContain("Duration: 2h");
 });

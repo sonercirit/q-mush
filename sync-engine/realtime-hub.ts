@@ -89,6 +89,22 @@ export class RealtimeHub {
     return `user:${userId}:${workspaceId ?? "*"}`;
   }
 
+  #parseUserKey(
+    key: string,
+  ): { userId: string; workspaceId: string } | undefined {
+    const match = /^user:([^:]+):(.+)$/u.exec(key);
+    return match === null
+      ? undefined
+      : { userId: match[1] ?? "", workspaceId: match[2] ?? "" };
+  }
+
+  #parsedUserKeys(): readonly { userId: string; workspaceId: string }[] {
+    return [...this.#connections.user.keys()].flatMap((key) => {
+      const parsed = this.#parseUserKey(key);
+      return parsed === undefined ? [] : [parsed];
+    });
+  }
+
   #updateUser(
     userId: string,
     workspaceId: string | undefined,
@@ -143,21 +159,15 @@ export class RealtimeHub {
   }
 
   userWorkspaces(userId: string): readonly string[] {
-    const prefix = `user:${userId}:`;
-    return [...this.#connections.user.keys()]
-      .filter((key) => key.startsWith(prefix))
-      .map((key) => key.slice(prefix.length))
-      .filter((workspaceId) => workspaceId !== "*");
+    return this.#parsedUserKeys().flatMap((parsed) =>
+      parsed.userId === userId && parsed.workspaceId !== "*"
+        ? [parsed.workspaceId]
+        : [],
+    );
   }
 
   userIds(): readonly string[] {
-    return [
-      ...new Set(
-        [...this.#connections.user.keys()]
-          .map((key) => /^user:([^:]+):/u.exec(key)?.[1])
-          .filter((userId) => userId !== undefined),
-      ),
-    ];
+    return [...new Set(this.#parsedUserKeys().map(({ userId }) => userId))];
   }
 
   publishRunnerCancellation(runnerId: string, commandId: string): void {
@@ -205,5 +215,15 @@ export class RealtimeHub {
     workspaceId?: string,
   ): void {
     publish(this.#sockets("user", this.#userKey(userId, workspaceId)), payload);
+  }
+
+  publishUserAllWorkspaces(userId: string, payload: RealtimePayload): void {
+    const sockets = new Set<RealtimeSocket>();
+    for (const [key, connected] of this.#connections.user) {
+      if (this.#parseUserKey(key)?.userId === userId) {
+        for (const socket of connected) sockets.add(socket);
+      }
+    }
+    publish(sockets, payload);
   }
 }

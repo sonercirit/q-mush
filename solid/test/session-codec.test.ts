@@ -61,6 +61,24 @@ test("projects session details to summary-only fields", () => {
   expect(summary.adaptiveThinking).toBe(DETAIL.adaptiveThinking);
 });
 
+test("reads and validates persisted message turn identities", () => {
+  const persisted = {
+    ...testUserImageMessage("message-turn", "Durable output"),
+    images: [],
+    turnId: "turn-120-minutes",
+  };
+
+  expect(
+    readSessionDetail({ ...DETAIL, messages: [persisted] }).messages[0]?.turnId,
+  ).toBe("turn-120-minutes");
+  expect(() =>
+    readSessionDetail({
+      ...DETAIL,
+      messages: [{ ...persisted, turnId: 42 }],
+    }),
+  ).toThrow("invalid session message");
+});
+
 test("reads message image metadata from the server", () => {
   const detail = {
     ...DETAIL,

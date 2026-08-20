@@ -10,6 +10,7 @@ import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 import type { SessionPendingInputContent } from "./session-pending-input.ts";
 import type { SessionRunStepTiming } from "./session-timing.ts";
 import type { AgentTokenUsageSummary } from "./session-token-usage.ts";
+import type { ToolSettings } from "./tool-limits.ts";
 
 export const AGENT_SESSION_STATUSES = [
   "queued",
@@ -144,6 +145,7 @@ export interface AgentSessionTurn {
   readonly executionGeneration: number;
   readonly id: string;
   readonly startedAt: number;
+  readonly toolSettings: ToolSettings;
 }
 
 export interface AgentSessionDetail extends AgentSessionSummary {

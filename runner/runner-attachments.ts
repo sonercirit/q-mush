@@ -4,20 +4,24 @@ import {
   ATTACHMENT_READ_COMMAND,
   ATTACHMENT_WRITE_COMMAND,
 } from "../shared/attachment-reference.ts";
+import { readBoundedString } from "../shared/validation.ts";
 import {
   containedRunnerPath,
   resolveRunnerWorkspace,
 } from "./runner-workspace.ts";
 
 const DIRECTORY = ".q-mush/attachments";
+const MAXIMUM_ATTACHMENT_ARGUMENT_LENGTH = 4_096;
 const MAXIMUM_REFERENCE_LENGTH = 8_192;
 
 function requiredString(
   arguments_: Readonly<Record<string, unknown>>,
   key: string,
 ): string {
-  const value = arguments_[key];
-  if (typeof value !== "string" || value.length === 0) {
+  const value = readBoundedString(arguments_[key], {
+    maximumLength: MAXIMUM_ATTACHMENT_ARGUMENT_LENGTH,
+  });
+  if (value === undefined) {
     throw new Error(`Attachment argument ${key} is invalid`);
   }
   return value;
@@ -70,20 +74,13 @@ export async function executeAttachmentCommand(
   arguments_: Readonly<Record<string, unknown>>,
 ): Promise<string | undefined> {
   if (tool === ATTACHMENT_WRITE_COMMAND) {
-    const { description, id, mediaType, name: suppliedName } = arguments_;
-    if (
-      typeof description !== "string" ||
-      description.length === 0 ||
-      typeof mediaType !== "string" ||
-      mediaType.length === 0 ||
-      typeof suppliedName !== "string" ||
-      suppliedName.length === 0
-    ) {
-      throw new Error("The attachment metadata is invalid");
-    }
+    const description = requiredString(arguments_, "description");
+    const mediaType = requiredString(arguments_, "mediaType");
+    const suppliedName = requiredString(arguments_, "name");
+    const id = requiredString(arguments_, "id");
     const name = displayName(suppliedName);
     const directory = await secureAttachmentDirectory(root, true);
-    const attachmentId = safeIdentifier(requiredString({ id }, "id"));
+    const attachmentId = safeIdentifier(id);
     await mkdir(directory, { recursive: true });
     // Resolve after creation so a later swap of the lexical attachment symlink
     // cannot redirect the write away from this validated canonical directory.

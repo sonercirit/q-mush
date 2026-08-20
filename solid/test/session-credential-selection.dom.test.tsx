@@ -2,6 +2,8 @@ import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
+import { CONFIGURED_TOOL_SETTINGS } from "../../shared/test/tool-settings-fixtures.ts";
+import { formatToolLimitsStatement } from "../../shared/tool-limits.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -13,6 +15,7 @@ import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import {
   chooseTestOption,
+  clickTestButton,
   disposeTestViews,
   mountTestView,
   queryTestElement,
@@ -21,6 +24,8 @@ import {
 import { runnerSummary } from "./runner-fixtures.ts";
 import { sessionClientTestState } from "./session-client-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import { sessionPanelResourceProps } from "./session-panel-resource-fixtures.ts";
+import { selectedSessionViewState } from "./session-selected-state.ts";
 
 const disposals: (() => void)[] = [];
 
@@ -123,6 +128,20 @@ function createdSession(payload: Record<string, unknown>) {
   });
 }
 
+function mountPanel(
+  controller: SessionController,
+  overrides: Partial<Parameters<typeof SessionPanel>[0]> = {},
+): HTMLElement {
+  return mountTestView(
+    () =>
+      SessionPanel({
+        ...sessionPanelResourceProps(controller),
+        ...overrides,
+      }),
+    disposals,
+  );
+}
+
 function mountedSessionPanel(
   command: TestSessionCommand,
   providers = testProviderStates(),
@@ -132,16 +151,10 @@ function mountedSessionPanel(
 } {
   installModelDiscoveryFetch();
   const controller = createSessionTestController(command);
-  const container = mountTestView(
-    () =>
-      SessionPanel({
-        controller,
-        openAi: () => providers.ai,
-        openRouter: () => providers.router,
-        runners: () => createRunnerViewState([runnerSummary(1)]),
-      }),
-    disposals,
-  );
+  const container = mountPanel(controller, {
+    openAi: () => providers.ai,
+    openRouter: () => providers.router,
+  });
   return { container, controller };
 }
 
@@ -178,6 +191,26 @@ afterEach(() => {
   disposeTestViews(disposals);
 });
 
+test("shows one limits note when both session tool editors are expanded", () => {
+  const reactive = createReactiveState<SessionViewState>(
+    selectedSessionViewState(sessionClientTestState()),
+  );
+  const controller = new SessionController(reactive, undefined, null);
+  const container = mountPanel(controller, {
+    openAi: () => createProviderViewState([{ ...OPEN_AI_CREDENTIAL }]),
+    toolSettings: () => CONFIGURED_TOOL_SETTINGS,
+  });
+  clickTestButton(container, "[data-tool-picker-toggle='true']");
+  clickTestButton(container, "[data-session-tool-toggle='true']");
+
+  expect(
+    container.querySelectorAll("[data-tool-limits-note='true']"),
+  ).toHaveLength(1);
+  expect(container.textContent).toContain(
+    formatToolLimitsStatement(CONFIGURED_TOOL_SETTINGS),
+  );
+});
+
 test("new-session Ctrl/Cmd+Enter submits and shows the platform shortcut", () => {
   vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
   const reactive = createReactiveState<SessionViewState>(
@@ -186,15 +219,13 @@ test("new-session Ctrl/Cmd+Enter submits and shows the platform shortcut", () =>
   const controller = new SessionController(reactive, undefined, null);
   const create = vi.spyOn(controller, "create").mockResolvedValue();
   controller.setDraftField("prompt", "Test the shortcut");
-  const panelProps = {
-    controller,
+  const panelProps = Object.freeze({
+    ...sessionPanelResourceProps(controller),
     openAi: () =>
       createProviderViewState([
         credential("credential-1", "OpenAI account", true),
       ]),
-    openRouter: () => createProviderViewState([]),
-    runners: () => createRunnerViewState([runnerSummary(1)]),
-  };
+  });
   const container = mountTestView(() => SessionPanel(panelProps), disposals);
   const prompt = queryTestElementAs(
     container,

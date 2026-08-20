@@ -7,6 +7,7 @@ import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discove
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
+import type { ToolSettingsStore } from "./tool-settings-store.ts";
 
 interface SessionLivenessOptions {
   /** Internal test-only escape hatch for deterministic sub-floor timers. */
@@ -33,6 +34,7 @@ export interface SessionDependencies {
   readonly liveness?: SessionLivenessOptions;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
+  readonly toolSettings?: Pick<ToolSettingsStore, "read">;
   readonly workspaces?: SessionWorkspaceReader;
 }
 

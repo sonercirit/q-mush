@@ -29,6 +29,7 @@ import {
   mountTestView,
 } from "../solid/test/dom-test-helpers.ts";
 import { TEST_PROMPT } from "../solid/test/prompt-fixtures.ts";
+import { ToolSettingsController } from "../solid/tool-settings-controller.ts";
 import { createWorkspaceViewState } from "../solid/workspace-client.tsx";
 import { WorkspaceController } from "../solid/workspace-controller.ts";
 import { Workspace } from "../solid/workspace-view.tsx";
@@ -116,6 +117,7 @@ test("discovers global fallbacks through the mounted workspace", async () => {
         runners={
           new RunnerController(createReactiveState(createRunnerViewState([])))
         }
+        toolSettings={new ToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}
         workspaces={
           new WorkspaceController(

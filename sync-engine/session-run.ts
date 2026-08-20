@@ -44,10 +44,6 @@ interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly userId: string;
 }
 
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
-}
-
 function identity(
   detail: AgentSessionDetail,
 ): RestartHandoffIdentity | undefined {
@@ -262,7 +258,7 @@ export async function runPersistedSession(
       return;
     }
 
-    if (!options.controller.signal.aborted && !isAbort(error)) {
+    if (!options.controller.signal.aborted) {
       finishFailedSession(options, error, claimedIdentity);
     }
   }

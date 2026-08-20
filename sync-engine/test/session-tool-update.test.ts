@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   applySessionToolUpdate,
@@ -20,7 +21,11 @@ function setup() {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "tool-update-machine", "runner-1");
   addTestProviderCredential(database, "credential-1");
-  const store = new SessionStore(database);
+  const store = new SessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
   const created = store.create(
     {
       ...createSessionInput({
@@ -140,11 +145,12 @@ describe("session tool update", () => {
       ),
     ).rejects.toMatchObject({ code: "stale_generation" });
     expect(
-      new SessionStore(setupValue.database).get(
-        TEST_USER_ID,
-        setupValue.created.detail.id,
-        TEST_WORKSPACE_ID,
-      )?.tools,
+      new SessionStore(
+        setupValue.database,
+        undefined,
+        () => DEFAULT_TOOL_SETTINGS,
+      ).get(TEST_USER_ID, setupValue.created.detail.id, TEST_WORKSPACE_ID)
+        ?.tools,
     ).toEqual(["read", "bash"]);
   });
 

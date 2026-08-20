@@ -10,8 +10,8 @@ import {
   type ChromiumDiscoveryOptions,
 } from "./page-fetch-chromium.ts";
 import {
-  boundedOutput,
   MAXIMUM_RESPONSE_BYTES,
+  outputRecord,
   PAGE_CAPTURE_EXPRESSION,
   readCapture,
   type PageResponse,
@@ -564,7 +564,11 @@ export async function fetchRenderedPage(
       );
       await assertPublicPageUrl(finalUrl, resolveAddress);
       policy.response(result.response);
-      return boundedOutput(result.response, readCapture(result.evaluated));
+      return JSON.stringify(
+        outputRecord(result.response, readCapture(result.evaluated)),
+        undefined,
+        2,
+      );
     },
     timeoutMilliseconds,
     signal,

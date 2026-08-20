@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
@@ -225,7 +226,7 @@ describe("session agent tools", () => {
   });
 
   test("routes more than eight mixed session and runner recipients through parallel", async () => {
-    const toolUses = Array.from({ length: 20 }, (_, index) =>
+    const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
         ? { parameters: {}, recipient_name: "list_sessions" }
         : {
@@ -243,11 +244,11 @@ describe("session agent tools", () => {
     const { output, setup } = await completedToolOutput(model, "parallel");
     const results: unknown = JSON.parse(output ?? "null");
 
-    expect(results).toHaveLength(20);
+    expect(results).toHaveLength(10);
     expect(Array.isArray(results) ? results[0] : undefined).toMatchObject({
       recipient_name: "list_sessions",
     });
-    expect(Array.isArray(results) ? results[19] : undefined).toMatchObject({
+    expect(Array.isArray(results) ? results[9] : undefined).toMatchObject({
       recipient_name: "read_session",
     });
     expect(setup.runnerCommands).toEqual([]);
@@ -506,7 +507,11 @@ describe("session agent tools", () => {
     const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
     expectRunnerRequired(child);
     await expectTranscriptExcludes(setup, "Spawned session completed");
-    const restartedStore = new SessionStore(setup.database);
+    const restartedStore = new SessionStore(
+      setup.database,
+      undefined,
+      () => DEFAULT_TOOL_SETTINGS,
+    );
     expect(restartedStore.pendingSpawnedSessions()).toEqual([]);
     expect(restartedStore.spawnedSessionLink(TEST_USER_ID, childId)).toEqual({
       parentGeneration: 0,

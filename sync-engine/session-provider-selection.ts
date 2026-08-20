@@ -11,8 +11,10 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { optionalSignal } from "../shared/validation.ts";
+import { isCredentialRejectionError } from "./agent-model-discovery-fetch.ts";
 import {
-  isCredentialRejectionError,
+  discoverModelOption,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
@@ -236,6 +238,7 @@ interface SessionMetadataOptions {
   readonly input: SessionMetadataInput;
   readonly ownerId: string;
   readonly rejectCredentialErrors?: boolean;
+  readonly signal?: AbortSignal;
 }
 
 export function sessionMetadataFromDependencies(options: {
@@ -263,6 +266,11 @@ function credentialFailure(
   error: unknown,
   fallback: SessionMetadataResult,
 ): SessionMetadataResult {
+  // Cancellation is not missing metadata: a deadline or session stop must
+  // propagate so callers do not proceed to create work after timing out.
+  if (options.signal?.aborted === true) {
+    throw error;
+  }
   if (options.rejectCredentialErrors === true) {
     if (isCredentialRejectionError(error)) throw error;
     throw new RealtimeCommandError("provider_unavailable");
@@ -280,7 +288,10 @@ export async function sessionMetadata(
         options.ownerId,
         credential,
         input.model,
-        { force: true },
+        {
+          force: true,
+          ...optionalSignal(options.signal),
+        },
       );
       const selected = selectedProvider(catalog, input.openRouterProviderTag);
       return selected === undefined
@@ -298,8 +309,13 @@ export async function sessionMetadata(
   }
 
   try {
-    const catalog = await options.discoverModels(input.provider, credential);
-    const model = catalog.models.find(({ id }) => id === input.model);
+    const model = await discoverModelOption(
+      options.discoverModels,
+      input.provider,
+      credential,
+      input.model,
+      options.signal,
+    );
     return {
       adaptiveThinking: model?.adaptiveThinking ?? null,
       maxContextTokens: model?.contextWindow ?? null,
