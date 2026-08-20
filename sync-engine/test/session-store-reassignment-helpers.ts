@@ -11,6 +11,7 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectRunnerRequired } from "./session-integration-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 export interface SessionStoreTestSetup {
   readonly database: AppDatabase;
@@ -105,6 +106,7 @@ export function expectRecoveredSession(
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   expect(restarted.failInterrupted(TEST_NOW + 3)).toEqual([]);
   expect(restarted.get(TEST_USER_ID, sessionId)).toEqual(before);

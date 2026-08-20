@@ -13,6 +13,7 @@ import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
 import { SessionStore } from "../../../sync-engine/session-store.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 const now = Date.now();
 const [databasePath, statePath, mode] = process.argv.slice(2);
 if (
@@ -91,6 +92,7 @@ if (mode === "start" || mode === "start-no-ack") {
     database,
     (timestamp) => generatedIds.shift() ?? createUuidV7(timestamp),
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   // Split from the create literal to break a jscpd clone against the
   // session-store hardening helpers; keep the shape if editing.
@@ -161,11 +163,8 @@ if (mode === "start" || mode === "start-no-ack") {
   const interrupted = shutdownStore();
   interrupted.failInvalid(now);
   interrupted.restore(now);
-  const store = new SessionStore(
-    database,
-    undefined,
-    () => DEFAULT_TOOL_SETTINGS,
-  );
+  const settings = () => DEFAULT_TOOL_SETTINGS;
+  const store = new SessionStore(database, undefined, settings, emptyRuntimes);
   store.failInterrupted(now + 1);
   const detail = store.get(state.userId, state.sessionId);
   if (detail === undefined) {

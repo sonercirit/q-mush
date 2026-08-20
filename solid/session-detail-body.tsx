@@ -64,6 +64,11 @@ function sessionCopyText(detail: AgentSessionDetail): string {
     detail.title,
     `Session ID: ${detail.id}`,
     `Status: ${detail.status}`,
+    ...(detail.runtimePending === null
+      ? []
+      : [
+          `Pending component: ${detail.runtimePending.component} since ${new Date(detail.runtimePending.since).toISOString()}`,
+        ]),
     `Model: ${detail.provider} · ${detail.model}`,
     `Working directory: ${detail.workingDirectory}`,
     ...(transcript.length === 0 ? [] : ["", "Transcript", ...transcript]),

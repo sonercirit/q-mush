@@ -2,6 +2,7 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
@@ -71,7 +72,34 @@ export class SessionLauncher {
       detail.runnerId,
       detail.generation,
       operation === "agent" ? "step" : "handoff",
-      async ({ controller, restartRequest, settled }) => {
+      async ({ controller, pendingComponent, restartRequest, settled }) => {
+        const reportPending = (
+          component: SessionRuntimePendingComponent,
+        ): void => {
+          // Repeated provider admission reports refresh watchdog liveness and
+          // intentionally publish each bounded retry to realtime clients.
+          if (!pendingComponent(component)) {
+            return;
+          }
+          try {
+            if (
+              this.#dependencies.store.executionIsCurrent(
+                userId,
+                detail.id,
+                detail.generation,
+              )
+            ) {
+              this.#dependencies.notify(userId, detail.id);
+            }
+          } catch (error) {
+            // Diagnostic publication must not interrupt the model request, but
+            // unexpected persistence failures must remain observable.
+            console.warn(
+              `Session ${detail.id} pending diagnostic publication failed`,
+              error,
+            );
+          }
+        };
         const restartPersistence: DurableRestartPersistence = {
           clear: clearShutdownMarker,
           operation: () =>
@@ -104,6 +132,7 @@ export class SessionLauncher {
           notify: this.#dependencies.notify,
           now: this.#dependencies.now,
           operation,
+          pendingComponent: reportPending,
           resources: {
             actions: this.#dependencies.actions,
             ...(this.#dependencies.attachmentFallbacks === undefined

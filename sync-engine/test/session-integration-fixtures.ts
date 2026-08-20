@@ -100,7 +100,8 @@ export function connectedSessionSetup(
     randomToken: () =>
       takeValue(runnerTokens, "The test ran out of runner tokens"),
   });
-  if (options.database === undefined) {
+  const existingRunners = storedRunners.listForUser(TEST_USER_ID);
+  if (options.database === undefined || existingRunners.length === 0) {
     storedRunners.collection(
       createAuthenticatedRequest("/api/runners", undefined, "POST"),
     );
@@ -124,7 +125,7 @@ export function connectedSessionSetup(
           .all()
           .map(({ id }) => id),
   );
-  if (options.database === undefined) {
+  if (!insertedCredentialIds.has(CREDENTIAL_ID)) {
     addTestProviderCredential(database, CREDENTIAL_ID);
     insertedCredentialIds.add(CREDENTIAL_ID);
   }
@@ -211,7 +212,12 @@ export function connectedSessionSetup(
       ? SESSION_ID
       : `018bcfe5-6800-7000-8000-${String(index + 63).padStart(12, "0")}`,
   );
-  const idBatch = options.database === undefined ? 0 : 100;
+  const existingSessionCount = database.$client
+    .query<{ readonly count: number }, []>(
+      "SELECT COUNT(*) AS count FROM agent_sessions",
+    )
+    .get()?.count;
+  const idBatch = (existingSessionCount ?? 0) === 0 ? 0 : 100;
   const selectedModels: string[] = [];
   const selectedOpenRouterProviderTags: (string | undefined)[] = [];
   const selectedPricing: (ProviderModelPricing | null)[] = [];
@@ -223,6 +229,7 @@ export function connectedSessionSetup(
     readonly sessionId: string;
     readonly userId: string;
   }[] = [];
+  const cleanupCommands: RunnerToolCommand[] = [];
   const runnerCommands: RunnerToolCommand[] = [];
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker =
@@ -231,6 +238,7 @@ export function connectedSessionSetup(
       commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
       deliver: (runnerId, command) => {
         if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
+          cleanupCommands.push(command);
           queueMicrotask(() => {
             broker.complete(runnerId, command.id, {
               output: "cleaned",
@@ -392,6 +400,7 @@ export function connectedSessionSetup(
     options.onChange?.(userId, sessionId);
   });
   return {
+    cleanupCommands,
     database,
     latestRunnerCommand: () => latestRunnerCommand,
     listRunnerCalls: () => listRunnerCalls,
@@ -435,13 +444,14 @@ export function createSessionRequest(
   autoCompact?: boolean,
   selectedProviderTag?: string,
   userContextTokenCap?: number,
+  executionEnvironment: "bare_metal" | "container" = "bare_metal",
 ): Request {
   return createAuthenticatedRequest(
     `${SESSIONS_PATH}?workspaceId=${encodeURIComponent(TEST_WORKSPACE_ID)}`,
     {
       credentialId: CREDENTIAL_ID,
       ...(autoCompact === undefined ? {} : { autoCompact }),
-      executionEnvironment: "bare_metal",
+      executionEnvironment,
       ...(images.length === 0 ? {} : { images }),
       ...(includeModel ? { model } : {}),
       ...(selectedProviderTag === undefined

@@ -43,6 +43,7 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
 class PausedParentChildModel implements AgentModel {
@@ -511,6 +512,7 @@ describe("session agent tools", () => {
       setup.database,
       undefined,
       () => DEFAULT_TOOL_SETTINGS,
+      emptyRuntimes,
     );
     expect(restartedStore.pendingSpawnedSessions()).toEqual([]);
     expect(restartedStore.spawnedSessionLink(TEST_USER_ID, childId)).toEqual({

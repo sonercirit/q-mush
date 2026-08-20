@@ -16,6 +16,7 @@ import {
 import {
   createStore,
   createTestSession,
+  emptyRuntimes,
 } from "./session-store-test-fixtures.ts";
 
 const SETTINGS = {
@@ -66,7 +67,12 @@ function configuredStore(read: () => ToolSettings): SettingsStoreSetup {
   const setup = createStore();
   return {
     ...setup,
-    store: new SessionStore(setup.database, setup.generateId, read),
+    store: new SessionStore(
+      setup.database,
+      setup.generateId,
+      read,
+      emptyRuntimes,
+    ),
   };
 }
 

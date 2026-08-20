@@ -14,6 +14,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
+import type { AgentModelRequestOptions } from "./agent-model-options.ts";
 import {
   createFallbackModel,
   type AgentModelFactory,
@@ -38,6 +39,7 @@ export async function explainAttachment(
     readonly currentProviderPricing: ProviderModelPricing | null;
     readonly currentProviderTag: string | null;
     readonly factory: AgentModelFactory;
+    readonly onRequestState?: AgentModelRequestOptions["onRequestState"];
     readonly onStepStart?: () => void;
     readonly prompt: string | null;
     readonly resources: AttachmentFallbackRuntimeResources;
@@ -100,6 +102,7 @@ export async function explainAttachment(
     credential,
     maxOutputTokens: selectedModel.maxOutputTokens,
     model: selectedModelId,
+    onRequestState: options.onRequestState,
     openRouterProviderTag:
       selection?.openRouterProviderTag ?? options.currentProviderTag,
     prompt: options.prompt,

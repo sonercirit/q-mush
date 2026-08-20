@@ -1,4 +1,9 @@
-import type { RestartHandoffRequester } from "../shared/session-model.ts";
+import type {
+  RestartHandoffRequester,
+  SessionRuntimePending,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import type { SessionRestartRequester } from "./session-restart-requester.ts";
 
 export type RestartScope =
@@ -20,6 +25,7 @@ interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
+  pending: SessionRuntimePending;
   persistRestart:
     | ((request: RestartRequest, durable: boolean) => Promise<void> | void)
     | undefined;
@@ -32,10 +38,19 @@ interface ActiveSessionRuntime {
 
 interface SessionRuntimeContext extends SessionRestartRequester {
   readonly controller: AbortController;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => boolean;
   readonly settled: (clearDurable: () => Promise<void> | void) => void;
 }
 
 type SessionRuntime = (context: SessionRuntimeContext) => Promise<void>;
+
+export function sessionPendingComponentFromProviderState(
+  state: ProviderRequestState,
+): SessionRuntimePendingComponent {
+  return state === "admission" ? "provider_admission" : "provider_request";
+}
 
 function scopeIncludes(scope: RestartScope, runnerId: string): boolean {
   return scope.kind === "server" || scope.runnerId === runnerId;
@@ -77,7 +92,12 @@ export function isValidRestartId(restartId: string): boolean {
 export class SessionRuntimes {
   readonly #active = new Map<string, ActiveSessionRuntime>();
   readonly #drainingRunners = new Map<string, RunnerRestartGate>();
+  readonly #now: () => number;
   #drainingServer: RestartRequest | undefined;
+
+  constructor(now: () => number = Date.now) {
+    this.#now = now;
+  }
 
   get draining(): boolean {
     return this.#drainingServer !== undefined;
@@ -91,6 +111,14 @@ export class SessionRuntimes {
     return this.activeGenerationMatches(sessionId, generation);
   }
 
+  pending(
+    sessionId: string,
+    generation: number,
+  ): SessionRuntimePending | undefined {
+    const runtime = this.#active.get(sessionId);
+    return runtime?.generation === generation ? runtime.pending : undefined;
+  }
+
   abort(sessionId: string): void {
     this.#active.get(sessionId)?.controller.abort();
   }
@@ -99,15 +127,18 @@ export class SessionRuntimes {
     return this.#active.get(sessionId)?.generation === generation;
   }
 
-  abortForGeneration(sessionId: string, generation: number): boolean {
+  abortForGeneration(
+    sessionId: string,
+    generation: number,
+    reason: DOMException = new DOMException(
+      "The session tools changed",
+      "AbortError",
+    ),
+  ): boolean {
     if (!this.activeGenerationMatches(sessionId, generation)) {
       return false;
     }
-    this.#active
-      .get(sessionId)
-      ?.controller.abort(
-        new DOMException("The session tools changed", "AbortError"),
-      );
+    this.#active.get(sessionId)?.controller.abort(reason);
     return true;
   }
 
@@ -226,6 +257,7 @@ export class SessionRuntimes {
       boundary,
       controller,
       generation,
+      pending: { component: "startup", since: this.#now() },
       persistRestart: undefined,
       restartDurable: false,
       restartRequest: undefined,
@@ -238,6 +270,17 @@ export class SessionRuntimes {
       runtime.settled = Promise.resolve(
         run({
           controller,
+          pendingComponent: (component) => {
+            if (this.#active.get(sessionId) !== runtime) {
+              return false;
+            }
+            const unchanged = runtime.pending.component === component;
+            if (unchanged && component !== "provider_admission") {
+              return false;
+            }
+            runtime.pending = { component, since: this.#now() };
+            return true;
+          },
           restartRequest: (persist) => {
             if (persist !== undefined) {
               runtime.persistRestart = persist;

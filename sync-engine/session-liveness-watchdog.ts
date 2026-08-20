@@ -1,6 +1,7 @@
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
@@ -20,6 +21,7 @@ export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 
 interface SessionLivenessWatchdogOptions {
+  readonly cleanup: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly actions: Pick<
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
@@ -34,7 +36,10 @@ interface SessionLivenessWatchdogOptions {
   readonly allowUnsafeTestTiming?: boolean;
   readonly notify: SessionNotification;
   readonly now: () => number;
-  readonly runtimes: Pick<SessionRuntimes, "activeForGeneration">;
+  readonly runtimes: Pick<
+    SessionRuntimes,
+    "abortForGeneration" | "activeForGeneration" | "pending"
+  >;
   readonly shutdownInterrupted: Pick<
     ShutdownInterruptedSessionStore,
     "recover"
@@ -44,16 +49,22 @@ interface SessionLivenessWatchdogOptions {
 
 interface MissingRuntime {
   readonly generation: number;
+  readonly pendingSince: number | undefined;
   readonly reason: MissingRuntimeReason;
   missingSince: number;
 }
 
 type MissingRuntimeReason =
-  "missing_runtime" | "queued_command" | "runner_disconnected";
+  | "missing_runtime"
+  | "provider_admission"
+  | "queued_command"
+  | "runner_disconnected";
 
 const LIVENESS_ERRORS: Readonly<Record<MissingRuntimeReason, string>> = {
   missing_runtime:
     "Session failed: the liveness watchdog found no active runtime driving this running session",
+  provider_admission:
+    "Session failed: the provider request was not acknowledged during the liveness recovery window",
   queued_command:
     "Session failed: the liveness watchdog found a runner command that could not be dispatched during the recovery window",
   runner_disconnected:
@@ -106,19 +117,24 @@ export class SessionLivenessWatchdog {
       const missing = this.#missing.get(session.id);
       if (
         missing?.generation !== session.executionGeneration ||
-        missing.reason !== missingReason
+        missing.reason !== missingReason.reason ||
+        missing.pendingSince !== missingReason.pendingSince
       ) {
         this.#missing.set(session.id, {
           generation: session.executionGeneration,
           missingSince: now,
-          reason: missingReason,
+          pendingSince: missingReason.pendingSince,
+          reason: missingReason.reason,
         });
         continue;
       }
       if (now - missing.missingSince < (this.#options.graceMs ?? 0)) {
         continue;
       }
-      this.#fail(session, now, missing.reason);
+      if (!this.#stillMissing(session, missing)) {
+        continue;
+      }
+      this.#fail(session, now, missing);
       this.#missing.delete(session.id);
     }
     for (const sessionId of this.#missing.keys()) {
@@ -136,49 +152,81 @@ export class SessionLivenessWatchdog {
   #missingReason(
     sessionId: string,
     userId: string,
-  ): MissingRuntimeReason | undefined {
+  ):
+    | {
+        readonly pendingSince: number | undefined;
+        readonly reason: MissingRuntimeReason;
+      }
+    | undefined {
     const detail = this.#options.store.get(userId, sessionId);
     if (
       detail === undefined ||
       !this.#options.runtimes.activeForGeneration(sessionId, detail.generation)
     ) {
-      return "missing_runtime";
+      return { pendingSince: undefined, reason: "missing_runtime" };
     }
     const commandPhase = this.#options.broker.sessionCommandPhase(sessionId);
     if (commandPhase === "runner_disconnected") {
-      return "runner_disconnected";
+      return { pendingSince: undefined, reason: "runner_disconnected" };
     }
     if (commandPhase === "queued") {
-      return "queued_command";
+      return { pendingSince: undefined, reason: "queued_command" };
     }
-    return commandPhase === "in_flight" &&
+    if (
+      commandPhase === "in_flight" &&
       !this.#connectedRunners.has(detail.runnerId)
-      ? "runner_disconnected"
+    ) {
+      return { pendingSince: undefined, reason: "runner_disconnected" };
+    }
+    const pending = this.#options.runtimes.pending(
+      sessionId,
+      detail.generation,
+    );
+    return pending?.component === "provider_admission"
+      ? { pendingSince: pending.since, reason: "provider_admission" }
       : undefined;
+  }
+
+  #stillMissing(
+    session: InterruptedStoredSession,
+    observed: MissingRuntime,
+  ): boolean {
+    const current = this.#missingReason(session.id, session.userId);
+    return (
+      current?.reason === observed.reason &&
+      current.pendingSince === observed.pendingSince
+    );
   }
 
   #fail(
     session: InterruptedStoredSession,
     now: number,
-    reason: MissingRuntimeReason,
+    missing: MissingRuntime,
   ): void {
+    const error = LIVENESS_ERRORS[missing.reason];
     if (
       !failInterruptedStoredSession(
         this.#options.database,
         session,
         this.#options.generateId(now),
         now,
-        LIVENESS_ERRORS[reason],
+        error,
       )
     ) {
       return;
     }
+    this.#options.runtimes.abortForGeneration(
+      session.id,
+      session.executionGeneration,
+      new DOMException(error, "AbortError"),
+    );
     this.#options.broker.cancelSession(session.id);
     const detail = this.#options.store.get(session.userId, session.id);
     this.#options.notify(session.userId, session.id);
     if (detail === undefined) {
       return;
     }
+    void Promise.resolve(this.#options.cleanup(detail)).catch(() => undefined);
     this.#options.actions.stopChildren(detail, session.userId);
     this.#options.actions.finished(detail, session.userId);
   }

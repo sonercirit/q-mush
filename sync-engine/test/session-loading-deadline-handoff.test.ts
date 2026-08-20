@@ -48,6 +48,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
         notify: () => undefined,
         now: () => TEST_NOW + 17,
         operation: "agent" as const,
+        pendingComponent: () => undefined,
         resources: Object.assign(
           {},
           {

@@ -24,6 +24,7 @@ import {
   EMPTY_SESSION_REQUEST_MODEL_METADATA,
   sessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 const RUNNER_ID = "runner-filesystem";
 const SESSION_ID = "session-filesystem";
@@ -256,6 +257,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const session = testSession();
   const actions = new SessionAgentActions({

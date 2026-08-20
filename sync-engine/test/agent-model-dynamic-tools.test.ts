@@ -3,6 +3,7 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
+  acknowledgeProviderSocket,
   COMPLETED_EVENT,
   FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
@@ -56,6 +57,7 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
   expect(bash).toMatchObject({
     parameters: { properties: { timeout: { maximum: 420 } } },
   });
+  acknowledgeProviderSocket(socket);
   socket.receive(COMPLETED_EVENT);
   await expect(pending).resolves.toMatchObject({ content: "Done." });
 });

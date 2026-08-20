@@ -12,13 +12,13 @@ import {
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
-  RunnerDisconnectedError,
   type RunnerCommandBroker,
   type RunnerCommandOutputDelta,
 } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionUsageUpdate,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import {
   toolExecutionLimitSeconds,
@@ -27,6 +27,7 @@ import {
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills } from "./agent-skills.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
@@ -60,7 +61,12 @@ import {
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
+import {
+  executeForSession,
+  isRestartHandoffError,
+} from "./session-runner-execution.ts";
 import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
+import { sessionPendingComponentFromProviderState } from "./session-runtime.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -79,6 +85,9 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly manualCompactionRequested: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly restartHandoffRequested: () => boolean;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;
@@ -89,6 +98,13 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly userId: string;
 }
 
+function markProviderPending(
+  runtime: SessionAgentRuntimeDependencies,
+  state: ProviderRequestState,
+): void {
+  runtime.pendingComponent(sessionPendingComponentFromProviderState(state));
+}
+
 function writeRuntime(
   runtime: SessionAgentRuntimeDependencies,
   write: (sessionId: string, now: number, generation: number) => void,
@@ -97,7 +113,9 @@ function writeRuntime(
   runtime.notify();
 }
 
-function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
+function markRuntimeStepStart(runtime: SessionAgentRuntimeDependencies): void {
+  // Status- and generation-guarded: a racing stop or restart makes this
+  // write match zero rows instead of throwing.
   const { store } = runtime;
   writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
 }
@@ -156,44 +174,6 @@ function recordCompaction(
   });
 }
 
-function isSessionRestartHandoff(
-  runtime: SessionAgentRuntimeDependencies,
-  error: unknown,
-): boolean {
-  return (
-    error instanceof RunnerDisconnectedError &&
-    runtime.restartHandoffRequested()
-  );
-}
-
-function handoffError(): DOMException {
-  return new DOMException(
-    "The runner disconnected during a restart handoff",
-    "RestartHandoff",
-  );
-}
-
-async function executeForSession<Result>(
-  runtime: SessionAgentRuntimeDependencies,
-  execute: () => Promise<Result>,
-  handoff?: (error: DOMException) => void,
-): Promise<Result> {
-  try {
-    return await execute();
-  } catch (error) {
-    if (isSessionRestartHandoff(runtime, error)) {
-      const restartError = handoffError();
-      handoff?.(restartError);
-      throw restartError;
-    }
-    throw error;
-  }
-}
-
-export function isRestartHandoffError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "RestartHandoff";
-}
-
 async function loadModels(
   runtime: SessionAgentRuntimeDependencies,
   options: {
@@ -206,14 +186,15 @@ async function loadModels(
     runtime.signal,
     settings,
     async (signal) => {
-      const agentFile = await executeForSession(runtime, () =>
-        loadSessionAgentFile(
+      const agentFile = await executeForSession(runtime, () => {
+        runtime.pendingComponent("runner_command");
+        return loadSessionAgentFile(
           runtime.broker,
           runtime.detail,
           signal,
           runtime.isCurrent,
-        ),
-      );
+        );
+      });
       writeRuntime(runtime, (sessionId, now, generation) => {
         runtime.store.setRuntimeAgentFile(
           sessionId,
@@ -222,6 +203,7 @@ async function loadModels(
           generation,
         );
       });
+      runtime.pendingComponent("provider_request");
       const metadata = await sessionRequestMetadata(
         runtime,
         (apply) => {
@@ -229,15 +211,15 @@ async function loadModels(
         },
         signal,
       );
+      const onRequestState = markProviderPending.bind(undefined, runtime);
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
         detail: { ...runtime.detail, ...metadata },
         factory: runtime.modelFactory,
         isCurrent: runtime.isCurrent,
-        onStepStart: () => {
-          markSessionStepStart(runtime);
-        },
+        onRequestState,
+        onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         realtime: runtime.realtime,
         ...(options.streamId === undefined
           ? {}
@@ -328,6 +310,7 @@ async function executeAgentTool(
     return restartInterruptedToolResult();
   }
   try {
+    runtime.pendingComponent("engine_tool");
     if (
       !isAgentSessionToolName(call.name) ||
       !stepTools.has(call.name) ||
@@ -403,6 +386,7 @@ export async function runSessionAgent(
     signal: AbortSignal = toolSignal,
     callId?: string,
   ): Promise<RunnerCommandResult> => {
+    runtime.pendingComponent("runner_command");
     const result = await executeForSession(
       runtime,
       () =>
@@ -453,6 +437,7 @@ export async function runSessionAgent(
     if (attachment === undefined) {
       throw new Error("The runner returned invalid file attachment data");
     }
+    runtime.pendingComponent("provider_request");
     const currentModel = await discoverCurrentSessionModel(runtime, signal);
     // Discovery may ignore cancellation and settle after the wrapper already
     // reported timed-out; never start explanation model work afterward.
@@ -460,6 +445,7 @@ export async function runSessionAgent(
     if (currentModel === undefined) {
       throw new Error("The session model is unavailable for file explanation");
     }
+    const onRequestState = markProviderPending.bind(undefined, runtime);
     const explanation = await explainAttachment(
       {
         attachment,
@@ -470,9 +456,8 @@ export async function runSessionAgent(
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
         factory: runtime.modelFactory,
-        onStepStart: () => {
-          markSessionStepStart(runtime);
-        },
+        onRequestState,
+        onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,
         toolSettings: runtime.toolSettings,

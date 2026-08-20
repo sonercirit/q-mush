@@ -76,6 +76,7 @@ function runtimeDependencies(
   return {
     braveSearch: { execute: () => Promise.resolve("unused search") },
     broker: new RunnerCommandBroker(),
+    pendingComponent: () => undefined,
     credential: {
       accountId: null,
       id: options.detail.credentialId,

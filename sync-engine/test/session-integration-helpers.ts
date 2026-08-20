@@ -128,12 +128,13 @@ export function completeRunnerCommand(
 export async function completeAgentFileLookup(
   setup: ConnectedSessionSetup,
   agentFile: unknown = null,
+  executionEnvironment: RunnerToolCommand["executionEnvironment"] = "bare_metal",
 ): Promise<void> {
   await expectRunnerCommand(
     setup,
     {
       arguments: {},
-      executionEnvironment: "bare_metal",
+      executionEnvironment,
       id: RUNNER_COMMAND_ID,
       sessionId: SESSION_ID,
       tool: RUNNER_AGENT_FILE_COMMAND,

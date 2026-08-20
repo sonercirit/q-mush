@@ -32,7 +32,10 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
-import { testSessionInput } from "./session-store-test-fixtures.ts";
+import {
+  emptyRuntimes,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 const FOREIGN_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000082";
 const RECOVERABLE_SESSION_ID = "018bcfe5-6800-7000-8000-000000000084";
@@ -126,6 +129,7 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     () =>
       takeValue(generatedIds, "The test ran out of recoverable session IDs"),
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const created = store.create(
     testSessionInput({

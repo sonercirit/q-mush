@@ -31,6 +31,7 @@ import {
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
 const CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -129,6 +130,7 @@ function authoritySetup(options: {
     database,
     () => ids.shift() ?? "unexpected-parent-authority-id",
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const parent = createStoredSession(store, SESSION_ID, RUNNER_ID);
   transition(store, parent, "running", TEST_NOW + 1);
