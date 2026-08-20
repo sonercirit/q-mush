@@ -240,7 +240,7 @@ setInterval(() => undefined, 1_000);
         restartDelayMilliseconds: 10,
         restartTriggerPath: triggerPath,
         shutdownForceMilliseconds: 300,
-        shutdownPreparationMilliseconds: 100,
+        shutdownPreparationMilliseconds: 300,
       } as const;
       const server = startDevelopmentServer(serverOptions);
       try {
@@ -249,7 +249,9 @@ setInterval(() => undefined, 1_000);
         await triggerDevelopmentRestart(triggerPath);
         await waitForStartCount(startsPath, 2);
         const elapsed = performance.now() - startedAt;
-        expect(elapsed).toBeLessThan(250);
+        // One shared deadline spends the 300 ms preparation budget once; a
+        // per-phase deadline would wait for it again before SIGKILL.
+        expect(elapsed).toBeLessThan(500);
         expect(await Bun.file(overlapPath).exists()).toBe(false);
       } finally {
         await server.stop();
