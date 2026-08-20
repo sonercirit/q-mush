@@ -269,12 +269,11 @@ the codec rejects it otherwise and the UI displays it.
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs. Frozen clocks may collapse admission
-  transitions; production cannot. An identified, non-retained `response.*`
-  admits when `response.created` is omitted. WebSocket Mode expires in 60
-  minutes; an observed limit error replaces the socket once per step, then
-  retries replay it. Admission is bounded until `response.created` or another
-  qualifying response event; HTTP waits are not. Discard unknown, pre-creation,
-  mismatched-ID, and retained-ID frames/errors. On a reused socket, an
+  transitions; production cannot. A fresh socket admits any non-retained
+  `response.*`; a reused one requires an ID or `response.created`. WebSocket
+  Mode expires in 60 minutes; an observed limit error replaces the socket once
+  per step, then retries replay it. HTTP waits are not admission-bounded.
+  Discard mismatched-ID, and retained-ID frames/errors. On a reused socket, an
   uncorrelated pre-admission error retries fresh unless permanent, which
   surfaces; after admission, including ID-less admission, an unidentified error
   retires the reused socket and retries fresh. Provider IDs (~53 bytes normally)

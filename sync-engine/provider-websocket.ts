@@ -309,10 +309,10 @@ export class ProviderWebSocketSession {
             if (!admitsRequest) {
               return;
             }
-            // response.created is canonical. Otherwise, a fresh socket's
-            // response event or an identified non-retained response event
-            // correlates the request; unidentified events on a reused socket
-            // are potentially stale and discarded.
+            // response.created is canonical. Otherwise, any response event on
+            // a fresh socket or an identified non-retained response event on a
+            // reused socket correlates the request; unidentified events on a
+            // reused socket are potentially stale and discarded.
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");
