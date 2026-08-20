@@ -209,9 +209,9 @@ export class RealtimeHub {
 
   publishUserAllWorkspaces(userId: string, payload: RealtimePayload): void {
     const sockets = new Set<RealtimeSocket>();
-    const prefix = `user:${userId}:`;
     for (const [key, connected] of this.#connections.user) {
-      if (key.startsWith(prefix)) {
+      const [, connectedUserId] = key.split(":", 3);
+      if (connectedUserId === userId) {
         for (const socket of connected) sockets.add(socket);
       }
     }

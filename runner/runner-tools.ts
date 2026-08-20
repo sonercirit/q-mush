@@ -52,11 +52,6 @@ import {
 const MAX_FILE_BYTES = 1024 * 1024;
 const MAXIMUM_EDITS = 100;
 
-function throwIfRunnerToolStopped(signal: AbortSignal | undefined): void {
-  if (signal?.aborted !== true) return;
-  throw new Error("The runner command was stopped");
-}
-
 type RunnerToolStream = (
   delta: Omit<RunnerCommandOutputDelta, "sequence">,
 ) => void;
@@ -182,7 +177,6 @@ async function readTool(
   const content = await readTextFile(path, MAX_FILE_BYTES);
   const lineBounds = { maximum: 1_000_000_000, minimum: 1 };
   const offset = optionalInteger(arguments_, "offset", 1, lineBounds);
-  const explicitLimit = arguments_["limit"] !== undefined;
   const limit = optionalInteger(
     arguments_,
     "limit",
@@ -194,7 +188,6 @@ async function readTool(
     offset,
     limit,
     options?.outputLimitCharacters,
-    explicitLimit,
   );
 }
 
@@ -266,11 +259,11 @@ async function writeTool(
   );
   // Cancellation may fire while path resolution is in flight; do not begin
   // any filesystem mutation after the caller has already stopped waiting.
-  throwIfRunnerToolStopped(context.signal);
+  throwIfRunnerCommandStopped(context.signal);
   await mkdir(dirname(context.path), { recursive: true });
   // Directory creation can outlive the caller's deadline; fence the content
   // write independently so no new file mutation starts after cancellation.
-  throwIfRunnerToolStopped(context.signal);
+  throwIfRunnerCommandStopped(context.signal);
   await writeFile(context.path, content, "utf8");
   return `Wrote ${String(Buffer.byteLength(content))} bytes to ${displayPath(context.root, context.path)}.`;
 }
@@ -361,7 +354,7 @@ async function editTool(
   const content = await readTextFile(context.path, MAX_FILE_BYTES);
   // Cancellation may fire while the reads above are in flight; fence before
   // mutating the file.
-  throwIfRunnerToolStopped(context.signal);
+  throwIfRunnerCommandStopped(context.signal);
   const edits = locateEdits(content, replacements);
   let updated = content;
 
@@ -370,7 +363,7 @@ async function editTool(
   }
 
   // Replacement construction may be substantial; fence the actual write too.
-  throwIfRunnerToolStopped(context.signal);
+  throwIfRunnerCommandStopped(context.signal);
   await writeFile(context.path, updated, "utf8");
   return `Successfully replaced ${String(edits.length)} block(s) in ${displayPath(context.root, context.path)}.`;
 }
@@ -624,7 +617,7 @@ export async function executeRunnerTool(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<string> {
   const resolved = await resolvedRunnerTool(parameters);
-  throwIfRunnerToolStopped(resolved.signal);
+  throwIfRunnerCommandStopped(resolved.signal);
   return executeResolvedRunnerTool(resolved);
 }
 
@@ -632,7 +625,7 @@ export async function executeRunnerToolResult(
   ...parameters: ExecuteRunnerToolArguments
 ): Promise<RunnerCommandResult> {
   const resolved = await resolvedRunnerTool(parameters);
-  throwIfRunnerToolStopped(resolved.signal);
+  throwIfRunnerCommandStopped(resolved.signal);
   if (resolved.name === "parallel") {
     return parallelToolResult(...parallelArguments(resolved));
   }

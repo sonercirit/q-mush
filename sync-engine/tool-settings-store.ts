@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { toolSettings } from "../shared/database/schema.ts";
@@ -8,7 +8,6 @@ import {
   DEFAULT_TOOL_SETTINGS,
   type ToolSettings,
 } from "../shared/tool-limits.ts";
-import { sqliteChangeCount } from "./database-changes.ts";
 
 function activeSettingsCondition(userId: string) {
   return and(
@@ -42,25 +41,19 @@ export class ToolSettingsStore {
 
   set(userId: string, settings: ToolSettings, now: number): ToolSettings {
     this.#database
-      .update(toolSettings)
-      .set({ ...settings, ...updatedAuditFields(userId, now) })
-      .where(activeSettingsCondition(userId))
+      .insert(toolSettings)
+      .values({
+        ...createdAuditFields(userId, now),
+        ...settings,
+        id: this.#idAt(now),
+        userId,
+      })
+      .onConflictDoUpdate({
+        set: { ...settings, ...updatedAuditFields(userId, now) },
+        target: toolSettings.userId,
+        targetWhere: sql`NOT ${toolSettings.isDeleted}`,
+      })
       .run();
-    const updated = sqliteChangeCount(
-      this.#database,
-      "The tool settings update count is unavailable",
-    );
-    if (updated === 0) {
-      this.#database
-        .insert(toolSettings)
-        .values({
-          ...createdAuditFields(userId, now),
-          ...settings,
-          id: this.#idAt(now),
-          userId,
-        })
-        .run();
-    }
     return settings;
   }
 }

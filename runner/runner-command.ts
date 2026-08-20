@@ -164,6 +164,11 @@ export async function executeRunnerCommand(
   return new RunnerCommandExecutor().execute(command, signal);
 }
 
+type ResolvedRunnerToolCommand = RunnerToolCommand & {
+  readonly executionLimitSeconds: number;
+  readonly outputLimitCharacters: number;
+};
+
 export class RunnerCommandExecutor {
   readonly #containers: RunnerContainerCommands;
 
@@ -171,10 +176,16 @@ export class RunnerCommandExecutor {
     this.#containers = containers ?? new RunnerContainerManager();
   }
 
-  #toolSettings(command: RunnerToolCommand): {
-    readonly outputLimitCharacters: number;
-  } {
+  #toolSettings(
+    command: RunnerToolCommand,
+  ): Pick<
+    ResolvedRunnerToolCommand,
+    "executionLimitSeconds" | "outputLimitCharacters"
+  > {
     return {
+      executionLimitSeconds:
+        command.executionLimitSeconds ??
+        toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
       outputLimitCharacters:
         command.outputLimitCharacters ??
         DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
@@ -186,17 +197,18 @@ export class RunnerCommandExecutor {
     signal?: AbortSignal,
     stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
   ): Promise<RunnerCommandResult> {
-    const result = await this.#executeResult(command, {
+    const resolvedCommand = { ...command, ...this.#toolSettings(command) };
+    const result = await this.#executeResult(resolvedCommand, {
       ...(signal === undefined ? {} : { signal }),
       ...(stream === undefined ? {} : { stream }),
     });
-    return isRunnerAgentToolName(command.tool)
-      ? retainToolResultOverflow(result, this.#toolSettings(command))
+    return isRunnerAgentToolName(resolvedCommand.tool)
+      ? retainToolResultOverflow(result, resolvedCommand)
       : result;
   }
 
   async #executeResult(
-    command: RunnerToolCommand,
+    command: ResolvedRunnerToolCommand,
     options: {
       readonly signal?: AbortSignal;
       readonly stream?: NonNullable<RunnerToolExecutionOptions["stream"]>;
@@ -256,7 +268,7 @@ export class RunnerCommandExecutor {
   }
 
   async #executeContainer(
-    command: RunnerToolCommand,
+    command: ResolvedRunnerToolCommand,
     signal: AbortSignal | undefined,
     stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
   ): Promise<RunnerCommandResult> {
@@ -280,9 +292,7 @@ export class RunnerCommandExecutor {
           timeoutSeconds,
           {
             ...(shellStream === undefined ? {} : { publish: shellStream }),
-            outputLimitCharacters:
-              command.outputLimitCharacters ??
-              DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+            outputLimitCharacters: command.outputLimitCharacters,
             ...(shellSignal === undefined ? {} : { signal: shellSignal }),
           },
         ),
@@ -303,16 +313,12 @@ export class RunnerCommandExecutor {
   }
 
   #toolOptions(
-    command: RunnerToolCommand,
+    command: ResolvedRunnerToolCommand,
     stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
   ): RunnerToolExecutionOptions {
     return {
-      executionLimitSeconds:
-        command.executionLimitSeconds ??
-        toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
-      outputLimitCharacters:
-        command.outputLimitCharacters ??
-        DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+      executionLimitSeconds: command.executionLimitSeconds,
+      outputLimitCharacters: command.outputLimitCharacters,
       ...(stream === undefined ? {} : { stream }),
     };
   }

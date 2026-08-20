@@ -47,7 +47,6 @@ export function readContinuation(
   offset: number,
   limit: number,
   maximumCharacters?: number,
-  explicitLimit = true,
 ): string {
   const lines = content.split("\n");
   const start = offset - 1;
@@ -62,11 +61,9 @@ export function readContinuation(
   const complete =
     nextOffset <= lines.length
       ? `${output}${continuationMarker(offset, requested.length, lines.length)}`
-      : explicitLimit
-        ? output
-        : offset === 1
-          ? content
-          : output;
+      : offset === 1
+        ? content
+        : output;
   if (
     maximumCharacters === undefined ||
     unicodeCharacterCount(complete) <= maximumCharacters
