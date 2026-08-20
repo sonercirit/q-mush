@@ -13,9 +13,10 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   why in a test. Integrate each session capability with every protocol's native
   control, recording gaps.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
-  decisions/lessons here; repeated guidance means a missing rule. If evidence
-  overturns a finding, fix code and stale records; act, don't ask. Never commit
-  secrets, artifacts, or env files.
+  decisions/lessons in the appropriate memory file: provider protocol facts
+  belong in `PROVIDER_PROTOCOLS.md`; all others here. Repeated guidance means a
+  missing rule. If evidence overturns a finding, fix code and stale records;
+  act, don't ask. Never commit secrets, artifacts, or env files.
 - Keep workflows local-first: narrow checks, then broad, then failures.
 
 ## Setup, Commands
@@ -57,9 +58,9 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   out.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
-  `runners.ts` issues hashed tokens, owns management/token-auth callbacks and
-  origin-based installers. `runner-installer.ts` emits the macOS/Linux
-  one-liner: picks an x64/ARM64 glibc/musl target, starts under
+  `runners.ts` issues hashed opaque setup tokens, owns management/token-auth
+  callbacks and origin-based installers. `runner-installer.ts` emits the
+  macOS/Linux one-liner: picks an x64/ARM64 glibc/musl target, starts under
   `~/.q-mush/runner` without Bun. Runners send metadata and 15-second WebSocket
   heartbeats, check updates on startup/every 5 minutes, recheck via handshake
   version after restarts, replacing old sockets on reconnect. Updates use
@@ -164,8 +165,10 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 
 ## Gotchas
 
-- `AGENTS.md` runs at its cap: diff edits/merges against the pre-merge blob;
-  re-condense or split at a real seam rather than silently evicting facts.
+- Neither memory file runs at its cap: `AGENTS.md` and `PROVIDER_PROTOCOLS.md`
+  each share a 20,000-code-point cap; diff edits/merges against the pre-merge
+  blob, and re-condense or split at a real seam rather than silently evicting
+  facts.
 - HTTP port 12345 (`PORT` overrides). Google login uses `GOOGLE_CLIENT_ID` and
   `GOOGLE_CLIENT_SECRET` together, plus optional `GOOGLE_REDIRECT_URI`; register
   `http://localhost:12345/api/auth/google/callback` with the OAuth client. Never
@@ -178,13 +181,13 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   PRAGMAs; `createDatabase` disables foreign keys first and reenables them
   afterward.
 - Credential storage needs stable 32-byte base64url `*_CREDENTIAL_KEY` secrets
-  per provider; redirects end in `/api/<provider>/oauth/callback`. OpenAI
-  defaults to the public Codex OAuth client with localhost-only callback at
-  `http://localhost:1455/auth/callback` (keep its port free); a different
-  `OPENAI_CLIENT_ID` disables that loopback and must allow the configured or
-  request-origin callback. OpenRouter OAuth needs no client credentials and
-  yields user-owned keys. Removal soft-deletes its audit record and clears its
-  payload; provider-side access remains.
+  per provider; OAuth redirect URIs (not merely HTTP redirects) end in
+  `/api/<provider>/oauth/callback`. OpenAI defaults to the public Codex OAuth
+  client with localhost-only callback at `http://localhost:1455/auth/callback`
+  (keep its port free); a different `OPENAI_CLIENT_ID` disables that loopback
+  and must allow the configured or request-origin callback. OpenRouter OAuth
+  needs no client credentials and yields user-owned keys. Removal soft-deletes
+  its audit record and clears its payload; provider-side access remains.
 - `shared/ids.ts` owns UUIDv7 generation and the `SYSTEM` audit actor; user
   actions use the internal user UUID. Never hard-delete: set `isDeleted`,
   `updatedAt`, `updatedById`, exclude deleted rows from active queries. Audit
@@ -199,7 +202,8 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
   `compile.outfile` (`outputs[0]` is bundled JS): build in temp, read it
   pre-cleanup.
-- Bare-metal tools accept any account-accessible path; relative paths use the
+- Bare-metal tools accept any runner-account-accessible path (an
+  `account-accessible` path for the runner account); relative paths use the
   workspace. Container file tools/attachments run on the host and stay
   host-contained. Container shells are disposable per-session root Arch
   (`archlinux:latest` by default), with default network/capabilities; only the
