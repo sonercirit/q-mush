@@ -15,7 +15,7 @@
 - No reward hacking: don't weaken tests, special-case checks, or claim unrun
   checks. Fix defects on sight; if a fix is harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change. A repeated
-  instruction means a rule is missing. If evidence overturns a finding, fix its
+  repetition means a rule is missing. If evidence overturns a finding, fix its
   code and stale records in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun narrow failures. Never commit secrets or artifacts.
@@ -119,15 +119,15 @@
   `agent-model-discovery.ts` queries metadata, signal-cancelable;
   `shared/agent-configuration.ts` owns catalog types/validation. New sessions
   take the default online runner (else the first) and credential, first
-  discovered model, latest working directory, top reported effort. Unknown
-  modalities imply no attachment support; choices show provider and Q Mush
-  modalities. `solid/custom-select.tsx` shares search normalization, paginates
-  past ten items, owns accessible keyboard/focus. Focus mode fills the app
-  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
-  overlays on desktop, becomes a drawer, collapses on selection, closing with
-  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display; reasoning summaries persist as `thinking` messages omitted
-  from replay. Session and transcript rows sit in `agent_sessions` and
+  discovered model, last directory, top reported effort. Unknown modalities
+  imply no attachment support; choices show provider and Q Mush modalities.
+  `solid/custom-select.tsx` shares search normalization, paginates past ten
+  items, owns accessible keyboard/focus. Focus mode fills the app viewport (not
+  browser Fullscreen), keeping drafts and scroll; its rail overlays on desktop,
+  becomes a drawer, collapses on selection, closing with Escape first.
+  `shared/agent-prompt.ts` builds the model system prompt and transcript
+  display; reasoning summaries persist as `thinking` messages omitted from
+  replay. Session and transcript rows sit in `agent_sessions` and
   `agent_messages`; `step_started_at` sets per model step, clears with
   `activeStartedAt` (live Step timer); interrupted processes mark active
   sessions failed for resumption; rebuilds add interrupted tool errors on

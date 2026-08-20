@@ -10,9 +10,10 @@ import {
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 test("adopts an ID observed after unidentified admission", async () => {
-  const sockets = new FakeProviderSockets();
-  const pending = complete(apiKeyModel({ webSocket: sockets.create }));
-  const socket = requireProviderSocket(sockets, 0);
+  const setup = new FakeProviderSockets();
+  const model = apiKeyModel({ webSocket: setup.create });
+  const pending = complete(model);
+  const socket = requireProviderSocket(setup, 0);
   socket.open();
   socket.receive({ type: "response.created" });
   socket.receive({
