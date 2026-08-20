@@ -19,11 +19,11 @@ function formatSleepDuration(milliseconds: number): string {
 
 function sleepDurationMilliseconds(
   arguments_: string,
-  settings: ToolSettings,
+  settings: ToolSettings | undefined,
 ): number | undefined {
   const maximumSeconds = Math.max(
     HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS,
-    toolExecutionLimitSeconds(settings),
+    settings === undefined ? 0 : toolExecutionLimitSeconds(settings),
   );
   const maximumMilliseconds = maximumSeconds * MILLISECONDS_PER_SECOND;
   const parsed = parseOptionalJsonRecord(arguments_);
@@ -56,7 +56,7 @@ export function renderToolArguments(
   settings: ToolSettings | undefined,
 ): JSX.Element {
   const durationMilliseconds =
-    name === "sleep" && settings !== undefined
+    name === "sleep"
       ? sleepDurationMilliseconds(arguments_, settings)
       : undefined;
   return durationMilliseconds === undefined ? (
