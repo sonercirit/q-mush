@@ -440,9 +440,6 @@ describe("session restart control", () => {
     ]);
   });
 
-  // A late runner joins the restart already in flight, so it stays bounded by
-  // the original deadline; a second server restart in a surviving process is a
-  // new restart, so it arms its own full bound instead of the remainder.
   test.each([
     ["a late runner keeps the original server deadline", drainRunner, 60_000],
     [
