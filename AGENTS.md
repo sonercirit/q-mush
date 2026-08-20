@@ -15,10 +15,10 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
   decisions/lessons in the appropriate memory file: facts about provider
   discovery, requests, streaming, caching, retries, or model capability handling
-  belong in `PROVIDER_PROTOCOLS.md`; provider credential and OAuth configuration
-  stays here. Repeated guidance means a missing rule. If evidence overturns a
-  finding, fix code and stale records; act, don't ask. Never commit secrets,
-  artifacts, or env files.
+  belong in `PROVIDER_PROTOCOLS.md`; everything else, including provider
+  credential and OAuth configuration, stays here. Repeated guidance means a
+  missing rule. If evidence overturns a finding, fix code and stale records;
+  act, don't ask. Never commit secrets, artifacts, or env files.
 - Keep workflows local-first: narrow checks, then broad, then failures.
 
 ## Setup, Commands
