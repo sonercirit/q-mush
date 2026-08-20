@@ -28,6 +28,7 @@ import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
+import type { SessionRestartAbort } from "./session-restart-abort.ts";
 import type {
   RestartDrainSessionProgress,
   SessionRestartControl,
@@ -90,7 +91,7 @@ export interface SessionIntegrationApiResources {
   ) => Promise<Response>;
   readonly requests: SessionRequestHelpers;
   readonly restart: SessionRestartControl;
-  readonly restartController: AbortController;
+  readonly restartController: SessionRestartAbort;
   readonly restartCoordinator: SessionRestartCoordinator;
   readonly runnerRemoval: RunnerRemovalCoordinator;
   readonly runtimes: SessionRuntimes;
@@ -293,6 +294,8 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   restoreDevelopmentDrainRecovery(): void {
     this.resources.shutdownInterrupted.enableRecovery();
+    this.resources.restart.restoreServerDrain();
+    this.resources.restartController.restore();
   }
 
   async prepareFinalShutdown(): Promise<void> {

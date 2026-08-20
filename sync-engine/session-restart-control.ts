@@ -79,6 +79,11 @@ export interface SessionRestartControl extends Pick<
   readonly escalateServerDrain: () => boolean;
   readonly pendingRunnerRestart: (runnerId: string) => string | undefined;
   readonly prepareServerShutdown: () => Promise<void>;
+  /**
+   * Reopens the server restart gate after a failed development restart drain,
+   * so the surviving process accepts new sessions and queued work again.
+   */
+  readonly restoreServerDrain: () => void;
   readonly recover: (
     launchPending: (runnerId?: string) => void,
     runnerId?: string,
@@ -248,6 +253,11 @@ export function createSessionRestartControl(
         .drain({ kind: "server" }, nextServerRestartId())
         .then(() => undefined),
     escalateServerDrain: () => escalateScope({ kind: "server" }),
+    restoreServerDrain: () => {
+      serverDeadline = undefined;
+      sharedServerRestartIds.clear();
+      runtimes.start();
+    },
     prepareServerShutdown: async () => {
       finalShutdownMark ??= runtimes
         .mark({ kind: "server" }, nextServerRestartId())

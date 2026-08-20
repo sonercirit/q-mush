@@ -30,7 +30,7 @@ import {
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
-import { drainDevelopmentRestart } from "./development-restart.ts";
+import { DevelopmentRestartLifecycle } from "./development-restart.ts";
 import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
@@ -197,11 +197,9 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-let shutdownKind: "development_restart" | "final" | undefined;
-let developmentRestart: Promise<void> | undefined;
 const restartVisibleSessionIds: RestartProgressVisibilityCache = new Map();
 sessions.onChange((userId, sessionId) => {
-  if (shutdownKind !== "development_restart") return;
+  if (!lifecycle.restarting) return;
   for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
     if (sessions.detailForUser(userId, sessionId, workspaceId) === undefined) {
       continue;
@@ -274,53 +272,40 @@ function publishRestartProgress(): void {
   }
 }
 
-function restartDevelopment(deadlineAt: number): Promise<void> {
-  if (shutdownKind === "final") {
-    return Promise.resolve();
-  }
-  if (developmentRestart !== undefined) {
-    sessions.escalateDrain();
-    return developmentRestart;
-  }
-
-  shutdownKind = "development_restart";
-  stopMaintenance();
-  publishRestartProgress();
-  const progressTimer = setInterval(
-    publishRestartProgress,
-    RESTART_PROGRESS_INTERVAL_MS,
-  );
-  progressTimer.unref();
-  const deadline = new RestartDeadline(deadlineAt);
-  developmentRestart = drainDevelopmentRestart(sessions, deadline, (error) => {
+let progressTimer: ReturnType<typeof setInterval> | undefined;
+const lifecycle = new DevelopmentRestartLifecycle({
+  drainFailed: (error) => {
     console.warn(
       `Q Mush development restart drain failed: ${errorMessage(error)}`,
     );
-  })
-    .then((drained) => {
-      if (!drained) {
-        startMaintenance();
-        shutdownKind = undefined;
-        developmentRestart = undefined;
-        return;
-      }
-      publishRestartProgress();
-      process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
-    })
-    .finally(() => {
-      clearInterval(progressTimer);
-      restartVisibleSessionIds.clear();
-    });
-  return developmentRestart;
-}
+  },
+  drainReady: () => {
+    publishRestartProgress();
+    process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
+  },
+  drainSettled: () => {
+    clearInterval(progressTimer);
+    progressTimer = undefined;
+    restartVisibleSessionIds.clear();
+  },
+  drainStarted: () => {
+    publishRestartProgress();
+    progressTimer = setInterval(
+      publishRestartProgress,
+      RESTART_PROGRESS_INTERVAL_MS,
+    );
+    progressTimer.unref();
+  },
+  sessions,
+  startMaintenance,
+  stopMaintenance,
+});
 
 async function shutDown(): Promise<void> {
-  if (shutdownKind === "final") {
+  if (!lifecycle.beginFinalShutdown()) {
     return;
   }
 
-  shutdownKind = "final";
-  stopMaintenance();
   await sessions.prepareFinalShutdown();
   recordDatabaseRetryFixtureEvent(Bun.env, "shutdown:prepared");
   process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
@@ -337,7 +322,7 @@ async function shutDown(): Promise<void> {
 
 process.on("message", (message) => {
   if (isDevelopmentRestartRequestMessage(message)) {
-    void restartDevelopment(message.deadlineAt);
+    void lifecycle.restart(new RestartDeadline(message.deadlineAt));
   } else if (message === DEVELOPMENT_RESTART_ESCALATE_MESSAGE) {
     sessions.escalateDrain();
   } else if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) {

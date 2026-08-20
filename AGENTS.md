@@ -42,63 +42,65 @@
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
   sessions, and runner work; no polling/SSE. `dev:watch` watches production
-  source and local `.env`, coalescing bursts into the ignored restart trigger;
-  `dev:restart` writes it, while plain `dev` restarts only from it.
+  source and local `.env`, coalescing bursts into the ignored restart trigger
+  `dev:restart` writes; plain `dev` restarts only from it.
   `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, serves `/runner/executable`. Development restarts use one
-  supervisor-issued absolute 120-second deadline, reject new steps and
+  caches in memory, and serves `/runner/executable`. Development restarts use
+  one supervisor-issued absolute 120-second deadline, reject new steps and
   provider/auxiliary requests, report scoped active-tool counts, force-park
-  stragglers only after durable handoffs, then use bounded cleanup/termination;
-  repeated requests escalate immediately. Supervisor restart-chain failures are
-  logged and released so later triggers remain usable. Final shutdown cancels
-  the supervisor deadline, promotes runner handoffs to a server marker, and
-  stays unbounded after that marker; live markers are fenced from liveness
-  recovery. Text handlers precompress once, negotiating zstd, Brotli, gzip,
-  deflate; `/favicon.svg` revalidates separately with ETag.
+  stragglers only after durable handoffs, then bound cleanup/termination;
+  repeats escalate immediately. `DevelopmentRestartLifecycle` owns it; a
+  rejected drain keeps serving, so it restores maintenance, shutdown state,
+  recovery, the restart gate, and the abort signal (`SessionRestartAbort`:
+  aborted controllers never reopen). Restart-chain failures are logged and
+  released so later triggers stay usable. Final shutdown cancels the supervisor
+  deadline, promotes runner handoffs to a server marker, then stays unbounded;
+  live markers are fenced from liveness recovery. Text handlers precompress
+  once, negotiating zstd, Brotli, gzip, and deflate; `/favicon.svg` revalidates
+  with an ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
-- `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
-    discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
-    SQLite to upsert users and persist seven-day sessions. Primary keys are
-    UUIDv7; Google subjects and session cookie tokens are separate unique
-    fields; every table has created/updated timestamps, actor IDs, `isDeleted`.
-    `shared/database.ts` applies committed `drizzle/` migrations on open;
-    `sync-engine/index.ts` injects the persistent connection; the auth factory
-    falls back on in-memory SQLite. Shared PKCE, provider parsing, and redirects
-    live in `oauth.ts`; cookie/response helpers in `http.ts`. `solid/client.tsx`
-    reads `/api/auth/session`, gates the app, posts logout. Browser regressions
-    use real Chromium/Tailwind and production state/UI mutations, never
-    synthetic layout or CSS-only assertions; CI rejects `.only` and zero tests.
-- `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
-  active registration per machine fingerprint, one default per user.
-  `sync-engine/runners.ts` issues hashed opaque setup tokens, owns authenticated
-  management and token-authenticated callback APIs, deriving installer commands
-  from the request origin. `sync-engine/runner-installer.ts` emits the
-  macOS/Linux one-liner: it picks an x64/ARM64 glibc/musl target and starts a
-  downloaded standalone executable under `~/.q-mush/runner`; no Bun needed.
-  Runners report metadata and 15-second heartbeats over authenticated
-  WebSockets, check updates at startup and five-minute intervals, recheck via
-  handshake version after restarts, replacing an older socket on reconnect;
-  restart IDs clear only after both `restart_ready` and operational settlement.
-  Updates use a source/compiler ETag and SHA-256 digest, atomically replace and
-  restart the executable; development restarts drain active sessions first.
-  Reinstalling for the same user and machine rotates the registration to its new
-  token instead of adding a runner; other registrations stay protected; tokens
-  never appear in lists.
+- `sync-engine/auth.ts` implements Google OIDC (authorization code + PKCE) with
+  HttpOnly state/verifier cookies, fetching the basic profile and discarding
+  provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun SQLite to upsert
+  users and keep seven-day sessions. Primary keys are UUIDv7; Google subjects
+  and session cookie tokens are separate unique fields; tables carry
+  created/updated timestamps, actor IDs, `isDeleted`. `shared/database.ts`
+  applies committed `drizzle/` migrations on open; `sync-engine/index.ts`
+  injects the persistent connection; the auth factory falls back on in-memory
+  SQLite. Shared PKCE, provider parsing, and redirects live in `oauth.ts`;
+  cookie/response helpers in `http.ts`. `solid/client.tsx` reads
+  `/api/auth/session`, gates the app, posts logout. Browser regressions use real
+  Chromium/Tailwind and production state/UI mutations, never synthetic layout or
+  CSS-only assertions; CI rejects `.only` and empty suites.
+- `sync-engine/runner-store.ts` persists registrations in `runners`: one active
+  per machine fingerprint, one default per user. `sync-engine/runners.ts` issues
+  hashed opaque setup tokens and owns authenticated management plus
+  token-authenticated callback APIs, deriving installer commands from the
+  request origin. `sync-engine/runner-installer.ts` emits the macOS/Linux
+  one-liner: it picks an x64/ARM64 glibc/musl target and starts a downloaded
+  standalone executable under `~/.q-mush/runner`, needing no Bun. Runners report
+  metadata and 15-second heartbeats over authenticated WebSockets, check updates
+  at startup and every five minutes, recheck via handshake version after
+  restarts, and replace an older socket on reconnect; restart IDs clear only
+  after `restart_ready` and operational settlement. Updates use a
+  source/compiler ETag and SHA-256 digest, then atomically replace and restart
+  the executable; development restarts drain first. Reinstalling for the same
+  user and machine rotates the registration to its new token instead of adding a
+  runner; others stay protected, and tokens never appear in lists.
 - Browser messages sort by time then ID; live output anchors at its initiator;
-  snapshots replace it. `session-agent-read.ts` byte-bounds transcript/system/
-  tool-definition data.
+  snapshots replace it. `session-agent-read.ts` byte-bounds
+  transcript/system/tool data.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions. User
-  messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
-  Sessions record active time, cost, token usage, and context limit; reported
-  charges win. Auto-compaction defaults on at 95%; truncation enters only its
-  immediate compactor context, including persisted manual/idle compaction, so
-  partial output stays unfinished without marking a retry. Idle sessions compact
+  messages take eight 10 MB PNG/JPEG/GIF/WebP multimodal images. Sessions record
+  active time, cost, token usage, and context limit; reported charges win.
+  Auto-compaction defaults on at 95%; truncation enters only its immediate
+  compactor context, including persisted manual/idle compaction, so partial
+  output stays unfinished without marking a retry. Idle sessions compact
   manually or, opted in, at 30 idle minutes; compaction soft-deletes messages
-  into a replayable handoff; replays say deliver drafts, don't re-verify. The
-  composer stays mounted across statuses, explaining unavailable actions,
+  into a replayable handoff, and replays say deliver drafts, don't re-verify.
+  The composer stays mounted across statuses, explaining unavailable actions,
   keeping drafts; draft fields echo a local signal debounced into the shared
   draft — submit paths flush first; local prefs filter transcript categories.
   Provider secrets never reach browser or runner work payloads. The directory
@@ -112,31 +114,30 @@
   categories and definitions; `get_session_options` pages spawn choices. Grouped
   tools manage non-blocking owned children, report final messages, resume idle
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. Assistant transcript/system/tool-definition reads are
+  propagates cancellation. Assistant transcript/system/tool reads are
   byte-bounded. `solid/session-transcript.tsx` renders prompts, tool
   definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists page by ten. Live sessions use
-  `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  `solid/session-controller.ts`: model deltas combine once per frame per
-  session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
-  scroll anchor, and only bottom-pinned transcripts follow live output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else the first) and credential, first
-  discovered model, latest working directory, top reported effort. Unknown
-  modalities imply no attachment support; choices show provider and Q Mush
-  modalities. `solid/custom-select.tsx` shares search normalization, paginates
-  past ten items, owns accessible keyboard/focus. Focus mode fills the app
-  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
-  overlays on desktop, becomes a drawer, collapses on selection, closing with
-  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display; reasoning summaries persist as `thinking` messages omitted
-  from replay. Session and transcript rows sit in `agent_sessions` and
-  `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer); interrupted processes mark active
-  sessions failed for resumption; rebuilds add interrupted tool errors on
+  preserving user line breaks; lists page by ten. Live sessions use
+  `solid/realtime-client.ts`, `session-client.tsx`, and `session-controller.ts`:
+  model deltas combine once per frame per session, other events are immediate,
+  unchanged snapshots suppress notifications, keyed messages rerender only
+  changes. The long-lived Solid root preserves focus and scroll; the changing
+  session detail is no document scroll anchor, and only bottom-pinned
+  transcripts follow live output. `agent-model-discovery.ts` queries metadata,
+  signal-cancelable; `shared/agent-configuration.ts` owns catalog
+  types/validation. New sessions take the default online runner (else the first)
+  and credential, the first discovered model, latest working directory, and top
+  reported effort. Unknown modalities imply no attachment support; choices show
+  provider and Q Mush modalities. `solid/custom-select.tsx` shares search
+  normalization, paginates past ten items, and owns accessible keyboard/focus.
+  Focus mode fills the app viewport (not browser Fullscreen), keeping drafts and
+  scroll; its rail overlays on desktop, becomes a drawer, collapses on
+  selection, and closes with Escape first. `shared/agent-prompt.ts` builds the
+  model system prompt and transcript display; reasoning summaries persist as
+  replay-omitted `thinking` messages. Session and transcript rows sit in
+  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step
+  and clears with `activeStartedAt` (live Step timer); interrupted processes
+  mark active sessions failed for resumption, and rebuilds add tool errors on
   resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
