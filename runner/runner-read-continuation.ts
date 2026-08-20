@@ -32,13 +32,12 @@ function boundedContinuationPage(
     shownLines = candidateLines;
   }
   if (shownLines === 0) {
-    const fallback = `${requested.join("\n")}${continuationMarker(
-      offset,
-      requested.length,
-      totalLines,
-    )}`;
-    const padding = Math.max(0, maximum + 1 - unicodeCharacterCount(fallback));
-    return codePointPrefix(`${fallback}${"\n".repeat(padding)}`, maximum + 1);
+    // The first requested line plus its marker exceeded the bound. Append an
+    // explicit overflow signal; the prefix retains only as much as needed.
+    return codePointPrefix(
+      `${requested.join("\n")}${"\n".repeat(maximum + 1)}`,
+      maximum + 1,
+    );
   }
   return `${requested.slice(0, shownLines).join("\n")}${continuationMarker(
     offset,
