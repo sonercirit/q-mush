@@ -4,13 +4,15 @@ import {
   SESSION_ID,
   STREAM_ID,
 } from "./realtime-stream-event-fixtures.ts";
-import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
+import {
+  advancingClock,
+  streamingRealtimeFixture,
+} from "./realtime-stream-test-fixture.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
 test("keeps older deltas ahead of a later state barrier after terminal cleanup", () => {
-  let clock = 0;
   const stream = streamingRealtimeFixture("terminal-barrier", undefined, {
-    now: () => (clock += 5),
+    now: advancingClock(),
   });
   stream.receive({
     session: { ...TEST_SESSION_DETAIL, id: SESSION_ID, status: "completed" },

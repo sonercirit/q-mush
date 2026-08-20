@@ -13,7 +13,10 @@ import {
   SESSION_ID,
   STREAM_ID,
 } from "./realtime-stream-event-fixtures.ts";
-import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
+import {
+  advancingClock,
+  streamingRealtimeFixture,
+} from "./realtime-stream-test-fixture.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 interface StreamingTestConnection extends ReturnType<
@@ -169,13 +172,6 @@ function queueEmptyQuestions(stream: StreamingTestConnection): void {
     sessionId: SESSION_ID,
     type: "session_questions",
   });
-}
-function advancingClock(): () => number {
-  let clock = 0;
-  return () => {
-    clock += 5;
-    return clock;
-  };
 }
 function sendRunningTool(
   stream: StreamingTestConnection,

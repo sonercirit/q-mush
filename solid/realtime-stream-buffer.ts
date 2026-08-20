@@ -116,6 +116,7 @@ export class RealtimeStreamBuffer {
     this.#selectedTurn = true;
     this.#selectedId = undefined;
   }
+  // Callers must discard every outstanding barrier before clearing pending data.
   clearPending(): void {
     for (const pending of this.#pending.values()) {
       for (const update of pending.values()) {

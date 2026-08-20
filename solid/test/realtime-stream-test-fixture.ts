@@ -3,6 +3,14 @@ import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
 
+export function advancingClock(): () => number {
+  let clock = 0;
+  return () => {
+    clock += 5;
+    return clock;
+  };
+}
+
 export interface StreamingRealtimeFixture {
   readonly emitted: RealtimeClientEvent[];
   readonly pendingFrames: (() => void)[];
