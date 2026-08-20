@@ -30,7 +30,7 @@ import {
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
-import { restoreRejectedDevelopmentDrainRecovery } from "./development-restart-recovery.ts";
+import { drainDevelopmentRestart } from "./development-restart.ts";
 import { EngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
@@ -71,7 +71,7 @@ const database = openDatabaseAndCleanupRepairSnapshots(databasePath, {
 });
 // Run the free-space preflight before the optional full VACUUM rebuild.
 const vacuumRequiredBytes = databaseVacuumSafetyBytes(database.$client);
-const freeSpace = startDatabaseFreeSpaceMonitor(
+let freeSpace = startDatabaseFreeSpaceMonitor(
   databasePath,
   health,
   vacuumRequiredBytes,
@@ -93,7 +93,7 @@ if (vacuum.rebuilt) {
 }
 const writeResilience = new DatabaseWriteResilience({ health });
 installDatabaseWriteResilience(database, writeResilience);
-const vacuumTimer = startIncrementalVacuum(database.$client);
+let vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
   await Promise.all([
     buildClientJavaScript(),
@@ -134,7 +134,7 @@ const sessions = createSessionIntegration(
   { generic, openai: openAi, openrouter: openRouter },
   { braveSearch, database, realtime: realtimeHub, workspaces },
 );
-const recoveryTimer = startDatabaseRecoveryWatcher(
+let recoveryTimer = startDatabaseRecoveryWatcher(
   database.$client,
   health,
   () => sessions.reconcileDatabaseWrites(),
@@ -214,6 +214,23 @@ sessions.onChange((userId, sessionId) => {
   }
 });
 
+function startMaintenance(): void {
+  const reconcileWrites = () => sessions.reconcileDatabaseWrites();
+  const hasPendingWrites = () => sessions.hasPendingDatabaseWrites();
+  recoveryTimer = startDatabaseRecoveryWatcher(
+    database.$client,
+    health,
+    reconcileWrites,
+    hasPendingWrites,
+  );
+  vacuumTimer = startIncrementalVacuum(database.$client);
+  freeSpace = startDatabaseFreeSpaceMonitor(
+    databasePath,
+    health,
+    vacuumRequiredBytes,
+  );
+}
+
 function stopMaintenance(): void {
   clearInterval(recoveryTimer);
   clearInterval(vacuumTimer);
@@ -275,15 +292,18 @@ function restartDevelopment(deadlineAt: number): Promise<void> {
   );
   progressTimer.unref();
   const deadline = new RestartDeadline(deadlineAt);
-  developmentRestart = sessions
-    .drain(deadline)
-    .catch((error: unknown) => {
-      restoreRejectedDevelopmentDrainRecovery(sessions);
-      console.warn(
-        `Q Mush development restart drain failed: ${errorMessage(error)}`,
-      );
-    })
-    .then(() => {
+  developmentRestart = drainDevelopmentRestart(sessions, deadline, (error) => {
+    console.warn(
+      `Q Mush development restart drain failed: ${errorMessage(error)}`,
+    );
+  })
+    .then((drained) => {
+      if (!drained) {
+        startMaintenance();
+        shutdownKind = undefined;
+        developmentRestart = undefined;
+        return;
+      }
       publishRestartProgress();
       process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
     })

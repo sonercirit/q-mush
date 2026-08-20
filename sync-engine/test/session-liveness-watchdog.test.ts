@@ -358,8 +358,6 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
   const setup = runningSetup();
   const watchdog = watchdogSetup(setup, { graceMs: 1_000 });
   markedShutdownSession(setup, watchdog, "bounded-shutdown");
-  watchdog.shutdownInterrupted.enableRecovery();
-
   watchdog.scan();
 
   const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);

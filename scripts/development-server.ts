@@ -160,7 +160,6 @@ export function startDevelopmentServer(
       child.send(message);
       return true;
     } catch {
-      // IPC sends are best effort; the child exit/retry paths handle failure.
       return false;
     }
   };
