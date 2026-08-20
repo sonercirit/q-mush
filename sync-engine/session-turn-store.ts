@@ -207,6 +207,7 @@ type SessionTurnRotationOptions = Omit<
   readonly toolSettings: ToolSettings | "inherit";
 };
 
+// Turn-column defaults derive from DEFAULT_TOOL_SETTINGS in the database schema.
 function selectedToolSettingsColumns() {
   return {
     executionLimitMinutes: agentSessionTurns.toolExecutionLimitMinutes,

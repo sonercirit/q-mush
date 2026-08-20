@@ -150,6 +150,7 @@ export function readCapture(value: unknown): PageCapture {
     throw new Error("Chromium returned an invalid rendered page result");
   }
   const capture = value["result"]["value"];
+  // The response-byte limit is also the in-process capture text memory bound.
   if (
     !isRecord(capture) ||
     typeof capture["text"] !== "string" ||
@@ -185,7 +186,7 @@ export function readCapture(value: unknown): PageCapture {
   };
 }
 
-function outputRecord(response: PageResponse, capture: PageCapture) {
+export function outputRecord(response: PageResponse, capture: PageCapture) {
   return {
     charset: response.charset,
     contentType: response.contentType,
@@ -201,11 +202,4 @@ function outputRecord(response: PageResponse, capture: PageCapture) {
       text: capture.truncated.text,
     },
   };
-}
-
-export function boundedOutput(
-  response: PageResponse,
-  capture: PageCapture,
-): string {
-  return JSON.stringify(outputRecord(response, capture), undefined, 2);
 }
