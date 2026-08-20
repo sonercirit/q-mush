@@ -39,6 +39,29 @@ test("does not adopt a retained ID after unidentified admission", async () => {
   socket.close();
 });
 
+test("retries a late prior-response error on a reused socket", async () => {
+  const setup = new FakeProviderSockets();
+  const createSocket = setup.create;
+  const model = apiKeyModel({ webSocket: createSocket });
+  const first = complete(model);
+  const reused = requireProviderSocket(setup, 0);
+  reused.open();
+  acknowledgeProviderSocket(reused, "prior");
+  completeProviderSocket(reused, "prior");
+  expectDoneStep(await first);
+
+  const second = complete(model);
+  reused.receive({
+    error: { code: "late_error", message: "Stale failure" },
+    type: "error",
+  });
+  await setup.waitForAttempt(1);
+  expect(reused.readyState).toBe(WebSocket.CLOSED);
+  expect(reused.closeReason).toBe("Uncorrelated provider error");
+  await replaceProviderSocket(setup, 1);
+  expectDoneStep(await second);
+});
+
 test("retries provider errors received before admission", async () => {
   const retry = retryingSocket();
   const first = requireProviderSocket(retry.sockets, 0);

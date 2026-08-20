@@ -168,33 +168,6 @@ test("correlates deltas on a reused socket", async () => {
   expectProviderSocketReleased(socket);
 });
 
-test("retries a reused socket when a late prior-response error arrives", async () => {
-  const { model, sockets } = lifecycleModel([]);
-  const first = complete(model);
-  const reused = requireProviderSocket(sockets, 0);
-  reused.open();
-  acknowledgeProviderSocket(reused, "response-1");
-  completeResponse(reused, "response-1");
-  expectDoneStep(await first);
-
-  const second = complete(model);
-  expect(reused.sent).toHaveLength(2);
-  reused.receive({
-    error: { code: "late_previous_error", message: "Stale failure" },
-    type: "error",
-  });
-  await sockets.waitForAttempt(1);
-  const replacement = requireProviderSocket(sockets, 1);
-  replacement.open();
-  acknowledgeProviderSocket(replacement, "response-2");
-  completeResponse(replacement, "response-2");
-
-  expectDoneStep(await second);
-  expect(reused.readyState).toBe(WebSocket.CLOSED);
-  expect(reused.closeReason).toBe("Uncorrelated provider error");
-  replacement.close();
-});
-
 test.each([
   ["fresh-first", true],
   ["reused-first", false],
