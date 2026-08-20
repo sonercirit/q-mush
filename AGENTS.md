@@ -112,31 +112,32 @@ Project memory.
   parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
   propagates cancellation. `solid/session-transcript.tsx` renders prompts,
   Markdown, code/JSON, diffs/results; session lists by ten. Live streams use
-  count/time-bounded fair four-key preparation frames; each batch patches once.
-  Mutation/stop freezes model/tool UI to prevent mixed state; settlement rebases
-  streams. Disconnect drops unrendered fragments, then resyncs active paused
-  tool streams. Incremental barriers and compact 100/session, 1,000/user caps
-  block stale revival and permit key reuse. Barrier epochs stay monotonic while
-  a session has queued updates or barriers; releasing its last barrier reclaims
-  the epoch only after queued updates drain. Terminal cleanup cannot reset
-  epochs while later barriers remain. Resets replace models; state events
-  coalesce one/frame; ready, health, commands apply directly; no-op snapshots
-  suppress notices. Solid keeps focus/scroll; detail disables document anchoring
-  and only bottom-pinned transcripts follow output. `agent-model-discovery.ts`
-  queries metadata, signal-cancelable; `shared/agent-configuration.ts` owns
-  catalog types/validation. New sessions take the default online runner (else
-  the first) and credential, first discovered model, latest working directory,
-  top reported effort. Unknown modalities imply no attachment support; choices
-  show provider and Q Mush modalities. `solid/custom-select.tsx` shares search
-  normalization, paginates past ten items, owns accessible keyboard/focus. Focus
-  mode fills the app viewport (not browser Fullscreen), keeping drafts and
-  scroll; its rail overlays on desktop, becomes a drawer, collapses on
-  selection, closing with Escape first. `shared/agent-prompt.ts` builds the
-  model system prompt and transcript display; reasoning summaries persist as
-  `thinking` messages omitted from replay. Session and transcript rows sit in
-  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
-  clears with `activeStartedAt` (live Step timer); interrupted processes mark
-  active sessions failed for resumption; rebuilds add interrupted tool errors on
+  four-key preparation frames; batches patch once, compacting the oldest or
+  protected candidate before eviction. Mutation/stop freezes model/tool UI;
+  settlement rebases streams. Disconnect drops unrendered fragments, then
+  resyncs active paused tool streams. Incremental barriers and compact
+  100/session, 1,000/user caps block stale revival and permit key reuse. Barrier
+  epochs stay monotonic while a session has queued updates or barriers;
+  releasing its last barrier reclaims the epoch only after queued updates drain.
+  Terminal cleanup cannot reset epochs while later barriers remain. Resets
+  replace models; state events coalesce one/frame; ready, health, commands apply
+  directly; no-op snapshots suppress notices. Solid keeps focus/scroll; detail
+  disables document anchoring and only bottom-pinned transcripts follow output.
+  `agent-model-discovery.ts` queries metadata, signal-cancelable;
+  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
+  take the default online runner (else the first) and credential, first
+  discovered model, latest working directory, top reported effort. Unknown
+  modalities imply no attachment support; choices show provider and Q Mush
+  modalities. `solid/custom-select.tsx` shares search normalization, paginates
+  past ten items, owns accessible keyboard/focus. Focus mode fills the app
+  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  overlays on desktop, becomes a drawer, collapses on selection, closing with
+  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
+  transcript display; reasoning summaries persist as `thinking` messages omitted
+  from replay. Session and transcript rows sit in `agent_sessions` and
+  `agent_messages`; `step_started_at` sets per model step, clears with
+  `activeStartedAt` (live Step timer); interrupted processes mark active
+  sessions failed for resumption; rebuilds add interrupted tool errors on
   resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model

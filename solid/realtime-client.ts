@@ -579,7 +579,7 @@ export class RealtimeConnection {
       return;
     }
     if (event.type === "health") {
-      this.#listener(event);
+      this.#deliver(event);
       return;
     }
     if (event.type === "session_delta" || event.type === "tool_stream") {

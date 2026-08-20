@@ -3,7 +3,10 @@ import {
   MAXIMUM_TOOL_STREAMS_PER_SESSION,
   MAXIMUM_TOOL_STREAMS_PER_USER,
 } from "../../shared/tool-stream.ts";
-import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
+import {
+  RealtimeStreamBuffer,
+  type RealtimeStreamBatch,
+} from "../realtime-stream-buffer.ts";
 import {
   activeToolDelta,
   deliverTerminalStream,
@@ -33,29 +36,81 @@ test("bounds pending keys before materialization", () => {
   expect(drained).toBe(MAXIMUM_TOOL_STREAMS_PER_USER);
 });
 
-test("compacts the oldest model stream instead of evicting it at the fragment cap", () => {
-  const buffer = new RealtimeStreamBuffer();
-  const oldestParts = ["oldest-first", "-oldest-second"];
-  for (const part of oldestParts) {
+function drainUpdates(
+  buffer: RealtimeStreamBuffer,
+): RealtimeStreamBatch["updates"] {
+  const updates: RealtimeStreamBatch["updates"][number][] = [];
+  while (buffer.pending) updates.push(...(buffer.takeNext()?.updates ?? []));
+  return updates;
+}
+
+function queueModelParts(
+  buffer: RealtimeStreamBuffer,
+  parts: readonly string[],
+): void {
+  for (const part of parts)
     buffer.queue(identifiedModelDelta(SESSION_ID, STREAM_ID, part));
-  }
-  for (let index = 0; index < MAXIMUM_TOOL_STREAMS_PER_USER - 2; index += 1) {
+}
+
+function modelContents(buffer: RealtimeStreamBuffer): readonly string[] {
+  return drainUpdates(buffer)
+    .filter((update) => update.type === "session_delta")
+    .map((update) => update.content);
+}
+
+function queueModelFillers(
+  buffer: RealtimeStreamBuffer,
+  count: number,
+  prefix: string,
+): void {
+  const suffixes = Array.from({ length: count }).map((_value, index) =>
+    String(index),
+  );
+  for (const suffix of suffixes) {
     buffer.queue(
       identifiedModelDelta(
-        `filler-session-${String(index)}`,
-        `filler-stream-${String(index)}`,
+        `${prefix}-session-${suffix}`,
+        `${prefix}-stream-${suffix}`,
       ),
     );
   }
+}
+
+test("compacts the oldest model stream instead of evicting it at the fragment cap", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const oldestParts = ["oldest-first", "-oldest-second"];
+  queueModelParts(buffer, oldestParts);
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "filler");
   buffer.queue(identifiedModelDelta("new-session", "new-stream"));
 
-  const content: string[] = [];
-  while (buffer.pending) {
-    for (const update of buffer.takeNext()?.updates ?? []) {
-      if (update.type === "session_delta") content.push(update.content);
-    }
-  }
-  expect(content).toContain(oldestParts.join(""));
+  expect(modelContents(buffer)).toContain(oldestParts.join(""));
+});
+
+test("compacts a protected model stream at the fragment cap", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const parts = ["protected-first", "-protected-middle"];
+  queueModelParts(buffer, parts);
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "protected");
+  const last = "-protected-last";
+  parts.push(last);
+  buffer.queue(identifiedModelDelta(SESSION_ID, STREAM_ID, last));
+
+  expect(modelContents(buffer)).toContain(parts.join(""));
+});
+
+test("preserves a protected tool stream when compacting it at the fragment cap", () => {
+  const buffer = new RealtimeStreamBuffer();
+  buffer.queue(orderedToolDelta(0, { state: "preparing" }));
+  buffer.queue(orderedToolDelta(1, { state: "running" }));
+  buffer.queue(orderedToolDelta(2, { content: "tool-first" }));
+  buffer.queue(orderedToolDelta(3, { content: "-tool-middle" }));
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "tool-filler");
+  buffer.queue(orderedToolDelta(4, { content: "-tool-second" }));
+
+  const outputs = drainUpdates(buffer)
+    .filter((update) => update.type === "tool_update")
+    .map((update) => update.entry.stdout);
+  expect(outputs).toContain("tool-first-tool-middle-tool-second");
 });
 
 test("retains compact terminal identity independent of rendered payload", () => {

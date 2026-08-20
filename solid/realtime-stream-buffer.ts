@@ -46,7 +46,6 @@ export interface RealtimeStreamBarrier {
   readonly sessionId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
-// Share the user tool-stream cap for both queued fragments and distinct keys.
 const MAXIMUM_PENDING_STREAM_ITEMS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
@@ -399,27 +398,32 @@ export class RealtimeStreamBuffer {
     const pending = this.#pendingSession(event.sessionId);
     const found = pending?.get(key);
     const buffered = found?.kind === "tool" ? found.value : undefined;
-    const retainedKey = toolKey(event);
     const current =
       buffered?.entry ??
-      this.#pendingToolEntry(event.sessionId, retainedKey) ??
-      this.#currentToolEntry(retainedKey);
-    const result = validatedToolDelta(current, event);
+      this.#pendingToolEntry(event.sessionId, toolKey(event)) ??
+      this.#currentToolEntry(toolKey(event));
+    let result = validatedToolDelta(current, event);
     if (!result.accepted) {
       if (result.reason === "initial" || result.reason === "gap") {
         this.#requestToolResync(event);
       }
       return;
     }
-    const contentBytes =
-      event.content === undefined ? 0 : utf8ByteLength(event.content);
+    const contentBytes = utf8ByteLength(event.content ?? "");
     const fragments = event.content === undefined ? 0 : 1;
     if (!this.#makeRoom(contentBytes, fragments, buffered === undefined, key)) {
       this.#requestToolResync(event);
       return;
     }
+    if (buffered !== undefined && buffered.entry !== current) {
+      result = validatedToolDelta(buffered.entry, event);
+      if (!result.accepted) {
+        this.#requestToolResync(event);
+        return;
+      }
+    }
     const next = buffered ?? initialBufferedToolUpdate(result.entry, epoch);
-    if (appendToolDelta(next, event, result.entry) === undefined) return;
+    if (!appendToolDelta(next, event, result.entry)) return;
     if (buffered === undefined) {
       this.#storePending(event.sessionId, key, { kind: "tool", value: next });
     } else {

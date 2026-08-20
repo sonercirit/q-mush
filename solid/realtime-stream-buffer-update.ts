@@ -146,11 +146,11 @@ export function appendToolDelta(
   buffered: BufferedToolUpdate,
   event: ToolStreamDeltaFrame,
   entry: ToolStreamEntry,
-): Readonly<{ bytes: number; fragments: number }> | undefined {
+): boolean {
   const bytes = event.content === undefined ? 0 : utf8ByteLength(event.content);
   if (event.channel !== undefined && event.content !== undefined) {
     const channelTotal = buffered.bytes[event.channel] + bytes;
-    if (channelTotal > MAXIMUM_TOOL_STREAM_FIELD_BYTES) return undefined;
+    if (channelTotal > MAXIMUM_TOOL_STREAM_FIELD_BYTES) return false;
     buffered.bytes[event.channel] = channelTotal;
     buffered.chunks[event.channel].push(event.content);
     buffered.fragments += 1;
@@ -158,7 +158,7 @@ export function appendToolDelta(
   }
   buffered.entry = entry;
   buffered.terminal = entry.state !== "preparing" && entry.state !== "running";
-  return { bytes, fragments: event.content === undefined ? 0 : 1 };
+  return true;
 }
 
 export function validatedToolDelta(
