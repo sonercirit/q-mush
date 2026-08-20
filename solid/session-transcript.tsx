@@ -15,10 +15,7 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import { type ToolSettings } from "../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
@@ -442,16 +439,15 @@ export function SessionTranscript(props: {
     isStreamedMessage(message)
       ? transcriptToolSettings()
       : turnToolSettings().get(message.turnId ?? "");
-  const serializedTools = createMemo(() =>
-    JSON.stringify(
-      selectedAgentTools(
-        props.tools,
-        transcriptToolSettings() ?? DEFAULT_TOOL_SETTINGS,
-      ),
-      null,
-      2,
-    ),
-  );
+  const serializedTools = createMemo(() => {
+    const settings = transcriptToolSettings();
+    return settings === undefined
+      ? JSON.stringify({
+          settings: "Tool limits for this transcript are unavailable.",
+          tools: props.tools,
+        })
+      : JSON.stringify(selectedAgentTools(props.tools, settings), null, 2);
+  });
   const stepTiming = createSessionStepTiming(
     () => props.messages,
     () => props.status ?? "idle",
@@ -528,15 +524,26 @@ export function SessionTranscript(props: {
   return (
     <>
       <Show when={props.filters.systemPrompt}>
-        {renderTranscriptInstruction({
-          boundaryKey: "system-prompt",
-          content: createAgentSystemPrompt(
-            null,
-            props.executionEnvironment,
-            transcriptToolSettings() ?? DEFAULT_TOOL_SETTINGS,
-          ),
-          label: "System prompt",
-        })}
+        <Show
+          fallback={renderTranscriptInstruction({
+            boundaryKey: "system-prompt",
+            content: "Tool limits for this transcript are unavailable.",
+            label: "System prompt",
+          })}
+          when={transcriptToolSettings()}
+        >
+          {(settings) =>
+            renderTranscriptInstruction({
+              boundaryKey: "system-prompt",
+              content: createAgentSystemPrompt(
+                null,
+                props.executionEnvironment,
+                settings(),
+              ),
+              label: "System prompt",
+            })
+          }
+        </Show>
       </Show>
       <Show when={props.filters.agentInstructions && props.agentFile !== null}>
         {renderTranscriptInstruction({

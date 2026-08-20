@@ -32,7 +32,10 @@ function boundedContinuationPage(
     shownLines = candidateLines;
   }
   if (shownLines === 0) {
-    return codePointPrefix(requested.join("\n"), maximum + 1);
+    const requestedEnd = offset - 1 + requested.length;
+    const fallbackLines =
+      requestedEnd < totalLines ? [...requested, ""] : requested;
+    return codePointPrefix(fallbackLines.join("\n"), maximum + 1);
   }
   return `${requested.slice(0, shownLines).join("\n")}${continuationMarker(
     offset,
