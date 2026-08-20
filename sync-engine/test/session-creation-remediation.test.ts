@@ -8,6 +8,7 @@ import {
 } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { SessionRestartAbort } from "../../sync-engine/session-restart-abort.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { createSessionForUser } from "../../sync-engine/session-user-actions.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
@@ -115,13 +116,18 @@ test("HTTP creation retains restart identity across credential lookup", async ()
   const restart = new SessionRestartAbort();
   const setup = setupCreation({ launch: () => true });
   const input = sessionInput();
-  const {
-    openRouterProviderTag: _openRouterProviderTag,
-    reasoningEffort: _reasoningEffort,
-    userContextTokenCap: _userContextTokenCap,
-    workspaceId,
-    ...requestInput
-  } = input;
+  const requestInput = {
+    autoCompact: input.autoCompact,
+    credentialId: input.credentialId,
+    executionEnvironment: input.executionEnvironment,
+    images: input.images,
+    model: input.model,
+    prompt: input.prompt,
+    provider: input.provider,
+    runnerId: input.runnerId,
+    tools: input.tools,
+    workingDirectory: input.workingDirectory,
+  };
   const response = await createSessionForUser(
     {
       compactionBoundary: () => {
@@ -130,7 +136,10 @@ test("HTTP creation retains restart identity across credential lookup", async ()
       discoverModels: setup.dependencies.discoverModels,
       discoverOpenRouterProviders:
         setup.dependencies.discoverOpenRouterProviders,
-      launchBoundary: () => setup.dependencies as never,
+      launchBoundary: () => ({
+        ...setup.dependencies,
+        runtimes: new SessionRuntimes(),
+      }),
       restartSignal: () => restart.signal,
       runnerIsAvailable: () => true,
       withCredential: async (_userId, _selection, action) => {
@@ -145,7 +154,7 @@ test("HTTP creation retains restart identity across credential lookup", async ()
       method: "POST",
     }),
     TEST_USER,
-    workspaceId,
+    input.workspaceId,
   );
   expect(response.status).toBe(503);
   expect(setup.store.create).not.toHaveBeenCalled();
