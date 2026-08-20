@@ -154,7 +154,7 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
-  test("requires an owned workspace for creation and every HTTP session item action", async () => {
+  test("requires workspace ownership for HTTP session actions", async () => {
     const setup = completingSessionSetup("Workspace isolation ready.");
 
     const input = await sessionRequestInput();
@@ -229,7 +229,7 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("stores session failures as error messages and settles active timing", async () => {
+  test("stores failures and settles timing", async () => {
     let now = TEST_NOW;
     const setup = connectedSessionSetup(
       new FailingModel(),
@@ -302,7 +302,7 @@ describe("agent sessions", () => {
     );
   });
 
-  test("persists images and timing and sends them to the model", async () => {
+  test("persists and sends images with timing", async () => {
     const expiry = TEST_NOW + 7 * 86_400_000;
     let now = TEST_NOW;
     const model = new ScriptedAgentModel([
@@ -446,7 +446,7 @@ describe("agent sessions", () => {
     }
   });
 
-  test("hands off a durable tool step and resumes only after explicit recovery", async () => {
+  test("resumes durable tool handoff after recovery", async () => {
     const restartCall = {
       arguments: '{"command":"bun run dev:restart","timeout":30}',
       id: "restart-call",
@@ -619,7 +619,7 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("rejects malformed HTTP stop semantics", async () => {
+  test("rejects malformed stop semantics", async () => {
     const setup = connectedSessionSetup(new BlockingModel());
     await setup.sessions.collection(createSessionRequest());
 
@@ -630,7 +630,7 @@ describe("agent sessions", () => {
     setup.database.$client.close();
   });
 
-  test("protects session endpoints", async () => {
+  test("protects endpoints", async () => {
     expect(await unauthenticatedSessionStatus()).toBe(401);
   });
 });
