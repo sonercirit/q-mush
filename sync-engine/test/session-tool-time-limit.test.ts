@@ -60,11 +60,26 @@ async function expectTimedOutRun(
   execute: Parameters<typeof executeToolWithinTimeLimit>[0],
   outer: AbortController,
 ): Promise<void> {
-  const result = executeToolWithinTimeLimit(execute, outer.signal);
+  const result = executeToolWithinTimeLimit(
+    execute,
+    outer.signal,
+    DEFAULT_TOOL_SETTINGS,
+  );
   await vi.advanceTimersByTimeAsync(
     toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
   );
   await expect(result).resolves.toMatchObject({ state: "timed-out" });
+}
+
+function defaultTimedRun(
+  execute: Parameters<typeof executeToolWithinTimeLimit>[0],
+  outer: AbortController,
+) {
+  return executeToolWithinTimeLimit(
+    execute,
+    outer.signal,
+    DEFAULT_TOOL_SETTINGS,
+  );
 }
 
 function timedOutOuterController(): AbortController {
@@ -116,6 +131,7 @@ describe("global tool time limit", () => {
       executeToolWithinTimeLimit(
         () => Promise.resolve({ output: "done", state: "completed" }),
         outer.signal,
+        DEFAULT_TOOL_SETTINGS,
       ),
     ).resolves.toEqual({ output: "done", state: "completed" });
   });
@@ -206,10 +222,14 @@ describe("global tool time limit", () => {
     const outer = timedOutOuterController();
     const callSignal = signalCapture();
 
-    const result = executeToolWithinTimeLimit((signal) => {
-      callSignal(signal);
-      return hangingExecute(signal);
-    }, outer.signal);
+    const result = executeToolWithinTimeLimit(
+      (signal) => {
+        callSignal(signal);
+        return hangingExecute(signal);
+      },
+      outer.signal,
+      DEFAULT_TOOL_SETTINGS,
+    );
     await advanceToToolDeadline();
     expect(lastCapturedSignal(callSignal).aborted).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
@@ -225,10 +245,7 @@ describe("global tool time limit", () => {
 
   test("prefers the outer reason when execution rejects with another abort", async () => {
     const outer = timedOutOuterController();
-    const result = executeToolWithinTimeLimit(
-      abortingExecute("Inner abort"),
-      outer.signal,
-    );
+    const result = defaultTimedRun(abortingExecute("Inner abort"), outer);
     const assertion = expect(result).rejects.toThrow("Outer stop");
 
     outer.abort(new Error("Outer stop"));
@@ -239,7 +256,7 @@ describe("global tool time limit", () => {
   test("an outer abort still rejects instead of reporting a timeout", async () => {
     const outer = timedOutOuterController();
 
-    const result = executeToolWithinTimeLimit(hangingExecute, outer.signal);
+    const result = defaultTimedRun(hangingExecute, outer);
     const assertion = expect(result).rejects.toThrow("Aborted");
     outer.abort(new DOMException("Aborted", "AbortError"));
     await assertion;
@@ -254,6 +271,7 @@ describe("global tool time limit", () => {
     const result = executeToolWithinTimeLimit(
       nonCooperativeExecute,
       outer.signal,
+      DEFAULT_TOOL_SETTINGS,
     );
     const captured = result.catch((error: unknown) => error);
     outer.abort(reason);
@@ -275,7 +293,11 @@ describe("global tool time limit", () => {
     outer.abort(new Error("Stopped by the user"));
 
     await expect(
-      executeToolWithinTimeLimit(nonCooperativeExecute, outer.signal),
+      executeToolWithinTimeLimit(
+        nonCooperativeExecute,
+        outer.signal,
+        DEFAULT_TOOL_SETTINGS,
+      ),
     ).rejects.toThrow("Stopped by the user");
     expectNoTimers();
   });
@@ -303,10 +325,14 @@ describe("global tool time limit", () => {
     const callSignal = signalCapture();
     const outer = new AbortController();
 
-    await executeToolWithinTimeLimit((signal) => {
-      callSignal(signal);
-      return Promise.resolve({ output: "done", state: "completed" });
-    }, outer.signal);
+    await executeToolWithinTimeLimit(
+      (signal) => {
+        callSignal(signal);
+        return Promise.resolve({ output: "done", state: "completed" });
+      },
+      outer.signal,
+      DEFAULT_TOOL_SETTINGS,
+    );
 
     // A straggler still listening on the call signal must not retain
     // the long-lived session signal after its call settled; settle()

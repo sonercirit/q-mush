@@ -283,8 +283,9 @@ Project memory.
   errors retry before persistence; replays reset partial UI deltas and exhausted
   WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.
-- Tools use persisted global per-user settings, defaulting to 30 minutes and
-  20,000 Unicode characters. Each run snapshots both for its prompt, schemas,
+- Tools use persisted user settings, defaulting to 30 minutes and 20,000 Unicode
+  characters. Writes upsert on the partial index; keep its conflict
+  predicate schema-aligned. Each run snapshots both for its prompt, schemas,
   engine/runner deadline, sleep, skills/session tools, and final model-facing
   result bound; changes apply next run and realtime updates stay user-scoped.
   Loading clears its timer and aborts its signal on settlement. `parallel`

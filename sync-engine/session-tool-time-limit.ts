@@ -1,5 +1,4 @@
 import {
-  DEFAULT_TOOL_SETTINGS,
   formatGlobalToolExecutionLimit,
   toolExecutionLimitMilliseconds,
   type ToolSettings,
@@ -21,7 +20,7 @@ function timeLimitMessage(settings: ToolSettings): string {
 export function executeToolWithinTimeLimit(
   execute: (signal: AbortSignal) => Promise<RunnerCommandResult>,
   outerSignal: AbortSignal,
-  settings: ToolSettings = DEFAULT_TOOL_SETTINGS,
+  settings: ToolSettings,
 ): Promise<RunnerCommandResult> {
   if (outerSignal.aborted) {
     return Promise.reject(

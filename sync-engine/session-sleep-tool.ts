@@ -1,6 +1,5 @@
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import {
-  DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitSeconds,
   type ToolSettings,
 } from "../shared/tool-limits.ts";
@@ -47,8 +46,8 @@ export async function executeSessionSleepTool(
   signal: AbortSignal,
   hasPendingSteeringInput: () => boolean,
   waitForSteeringInput: (signal: AbortSignal) => Promise<void>,
-  now: () => number = Date.now,
-  settings: ToolSettings = DEFAULT_TOOL_SETTINGS,
+  now: () => number,
+  settings: ToolSettings,
 ): Promise<string> {
   const expectedMilliseconds = requestedDuration(arguments_, settings);
   const startedAt = now();

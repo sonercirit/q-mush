@@ -45,6 +45,21 @@ function startSleep(
     signal,
     options.pending ?? inactiveSteering,
     (waitSignal) => waitForSessionSteeringInput(sessionId, waitSignal),
+    Date.now,
+    DEFAULT_TOOL_SETTINGS,
+  );
+}
+
+function invalidSleep(
+  arguments_: Readonly<Record<string, unknown>>,
+): Promise<string> {
+  return executeSessionSleepTool(
+    arguments_,
+    new AbortController().signal,
+    inactiveSteering,
+    () => Promise.resolve(),
+    Date.now,
+    DEFAULT_TOOL_SETTINGS,
   );
 }
 
@@ -109,8 +124,6 @@ describe("session sleep tool", () => {
   });
 
   test("rejects invalid and unreasonably long durations", async () => {
-    const signal = new AbortController().signal;
-    const wait = () => Promise.resolve();
     for (const durationSeconds of [
       undefined,
       0,
@@ -120,30 +133,15 @@ describe("session sleep tool", () => {
       1.5,
       DEFAULT_EXECUTION_LIMIT_SECONDS + 1,
     ]) {
-      await expect(
-        executeSessionSleepTool(
-          { durationSeconds },
-          signal,
-          inactiveSteering,
-          wait,
-        ),
-      ).rejects.toThrow("durationSeconds");
+      await expect(invalidSleep({ durationSeconds })).rejects.toThrow(
+        "durationSeconds",
+      );
     }
+    await expect(invalidSleep({ durationMs: 1_000 })).rejects.toThrow(
+      "durationSeconds",
+    );
     await expect(
-      executeSessionSleepTool(
-        { durationMs: 1_000 },
-        signal,
-        inactiveSteering,
-        wait,
-      ),
-    ).rejects.toThrow("durationSeconds");
-    await expect(
-      executeSessionSleepTool(
-        { durationSeconds: 1, extra: true },
-        signal,
-        inactiveSteering,
-        wait,
-      ),
+      invalidSleep({ durationSeconds: 1, extra: true }),
     ).rejects.toThrow("arguments");
   });
 

@@ -61,9 +61,7 @@ export function readContinuation(
   const complete =
     nextOffset <= lines.length
       ? `${output}${continuationMarker(offset, requested.length, lines.length)}`
-      : offset === 1
-        ? content
-        : output;
+      : output;
   if (
     maximumCharacters === undefined ||
     unicodeCharacterCount(complete) <= maximumCharacters
