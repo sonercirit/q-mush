@@ -69,10 +69,12 @@ export class SessionRealtimeState {
 
   #oldestEvictableSession(ids: Iterable<string>): string | undefined {
     const view = this.#view.value;
-    return Array.from(ids).find(
-      (candidate) =>
-        candidate !== view.selectedId && candidate !== view.detail?.id,
-    );
+    for (const candidate of ids) {
+      if (candidate !== view.selectedId && candidate !== view.detail?.id) {
+        return candidate;
+      }
+    }
+    return undefined;
   }
 
   #retainMutationRebase(sessionId: string): void {

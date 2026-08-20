@@ -9,10 +9,10 @@ import {
   deliverTerminalStream,
   identifiedModelDelta,
   orderedToolDelta,
+  SESSION_ID,
+  STREAM_ID,
 } from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
-
-const STREAM_ID = "stream-ordered";
 
 test("bounds pending keys before materialization", () => {
   const buffer = new RealtimeStreamBuffer();
@@ -80,7 +80,7 @@ test("active tool state survives a terminal tombstone flood", () => {
   });
 
   expect(buffer.activeToolStreams()).toContainEqual({
-    sessionId: "session-ordered",
+    sessionId: SESSION_ID,
     streamId: activeStreamId,
   });
 });
@@ -98,7 +98,7 @@ test("reconnect synchronizes active tools retained through a tombstone flood", (
 
   expect(reconnected.sent).toContain(
     JSON.stringify({
-      sessionId: "session-ordered",
+      sessionId: SESSION_ID,
       streamId: activeStreamId,
       type: "sync_tools",
     }),

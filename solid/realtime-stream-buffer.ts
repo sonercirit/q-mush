@@ -207,6 +207,7 @@ export class RealtimeStreamBuffer {
   }
   clearToolSession(sessionId: string): void {
     this.#deletePending(sessionId, (update) => update.kind === "tool");
+    this.#epochs.delete(sessionId);
     this.#deleteToolStates((state) =>
       state.kind === "active"
         ? state.entry.sessionId === sessionId
