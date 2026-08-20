@@ -49,14 +49,12 @@
   supervisor-issued absolute 120-second deadline (fresh per restart, shared only
   in flight), reject new steps and provider/auxiliary requests, report scoped
   active-tool counts, force-park stragglers only after durable handoffs, then
-  bound cleanup/termination; repeats escalate. Runner elapsed time retains its
-  original request through server authority; force-parking clears it so restore
-  cannot resurrect work. Restart timers name a purpose tests target.
-  `DevelopmentRestartLifecycle` owns it; a rejected drain keeps serving, so it
-  restores maintenance, shutdown state, recovery, the abort signal
-  (`SessionRestartAbort`: aborted controllers stay aborted) and the gate, clears
-  each session's abandoned server request (a still-gating runner request is
-  kept), then reruns handoff recovery and the queued launcher unless a final
+  bound cleanup/termination; repeats escalate. Restart timers name a purpose
+  tests target. `DevelopmentRestartLifecycle` owns it; a rejected drain keeps
+  serving, so it restores maintenance, shutdown state, recovery, the abort
+  signal (`SessionRestartAbort`: aborted controllers stay aborted) and the gate,
+  clears each session's abandoned server request (a still-gating runner request
+  is kept), then reruns handoff recovery and the queued launcher unless a final
   shutdown won and it only logs. Failed chains release. Final shutdown cancels
   that deadline, promotes runner handoffs to a server marker, then stays
   unbounded, fencing live markers from liveness scans. Text handlers precompress
