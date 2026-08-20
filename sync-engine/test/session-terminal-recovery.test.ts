@@ -17,10 +17,10 @@ import {
 } from "./session-compaction-test-helpers.ts";
 import {
   createStore,
+  emptyRuntimes,
   testSessionInput,
 } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 const TERMINAL_USAGE: AgentSessionUsageUpdate = {
   contextTokens: 432,
   costBasis: "reported",

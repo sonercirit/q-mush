@@ -43,9 +43,9 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 class PausedParentChildModel implements AgentModel {
   #requestCount = 0;
   #releaseParent: (() => void) | undefined;

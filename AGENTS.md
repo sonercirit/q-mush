@@ -4,100 +4,92 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 
 ## Working Agreements
 
-- Call capabilities impossible only with excluding evidence; else record an open
-  question.
-- Preserve patterns; improve touched code.
-- TDD: fail first, implement, refactor green. Keep one authoritative path; avoid
-  premature abstraction.
-- Research provider docs via Brave Search; probe APIs. For tunables, probe
-  omission, prefer provider defaults, then metadata/docs.
-- Fix defects on sight, even pre-existing; if harmful, codify why in a test.
-- Integrate completely the first time: wire every session capability to each
-  protocol's native control, recording what a protocol lacks.
-- Never weaken checks or claim unperformed verification; disclose gaps.
-- Record decisions and lessons here unprompted; repeated guidance means a rule
-  is missing. Condense to fit. If evidence overturns a finding, fix its code and
-  stale records then; act, don't ask.
-- Keep workflows local-first: narrow checks, then broad, then failures.
-- Never commit secrets, generated artifacts, or env files.
+- Call capabilities impossible only with excluding evidence; otherwise record an
+  open question. Research provider docs via Brave, probe APIs; for tunables
+  probe omission, prefer defaults, then metadata/docs.
+- Preserve patterns. TDD: fail, implement, refactor green. Keep one
+  authoritative path; avoid premature abstraction.
+- Fix defects on sight; if harmful, codify why in a test. Integrate every
+  session capability with each protocol's native control, recording gaps.
+- Never weaken checks or claim unperformed verification; disclose gaps. Record
+  decisions/lessons here; repeated guidance means a missing rule. If evidence
+  overturns a finding, fix code and stale records. Never commit secrets,
+  artifacts, or env files.
 
 ## Setup, Commands
 
-- Install/run: `bun install`; `bun run sync-engine/index.ts`
-- Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
-- Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` (DOM/server + Chromium); `test:watch` omits browsers.
-  `test:browser` uses bare `scripts/test-browser.ts` (Bun no-orphans rejects
-  `./`/absolute paths), pins headless, clears `PWDEBUG`.
-- `bun run check` runs all static checks; `format`/`lint:fix` write fixes.
-- CI (`checks.yml`): tests, static checks, build, whitespace on Bun 1.3.14,
-  frozen lockfile.
+- Install/run: `bun install`; `bun run sync-engine/index.ts`. Develop:
+  `bun run dev` (`dev:restart`, `dev:watch`); build: `bun run build`;
+  migrations: `db:generate` / `db:migrate`.
+- Tests: `bun run test`; `test:watch` omits browsers; `test:browser` uses bare
+  `scripts/test-browser.ts` (Bun no-orphans rejects `./`/absolute paths), pins
+  headless, clears `PWDEBUG`.
+- `bun run check` runs static checks; `format`/`lint:fix` write. CI runs tests,
+  checks, build, whitespace on Bun 1.3.14 with frozen lockfile.
 
 ## Architecture
 
-- Four production workspaces: `solid` owns browser UI, `sync-engine` the Bun
-  server/integrations, `runner` the standalone runner, `shared` cross-workspace
-  code. The first three import only themselves and `shared`; `shared` imports
-  none; only `scripts` may import `scripts`.
+- Four workspaces: `solid` owns browser UI, `sync-engine` the Bun
+  server/integrations, `runner` the runner, `shared` shared code. They import
+  only themselves/`shared`; `shared` imports none; only `scripts` may import
+  `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
-  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state
-  and runner work; no polling/SSE. `dev:watch` watches production source and
-  `.env`, coalescing bursts into the ignored restart trigger; `dev:restart`
-  writes it, plain `dev` restarts only from it. `runner-executable.ts`
-  fingerprints runner source/compiler, builds privately, caches in memory,
-  serves `/runner/executable`. Restarts drain active steps, queue new work, so
-  sessions may request their own restart. Text handlers precompress once,
-  negotiating zstd, Brotli, gzip, deflate; `/favicon.svg` revalidates by ETag.
-- `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
-  `sync-engine/pages.ts` loads it with Vite's SSR runner. The app mounts from
-  `solid/client.tsx`; routes live in `shared/routes.ts`. Browser tests use real
-  Chromium/Tailwind and production mutations, never synthetic layout or CSS-only
-  assertions; CI rejects `.only` and zero tests.
-- `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-  - PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
-    discarding provider tokens. `auth-store.ts` uses Drizzle/Bun SQLite,
-    upserting users and persisting seven-day sessions. Primary keys are UUIDv7;
-    Google subjects and session cookie tokens are separate unique fields; every
-    table has created/updated timestamps, actor IDs, `isDeleted`.
-    `shared/database.ts` applies committed `drizzle/` migrations on open;
-    `sync-engine/index.ts` injects the persistent connection; the auth factory
-    falls back on in-memory SQLite. Shared PKCE, provider parsing, redirects
-    live in `oauth.ts`; cookie helpers in `http.ts`. `solid/client.tsx` reads
-    `/api/auth/session`, gates the app, posts logout.
+  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser/runner
+  state; no polling/SSE. `dev:watch` watches source and `.env`, coalescing
+  bursts into the ignored restart trigger; `dev:restart` writes it, plain `dev`
+  restarts only from it. `runner-executable.ts` fingerprints/builds/caches
+  runner source, serving `/runner/executable`. Restarts drain active steps,
+  queue new work, so sessions may request their own restart. Text handlers
+  precompress, negotiating zstd/Brotli/gzip/deflate; `/favicon.svg` revalidates
+  by ETag.
+- `solid/pages.tsx` SSR-renders both page shells; `sync-engine/pages.ts` loads
+  it with Vite's SSR runner. The app mounts from `solid/client.tsx`; routes live
+  in `shared/routes.ts`. Browser tests use real Chromium/Tailwind and production
+  mutations, not synthetic layout/CSS assertions; CI rejects `.only` and zero
+  tests.
+- `sync-engine/auth.ts` implements Google OIDC (code + PKCE) with HttpOnly
+  state/verifier cookies, fetching the profile and discarding provider tokens.
+  `auth-store.ts` uses Drizzle/Bun SQLite, upserting users and persisting 7-day
+  sessions. Keys are UUIDv7; Google subjects/session tokens are separate unique
+  fields; tables have created/updated timestamps, actor IDs, `isDeleted`.
+  `shared/database.ts` applies committed `drizzle/` migrations on open;
+  `sync-engine/index.ts` injects the connection; the auth factory falls back on
+  SQLite. Shared PKCE, provider parsing, redirects live in `oauth.ts`; cookie
+  helpers in `http.ts`. `solid/client.tsx` reads `/api/auth/session`, gates the
+  app, posts logout.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
-  `runners.ts` issues hashed opaque setup tokens, owns authenticated management
-  and token-authenticated callbacks, deriving installers from the origin.
-  `runner-installer.ts` emits the macOS/Linux one-liner: it picks an x64/ARM64
-  glibc/musl target and starts a downloaded standalone executable under
-  `~/.q-mush/runner`; Bun not needed. Runners report metadata and 15-second
-  heartbeats over authenticated WebSockets, check updates at startup/five-minute
-  intervals, recheck via handshake version after restarts, replacing an older
-  socket on reconnect. Updates use source/compiler ETags and SHA-256, atomically
-  replace and restart it; dev restarts drain sessions first. Reinstalling for
-  the same user and machine rotates the registration to its new token instead of
-  adding a runner; others stay protected; tokens never list.
+  `runners.ts` issues hashed opaque setup tokens, owns management and
+  token-authenticated callbacks, deriving installers from the origin.
+  `runner-installer.ts` emits the installer: it picks an x64/ARM64 glibc/musl
+  target and starts a executable under `~/.q-mush/runner`; Bun not needed.
+  Runners report metadata and 15-second heartbeats over WebSockets, check
+  updates at startup/5-minute intervals, recheck via handshake version after
+  restarts, replacing an older socket on reconnect. Updates use source/compiler
+  ETags and SHA-256, replace/restart it; dev restarts drain sessions first.
+  Reinstalling for the same user and machine rotates the registration to its new
+  token instead of adding a runner; others stay protected; tokens never list.
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` keeps positional record/category
   controls; the shared Unicode result bound applies after serialization.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions.
-  Messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
-  Sessions record active time, cost, token usage, context limit; reported
-  charges win. Auto-compaction defaults on at 95%; truncation enters only its
-  immediate compactor context, including persisted manual/idle compaction, so
-  partial output stays unfinished without a retry mark. Idle sessions compact
-  manually or, opted in, at 30 idle minutes; compaction soft-deletes messages
-  into a replayable handoff; replays deliver drafts, skip re-verifying. The
-  composer stays mounted across statuses, explaining unavailable actions,
-  keeping drafts; draft fields echo a local signal debounced into the shared
-  draft — submit paths flush first; local prefs filter transcript categories.
-  Provider secrets never reach browser/runner payloads. The directory field
-  opens `directory-picker-client.tsx` (`/api/runners/:id/directories`). Each
-  run, `read_agent_file` loads root `AGENTS.md` (else `CLAUDE.md`).
+  Messages take eight 10 MB PNG/JPEG/GIF/WebP images. Sessions record active
+  time, cost, token usage, context limit; reported charges win. Auto-compaction
+  defaults on at 95%; truncation enters only its immediate compactor context,
+  including persisted manual/idle compaction, so partial output stays unfinished
+  without a retry mark. Idle sessions compact manually or, opted in, at 30 idle
+  minutes; compaction soft-deletes messages into a replayable handoff; replays
+  deliver drafts, skip re-verifying. The composer stays mounted across statuses,
+  explaining unavailable actions, keeping drafts; draft fields echo a local
+  signal debounced into the shared draft — submit paths flush first; local prefs
+  filter transcript categories. Provider secrets never reach browser/runner
+  payloads. Directory opens `directory-picker-client.tsx`
+  (`/api/runners/:id/directories`). Each run, `read_agent_file` loads root
+  `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
-  pickers use canonical schemas. `read_session` spans transcript categories and
+  pickers use schemas. `read_session` spans transcript categories and
   definitions with positional record pagination; `get_session_options` pages
   spawn choices. Grouped tools manage non-blocking owned children, deliver final
   messages, and resume idle parents; `parallel` uses four ordered workers for 2+
@@ -143,7 +135,7 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   (`anthropic-request.ts`, `provider-stream-anthropic.ts`; images/PDFs map to
   native blocks). Credentials live in `provider_credentials` with per-record
   AES-256-GCM encryption; APIs expose metadata only; one credential may be the
-  user's default across providers. Shared behavior: `provider-credentials.ts`,
+  user's default across providers. Shared: `provider-credentials.ts`,
   `connected-account-oauth.ts`, the `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix (total input dilutes with
   fresh tool output); persistent shortfalls are bugs, lone misses noise. Codex
@@ -153,15 +145,15 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
   `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
-  Anthropic-format requests mark one-hour `cache_control` breakpoints on the
-  system prompt, transcript tail, and Anthropic tool definitions
+  Anthropic-format requests mark 1-hour `cache_control` points on the system
+  prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects markers, generic OpenAI-format
   endpoints get neither markers nor `prompt_cache_key` (Ollama rejects array
-  content; strict servers reject unknown fields). Messages requests send catalog
+  content; strict servers reject unknown fields). Requests send catalog
   `max_tokens` (`agent_sessions.max_output_tokens`), omitted when discovery
-  reported none — the real API requires it, proxies don't; the
+  reported none — the API requires it, proxies don't; the
   context-window-exceeded beta degrades pre-4.5 overshoots to a stop reason.
-  Length stops persist a non-replayed `error` notice
+  Length stops persist a nonreplayed `error` notice
   (`AgentModelStep.truncation`). Null limits refresh lazily
   (`session-current-model.ts`) only while the credential stays attached,
   propagating stops, not degrading; generic reassignment nulls them to re-probe,
@@ -214,18 +206,18 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   transitively import `bun:sqlite` there. Its migration transaction nullifies
   foreign-key PRAGMAs; `createDatabase` therefore disables foreign keys first
   and reenables them afterward.
-- Credential storage needs private, stable, 32-byte base64url `*_CREDENTIAL_KEY`
-  secrets per provider; redirect URIs end in `/api/<provider>/oauth/callback`.
-  OpenAI defaults to the public Codex OAuth client with a localhost-only
-  callback at `http://localhost:1455/auth/callback` (keep its port free); a
-  different `OPENAI_CLIENT_ID` disables that loopback and must allow the
-  configured or request-origin callback. OpenRouter OAuth needs no client
-  credentials and yields a user-controlled key. Removal soft-deletes the audit
-  record and clears its payload; provider-side access remains.
+- Credential storage needs stable 32-byte base64url `*_CREDENTIAL_KEY` secrets
+  per provider; redirect URIs end in `/api/<provider>/oauth/callback`. OpenAI
+  defaults to the public Codex OAuth client with a localhost-only callback at
+  `http://localhost:1455/auth/callback` (keep its port free); a different
+  `OPENAI_CLIENT_ID` disables that loopback and must allow the configured or
+  request-origin callback. OpenRouter OAuth needs no client credentials and
+  yields a user-owned key. Removal soft-deletes the audit record and clears its
+  payload; provider-side access remains.
 - `shared/ids.ts` owns UUIDv7 generation and the `SYSTEM` audit actor; user
   actions use the internal user UUID. Never hard-delete: set `isDeleted`,
-  `updatedAt`, `updatedById`, excluding soft-deleted rows from active queries.
-  Audit actor fields aren't foreign keys — `SYSTEM` is no user.
+  `updatedAt`, `updatedById`, excluding deleted rows from active queries. Audit
+  actor fields aren't foreign keys — `SYSTEM` is no user.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
   connects bound at 10s, under the tool deadline.
 - Knip severities don't activate default-off issue types; keep the included list
@@ -241,8 +233,8 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   stay host-contained. Container shells are disposable per-session root Arch
   (`archlinux:latest` by default), with network/default capabilities and only
   the workspace mounted, so pacman works. `read` pages files. Directory browsing
-  escapes the workspace, returns bounded directory-only metadata, times out
-  stalls, maps HTTP cancellation to a browse error, and propagates tool
+  escapes the workspace, returns bounded directory-only metadata, times out at
+  15s, maps HTTP cancellation to a browse error, and propagates tool
   cancellation. Stopping aborts the model request and runner commands, ending an
   active shell. OpenAI API-key and OAuth requests prefer Responses WebSockets,
   falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
@@ -269,14 +261,23 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   while thinking tokens bill. The local proxy tolerates tool-loop replay without
   signed thinking blocks; strict endpoints might not. Streamed reasoning deltas
   group by `output_index`/`summary_index`; separate summary parts with
-  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
-  has a 60-minute limit; the canonical `websocket_connection_limit_reached` and
-  observed underscore-free variant replace the socket once per step, then bound
-  retries, replaying only an unpersisted step. Other WebSocket/HTTP
-  interruptions or provider errors retry before persistence; replays reset
-  partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
-  and aborts don't retry; terminal failures persist as non-replayed `error`
-  messages.
+  paragraphs since completed responses may omit them. Frozen clocks can collapse
+  admission transitions; production cannot. Fresh sockets admit non-retained
+  `response.*`; reused ones require an ID or `response.created`. WebSocket Mode
+  expires at 60 minutes; either spelling of `websocket_connection_limit_reached`
+  replaces the socket once per step, then retries replay only the unpersisted
+  step. HTTP waits are not admission-bounded. Discard mismatched-ID/retained-ID
+  frames and errors. A reused socket's uncorrelated pre-admission error retries
+  fresh unless permanent; after any admission (including ID-less), an
+  unidentified error retires it and retries fresh. Provider IDs (~53 bytes) are
+  unbounded: fence at 16 MiB, then retire. ID-less admission skips retained IDs
+  until a new one; completion retires it. Concurrency closes superseded sockets;
+  fenced watchdog failures abort. Requests unacknowledged through the 5-minute
+  liveness grace fail without retry, resumable by `continue`. Other
+  WebSocket/accepted-HTTP interruptions or provider errors retry before
+  persistence; replays reset partial UI deltas; exhausted sockets use HTTP.
+  Permanent errors/aborts never retry; terminal failures persist as nonreplayed
+  `error`.
 - Tools persist user settings (`tool-settings*.ts`), defaulting to 30 minutes
   and 20,000 Unicode characters. Writes upsert on a partial index whose
   predicate must match the schema. Runs snapshot both settings for the prompt,
@@ -285,9 +286,9 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   and aborts on settlement. `parallel` shares one budget; `ask_questions` waits
   outside it. One truncation path/notice owns model-facing output; positional
   pagination preserves continuation envelopes; input/security/transport bounds
-  remain separate. Shell has a runner timer; each POSIX command gets a session
-  whose group is signaled on stop/timeout. Write/edit cancellation is
-  best-effort after mutation. Outside compaction, provider replay has no
-  timeout.
+  remain separate. Shell commands need a positive timeout; each POSIX command
+  gets a session whose group is signaled on stop/timeout. Write/edit
+  cancellation is best-effort after mutation. Outside compaction, provider
+  replay has no timeout.
 - Pin Playwright 1.62.1/Vitest 4.1.10: probes couple to Playwright `<launching>`
   and Vitest launch.

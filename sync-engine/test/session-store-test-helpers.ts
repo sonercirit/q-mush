@@ -7,9 +7,11 @@ import {
 import { takeValue } from "./oauth-test-helpers.ts";
 import { createRunningTestSession } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
-import { testSessionInput } from "./session-store-test-fixtures.ts";
+import {
+  emptyRuntimes,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
 const SESSION_ID = "018bcfe5-6800-7000-8000-000000000043";

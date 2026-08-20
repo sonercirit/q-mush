@@ -16,8 +16,8 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 function setup() {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "tool-update-machine", "runner-1");

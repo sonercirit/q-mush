@@ -34,9 +34,9 @@ import { runLaunchedSession } from "./session-launch-test-helpers.ts";
 import {
   createStore,
   createTestSession,
+  emptyRuntimes,
 } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 function markerlessStartupSession(database: AppDatabase): void {
   const ids = [
     SESSION_ID,

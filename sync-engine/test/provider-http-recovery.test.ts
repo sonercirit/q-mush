@@ -117,7 +117,6 @@ function openRouterModel(
       source: "api_key",
     },
     fetch: provider.fetch,
-    toolSettings: DEFAULT_TOOL_SETTINGS,
     maxOutputTokens: null,
     model: "openai/gpt-4.1-mini",
     ...(onRequestState === undefined ? {} : { onRequestState }),
@@ -130,6 +129,7 @@ function openRouterModel(
         }),
     provider: "openrouter",
     sleep: provider.sleep,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
   });
 }
 

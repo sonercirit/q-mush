@@ -39,8 +39,8 @@ export function readStoredSessionDetail(
   readPendingQuestions: ReadPendingQuestions,
   userId: string,
   sessionId: string,
-  workspaceId?: string,
-  readRuntimePending: ReadRuntimePending = () => undefined,
+  workspaceId: string | undefined,
+  readRuntimePending: ReadRuntimePending,
 ): AgentSessionDetail | undefined {
   const stored = selectStoredSessions(
     database,
@@ -81,8 +81,8 @@ export function listStoredSessions(
   database: AppDatabase,
   readPendingQuestions: ReadPendingQuestions,
   userId: string,
-  workspaceId?: string,
-  readRuntimePending: ReadRuntimePending = () => undefined,
+  workspaceId: string | undefined,
+  readRuntimePending: ReadRuntimePending,
 ): readonly AgentSessionSummary[] {
   return selectStoredSessions(
     database,

@@ -13,6 +13,8 @@ import { createSessionInput } from "./session-store-create-hardening-helpers.ts"
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
+export const emptyRuntimes = { pending: (): undefined => undefined };
+
 export const STORE_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const STORE_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
 export const STORE_SESSION_ID = "018bcfe5-6800-7000-8000-000000000043";
@@ -69,9 +71,12 @@ export function createStore() {
   return {
     database,
     generateId,
-    store: new SessionStore(database, generateId, () => DEFAULT_TOOL_SETTINGS, {
-      pending: () => undefined,
-    }),
+    store: new SessionStore(
+      database,
+      generateId,
+      () => DEFAULT_TOOL_SETTINGS,
+      emptyRuntimes,
+    ),
   };
 }
 

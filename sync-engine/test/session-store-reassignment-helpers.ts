@@ -11,8 +11,8 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectRunnerRequired } from "./session-integration-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 export interface SessionStoreTestSetup {
   readonly database: AppDatabase;
   readonly store: SessionStore;

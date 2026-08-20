@@ -24,8 +24,8 @@ import {
   EMPTY_SESSION_REQUEST_MODEL_METADATA,
   sessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 const RUNNER_ID = "runner-filesystem";
 const SESSION_ID = "session-filesystem";
 const WORKING_DIRECTORY = "/work/project";

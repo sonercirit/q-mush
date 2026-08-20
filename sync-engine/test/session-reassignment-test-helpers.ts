@@ -12,8 +12,8 @@ import {
   createRunningTestSession,
   createSessionInput,
 } from "./session-store-create-hardening-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-const emptyRuntimes = { pending: (): undefined => undefined };
 export type ReassignmentSessionSetup = ReturnType<typeof connectedSessionSetup>;
 
 export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
