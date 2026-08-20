@@ -1,6 +1,6 @@
 import {
+  codePointPrefix,
   unicodeCharacterCount,
-  unicodeCharacterPrefix,
 } from "../shared/tool-output-limits.ts";
 
 function continuationMarker(
@@ -32,9 +32,7 @@ function boundedContinuationPage(
     shownLines = candidateLines;
   }
   if (shownLines === 0) {
-    const marker = continuationMarker(offset, 1, totalLines);
-    const available = Math.max(0, maximum - unicodeCharacterCount(marker));
-    return `${unicodeCharacterPrefix(requested[0] ?? "", available)}${marker}`;
+    return codePointPrefix(requested[0] ?? "", maximum + 1);
   }
   return `${requested.slice(0, shownLines).join("\n")}${continuationMarker(
     offset,

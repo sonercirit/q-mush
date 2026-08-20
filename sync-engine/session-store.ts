@@ -98,13 +98,10 @@ export class SessionStore extends SessionStoreRestarts {
   constructor(
     database: AppDatabase,
     generateId: IdGenerator = createUuidV7,
-    toolSettings?: (userId: string) => ToolSettings,
+    toolSettings: (userId: string) => ToolSettings,
   ) {
     super(database, generateId);
     this.#resources = [database, generateId];
-    if (toolSettings === undefined) {
-      throw new Error("SessionStore requires a tool settings reader");
-    }
     this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({

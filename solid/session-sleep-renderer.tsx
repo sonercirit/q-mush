@@ -53,10 +53,10 @@ function sleepDurationMilliseconds(
 export function renderToolArguments(
   name: string,
   arguments_: string,
-  settings: ToolSettings,
+  settings: ToolSettings | undefined,
 ): JSX.Element {
   const durationMilliseconds =
-    name === "sleep"
+    name === "sleep" && settings !== undefined
       ? sleepDurationMilliseconds(arguments_, settings)
       : undefined;
   return durationMilliseconds === undefined ? (

@@ -1,8 +1,8 @@
 import type { RunnerCommandOutputDelta } from "../shared/runner-command-broker.ts";
 import { DEFAULT_TOOL_OUTPUT_CHARACTERS } from "../shared/tool-limits.ts";
 import {
+  codePointPrefix,
   unicodeCharacterCount,
-  unicodeCharacterPrefix,
 } from "../shared/tool-output-limits.ts";
 import {
   MAXIMUM_TOOL_STREAM_DELTA_BYTES,
@@ -92,7 +92,7 @@ async function readStream(
       contentCharacters,
       capture.remainingCharacters,
     );
-    output += unicodeCharacterPrefix(content, acceptedCharacters);
+    output += codePointPrefix(content, acceptedCharacters);
     capture.remainingCharacters -= acceptedCharacters;
   };
 

@@ -1,8 +1,8 @@
 import { isRecord } from "../shared/auth-model.ts";
 import {
+  codePointPrefix,
   toolOutputTruncationNotice,
   unicodeCharacterCount,
-  unicodeCharacterPrefix,
 } from "../shared/tool-output-limits.ts";
 
 export type StructuredSessionToolName =
@@ -60,7 +60,7 @@ function shrinkStringToFit(options: {
   options.record[options.field] = selected;
   while (lower <= upper) {
     const middle = Math.floor((lower + upper) / 2);
-    const candidate = unicodeCharacterPrefix(original, middle);
+    const candidate = codePointPrefix(original, middle);
     options.record[options.field] = candidate;
     if (unicodeCharacterCount(options.serialize()) <= options.maximum) {
       selected = candidate;

@@ -2,7 +2,7 @@ const TOOL_OUTPUT_NOTICE_PREFIX = "\n\n[Tool output truncated: ";
 const TOOL_OUTPUT_NOTICE_SUFFIX =
   " Unicode character limit reached; omitted content is unavailable.]";
 
-function codePointPrefix(value: string, maximum: number): string {
+export function codePointPrefix(value: string, maximum: number): string {
   if (maximum <= 0) return "";
   let codePoints = 0;
   let end = 0;
@@ -23,10 +23,6 @@ export function unicodeCharacterCount(value: string): number {
     count += 1;
   }
   return count;
-}
-
-export function unicodeCharacterPrefix(value: string, maximum: number): string {
-  return codePointPrefix(value, maximum);
 }
 
 export function toolOutputTruncationNotice(maximum: number): string {

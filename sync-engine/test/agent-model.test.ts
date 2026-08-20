@@ -92,7 +92,7 @@ function expectUnboundedParallelSchema(body: unknown): void {
 }
 function capturedModel(
   capture: RequestCapture,
-  options: Omit<ModelOptions, "fetch">,
+  options: Omit<ModelOptions, "fetch" | "toolSettings">,
 ): ChatCompletionsAgentModel {
   return respondingModel(options, chatCompletionsDone(), capture);
 }
@@ -133,7 +133,7 @@ async function completeGenericModel(
   return { body: await capturedBody(capture), capture };
 }
 function respondingModel(
-  options: Omit<ModelOptions, "fetch">,
+  options: Omit<ModelOptions, "fetch" | "toolSettings">,
   responseBody: unknown,
   capture: RequestCapture,
 ): ChatCompletionsAgentModel {
@@ -144,7 +144,10 @@ function respondingModel(
   });
 }
 function codexModel(
-  options: Omit<ModelOptions, "credential" | "maxOutputTokens" | "provider">,
+  options: Omit<
+    ModelOptions,
+    "credential" | "maxOutputTokens" | "provider" | "toolSettings"
+  >,
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     toolSettings: DEFAULT_TOOL_SETTINGS,

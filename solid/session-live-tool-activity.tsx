@@ -46,7 +46,7 @@ function LiveToolOutput(props: {
 }
 
 export function LiveToolStreamList(props: {
-  readonly settings: ToolSettings;
+  readonly settings: ToolSettings | undefined;
   readonly streams: readonly ToolStreamEntry[];
 }): JSX.Element {
   return (
@@ -79,10 +79,12 @@ export function renderToolHeader(options: {
   );
 }
 
-function LiveToolStream(props: {
-  readonly settings: ToolSettings;
+interface LiveToolActivityProps {
+  readonly settings: ToolSettings | undefined;
   readonly stream: ToolStreamEntry;
-}): JSX.Element {
+}
+
+function LiveToolStream(props: LiveToolActivityProps): JSX.Element {
   const name = (): string => toolStreamDisplayName(props.stream);
   const nestedScrollRef = createNestedScrollRef(
     () => `tool-stream:${props.stream.streamId}:${props.stream.callId}`,
@@ -111,11 +113,9 @@ function LiveToolStream(props: {
   );
 }
 
-export function LiveToolActivityContent(props: {
-  readonly includeArguments: boolean;
-  readonly settings: ToolSettings;
-  readonly stream: ToolStreamEntry;
-}): JSX.Element {
+export function LiveToolActivityContent(
+  props: LiveToolActivityProps & { readonly includeArguments: boolean },
+): JSX.Element {
   const stream = (): ToolStreamEntry => props.stream;
   return (
     <>

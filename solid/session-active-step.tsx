@@ -9,7 +9,7 @@ import {
 } from "./session-streamed-messages.tsx";
 
 function RunningAgentBlock(props: {
-  readonly settings: ToolSettings;
+  readonly settings: ToolSettings | undefined;
   readonly toolStreams: readonly ToolStreamEntry[];
 }): JSX.Element {
   return (
@@ -32,7 +32,7 @@ function RunningAgentBlock(props: {
 }
 
 export function ActiveStepAnchor(props: {
-  readonly settings: ToolSettings;
+  readonly settings: ToolSettings | undefined;
   readonly messages: readonly AgentSessionMessage[];
   readonly render: StreamedMessageRenderer;
   readonly timing: JSX.Element;

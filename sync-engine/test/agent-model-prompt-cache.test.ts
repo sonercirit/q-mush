@@ -20,7 +20,7 @@ function apiKeyChatOptions(
   provider: "generic" | "openai" | "openrouter",
   model: string,
   promptCacheKey: string | undefined,
-): Omit<ModelOptions, "fetch"> {
+): Omit<ModelOptions, "fetch" | "toolSettings"> {
   return {
     credential: {
       accountId: null,
@@ -38,7 +38,7 @@ function apiKeyChatOptions(
 }
 
 async function captureChat(
-  options: Omit<ModelOptions, "fetch">,
+  options: Omit<ModelOptions, "fetch" | "toolSettings">,
 ): Promise<{ readonly body: unknown; readonly request: Request }> {
   let captured: Request | undefined;
   const model = new ChatCompletionsAgentModel({

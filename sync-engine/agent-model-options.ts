@@ -46,6 +46,6 @@ export interface AgentModelRequestOptions {
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly systemPrompt?: string;
-  readonly toolSettings?: ToolSettings;
+  readonly toolSettings: ToolSettings;
   readonly tools?: readonly AgentSessionToolName[];
 }

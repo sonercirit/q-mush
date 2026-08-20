@@ -38,15 +38,13 @@ describe("provider HTTP connection-limit classification", () => {
       maxOutputTokens: null,
       model: "openai/gpt-4.1-mini",
       provider: "openrouter",
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       sleep: (milliseconds) => {
         delays.push(milliseconds);
         return Promise.resolve();
       },
     };
-    const model = new ChatCompletionsAgentModel({
-      ...modelOptions,
-      toolSettings: DEFAULT_TOOL_SETTINGS,
-    });
+    const model = new ChatCompletionsAgentModel(modelOptions);
     const failure = await captureRejection(model.complete(USER_MESSAGE));
 
     expect(fetchCount).toBe(1);

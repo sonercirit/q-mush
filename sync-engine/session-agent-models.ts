@@ -125,12 +125,9 @@ export function createSessionAgentModels(options: {
   readonly realtime: RealtimeHub | undefined;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
-  readonly toolSettings?: ToolSettings;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }): SessionAgentModels {
-  if (options.toolSettings === undefined) {
-    throw new Error("Session agent models require tool settings");
-  }
   const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();

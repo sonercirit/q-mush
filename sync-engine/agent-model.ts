@@ -434,9 +434,6 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
-    if (options.toolSettings === undefined) {
-      throw new Error("Agent model requires tool settings");
-    }
     this.#toolSettings = options.toolSettings;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
     this.#tools = selectedAgentTools(

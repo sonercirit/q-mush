@@ -104,12 +104,12 @@ function expectRawOverflow(output: string, maximum: number): void {
   expect(output).not.toContain("Tool output truncated");
 }
 
-function expectPartialLineContinuation(output: string, maximum: number): void {
-  const expectedMarker = "Use offset=2 to continue.";
-  expect([
-    unicodeCharacterCount(output),
-    output.includes(expectedMarker),
-  ]).toEqual([maximum, true]);
+function expectPartialLineOverflow(output: string, maximum: number): void {
+  const outputLength = unicodeCharacterCount(output);
+  expect([outputLength, output.includes("Use offset=2 to continue.")]).toEqual([
+    maximum + 1,
+    false,
+  ]);
 }
 
 describe("runner WebSocket protocol", () => {
@@ -197,7 +197,7 @@ describe("runner WebSocket protocol", () => {
     expect(output).not.toContain("�");
   });
 
-  test("does not advertise a continuation past a partially shown line", async () => {
+  test("retains detectable overflow without advertising past a partially shown line", async () => {
     const maximum = 120;
     const session = await readSession({
       content: `${"😀".repeat(500)}\ntail`,
@@ -211,7 +211,7 @@ describe("runner WebSocket protocol", () => {
       maximum,
     );
 
-    expectPartialLineContinuation(output, maximum);
+    expectPartialLineOverflow(output, maximum);
   });
 
   test("uses offset and limit only to select a page", async () => {
@@ -259,7 +259,7 @@ describe("runner WebSocket protocol", () => {
       maximum,
     );
 
-    expectPartialLineContinuation(output, maximum);
+    expectPartialLineOverflow(output, maximum);
     expect(output).not.toContain("does not fit");
     expect(output).not.toContain("saved to");
   });

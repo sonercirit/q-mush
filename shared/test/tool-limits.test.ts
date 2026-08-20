@@ -9,8 +9,8 @@ import {
 } from "../tool-limits.ts";
 import {
   boundToolResult,
+  codePointPrefix,
   unicodeCharacterCount,
-  unicodeCharacterPrefix,
 } from "../tool-output-limits.ts";
 
 function boundedOutput(output: string, outputLimitCharacters: number): string {
@@ -85,7 +85,7 @@ describe("tool settings", () => {
 describe("model-facing tool output bound", () => {
   test("counts Unicode code points rather than UTF-8 bytes or UTF-16 units", () => {
     expect(unicodeCharacterCount("A😀é")).toBe(3);
-    expect(unicodeCharacterPrefix("A😀é", 2)).toBe("A😀");
+    expect(codePointPrefix("A😀é", 2)).toBe("A😀");
   });
 
   test("keeps output unchanged at the exact boundary", () => {

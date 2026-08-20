@@ -122,7 +122,6 @@ function genericSession(response: Response): {
   let fetched = false;
   const factory: AgentModelFactory = (options) =>
     new ChatCompletionsAgentModel({
-      toolSettings: DEFAULT_TOOL_SETTINGS,
       ...options,
       fetch: () => {
         if (fetched) {
