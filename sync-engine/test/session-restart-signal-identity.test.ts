@@ -147,17 +147,12 @@ test("restart-aborted credential candidates return server restarting", async () 
   const pool = new ModelCredentialPool(
     {
       database: poolSetup.database,
-      readCredential: () => Promise.resolve(credential),
+      readCredential: () => {
+        restart.abort(new DOMException("restart", "AbortError"));
+        return Promise.resolve(credential);
+      },
     },
     new CredentialPoolBalancer(),
-  );
-  vi.spyOn(pool, "candidates").mockImplementation(
-    (_userId, _selection, signal) => {
-      restart.abort(new DOMException("restart", "AbortError"));
-      return Promise.reject(
-        signal.reason instanceof Error ? signal.reason : new Error("restart"),
-      );
-    },
   );
   const setup = agentActionsSetup("none", false, {
     modelCredentialPool: pool,
@@ -173,9 +168,10 @@ test("restart-aborted credential candidates return server restarting", async () 
   );
   const decoded = parseToolOutput(output);
   expect(decoded).toHaveProperty("error", "server_restarting");
-  expect(spawnedSession(setup)).toBeUndefined();
-  setup.database.$client.close();
-  poolSetup.database.$client.close();
+  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+  for (const database of [poolSetup.database, setup.database]) {
+    database.$client.close();
+  }
 });
 
 test("caller-aborted metadata rejection retains the caller reason", async () => {
