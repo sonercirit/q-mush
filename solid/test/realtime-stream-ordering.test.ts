@@ -163,6 +163,20 @@ function expectBatch(
 ): void {
   expect(stream.batches()[index]?.updates[updateIndex]).toMatchObject(expected);
 }
+function queueEmptyQuestions(stream: StreamingTestConnection): void {
+  stream.receive({
+    pending: null,
+    sessionId: SESSION_ID,
+    type: "session_questions",
+  });
+}
+function advancingClock(): () => number {
+  let clock = 0;
+  return () => {
+    clock += 5;
+    return clock;
+  };
+}
 function sendRunningTool(
   stream: StreamingTestConnection,
   output: string,
@@ -207,11 +221,7 @@ function expectToolSnapshotBarrier(
 test("keeps tool deltas queued after a questions barrier", () => {
   const stream = streamingTestConnection("questions-barrier-instance");
   sendRunningTool(stream, "A");
-  stream.receive({
-    pending: null,
-    sessionId: SESSION_ID,
-    type: "session_questions",
-  });
+  queueEmptyQuestions(stream);
   stream.receive(orderedToolDelta(3, { content: "B" }));
   stream.receive(orderedToolDelta(4, { content: "C" }));
   const sent = stream.setup.sockets.at(0)?.sent;
@@ -344,12 +354,8 @@ test("reprioritizes queued work after the selected session changes", () => {
   stream.stop();
 });
 test("bounds a stream frame by elapsed work", () => {
-  let clock = 0;
   const stream = streamingTestConnection("timed-frame-instance", undefined, {
-    now: () => {
-      clock += 5;
-      return clock;
-    },
+    now: advancingClock(),
   });
   receiveModelKeys(
     stream,

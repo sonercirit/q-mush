@@ -207,7 +207,6 @@ export class RealtimeStreamBuffer {
   }
   clearToolSession(sessionId: string): void {
     this.#deletePending(sessionId, (update) => update.kind === "tool");
-    this.#epochs.delete(sessionId);
     this.#deleteToolStates((state) =>
       state.kind === "active"
         ? state.entry.sessionId === sessionId
@@ -460,9 +459,9 @@ export class RealtimeStreamBuffer {
   ): RealtimeStreamBatch | undefined {
     return drainUpdates(maximumUpdates, withinBudget, () => {
       const pending = this.#pending.get(barrier.sessionId);
-      // A session Map preserves insertion order, and markBarrier advances the
-      // epoch before later updates are inserted (see markBarrier above). Thus
-      // the first entry has its lowest epoch.
+      // Barrier correctness requires epochs to remain monotonic per session
+      // while any barrier is outstanding. Map insertion order then makes the
+      // first entry the one with the lowest epoch.
       const first = pending?.values().next();
       if (
         pending === undefined ||

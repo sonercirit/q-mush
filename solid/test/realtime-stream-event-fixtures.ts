@@ -2,6 +2,7 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type { RealtimeStreamBatch } from "../realtime-stream-buffer.ts";
 
+// Shared ordered-session identity; orderedToolDelta embeds both constants.
 export const SESSION_ID = "session-ordered";
 export const STREAM_ID = "stream-ordered";
 

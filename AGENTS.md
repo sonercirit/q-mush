@@ -9,19 +9,16 @@ Project memory.
 
 ## Working Agreements
 
-- Research provider docs via Brave Search, then probe APIs/schemas/usage.
 - Call capabilities impossible only with excluding evidence; else record an open
   question.
-- Preserve patterns; add tools only as needed. Improve touched code, tests,
-  docs, performance, security, and DX now.
+- Preserve patterns and improve touched code.
 - TDD: fail first, implement, refactor green. Keep authoritative logic simple;
   avoid premature abstraction.
 - Never invent tunables: probe omission, prefer provider defaults, else use
   metadata or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- Never weaken tests, special-case checks, or claim unperformed verification;
-  disclose gaps. Fix defects on sight; codify harmful fixes in tests.
+- Never weaken checks or claim unperformed verification; disclose gaps.
 - Record new decisions, gotchas, and lessons here in the same change, unprompted
   — a repeated user instruction means a rule is missing; condense elsewhere to
   fit the size cap. When evidence overturns a recorded finding, fix the code it
@@ -120,24 +117,26 @@ Project memory.
   Mutation/stop freezes model/tool UI to prevent mixed state; settlement rebases
   streams. Disconnect drops unrendered fragments, then resyncs active paused
   tool streams. Incremental barriers and compact 100/session, 1,000/user caps
-  block stale revival and permit key reuse. Resets replace models; state events
-  coalesce one/frame; ready, health, commands apply directly; no-op snapshots
-  suppress notices. Solid keeps focus/scroll; detail disables document anchoring
-  and only bottom-pinned transcripts follow output. `agent-model-discovery.ts`
-  queries metadata, signal-cancelable; `shared/agent-configuration.ts` owns
-  catalog types/validation. New sessions take the default online runner (else
-  the first) and credential, first discovered model, latest working directory,
-  top reported effort. Unknown modalities imply no attachment support; choices
-  show provider and Q Mush modalities. `solid/custom-select.tsx` shares search
-  normalization, paginates past ten items, owns accessible keyboard/focus. Focus
-  mode fills the app viewport (not browser Fullscreen), keeping drafts and
-  scroll; its rail overlays on desktop, becomes a drawer, collapses on
-  selection, closing with Escape first. `shared/agent-prompt.ts` builds the
-  model system prompt and transcript display; reasoning summaries persist as
-  `thinking` messages omitted from replay. Session and transcript rows sit in
-  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
-  clears with `activeStartedAt` (live Step timer); interrupted processes mark
-  active sessions failed for resumption; rebuilds add interrupted tool errors on
+  block stale revival and permit key reuse. Barrier epochs stay monotonic until
+  reset (bounded by the user session cap); terminal cleanup cannot reset them
+  while later barriers remain. Resets replace models; state events coalesce
+  one/frame; ready, health, commands apply directly; no-op snapshots suppress
+  notices. Solid keeps focus/scroll; detail disables document anchoring and only
+  bottom-pinned transcripts follow output. `agent-model-discovery.ts` queries
+  metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
+  types/validation. New sessions take the default online runner (else the first)
+  and credential, first discovered model, latest working directory, top reported
+  effort. Unknown modalities imply no attachment support; choices show provider
+  and Q Mush modalities. `solid/custom-select.tsx` shares search normalization,
+  paginates past ten items, owns accessible keyboard/focus. Focus mode fills the
+  app viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  overlays on desktop, becomes a drawer, collapses on selection, closing with
+  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
+  transcript display; reasoning summaries persist as `thinking` messages omitted
+  from replay. Session and transcript rows sit in `agent_sessions` and
+  `agent_messages`; `step_started_at` sets per model step, clears with
+  `activeStartedAt` (live Step timer); interrupted processes mark active
+  sessions failed for resumption; rebuilds add interrupted tool errors on
   resume.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
