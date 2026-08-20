@@ -247,8 +247,7 @@ setInterval(() => undefined, 1_000);
         await triggerDevelopmentRestart(triggerPath);
         await waitForStartCount(startsPath, 2);
         const elapsed = performance.now() - startedAt;
-        // One shared deadline spends the preparation budget once; per-phase
-        // deadlines would wait for it again before SIGKILL.
+        expect(elapsed).toBeGreaterThan(300);
         expect(elapsed).toBeLessThan(500);
         expect(await Bun.file(overlapPath).exists()).toBe(false);
       } finally {

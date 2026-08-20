@@ -112,6 +112,7 @@ async function modelOptions(
   if (credentials.length === 0) {
     throw new Error("The model credential or provider is unavailable");
   }
+  const restartSignal = dependencies.restartSignal();
   let failure: unknown;
   for (const credential of credentials) {
     try {
@@ -120,13 +121,13 @@ async function modelOptions(
           selection.provider,
           credential,
           signal === undefined
-            ? dependencies.restartSignal()
-            : AbortSignal.any([signal, dependencies.restartSignal()]),
+            ? restartSignal
+            : AbortSignal.any([signal, restartSignal]),
         )
       ).models;
     } catch (error) {
       throwIfSignalAborted(signal, "Model option discovery was canceled");
-      if (dependencies.restartSignal().aborted) throw error;
+      if (restartSignal.aborted) throw error;
       failure = error;
     }
   }

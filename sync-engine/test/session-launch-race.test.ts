@@ -36,16 +36,13 @@ import {
   createStore,
   createTestSession,
 } from "./session-store-test-fixtures.ts";
-
 const RESTART_ID = "restart-launch-race";
 type LaunchRace = "restart" | "none" | "stale";
-
 interface LaunchRaceRun {
   readonly fail: (detail: AgentSessionDetail) => boolean;
   readonly launchedSession: () => AgentSessionDetail;
   readonly runtimes: SessionRuntimes;
 }
-
 interface FailedLaunchTestSetup extends SessionStoreTestSetup {
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
@@ -75,10 +72,7 @@ interface LaunchRaceExpectation {
 interface ExistingLaunchPath {
   readonly initialStatus: "failed" | "idle";
   readonly label:
-    | "ordinary send"
-    | "ordinary continue"
-    | "manual compaction"
-    | "manual compact and continue";
+    "send" | "continue" | "manual compaction" | "manual compact and continue";
   readonly operation: RestartHandoffOperation;
   readonly run: (setup: FailedLaunchRaceSetup) => Promise<Response>;
 }
@@ -331,9 +325,10 @@ function launchBoundary(setup: FailedLaunchRaceSetup) {
   };
 }
 
-function agentActionsSetup(
+export function agentActionsSetup(
   race: LaunchRace,
   includeTarget: boolean,
+  overrides: Partial<ConstructorParameters<typeof SessionAgentActions>[0]> = {},
 ): AgentActionsTestSetup {
   const setup = createStore();
   const now = testClock();
@@ -371,6 +366,7 @@ function agentActionsSetup(
     readCredential: () => Promise.resolve(credential),
     store: setup.store,
     withCredential: credentialAction(credential),
+    ...overrides,
   }).actions(parent.id, TEST_USER_ID, parent.generation, DEFAULT_TOOL_SETTINGS);
   return {
     ...setup,
@@ -382,7 +378,7 @@ function agentActionsSetup(
   };
 }
 
-function spawnInput(
+export function spawnInput(
   setup: Pick<AgentActionsTestSetup, "parent">,
   prompt: string,
 ) {
@@ -398,13 +394,13 @@ function spawnInput(
   };
 }
 
-function spawnedSession(setup: AgentActionsTestSetup) {
+export function spawnedSession(setup: AgentActionsTestSetup) {
   return setup.store
     .list(TEST_USER_ID)
     .find(({ id }) => id !== setup.parent.id);
 }
 
-function parseToolOutput(
+export function parseToolOutput(
   result: Awaited<ReturnType<typeof executeSessionAgentTool>>,
 ): unknown {
   const value: unknown = JSON.parse(result.output);
@@ -457,14 +453,14 @@ function manualCompactionLaunchPath(
 const EXISTING_LAUNCH_PATHS: readonly ExistingLaunchPath[] = [
   {
     initialStatus: "failed",
-    label: "ordinary send",
+    label: "send",
     operation: "agent",
     run: (setup) =>
       queueLaunchCase(setup, { images: [], prompt: "Queued follow-up" }),
   },
   {
     initialStatus: "failed",
-    label: "ordinary continue",
+    label: "continue",
     operation: "agent",
     run: (setup) => queueLaunchCase(setup),
   },
@@ -525,7 +521,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
     const output = await executeSessionAgentTool(
       setup.actions,
       "spawn_session",
-      spawnInput(setup, "Delegate through the production spawn path"),
+      spawnInput(setup, "Delegate"),
       new AbortController().signal,
     );
 
@@ -547,7 +543,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
     if (expected.race === "none") {
       expect(child.messages).toEqual([
         expect.objectContaining({
-          content: "Delegate through the production spawn path",
+          content: "Delegate",
           role: "user",
         }),
       ]);

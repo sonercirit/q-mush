@@ -168,24 +168,22 @@ export async function spawnAgentSession(options: {
     credential: ProviderCredentialAccess,
     workspaceId: string,
   ): Promise<Response> {
+    const restartSignal = options.dependencies.restartSignal();
     const metadata = await options.dependencies.discoverSessionMetadata(
       input,
       credential,
       options.userId,
       balanced,
       options.signal === undefined
-        ? options.dependencies.restartSignal()
-        : AbortSignal.any([
-            options.signal,
-            options.dependencies.restartSignal(),
-          ]),
+        ? restartSignal
+        : AbortSignal.any([options.signal, restartSignal]),
     );
     // Discovery settles even when the deadline fires mid-flight; never
     // create a child after the caller already reported timed-out.
     if (options.signal?.aborted === true) {
       throw abortSignalError(options.signal, "The spawn was canceled");
     }
-    if (restartSignalIsAborted(options.dependencies.restartSignal)) {
+    if (restartSignal.aborted) {
       return serverRestartingResponse();
     }
     const created = options.dependencies.store.create(
