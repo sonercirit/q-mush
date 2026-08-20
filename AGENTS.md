@@ -31,42 +31,42 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
 
 ## Architecture
 
-- Four workspaces: `solid` browser UI, `sync-engine` Bun server/integrations,
-  `runner`, `shared`. They import only themselves/`shared`; `shared` imports
-  none; only `scripts` may import `scripts`.
-- `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
-  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser/runner
-  state; no polling/SSE. `dev:watch` coalesces source/`.env` bursts into the
-  ignored restart trigger; `dev:restart` writes it, plain `dev` only reacts to
-  it. `runner-executable.ts` caches fingerprinted runner source at
-  `/runner/executable`. Restarts drain active steps and queue new work, so
-  sessions may request restart. Text handlers precompress, negotiating
-  zstd/Brotli/gzip/deflate; favicon revalidates by ETag.
-- `solid/pages.tsx` SSR-renders both shells; `sync-engine/pages.ts` loads it
-  with Vite SSR. App mounts from `solid/client.tsx`; routes are in
-  `shared/routes.ts`. Browser tests use real Chromium/Tailwind and production
-  mutations, not synthetic layout/CSS assertions; CI rejects `.only`/zero tests.
-- `sync-engine/auth.ts` implements Google OIDC (code + PKCE) with HttpOnly
-  state/verifier cookies, fetching the profile and discarding provider tokens.
-  `auth-store.ts` uses Drizzle/Bun SQLite, upserting users and persisting 7-day
-  sessions. Keys are UUIDv7; Google subjects/session tokens are distinct unique
-  fields; tables have timestamps, actor IDs, `isDeleted`. `shared/database.ts`
-  applies committed migrations on open; `sync-engine/index.ts` injects it; auth
-  falls back on in-memory SQLite. Shared PKCE/provider parsing/redirects live in
-  `oauth.ts`; cookie helpers in `http.ts`. Client reads `/api/auth/session`,
-  gates app, logs out.
+- Workspaces: solid UI, sync-engine server/integrations, runner, and shared.
+  Each imports only itself/`shared`; `shared` imports none; only `scripts` may
+  import `scripts`.
+- `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Auth WebSockets
+  at `/api/realtime` and `/api/runner/realtime` handle browser/runner state; no
+  polling/SSE. `dev:watch` coalesces source/`.env` changes into the ignored
+  restart trigger; `dev:restart` writes it, plain `dev` reacts only to it.
+  `runner-executable.ts` caches source/compiler fingerprinted builds at
+  `/runner/executable`. Restarts drain active steps and queue work, so sessions
+  may request their own restart. Text handlers precompress via
+  zstd/Brotli/gzip/deflate; `/favicon.svg` revalidates by ETag.
+- `solid/pages.tsx` SSR-renders shells; `sync-engine/pages.ts` loads it with
+  Vite SSR. App mounts at `solid/client.tsx`; routes in `shared/routes.ts`.
+  Browser tests use real Chromium/Tailwind and real mutations, not synthetic
+  layout/CSS assertions; CI rejects `.only`/zero tests.
+- `sync-engine/auth.ts` does Google OIDC (code + PKCE) with HttpOnly
+  state/verifier cookies; it fetches/discards provider tokens. `auth-store.ts`
+  uses Bun SQLite/Drizzle, upserting users, persisting 7-day sessions. Keys are
+  UUIDv7; Google subjects/session tokens are distinct unique fields; tables have
+  created/updated times, actor IDs, `isDeleted`. `shared/database.ts` applies
+  migrations on open; `sync-engine/index.ts` injects it; auth falls back to
+  in-memory SQLite. Shared PKCE/provider parsing/redirects live in `oauth.ts`;
+  cookie helpers in `http.ts`. Client reads `/api/auth/session`, gates app, logs
+  out.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
-  `runners.ts` issues hashed opaque setup tokens, owns management and
-  token-authenticated callbacks, deriving installers from the origin.
-  `runner-installer.ts` emits the macOS/Linux one-liner: it picks an x64/ARM64
-  glibc/musl target and starts an executable under `~/.q-mush/runner`; Bun isn't
-  needed. Runners report metadata and 15-second heartbeats over WebSockets,
-  check updates at startup/5-minute intervals, recheck via handshake version
-  after restarts, replacing an older socket on reconnect. Updates use ETags and
-  SHA-256, atomically replace and restart it; dev restarts drain sessions first.
-  Reinstalling for the same user and machine rotates the registration to its new
-  token instead of adding a runner; others stay protected; tokens never list.
+  `runners.ts` issues hashed tokens, owns management and token-auth callbacks
+  and origin-based installers. `runner-installer.ts` emits the macOS/Linux
+  one-liner, picking an x64/ARM64 glibc/musl target, starting under
+  `~/.q-mush/runner` without Bun. Runners send metadata and 15-second WebSocket
+  heartbeats, check updates at startup/5-minute intervals, recheck via handshake
+  version after restarts, replacing the old socket on reconnect. Updates use
+  source/compiler ETags and SHA-256, atomically replace/restart it; dev restarts
+  drain sessions first. Reinstalling for the same user/machine rotates the
+  registration to its new token rather than adding one; others stay protected;
+  tokens never list.
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` keeps positional record/category
   controls; the shared Unicode result bound applies after serialization.
@@ -77,11 +77,11 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   including persisted manual/idle compaction, so partial output stays unfinished
   without a retry mark. Idle sessions compact manually or, opted in, at 30 idle
   minutes; compaction soft-deletes messages into a replayable handoff; replays
-  deliver drafts, skip re-verifying. The composer stays mounted across statuses,
+  deliver drafts, skip re-verifying. Composer stays mounted across statuses,
   explaining unavailable actions, keeping drafts; draft fields echo a local
   signal debounced into the shared draft — submit paths flush first; local prefs
   filter transcript categories. Provider secrets never reach browser/runner
-  payloads. Directory opens `directory-picker-client.tsx`
+  payloads. Directory picker opens `directory-picker-client.tsx`
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads root
   `AGENTS.md` (else `CLAUDE.md`).
 
@@ -188,8 +188,9 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   the zero threshold; alpha ignores locally bound names but keeps free names,
   member APIs, literals.
 - Repo policy: tracked, unignored files have a 20,000-code-point maximum
-  (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
-  outside `test`/`fixtures`.
+  (`bun.lock`, `drizzle/` excepted); tests live only in `test`; app HTML only in
+  `test`/`fixtures`. `AGENTS.md` is at the cap: diff edits/merges against the
+  prior blob; re-condense or split at a real seam, never silently evict facts.
 
 ## Gotchas
 
@@ -237,10 +238,10 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   active shell. OpenAI API-key and OAuth requests prefer Responses WebSockets,
   falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
   completions, Anthropic-format ones Messages events. OpenAI OAuth refreshes its
-  token bundle before expiry. Sessions need an explicit model ID. Catalogs:
-  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
-  `/models`, or generic `/models`; Anthropic-format catalogs read
-  `display_name`, `max_input_tokens`, `max_tokens`, the `capabilities` tree
+  token before expiry. Sessions need an explicit model ID. Catalogs: OpenAI
+  `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
+  generic `/models`; Anthropic-format catalogs read `display_name`,
+  `max_input_tokens`, `max_tokens`, the `capabilities` tree
   (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
   are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
