@@ -273,9 +273,9 @@
   Streamed reasoning deltas group by `output_index` and `summary_index`;
   separate summary parts with paragraphs since completed responses may omit
   them. Frozen clocks may collapse admission transitions; production cannot.
-  Live OpenAI and Codex socket probes emitted `response.created` with its ID;
-  the first identified non-terminal `response.*` also admits servers omitting
-  it. WebSocket Mode expires after 60 minutes; canonical
+  Live OpenAI/Codex sockets emitted `response.created` with an ID; the first
+  identified non-terminal `response.*` also admits servers omitting it.
+  WebSocket Mode expires after 60 minutes; canonical
   `websocket_connection_limit_reached` and observed underscore-free variant
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. WebSocket send enters bounded admission until correlated
