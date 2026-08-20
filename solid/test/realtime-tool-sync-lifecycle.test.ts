@@ -1,8 +1,5 @@
 import { expect, test, vi } from "vitest";
-import {
-  ToolSyncTracker,
-  type ToolSyncRequest,
-} from "../realtime-client-tool-sync.ts";
+import { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
 import {
   orderedToolDelta,
@@ -107,8 +104,6 @@ test("does not resend unresolved session synchronization", () => {
 });
 
 test("retains current and remaining requests after a send failure", () => {
-  const pendingCalls: (readonly { sessionId: string; streamId: string }[])[] =
-    [];
   const stream = streamingRealtimeFixture("failed-sync-instance");
   const failedStreams = ["failed-a", "failed-b"];
   for (const [index, streamId] of failedStreams.entries()) {
@@ -119,22 +114,9 @@ test("retains current and remaining requests after a send failure", () => {
   socket.sent.length = 0;
   socket.throwAfter = 0;
   stream.setup.connection.syncTools(SESSION_ID);
-  const pendingSpy = vi
-    .spyOn(ToolSyncTracker.prototype, "pending")
-    .mockImplementation(function (this: ToolSyncTracker) {
-      // Restoring first avoids recursing into the mock.
-      pendingSpy.mockRestore();
-      const result: readonly ToolSyncRequest[] = this.pending();
-      pendingCalls.push(result);
-      return result;
-    });
-  try {
-    stream.reconnect("failed-sync-reconnected");
-  } finally {
-    // Idempotent: guards the leak when reconnect never calls pending().
-    pendingSpy.mockRestore();
-  }
-  expect(pendingCalls.at(-1)).toEqual(
+  const pendingSpy = vi.spyOn(ToolSyncTracker.prototype, "pending");
+  stream.reconnect("failed-sync-reconnected");
+  expect(pendingSpy.mock.results.at(-1)?.value).toEqual(
     failedStreams.map((streamId) => ({ sessionId: SESSION_ID, streamId })),
   );
   stream.stop();

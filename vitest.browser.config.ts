@@ -20,6 +20,7 @@ export default defineConfig({
     environment: "node",
     include: ["solid/test/**/*.browser.test.{ts,tsx}"],
     passWithNoTests: false,
+    restoreMocks: true,
     testTimeout: 15_000,
   },
 });

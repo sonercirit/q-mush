@@ -21,6 +21,7 @@ const NON_SOURCE_TEST_EXCLUDE = [
 export default defineConfig({
   test: {
     passWithNoTests: false,
+    restoreMocks: true,
     projects: [
       {
         plugins: [solid({ ssr: true })],
