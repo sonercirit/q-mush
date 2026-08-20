@@ -55,9 +55,12 @@ test("reconnect deduplicates remembered, active, and resync tool streams", () =>
 
   const reconnected = stream.reconnect("deduplicated-again");
   const identity = { sessionId: SESSION_ID, streamId: STREAM_ID };
-  expect(activeSpy.mock.results.at(-1)?.value).toEqual([identity]);
-  expect(pendingSpy.mock.results.at(-1)?.value).toEqual([identity]);
-  expect(resyncSpy.mock.results.at(-1)?.value).toEqual([identity]);
+  const sourceRequests = [
+    activeSpy.mock.results.at(-1)?.value,
+    pendingSpy.mock.results.at(-1)?.value,
+    resyncSpy.mock.results.at(-1)?.value,
+  ];
+  expect(sourceRequests).toEqual([[identity], [identity], [identity]]);
 
   const identities = reconnected.sent.flatMap((frame) => {
     const parsed: unknown = JSON.parse(frame);
