@@ -283,9 +283,10 @@
   ID memory budget, then retire (never evict) the fence. This borrows
   `Bun.serve` WebSocket's documented default `maxPayloadLength` as a
   transport-scale bound, not a client limit; observed IDs are ~53 bytes. After
-  ID-less admission, skip retained IDs until a new ID. Fenced watchdog failures
-  abort. Other provider errors retry before persistence; exhausted sockets use
-  HTTP. Permanent errors/aborts do not retry; terminal failures persist.
+  ID-less admission skips retained IDs until a new ID. Concurrency closes
+  superseded sockets. Fenced watchdog failures abort. Other provider errors
+  retry before persistence; exhausted sockets use HTTP. Permanent errors/aborts
+  do not retry; terminal failures persist.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

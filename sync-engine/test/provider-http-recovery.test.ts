@@ -184,6 +184,7 @@ describe("provider HTTP step recovery", () => {
       expect(states.at(-1)).toBe("active");
     });
     expect(states).toEqual([
+      "active",
       "admission",
       "admission",
       "admission",
@@ -222,10 +223,10 @@ describe("provider HTTP step recovery", () => {
 
     const completion = model.complete(USER_MESSAGE);
     await Promise.resolve();
-    expect(states).toEqual([]);
+    expect(states).toEqual(["active"]);
     releaseFirst?.();
     await completion;
-    expect(states).toEqual([]);
+    expect(states).toEqual(["active"]);
   });
 
   test("resets a partial step and persists only the recovered tool call", async () => {

@@ -65,7 +65,7 @@ export function beginLifecycleRequest(states: ("active" | "admission")[]) {
   const pending = complete(model);
   const socket = requireProviderSocket(sockets, 0);
   socket.open();
-  expectRequestStates(states, "admission");
+  expectRequestStates(states, "active", "admission");
   return { model, pending, socket, sockets };
 }
 export function responseEvent(

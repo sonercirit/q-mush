@@ -451,6 +451,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   };
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
+    this.#onRequestState?.("active");
     if (this.#provider !== "openai") {
       return this.#completeHttp(...parameters);
     }

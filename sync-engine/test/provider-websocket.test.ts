@@ -74,14 +74,14 @@ test("bounds admission through unknown frames", async () => {
   const observedStates: ("active" | "admission")[] = [];
   const request = beginLifecycleRequest(observedStates);
   request.socket.receive({ type: "provider.keepalive" });
-  expectRequestStates(observedStates, "admission");
+  expectRequestStates(observedStates, "active", "admission");
   await expectRequestPending(request.pending);
   request.socket.receive({
     delta: "Done.",
     response_id: "current",
     type: "response.output_text.delta",
   });
-  expectRequestStates(observedStates, "admission", "active");
+  expectRequestStates(observedStates, "active", "admission", "active");
   request.socket.receive({
     response: { id: "stale", output: [{ content: "Wrong" }] },
     type: "response.completed",
@@ -128,7 +128,7 @@ test("correlates deltas on a reused socket", async () => {
   const request = beginLifecycleRequest(states);
   const { model, pending: first, socket } = request;
   acknowledgeProviderSocket(socket, "response-1");
-  expectRequestStates(states, "admission", "active");
+  expectRequestStates(states, "active", "admission", "active");
   completeResponse(socket, "response-1");
   await first;
   const controller = new AbortController();
@@ -137,7 +137,14 @@ test("correlates deltas on a reused socket", async () => {
     controller.signal,
   );
   expect(socket.sent).toHaveLength(2);
-  expectRequestStates(states, "admission", "active", "admission");
+  const waitingStates = [
+    "active",
+    "admission",
+    "active",
+    "active",
+    "admission",
+  ] as const;
+  expectRequestStates(states, ...waitingStates);
   expect(socket.listenerCount("message")).toBe(1);
   socket.receive(responseEvent("response.created", "response-1"));
   socket.receive({
@@ -145,14 +152,14 @@ test("correlates deltas on a reused socket", async () => {
     response_id: "response-1",
     type: "response.output_text.delta",
   });
-  expectRequestStates(states, "admission", "active", "admission");
+  expectRequestStates(states, ...waitingStates);
   await expectRequestPending(stalled);
   socket.receive({
     delta: "Done.",
     response_id: "response-2",
     type: "response.output_text.delta",
   });
-  expectRequestStates(states, "admission", "active", "admission", "active");
+  expectRequestStates(states, ...waitingStates, "active");
   socket.receive({
     delta: " stale",
     response_id: "response-1",
@@ -164,47 +171,60 @@ test("correlates deltas on a reused socket", async () => {
   expectProviderSocketReleased(socket);
 });
 
-test("keeps a defensive-copy fence while the newest socket wins a concurrent reset", async () => {
-  const observed: ("active" | "admission")[] = [];
-  const lifecycle = lifecycleModel(observed);
-  const { model, sockets } = lifecycle;
-  const first = complete(model);
-  const old = requireProviderSocket(sockets, 0);
-  old.open();
-  acknowledgeProviderSocket(old, "old");
-  completeResponse(old, "old");
-  await first;
-  for (let generation = 0; generation < 40; generation += 1) {
-    const id = String(generation);
-    const pending = complete(model);
-    acknowledgeProviderSocket(old, id);
-    completeResponse(old, id);
-    await pending;
-  }
-  const reused = complete(model);
-  const fresh = complete(model);
-  const next = requireProviderSocket(sockets, 1);
-  next.open();
-  old.receive({
-    delta: "Stale",
-    response_id: "old",
-    type: "response.output_text.delta",
-  });
-  acknowledgeProviderSocket(old, "current");
-  acknowledgeProviderSocket(next, "fresh");
-  completeResponse(next, "fresh");
-  expectDoneStep(await fresh);
-  completeResponse(old, "current");
-  expectDoneStep(await reused);
-  expect(old.readyState).toBe(WebSocket.CLOSED);
-  expectProviderSocketReleased(old);
-  const subsequent = complete(model);
-  expect(next.sent).toHaveLength(2);
-  acknowledgeProviderSocket(next, "subsequent");
-  completeResponse(next, "subsequent");
-  expectDoneStep(await subsequent);
-  next.close();
-});
+test.each([
+  ["fresh-first", true],
+  ["reused-first", false],
+])(
+  "keeps a defensive-copy fence while the newest socket wins a %s concurrent reset",
+  async (_order, freshFirst) => {
+    const observed: ("active" | "admission")[] = [];
+    const lifecycle = lifecycleModel(observed);
+    const { model, sockets } = lifecycle;
+    const first = complete(model);
+    const old = requireProviderSocket(sockets, 0);
+    old.open();
+    acknowledgeProviderSocket(old, "old");
+    completeResponse(old, "old");
+    await first;
+    for (let generation = 0; generation < 40; generation += 1) {
+      const id = String(generation);
+      const pending = complete(model);
+      acknowledgeProviderSocket(old, id);
+      completeResponse(old, id);
+      await pending;
+    }
+    const reused = complete(model);
+    const fresh = complete(model);
+    const next = requireProviderSocket(sockets, 1);
+    next.open();
+    old.receive({
+      delta: "Stale",
+      response_id: "old",
+      type: "response.output_text.delta",
+    });
+    acknowledgeProviderSocket(old, "current");
+    acknowledgeProviderSocket(next, "fresh");
+    if (freshFirst) {
+      completeResponse(next, "fresh");
+      expectDoneStep(await fresh);
+      completeResponse(old, "current");
+      expectDoneStep(await reused);
+    } else {
+      completeResponse(old, "current");
+      expectDoneStep(await reused);
+      completeResponse(next, "fresh");
+      expectDoneStep(await fresh);
+    }
+    expect(old.readyState).toBe(WebSocket.CLOSED);
+    expectProviderSocketReleased(old);
+    const subsequent = complete(model);
+    expect(next.sent).toHaveLength(2);
+    acknowledgeProviderSocket(next, "subsequent");
+    completeResponse(next, "subsequent");
+    expectDoneStep(await subsequent);
+    next.close();
+  },
+);
 
 test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
   const request = beginLifecycleRequest([]);

@@ -25,6 +25,7 @@ const OPEN_STATE = 1;
 // transport-scale value as an application memory budget for the client fence;
 // crossing it retires the socket without evicting IDs or weakening the fence.
 const MAX_RETAINED_RESPONSE_ID_BYTES = 16 * 1024 * 1024;
+const textEncoder = new TextEncoder();
 
 export class ProviderWebSocketError extends Error {
   readonly reconnectImmediately: boolean;
@@ -172,11 +173,12 @@ export class ProviderWebSocketSession {
               !priorResponseIds.has(currentResponseId)
             ) {
               priorResponseIds.add(currentResponseId);
-              retainedBytes += Buffer.byteLength(currentResponseId, "utf8");
+              retainedBytes += textEncoder.encode(currentResponseId).byteLength;
             }
             if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
               this.#priorResponseIds = priorResponseIds;
               this.#priorResponseIdBytes = retainedBytes;
+              this.#socket?.close(1000, "Connection superseded");
               this.#socket = socket;
             } else {
               this.#priorResponseIds.clear();
