@@ -331,7 +331,14 @@ export class SessionRuntimes {
         ...request,
         boundary: runtime.boundary,
       };
-      runtime.restartRequest ??= scopedRequest;
+      if (
+        runtime.restartRequest === undefined ||
+        (durable &&
+          scope.kind === "server" &&
+          runtime.restartRequest.requestedBy === "runner")
+      ) {
+        runtime.restartRequest = scopedRequest;
+      }
       runtime.restartRequestedAt ??= this.#now();
       runtime.restartDurable ||= durable;
     }
