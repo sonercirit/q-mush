@@ -209,23 +209,22 @@ setInterval(() => {}, 1_000);
   );
 });
 
-test("development restart bounds the complete pre-kill lifecycle to one deadline", async () => {
+test("development restart bounds the whole pre-kill lifecycle to one deadline", async () => {
   await useDevelopmentServer(
-    "q-mush-dev-lifecycle-bound-test-",
+    "q-mush-dev-bound-test-",
     async (directory, triggerPath) => {
-      const childPath = join(directory, "bounded-child.ts");
-      const startsPath = join(directory, "bounded-starts.txt");
-      const overlapPath = join(directory, "bounded-overlap.txt");
+      const childPath = join(directory, "bound-child.ts");
+      const startsPath = join(directory, "bound-starts.txt");
+      const overlapPath = join(directory, "bound-overlap.txt");
       await Bun.write(
         childPath,
         `import { appendFileSync, existsSync, readFileSync } from "node:fs";
-const startsPath = process.argv[2];
-const overlapPath = process.argv[3];
+const [startsPath, overlapPath] = process.argv.slice(2);
 if (startsPath === undefined || overlapPath === undefined) throw new Error("Missing path");
 if (existsSync(startsPath)) {
-  const priorPid = Number(readFileSync(startsPath, "utf8").trim().split("\\n").at(-1));
+  const prior = Number(readFileSync(startsPath, "utf8").trim().split("\\n").at(-1));
   try {
-    process.kill(priorPid, 0);
+    process.kill(prior, 0);
     appendFileSync(overlapPath, "overlap\\n");
   } catch {}
 }
@@ -234,23 +233,22 @@ process.on("SIGTERM", () => undefined);
 setInterval(() => undefined, 1_000);
 `,
       );
-      const serverOptions = {
+      const server = startDevelopmentServer({
         command: [process.execPath, childPath, startsPath, overlapPath],
         cwd: directory,
         restartDelayMilliseconds: 10,
         restartTriggerPath: triggerPath,
         shutdownForceMilliseconds: 300,
         shutdownPreparationMilliseconds: 300,
-      } as const;
-      const server = startDevelopmentServer(serverOptions);
+      });
       try {
         await waitForStartCount(startsPath, 1);
         const startedAt = performance.now();
         await triggerDevelopmentRestart(triggerPath);
         await waitForStartCount(startsPath, 2);
         const elapsed = performance.now() - startedAt;
-        // One shared deadline spends the 300 ms preparation budget once; a
-        // per-phase deadline would wait for it again before SIGKILL.
+        // One shared deadline spends the preparation budget once; per-phase
+        // deadlines would wait for it again before SIGKILL.
         expect(elapsed).toBeLessThan(500);
         expect(await Bun.file(overlapPath).exists()).toBe(false);
       } finally {
