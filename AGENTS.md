@@ -280,12 +280,15 @@
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. WebSocket send enters bounded admission until correlated
   `response.created`; HTTP header waits stay unbounded. Discard unknown,
-  pre-creation, and mismatched-ID frames. Retain IDs for each socket's 60-minute
-  life; after ID-less admission, skip retained IDs until a new ID. Fenced
-  watchdog failures abort without replaying tools. Other interruptions and
-  provider errors retry before persistence; replays reset partial UI, and
-  exhausted WebSockets use HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  pre-creation, and mismatched-ID frames. A 60-minute lifetime does not bound
+  provider-controlled ID size or response rate: retain at most 16 MiB of ID
+  payload (Bun's default maximum inbound WebSocket frame), then retire rather
+  than evict from the stale-frame fence; observed OpenAI IDs are about 53 bytes.
+  After ID-less admission, skip retained IDs until a new ID. Fenced watchdog
+  failures abort without replaying tools. Other interruptions and provider
+  errors retry before persistence; replays reset partial UI, and exhausted
+  WebSockets use HTTP. Permanent errors and aborts do not retry; terminal
+  failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

@@ -462,6 +462,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
     if (parameters[1]?.aborted === true) {
       throw new DOMException("The model request was aborted", "AbortError");
     }
+    // WebSocket admission no longer applies once fallback owns the request;
+    // HTTP headers and streams may remain healthy beyond the admission grace.
+    this.#onRequestState?.("active");
     return this.#completeHttp(...parameters);
   }
 
@@ -614,7 +617,6 @@ export class ChatCompletionsAgentModel implements AgentModel {
           protocol,
         }),
         onDelta: this.#onDelta,
-        onRequestState: this.#onRequestState,
         protocol,
         provider: this.#provider,
         sleep: this.#sleep,

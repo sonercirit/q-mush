@@ -257,12 +257,18 @@ function oauthModel(
   fetch: () => Promise<Response>,
   sleep: ModelRequestSleep,
   webSocket: WebSocketFactory,
+  states?: ("active" | "admission")[],
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
     fetch,
     maxOutputTokens: null,
     model: "gpt-5-codex",
+    ...(states === undefined
+      ? {}
+      : {
+          onRequestState: (state: "active" | "admission") => states.push(state),
+        }),
     provider: "openai",
     sleep,
     webSocket,
@@ -305,6 +311,7 @@ export async function expectBoundedHttpFallback(options: {
   const sockets = new FakeProviderSockets();
   const delays: number[] = [];
   let fetchCount = 0;
+  const states: ("active" | "admission")[] = [];
   const model = oauthModel(
     () => {
       fetchCount += 1;
@@ -312,6 +319,7 @@ export async function expectBoundedHttpFallback(options: {
     },
     recordDelay(delays),
     sockets.create,
+    states,
   );
   const pending = complete(model);
 
@@ -319,6 +327,8 @@ export async function expectBoundedHttpFallback(options: {
 
   const step = await pending;
   expect(fetchCount).toBe(1);
+  expect(states.filter((state) => state === "admission")).toHaveLength(4);
+  expect(states.at(-1)).toBe("active");
   expect(delays).toEqual([1_000, 2_000, 4_000]);
   expectDoneStep(step);
 }

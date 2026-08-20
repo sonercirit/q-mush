@@ -131,6 +131,7 @@ test("a running session identifies its pending runtime component", () => {
   });
 
   expect(pendingComponentText(container)).toBe("Pending: provider admission");
+  expect(container.textContent).not.toContain(String(Date.now()));
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {

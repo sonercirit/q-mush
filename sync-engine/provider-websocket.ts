@@ -20,6 +20,9 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 const OPEN_STATE = 1;
+// Bun rejects inbound WebSocket messages above 16 MiB by default. Reuse that
+// transport resource boundary for cumulative response-ID payloads.
+const MAX_RETAINED_RESPONSE_ID_BYTES = 16 * 1024 * 1024;
 
 export class ProviderWebSocketError extends Error {
   readonly reconnectImmediately: boolean;
@@ -83,7 +86,11 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
-  // Unbounded is safe: reconnect/close clears IDs, and a socket lives 60 minutes.
+  // A provider controls both response-ID length and model latency, so the
+  // 60-minute socket lifetime alone cannot bound this stale-frame fence. Keep
+  // at most one Bun default maximum inbound-frame payload (16 MiB) of IDs; on
+  // crossing it, retire the socket rather than evict an ID and reopening the
+  // stale-frame admission race. Normal OpenAI `resp_…` IDs are about 53 bytes.
   readonly #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;
@@ -129,7 +136,9 @@ export class ProviderWebSocketSession {
         reusedSocket === undefined
           ? new Set<string>()
           : new Set(this.#priorResponseIds);
-      if (reusedSocket === undefined) this.#priorResponseIds.clear();
+      if (reusedSocket === undefined) {
+        this.#priorResponseIds.clear();
+      }
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
@@ -154,11 +163,21 @@ export class ProviderWebSocketSession {
         if (error === undefined && step !== undefined) {
           if (requestGeneration === this.#socketGeneration) {
             this.#priorResponseIds.clear();
-            for (const id of priorResponseIds) this.#priorResponseIds.add(id);
+            let retainedBytes = 0;
+            for (const id of priorResponseIds) {
+              this.#priorResponseIds.add(id);
+              retainedBytes += Buffer.byteLength(id);
+            }
             if (currentResponseId !== undefined) {
               this.#priorResponseIds.add(currentResponseId);
+              retainedBytes += Buffer.byteLength(currentResponseId);
             }
-            this.#socket = socket;
+            if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
+              this.#socket = socket;
+            } else {
+              this.#priorResponseIds.clear();
+              socket.close(1000, "Response ID retention limit reached");
+            }
           } else {
             socket.close(1000, "Connection superseded");
           }

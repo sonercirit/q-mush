@@ -1,7 +1,6 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import type { AgentModelRequestOptions } from "./agent-model-options.ts";
 import {
   fetchModelRequestAttempt,
   modelResponseRetryAfterMilliseconds,
@@ -22,8 +21,6 @@ export interface ProviderHttpOptions {
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
-  readonly onRequestState:
-    AgentModelRequestOptions["onRequestState"] | undefined;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
   readonly sleep: ModelRequestSleep | undefined;

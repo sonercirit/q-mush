@@ -206,6 +206,24 @@ test("keeps a defensive-copy fence while the newest socket wins a concurrent res
   next.close();
 });
 
+test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
+  const request = beginLifecycleRequest([]);
+  const { model, pending: first, socket } = request;
+  const oversizedId = "r".repeat(16 * 1024 * 1024 + 1);
+  acknowledgeProviderSocket(socket, oversizedId);
+  completeResponse(socket, oversizedId);
+  expectDoneStep(await first);
+  expect(socket.readyState).toBe(WebSocket.CLOSED);
+
+  const second = complete(model);
+  const replacement = requireProviderSocket(request.sockets, 1);
+  replacement.open();
+  acknowledgeProviderSocket(replacement, "replacement");
+  completeResponse(replacement, "replacement");
+  expectDoneStep(await second);
+  replacement.close();
+});
+
 test("reuses a socket and reconnects after idle close", async () => {
   const stepSockets = new FakeProviderSockets();
   const model = apiKeyModel({ webSocket: stepSockets.create });
