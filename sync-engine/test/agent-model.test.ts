@@ -260,7 +260,7 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("read_file");
     expect(serializedBody).not.toContain("list_files");
   });
-  test("uses a generic OpenAI-compatible chat-completions endpoint", async () => {
+  test("uses a generic OpenAI-compatible endpoint", async () => {
     const { body, capture } = await completeGenericModel({
       baseUrl: "https://models.example.test/openai/v1",
       model: "llama-3.3-70b",
@@ -311,7 +311,7 @@ describe("chat completions agent model", () => {
       openRouterProviderRouting,
     });
   }
-  test("maps all OpenRouter routing selections to provider preferences", async () => {
+  test("maps OpenRouter routing to provider preferences", async () => {
     const selections = [
       [{ sort: "price", type: "sort" }, { sort: "price" }],
       [{ sort: "throughput", type: "sort" }, { sort: "throughput" }],
@@ -364,7 +364,7 @@ describe("chat completions agent model", () => {
     expect(body).not.toMatchObject({ tool_choice: "auto" });
     expect(capturedToolNames(body)).toEqual([]);
   });
-  test("sends image inputs through chat completions", async () => {
+  test("sends images through chat completions", async () => {
     const capture = new RequestCapture();
     const model = respondingModel(
       OPENROUTER_IMAGE_OPTIONS,
