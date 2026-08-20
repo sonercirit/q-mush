@@ -27,6 +27,13 @@ async function reusedModel(
   return { model, socket, sockets };
 }
 
+function finishReplacement(sockets: FakeProviderSockets) {
+  const replacement = requireProviderSocket(sockets, 1);
+  replacement.open();
+  acknowledgeProviderSocket(replacement, "fresh");
+  completeProviderSocket(replacement, "fresh");
+}
+
 function permanentError(message: string, responseId?: string) {
   return {
     error: { code: "invalid_api_key", message },
@@ -52,6 +59,17 @@ test("surfaces a permanent pre-admission error on a reused socket", async () => 
   expect(prepared.sockets.created).toHaveLength(1);
 });
 
+test("replays an ID-less admitted request after an unidentified permanent error", async () => {
+  const { model, socket, sockets } = await reusedModel();
+  const pending = complete(model);
+  socket.receive({ type: "response.created" });
+  expect(sockets.created).toHaveLength(1);
+  socket.receive(permanentError("Stale failure"));
+  await sockets.waitForAttempt(1);
+  finishReplacement(sockets);
+  expectDoneStep(await pending);
+});
+
 test("resets forwarded output when replaying a post-admission error", async () => {
   const deltas: { content: string; reset?: boolean }[] = [];
   const { model, socket, sockets } = await reusedModel((delta) =>
@@ -67,9 +85,6 @@ test("resets forwarded output when replaying a post-admission error", async () =
   socket.receive(permanentError("Invalid key"));
   await sockets.waitForAttempt(1);
   expect(deltas).toContainEqual({ content: "", reset: true, thinking: "" });
-  const replacement = requireProviderSocket(sockets, 1);
-  replacement.open();
-  acknowledgeProviderSocket(replacement, "fresh");
-  completeProviderSocket(replacement, "fresh");
+  finishReplacement(sockets);
   expectDoneStep(await pending);
 });

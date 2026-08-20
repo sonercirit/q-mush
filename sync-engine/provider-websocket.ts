@@ -319,7 +319,6 @@ export class ProviderWebSocketSession {
           } else if (
             reusedSocket !== undefined &&
             value["type"] === "error" &&
-            currentResponseId !== undefined &&
             eventResponseId === undefined &&
             !readProviderStreamError(value).reconnectWebSocket
           ) {
