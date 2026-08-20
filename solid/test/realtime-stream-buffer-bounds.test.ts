@@ -33,6 +33,31 @@ test("bounds pending keys before materialization", () => {
   expect(drained).toBe(MAXIMUM_TOOL_STREAMS_PER_USER);
 });
 
+test("compacts the oldest model stream instead of evicting it at the fragment cap", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const oldestParts = ["oldest-first", "-oldest-second"];
+  for (const part of oldestParts) {
+    buffer.queue(identifiedModelDelta(SESSION_ID, STREAM_ID, part));
+  }
+  for (let index = 0; index < MAXIMUM_TOOL_STREAMS_PER_USER - 2; index += 1) {
+    buffer.queue(
+      identifiedModelDelta(
+        `filler-session-${String(index)}`,
+        `filler-stream-${String(index)}`,
+      ),
+    );
+  }
+  buffer.queue(identifiedModelDelta("new-session", "new-stream"));
+
+  const content: string[] = [];
+  while (buffer.pending) {
+    for (const update of buffer.takeNext()?.updates ?? []) {
+      if (update.type === "session_delta") content.push(update.content);
+    }
+  }
+  expect(content).toContain(oldestParts.join(""));
+});
+
 test("retains compact terminal identity independent of rendered payload", () => {
   const buffer = new RealtimeStreamBuffer();
   const output = "x".repeat(64 * 1_024);
