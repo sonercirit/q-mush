@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SessionController } from "../session-controller.ts";
+import { identifiedModelDelta } from "./realtime-stream-event-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import {
   sessionDetailWithStatus,
@@ -83,4 +84,49 @@ test("retains a rendered stale detail stream during navigation", () => {
   expect(sessionMessageIds(controller)).toEqual(
     expectedMessageIds(rendered.id),
   );
+});
+
+test("bounds frozen mutation rebases while retaining visible sessions", () => {
+  const selected = detail("session-selected");
+  const reactive = sessionDetailState(selected);
+  const controller = new SessionController(reactive);
+  const oldest = detail("session-frozen-0");
+  reactive.setState((view) => ({
+    ...view,
+    detail: oldest,
+    selectedId: oldest.id,
+  }));
+  controller.applyStreamBatch({
+    type: "stream_batch",
+    updates: [
+      {
+        content: "retained live output",
+        sessionId: oldest.id,
+        thinking: "",
+        type: "session_delta",
+      },
+    ],
+  });
+  reactive.setState((view) => ({
+    ...view,
+    detail: selected,
+    selectedId: selected.id,
+  }));
+  reactive.setState((view) => ({ ...view, sending: true }));
+  controller.applyStreamBatch({
+    type: "stream_batch",
+    updates: Array.from({ length: 101 }, (_, index) =>
+      identifiedModelDelta(
+        `session-frozen-${String(index)}`,
+        `stream-frozen-${String(index)}`,
+        "frozen",
+      ),
+    ),
+  });
+  reactive.setState((view) => ({ ...view, sending: false }));
+
+  reactive.setState((view) => ({ ...view, selectedId: oldest.id }));
+  controller.applyDetail(oldest);
+
+  expect(sessionMessageIds(controller)).toEqual(expectedMessageIds(oldest.id));
 });

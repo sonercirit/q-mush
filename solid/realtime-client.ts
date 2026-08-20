@@ -473,6 +473,7 @@ export class RealtimeConnection {
         }
         return;
       }
+      // A sent request stays pending until its matching snapshot arrives.
       this.#toolSync.remember(request);
     }
   }

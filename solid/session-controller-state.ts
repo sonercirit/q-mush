@@ -33,18 +33,9 @@ import { createDisplaySessionMessage } from "./session-message.ts";
 import { sessionMutationPending } from "./session-pending.ts";
 import { toolStreamKey } from "./tool-stream-client.ts";
 
+// This cap accommodates both protected identities: the selected session and a
+// separately rendered stale detail during navigation.
 const MAXIMUM_STREAMED_SESSIONS_PER_USER = 100;
-const MAXIMUM_PROTECTED_STREAMED_SESSIONS = 2;
-
-function assertStreamRetentionCapacity(maximum: number): void {
-  if (maximum < MAXIMUM_PROTECTED_STREAMED_SESSIONS) {
-    throw new Error(
-      "The streamed-session cap must accommodate the selected and rendered sessions",
-    );
-  }
-}
-
-assertStreamRetentionCapacity(MAXIMUM_STREAMED_SESSIONS_PER_USER);
 
 function replaceToolStream(
   streams: readonly ToolStreamEntry[],
@@ -76,22 +67,36 @@ export class SessionRealtimeState {
   readonly #streamedContent = new Map<string, StreamedSessionContent>();
   readonly #view: RevisionState<SessionViewState>;
 
+  #oldestEvictableSession(ids: Iterable<string>): string | undefined {
+    const view = this.#view.value;
+    return Array.from(ids).find(
+      (candidate) =>
+        candidate !== view.selectedId && candidate !== view.detail?.id,
+    );
+  }
+
+  #retainMutationRebase(sessionId: string): void {
+    this.#mutationRebases.delete(sessionId);
+    this.#mutationRebases.add(sessionId);
+    while (this.#mutationRebases.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
+      const oldest = this.#oldestEvictableSession(this.#mutationRebases);
+      // Only the selected and rendered sessions are protected, and the cap
+      // accommodates both, so an eviction candidate exists when over cap.
+      if (oldest === undefined) break;
+      this.#mutationRebases.delete(oldest);
+    }
+  }
+
   #retainStreamedContent(
     sessionId: string,
     content: StreamedSessionContent,
   ): void {
     this.#streamedContent.delete(sessionId);
     this.#streamedContent.set(sessionId, content);
-    const view = this.#view.value;
     while (this.#streamedContent.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
-      const oldest = this.#streamedContent
-        .keys()
-        .find(
-          (candidate) =>
-            candidate !== view.selectedId && candidate !== view.detail?.id,
-        );
-      // Only the selected and rendered sessions are protected. The enforced
-      // minimum cap guarantees an eviction candidate whenever this is over cap.
+      const oldest = this.#oldestEvictableSession(this.#streamedContent.keys());
+      // Only the selected and rendered sessions are protected, and the cap
+      // accommodates both, so an eviction candidate exists when over cap.
       if (oldest === undefined) break;
       this.#streamedContent.delete(oldest);
     }
@@ -134,7 +139,7 @@ export class SessionRealtimeState {
     freeze: boolean,
   ): void {
     this.#forStreamSessions(event, (sessionId) => {
-      if (freeze) this.#mutationRebases.add(sessionId);
+      if (freeze) this.#retainMutationRebase(sessionId);
       else this.#rebaseMutationStream(sessionId);
     });
   }
@@ -144,7 +149,7 @@ export class SessionRealtimeState {
   }
 
   rebaseStream(sessionId: string): void {
-    this.#mutationRebases.add(sessionId);
+    this.#retainMutationRebase(sessionId);
   }
 
   #rebaseMutationStream(sessionId: string): void {

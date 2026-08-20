@@ -4,12 +4,11 @@ import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
 import {
   orderedToolDelta,
   preparingToolDelta,
+  SESSION_ID,
+  STREAM_ID,
 } from "./realtime-stream-event-fixtures.ts";
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
-
-const SESSION_ID = "session-ordered";
-const STREAM_ID = "stream-ordered";
 
 function expectToolSync(sent: readonly string[] | undefined): void {
   const request = JSON.stringify({
@@ -52,12 +51,19 @@ test("reconnect deduplicates remembered, active, and resync tool streams", () =>
 
   const reconnected = stream.reconnect("deduplicated-again");
   const identity = { sessionId: SESSION_ID, streamId: STREAM_ID };
-  const sourceRequests = [
-    activeSpy.mock.results.at(-1)?.value,
-    pendingSpy.mock.results.at(-1)?.value,
-    resyncSpy.mock.results.at(-1)?.value,
-  ];
-  expect(sourceRequests).toEqual([[identity], [identity], [identity]]);
+  const sourceRequests: Record<string, unknown> = {};
+  for (const [source, spy] of Object.entries({
+    active: activeSpy,
+    pending: pendingSpy,
+    resync: resyncSpy,
+  })) {
+    sourceRequests[source] = spy.mock.results.at(-1)?.value;
+  }
+  expect(sourceRequests).toEqual({
+    active: [identity],
+    pending: [identity],
+    resync: [identity],
+  });
 
   const identities = reconnected.sent.flatMap((frame) => {
     const parsed: unknown = JSON.parse(frame);

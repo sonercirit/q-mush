@@ -46,8 +46,8 @@ export interface RealtimeStreamBarrier {
   readonly sessionId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
-// Deliberately share the per-user stream cap across queued fragments and keys so
-// every in-memory realtime stream dimension has the same bounded cardinality.
+// Deliberately share the per-user stream cap so queued fragments and keys have
+// the same bounded cardinality.
 const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
 const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(

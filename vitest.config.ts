@@ -21,7 +21,6 @@ const NON_SOURCE_TEST_EXCLUDE = [
 export default defineConfig({
   test: {
     passWithNoTests: false,
-    restoreMocks: true,
     projects: [
       {
         plugins: [solid({ ssr: true })],
@@ -35,6 +34,7 @@ export default defineConfig({
           ],
           include: TEST_INCLUDE,
           name: "server",
+          restoreMocks: true,
           testTimeout: 15_000,
         },
       },
@@ -57,6 +57,7 @@ export default defineConfig({
           exclude: [...NON_SOURCE_TEST_EXCLUDE, ...BROWSER_TEST_INCLUDE],
           include: DOM_TEST_INCLUDE,
           name: "dom",
+          restoreMocks: true,
           server: { deps: { inline: [/solid-js/u] } },
           testTimeout: 15_000,
         },
