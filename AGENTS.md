@@ -49,19 +49,18 @@
   supervisor-issued absolute 120-second deadline (fresh per restart, shared only
   in flight), reject new steps and provider/auxiliary requests, report scoped
   active-tool counts, force-park stragglers only after durable handoffs, then
-  bound cleanup/termination; repeats escalate. Runner drain elapsed time starts
-  at its original request and survives temporary server authority; force-parking
-  clears that clock so restoring a rejected server drain cannot resurrect it.
-  Restart timers name a purpose tests target. `DevelopmentRestartLifecycle` owns
-  it; a rejected drain keeps serving, so it restores maintenance, shutdown
-  state, recovery, the abort signal (`SessionRestartAbort`: aborted controllers
-  stay aborted) and the gate, clears each session's abandoned server request (a
-  still-gating runner request is kept), then reruns handoff recovery and the
-  queued launcher unless a final shutdown won and it only logs. Failed chains
-  release. Final shutdown cancels that deadline, promotes runner handoffs to a
-  server marker, then stays unbounded, fencing live markers from liveness scans.
-  Text handlers precompress once, negotiating zstd, Brotli, gzip and deflate;
-  `/favicon.svg` uses ETag.
+  bound cleanup/termination; repeats escalate. Runner elapsed time retains its
+  original request through server authority; force-parking clears it so restore
+  cannot resurrect work. Restart timers name a purpose tests target.
+  `DevelopmentRestartLifecycle` owns it; a rejected drain keeps serving, so it
+  restores maintenance, shutdown state, recovery, the abort signal
+  (`SessionRestartAbort`: aborted controllers stay aborted) and the gate, clears
+  each session's abandoned server request (a still-gating runner request is
+  kept), then reruns handoff recovery and the queued launcher unless a final
+  shutdown won and it only logs. Failed chains release. Final shutdown cancels
+  that deadline, promotes runner handoffs to a server marker, then stays
+  unbounded, fencing live markers from liveness scans. Text handlers precompress
+  once, negotiating zstd, Brotli, gzip and deflate; `/favicon.svg` uses ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
