@@ -39,6 +39,7 @@ export async function answerSessionQuestions(
     answeringQuestions: started.answeringQuestions,
     error: typeof started.error === "string" ? started.error : undefined,
   });
+  options.realtime.rebaseStream(detail.id);
   try {
     await options.transport.command(
       SESSION_REALTIME_OPERATIONS.answerQuestions,

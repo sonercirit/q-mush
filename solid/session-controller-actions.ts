@@ -89,6 +89,7 @@ export async function mutateSessionDetail(
     return;
   }
   const revision = dependencies.view.begin({ error: undefined, ...pending });
+  dependencies.realtime.rebaseStream(baseline.id);
   dependencies.loader.noteMutationStarted();
   try {
     if (dependencies.transport === undefined) {
