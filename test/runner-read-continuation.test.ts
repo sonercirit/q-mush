@@ -3,7 +3,9 @@ import { readContinuation } from "../runner/runner-read-continuation.ts";
 
 test.each([
   ["abc\nx", 3, "abc\n"],
+  ["abc\nx", 4, "abc\nx"],
   ["😀😀\n🦄", 2, "😀😀\n"],
+  ["😀😀\n🦄", 3, "😀😀\n🦄"],
 ])(
   "retains evidence of omitted content when no continuation marker fits",
   (content, maximum, expected) => {
