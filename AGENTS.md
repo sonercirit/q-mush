@@ -275,19 +275,17 @@
   them. Frozen clocks may collapse admission transitions; production cannot.
   Live OpenAI/Codex sockets emitted `response.created` with an ID; the first
   identified non-terminal `response.*` also admits servers omitting it.
-  WebSocket Mode expires after 60 minutes; canonical
-  `websocket_connection_limit_reached` and observed underscore-free variant
-  replace the socket once per step, then use bounded retries, replaying only the
-  unpersisted step. WebSocket send enters bounded admission until correlated
+  WebSocket Mode expires after 60 minutes; both observed connection-limit error
+  spellings replace the socket once per step, then bounded retries replay only
+  the unpersisted step. WebSocket send enters bounded admission until
   `response.created`; HTTP header waits stay unbounded. Discard unknown,
   pre-creation, and mismatched-ID frames. Since 60 minutes cannot bound
   provider-controlled ID size/rate, retain at most Bun's default 16 MiB inbound
   frame of ID payload, then retire (never evict) the fence; OpenAI IDs are ~53
   bytes. After ID-less admission, skip retained IDs until a new ID. Fenced
-  watchdog failures abort without replaying tools. Other interruptions and
-  provider errors retry before persistence; replays reset partial UI, and
-  exhausted WebSockets use HTTP. Permanent errors and aborts do not retry;
-  terminal failures persist as non-replayed `error` messages.
+  watchdog failures abort without replaying tools. Other interruptions/provider
+  errors retry before persistence; replays reset partial UI; exhausted sockets
+  use HTTP. Permanent errors/aborts do not retry; terminal failures persist.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
