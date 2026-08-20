@@ -300,15 +300,14 @@ export function createSessionRestartControl(
       if (runtimes.draining) {
         const serverId = serverRestartId();
         if (serverId !== undefined && serverDeadline !== undefined) {
-          const sharedDrain = boundedDrain(
+          sharedServerRestartIds.set(runnerId, restartId);
+          await boundedDrain(
             { kind: "server" },
             serverId,
             true,
             serverDeadline,
             false,
           );
-          sharedServerRestartIds.set(runnerId, restartId);
-          await sharedDrain;
           return;
         }
         warn(

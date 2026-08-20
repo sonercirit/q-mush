@@ -353,6 +353,9 @@ describe("session restart control", () => {
       { restartId: "server-1", scope: { kind: "server" } },
       { restartId: "server-1", scope: { kind: "server" } },
     ]);
+    expect(restart.escalateRunnerDrain("runner-overlap", "runner-1")).toBe(
+      false,
+    );
   });
 
   test("runner drain joins a pending server drain without escalating it", async () => {

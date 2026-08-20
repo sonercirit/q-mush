@@ -514,6 +514,7 @@ export class SessionRuntimes {
             ...runnerGate,
             boundary: runtime.boundary,
           };
+          runtime.restartRequestedAt = this.#now();
           continue;
         }
         runtime.restartRequest = undefined;

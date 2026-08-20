@@ -282,6 +282,23 @@ describe("bounded restart drain", () => {
     expectRunnerRequest(runtimes);
   });
 
+  test("re-scoped runner progress starts when the server drain is abandoned", async () => {
+    const fixture = pendingRunnerDrain();
+    const { clock, control, runtime } = fixture;
+    const runnerDrain = control.drainRunner("runner-1", "runner-restart");
+    const serverDrain = control.drainServer();
+    await waitUntil(() => control.drainProgress().length === 1);
+    clock.advance(1_500);
+
+    control.restoreServerDrain();
+
+    expect(control.drainProgress()).toEqual([
+      expect.objectContaining({ elapsedMs: 0, runnerId: "runner-1" }),
+    ]);
+    runtime.finish();
+    await Promise.all([runnerDrain, serverDrain]);
+  });
+
   test("final preparation retires a bounded runner continuation and leaves final drain unbounded", async () => {
     const { clock, control, runtime } = pendingRunnerDrain();
     const { drained: runnerDrain } = await startedDrain(control, "runner");
