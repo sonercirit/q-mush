@@ -128,7 +128,13 @@ test("retains compact terminal identity independent of rendered payload", () => 
     throw new TypeError("Missing terminal tool update");
   }
   const staleEntry = { ...terminal.entry, state: "running" as const };
-  expect(staleEntry.state).toBe("running");
+  const reconciled = buffer.applyToolSnapshot({
+    sessionId: SESSION_ID,
+    streamId: STREAM_ID,
+    streams: [staleEntry],
+    type: "tool_stream_snapshot",
+  });
+  expect(reconciled.streams).toEqual([]);
   buffer.queue(orderedToolDelta(4, { content: "late" }));
 
   expect(buffer.takeNext()).toBeUndefined();
