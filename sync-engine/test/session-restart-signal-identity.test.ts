@@ -15,6 +15,41 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
+test("model discovery retains restart identity across credential resolution", async () => {
+  const database = createAuthenticatedTestDatabase();
+  const credentialId = "restart-credential-resolution";
+  addTestProviderCredential(database, credentialId);
+  const restart = new SessionRestartAbort();
+  await expect(
+    sessionAgentOptions({
+      dependencies: {
+        database,
+        discoverModels: (_provider, _credential, signal) => {
+          expect(signal?.aborted).toBe(true);
+          return Promise.reject(new Error("restart cancellation"));
+        },
+        listRunnerOptions: () => ({ items: [], totalItems: 0 }),
+        readCredential: () => {
+          restart.abort("restart");
+          restart.restore();
+          return Promise.resolve(createTestProviderCredential(credentialId));
+        },
+        restartSignal: () => restart.signal,
+      },
+      input: {
+        category: "models",
+        credentialId,
+        page: 1,
+        provider: "openai",
+      },
+      signal: new AbortController().signal,
+      userId: TEST_USER_ID,
+      workspaceId: TEST_WORKSPACE_ID,
+    }),
+  ).rejects.toThrow("restart cancellation");
+  database.$client.close();
+});
+
 test("model discovery classifies its captured restart signal after recovery", async () => {
   const database = createAuthenticatedTestDatabase();
   const credentialId = "restart-credential";
@@ -162,5 +197,59 @@ test("recovery replacement cannot create a realtime session", async () => {
   });
   await expect(creation).rejects.toMatchObject({ code: "server_restarting" });
   expect(create).not.toHaveBeenCalled();
+  database.$client.close();
+});
+
+import { createAttachmentFallbackIntegration } from "../attachment-fallback-integration.ts";
+
+test("attachment fallback validation retains restart identity across credential lookup", async () => {
+  const database = createAuthenticatedTestDatabase();
+  const restart = new SessionRestartAbort();
+  const providerDiscovery = vi.fn(() => Promise.resolve({ providers: [] }));
+  const integration = createAttachmentFallbackIntegration({
+    database,
+    discoverModels: (_provider, _credential, signal) => {
+      expect(signal).toBe(restart.signal);
+      expect(signal?.aborted).toBe(true);
+      return Promise.reject(new Error("restart cancellation"));
+    },
+    discoverOpenRouterProviders: providerDiscovery,
+    generateId: () => crypto.randomUUID(),
+    now: () => 0,
+    providers: {
+      openrouter: {
+        readCredential: () => Promise.resolve(undefined),
+      },
+      openai: {
+        readCredential: () => {
+          const credential = createTestProviderCredential("credential");
+          restart.abort("restart");
+          restart.restore();
+          return Promise.resolve(credential);
+        },
+      },
+    },
+    requests: {
+      authenticate: (_request, _method, action) =>
+        action(TEST_AUTHENTICATED_USER),
+      forUser: (_request, action) => action(TEST_AUTHENTICATED_USER),
+    },
+    restartSignal: () => restart.signal,
+  });
+  const response = await integration.api.collection(
+    new Request("http://localhost/api/sessions/attachment-fallbacks", {
+      body: JSON.stringify({
+        credentialId: "credential",
+        modality: "image",
+        model: "model",
+        openRouterProviderTag: null,
+        provider: "openai",
+      }),
+      headers: { "content-type": "application/json" },
+      method: "PUT",
+    }),
+  );
+  expect(response.status).toBe(409);
+  expect(providerDiscovery).not.toHaveBeenCalled();
   database.$client.close();
 });

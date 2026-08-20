@@ -100,6 +100,7 @@ async function modelOptions(
   ) {
     throw new Error("The model credential or provider is unavailable");
   }
+  const restartSignal = dependencies.restartSignal();
   const credentials =
     balanced && dependencies.modelCredentialPool !== undefined
       ? await dependencies.modelCredentialPool.representative(
@@ -112,7 +113,6 @@ async function modelOptions(
   if (credentials.length === 0) {
     throw new Error("The model credential or provider is unavailable");
   }
-  const restartSignal = dependencies.restartSignal();
   let failure: unknown;
   for (const credential of credentials) {
     try {

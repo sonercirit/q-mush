@@ -20,7 +20,7 @@ export function createAttachmentFallbackIntegration(options: {
   readonly generateId: IdGenerator;
   readonly now: () => number;
   readonly providers: SessionCredentialReaders;
-  readonly requests: SessionRequestHelpers;
+  readonly requests: Pick<SessionRequestHelpers, "authenticate" | "forUser">;
   readonly restartSignal: () => AbortSignal;
 }): {
   readonly api: AttachmentFallbackApi;
@@ -35,6 +35,7 @@ export function createAttachmentFallbackIntegration(options: {
     requests: options.requests,
     store,
     validate: async (user, selection) => {
+      const restartSignal = options.restartSignal();
       const credential = await options.providers[
         selection.provider
       ]?.readCredential(user.id, selection.credentialId, GLOBAL_WORKSPACE_ID);
@@ -47,7 +48,7 @@ export function createAttachmentFallbackIntegration(options: {
           selection.provider,
           credential,
           selection.model,
-          options.restartSignal(),
+          restartSignal,
         );
         if (
           model === undefined ||
@@ -66,7 +67,7 @@ export function createAttachmentFallbackIntegration(options: {
           user.id,
           credential,
           selection.model,
-          { force: true, signal: options.restartSignal() },
+          { force: true, signal: restartSignal },
         );
         return providers.providers.some(({ tag }) => tag === routing.tag);
       } catch {

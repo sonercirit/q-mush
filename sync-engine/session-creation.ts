@@ -225,7 +225,7 @@ export function prepareSessionCredential(
   user: AuthenticatedUser,
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
-  restartSignal = dependencies.restartSignal(),
+  restartSignal: AbortSignal,
 ): Promise<SessionMetadataResult> {
   return sessionMetadataFromDependencies({
     credential,
@@ -243,7 +243,7 @@ export function createPreparedSession(
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
-  restartSignal = dependencies.restartSignal(),
+  restartSignal: AbortSignal,
 ): Response {
   if (restartSignal.aborted) {
     return serverRestartingResponse();
@@ -324,8 +324,8 @@ export async function createValidatedSession(
   user: AuthenticatedUser,
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
+  restartSignal: AbortSignal,
 ): Promise<Response> {
-  const restartSignal = dependencies.restartSignal();
   if (restartSignal.aborted) {
     return serverRestartingResponse();
   }

@@ -39,10 +39,10 @@ Project memory.
 
 ## Architecture
 
-- Four production workspaces: `solid` owns browser UI, `sync-engine` the Bun
-  server, `runner` the standalone runner, `shared` cross-workspace code. The
-  first three import only themselves and `shared`, `shared` imports none and
-  only `scripts` imports `scripts`.
+- Workspaces: `solid` owns browser UI, `sync-engine` the Bun server, `runner`
+  the standalone runner, `shared` cross-workspace code. The first three import
+  only themselves and `shared`, `shared` imports none and only `scripts` imports
+  `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
   sockets at `/api/realtime` and `/api/runner/realtime` carry browser state and
   runner work; no polling/SSE. `dev:watch` watches production source and `.env`,
@@ -52,17 +52,18 @@ Project memory.
   Restarts drain active steps and queue work, so sessions may request their own;
   `DevelopmentRestartLifecycle` bounds a dev one with one supervisor 120s
   deadline (fresh per restart, shared in flight), rejecting new steps and
-  provider/auxiliary requests, reporting active-tool counts, parking stragglers
-  after durable handoffs, then bounding cleanup, repeats escalating and
-  purpose-named timers. A rejected drain keeps serving, restoring maintenance,
-  shutdown state, recovery, the abort signal (`SessionRestartAbort`: requests
-  capture one signal identity across awaits; aborted controllers stay aborted)
-  and the gate, clearing each session's abandoned server request (still-gating
-  runner ones stay), then rerunning handoff recovery and the queued launcher
-  unless shutdown won and only logs; chains release. Final shutdown cancels it,
-  promotes runner handoffs to a server marker, runs unbounded, fencing live
-  markers from liveness scans. Text handlers precompress once, negotiating zstd,
-  Brotli, gzip, deflate; `/favicon.svg` revalidates by ETag.
+  provider/auxiliary requests, reporting scoped active-tool counts,
+  force-parking stragglers after durable handoffs, then bounding cleanup,
+  repeats escalating and purpose-named timers. A rejected drain keeps serving,
+  restoring maintenance, shutdown state, recovery, the abort signal
+  (`SessionRestartAbort`: requests capture one signal identity across awaits;
+  aborted controllers stay aborted) and the gate, clearing each session's
+  abandoned server request (still-gating runner ones stay), then rerunning
+  handoff recovery and the queued launcher unless shutdown won and only logs;
+  failed chains release. Final shutdown cancels it, promotes runner handoffs to
+  a server marker, runs unbounded, fencing live markers from liveness scans.
+  Text handlers precompress once, negotiating zstd, Brotli, gzip, deflate;
+  `/favicon.svg` revalidates by ETag.
 - `pages.tsx` renders both server page shells via Solid's SSR runtime,
   `pages.ts` loads it with Vite's SSR runner, the app mounts from `client.tsx`
   and `routes.ts` holds routes. Browser tests use real Chromium/Tailwind and

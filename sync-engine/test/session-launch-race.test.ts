@@ -406,6 +406,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       TEST_AUTHENTICATED_USER,
       sessionInput(inputSource),
       credential,
+      new AbortController().signal,
     );
 
     const authoritative = assertLaunchRaceState(

@@ -8,6 +8,7 @@ import {
 } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { SessionRestartAbort } from "../../sync-engine/session-restart-abort.ts";
+import { createSessionForUser } from "../../sync-engine/session-user-actions.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
 
@@ -106,8 +107,49 @@ async function createWithSetup(
     TEST_USER,
     input,
     TEST_CREDENTIAL,
+    setup.dependencies.restartSignal(),
   );
 }
+
+test("HTTP creation retains restart identity across credential lookup", async () => {
+  const restart = new SessionRestartAbort();
+  const setup = setupCreation({ launch: () => true });
+  const input = sessionInput();
+  const {
+    openRouterProviderTag: _openRouterProviderTag,
+    reasoningEffort: _reasoningEffort,
+    userContextTokenCap: _userContextTokenCap,
+    workspaceId,
+    ...requestInput
+  } = input;
+  const response = await createSessionForUser(
+    {
+      compactionBoundary: () => {
+        throw new Error("unused");
+      },
+      discoverModels: setup.dependencies.discoverModels,
+      discoverOpenRouterProviders:
+        setup.dependencies.discoverOpenRouterProviders,
+      launchBoundary: () => setup.dependencies as never,
+      restartSignal: () => restart.signal,
+      runnerIsAvailable: () => true,
+      withCredential: async (_userId, _selection, action) => {
+        restart.abort("restart");
+        restart.restore();
+        return action(TEST_CREDENTIAL);
+      },
+    },
+    new Request("http://localhost/api/sessions", {
+      body: JSON.stringify(requestInput),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }),
+    TEST_USER,
+    workspaceId,
+  );
+  expect(response.status).toBe(503);
+  expect(setup.store.create).not.toHaveBeenCalled();
+});
 
 async function expectCreatedDetail(
   setup: ReturnType<typeof setupCreation>,
