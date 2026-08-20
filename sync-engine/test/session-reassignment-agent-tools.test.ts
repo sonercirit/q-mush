@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { runners, users } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
@@ -120,8 +121,11 @@ function createRecoverableSession(setup: SessionToolSetup): void {
     userId: TEST_USER_ID,
   });
   const generatedIds = [RECOVERABLE_SESSION_ID, RECOVERABLE_MESSAGE_ID];
-  const store = new SessionStore(setup.database, () =>
-    takeValue(generatedIds, "The test ran out of recoverable session IDs"),
+  const store = new SessionStore(
+    setup.database,
+    () =>
+      takeValue(generatedIds, "The test ran out of recoverable session IDs"),
+    () => DEFAULT_TOOL_SETTINGS,
   );
   const created = store.create(
     testSessionInput({
