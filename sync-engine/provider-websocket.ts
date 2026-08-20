@@ -265,9 +265,20 @@ export class ProviderWebSocketSession {
           const eventResponseId = providerResponseId(value);
           if (!requestActive) {
             if (value["type"] === "error") {
-              // Provider error events generally carry no response ID, so they
-              // cannot participate in the stale-response fence. Treat them as
-              // applying to the sole sequential request on this socket.
+              if (reusedSocket !== undefined) {
+                // An uncorrelated error can be a delayed frame from the prior
+                // response. Retire the reused socket and replay this request
+                // on a fresh connection rather than assigning stale failure.
+                fail(
+                  new ProviderWebSocketError(
+                    "The reused provider WebSocket returned an uncorrelated error",
+                    false,
+                    { reconnectImmediately: true },
+                  ),
+                );
+                socket.close(1011, "Uncorrelated provider error");
+                return;
+              }
               accumulator.push(value);
               return;
             }
