@@ -208,6 +208,7 @@ function ConversationTranscriptMessage(props: {
   const system = (): boolean => props.message.role === "system";
   const showContent = (): boolean => props.showContent ?? true;
   const showTools = (): boolean => props.showTools ?? true;
+  const settings = (): ToolSettings => props.settings ?? DEFAULT_TOOL_SETTINGS;
   return (
     <li
       class={`min-w-0 rounded-2xl border p-3 sm:p-4 ${user() ? "sm:ml-8 border-emerald-300/20 bg-emerald-300/10" : system() ? "border-rose-300/20 bg-rose-300/10" : "sm:mr-8 border-white/10 bg-white/[0.04]"}`}
@@ -279,17 +280,13 @@ function ConversationTranscriptMessage(props: {
                     name: call.name,
                   })}
                   <div class="mt-2">
-                    {renderToolArguments(
-                      call.name,
-                      call.arguments,
-                      props.settings ?? DEFAULT_TOOL_SETTINGS,
-                    )}
+                    {renderToolArguments(call.name, call.arguments, settings())}
                   </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent
                         includeArguments={false}
-                        settings={props.settings ?? DEFAULT_TOOL_SETTINGS}
+                        settings={settings()}
                         stream={liveStream()}
                       />
                     )}
@@ -303,7 +300,7 @@ function ConversationTranscriptMessage(props: {
       <Show when={showTools() && (props.liveToolStreams?.length ?? 0) > 0}>
         <ul class="mt-3 space-y-2">
           <LiveToolStreamList
-            settings={props.settings ?? DEFAULT_TOOL_SETTINGS}
+            settings={settings()}
             streams={props.liveToolStreams ?? []}
           />
         </ul>
@@ -316,13 +313,14 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly filters: Readonly<SessionTranscriptFilters>;
   readonly liveToolStreams: readonly ToolStreamEntry[];
   readonly nestedScrollKey: string;
-  readonly settings: ToolSettings;
+  readonly settings: Accessor<ToolSettings>;
   readonly onForkMessage?: ((messageId: string) => void) | undefined;
   readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
 };
 
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
+  settings: Accessor<ToolSettings>,
 ): JSX.Element {
   switch (untrack(() => props.message.role)) {
     case "assistant":
@@ -330,7 +328,7 @@ function renderTranscriptMessage(
         <ConversationTranscriptMessage
           liveToolStreams={props.liveToolStreams}
           message={props.message}
-          settings={props.settings}
+          settings={settings()}
           onFork={props.onForkMessage}
           showContent={props.filters.assistantMessages}
           showTools={props.filters.toolActivity}
@@ -366,9 +364,10 @@ function TranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
   const nestedScrollRef = createNestedScrollRef(() => props.nestedScrollKey);
+  const settings = createMemo(() => props.settings());
   return (
     <li class="contents" ref={nestedScrollRef}>
-      {renderTranscriptMessage(props)}
+      {renderTranscriptMessage(props, settings)}
     </li>
   );
 }
@@ -496,7 +495,7 @@ export function SessionTranscript(props: {
           filters={props.filters}
           liveToolStreams={liveToolStreams()}
           message={message()}
-          settings={messageToolSettings(message(), liveToolStreams())}
+          settings={() => messageToolSettings(message(), liveToolStreams())}
           nestedScrollKey={
             messageNestedScrollKeys().byMessageId.get(message().id) ??
             message().id

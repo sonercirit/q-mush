@@ -303,11 +303,10 @@ test("uses the latest configured limit for live sleep streams", () => {
   const liveMessage = {
     ...assistantToolCall({
       arguments: '{"durationSeconds":7200}',
-      id: "live-sleep",
+      id: "message-sleep",
       name: "sleep",
     }),
     id: "stream:live-assistant",
-    turnId: "live-turn",
   };
   const html = renderMessages(
     [liveMessage],
