@@ -116,15 +116,15 @@ Project memory.
   protected candidate before eviction. Mutation/stop freezes model/tool UI;
   settlement rebases streams. Disconnect drops unrendered fragments and resyncs
   paused tools. Every eviction requests a snapshot: a locally committed but
-  undelivered terminal cannot clear a rendered running row. Barriers and
-  100/session, 1,000/user caps block stale revival and key reuse. Epochs stay
-  monotonic while updates or barriers are queued; releasing the last barrier
-  reclaims its epoch after updates drain. Terminal cleanup can't reset epochs
-  with later barriers. Resets replace models; state events coalesce one/frame;
-  ready, health, and commands apply directly; no-op snapshots suppress notices.
-  Solid keeps focus/scroll; detail disables document anchoring and only
-  bottom-pinned transcripts follow output. `agent-model-discovery.ts` queries
-  metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
+  undelivered terminal cannot clear a running row. Barriers and 100/session,
+  1,000/user caps block stale revival and key reuse. Epochs stay monotonic while
+  updates or barriers are queued; releasing the last barrier reclaims its epoch
+  after updates drain. Terminal cleanup can't reset epochs with later barriers.
+  Resets replace models; state events coalesce one/frame; ready, health, and
+  commands apply directly; no-op snapshots suppress notices. Solid keeps
+  focus/scroll; detail disables document anchoring and only bottom-pinned
+  transcripts follow output. `agent-model-discovery.ts` queries metadata,
+  signal-cancelable; `shared/agent-configuration.ts` owns catalog
   types/validation. New sessions take the default online runner (else first) and
   credential, first discovered model, latest directory, top reported effort.
   Unknown modalities imply no attachment support; choices show provider/Q Mush
