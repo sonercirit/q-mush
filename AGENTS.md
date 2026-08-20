@@ -6,23 +6,23 @@
 ## Working Agreements
 
 - Research provider docs with Brave Search, then probe APIs/schemas/metrics.
-  Call capabilities impossible only with excluding evidence; otherwise record an
-  open question.
+  Call a capability impossible only with excluding evidence; else record an open
+  question.
 - Preserve patterns; add tools only as needed; improve touched code, tests,
-  docs, performance, security, and DX. Ship now; use TDD, DRY, and KISS.
-- Never invent tunables: probe omission, prefer provider defaults, else use
-  metadata or docs.
+  docs, performance, security and DX. Ship now; use TDD, DRY and KISS.
+- Never invent tunables: probe omission, prefer provider defaults, else metadata
+  or docs.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
-- Never weaken tests, special-case checks, or claim unperformed verification;
-  disclose gaps. Fix defects on sight, including pre-existing/out-of-scope ones;
-  if harmful, codify why in a test.
+- Never weaken tests, special-case checks or claim unperformed verification;
+  disclose gaps. Fix defects on sight, including pre-existing ones; if harmful,
+  codify why in a test.
 - Record decisions/gotchas here in the same change; repeated instructions mean a
   rule is missing. Condense to fit the cap. Fix code and stale records when
   evidence overturns a finding; act, don't ask.
 - Keep workflows local-first: narrow checks, then broad suites and focused
-  failure reruns.
-- Never commit secrets, generated artifacts, or env files.
+  reruns.
+- Never commit secrets, generated artifacts or env files.
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Test: `bun run test` (unit + Chromium); `test:watch` omits browsers;
@@ -40,26 +40,24 @@
   The first three import only themselves and `shared`; `shared` imports no other
   workspace; only `scripts` may import `scripts`.
 - `server.ts` serves Vite's in-memory browser JS/Tailwind CSS. Authenticated
-  WebSockets at `/api/realtime` and `/api/runner/realtime` handle browser state,
-  sessions, and runner work; no polling/SSE. `dev:watch` watches production
-  source and local `.env`, coalescing bursts into the ignored restart trigger
-  `dev:restart` writes; plain `dev` restarts only from it.
-  `runner-executable.ts` fingerprints runner source/compiler, builds privately,
-  caches in memory, and serves `/runner/executable`. Development restarts use
-  one supervisor-issued absolute 120-second deadline, reject new steps and
+  WebSockets at `/api/realtime` and `/api/runner/realtime` carry browser state,
+  sessions and runner work; no polling/SSE. `dev:watch` watches production
+  source and local `.env`, coalescing bursts into the ignored trigger
+  `dev:restart` writes; plain `dev` restarts only from that.
+  `runner-executable.ts` fingerprints runner source/compiler, then builds,
+  caches and serves `/runner/executable` privately. Development restarts use one
+  supervisor-issued absolute 120-second deadline, reject new steps and
   provider/auxiliary requests, report scoped active-tool counts, force-park
   stragglers only after durable handoffs, then bound cleanup/termination;
-  repeats escalate immediately. `DevelopmentRestartLifecycle` owns it; a
-  rejected drain keeps serving, restoring maintenance, shutdown state, recovery,
-  and the abort signal (`SessionRestartAbort`: aborted controllers never
-  reopen), reopening the gate while clearing each session's abandoned server
-  restart request, then rerunning handoff recovery and the queued launcher. A
-  mid-drain final shutdown wins: the rejection only logs; chain failures release
-  so later triggers work. Final shutdown cancels the supervisor deadline,
-  promotes runner handoffs to a server marker, then stays unbounded; live
-  markers are fenced from liveness recovery. Text handlers precompress once,
-  negotiating zstd, Brotli, gzip, and deflate; `/favicon.svg` revalidates with
-  an ETag.
+  repeats escalate. `DevelopmentRestartLifecycle` owns it; a rejected drain
+  keeps serving, so it restores maintenance, shutdown state, recovery, the abort
+  signal (`SessionRestartAbort`: aborted controllers stay aborted) and the gate,
+  clears each session's abandoned server request, then reruns handoff recovery
+  and the queued launcher, unless a concurrent final shutdown won and it only
+  logs. Failed chains release. Final shutdown cancels that deadline, promotes
+  runner handoffs to a server marker, then stays unbounded, fencing live markers
+  from liveness scans. Text handlers precompress once, negotiating zstd, Brotli,
+  gzip and deflate; `/favicon.svg` revalidates by ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
@@ -237,10 +235,10 @@
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
   connects bound at 10s, subordinate to the tool deadline.
 - Knip severities alone do not activate default-off issue types; keep the
-  included-issue list complete. Do not run the full test suite parallel to lint
+  included-issue list complete. Never run the full test suite parallel to lint
   or repository scans; tooling-policy tests probe `solid`.
 - Runner install commands use the HTTP request origin: connect other machines
-  through a reachable origin, not `localhost`. Removing a runner leaves
+  through a reachable origin, not `localhost`; removing a runner leaves
   `~/.q-mush/runner`.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
   `compile.outfile` (`outputs[0]` is bundled JS): build in a temp directory and
@@ -288,8 +286,8 @@
   WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
-  session; stop/timeout signals only its group. Agent launches and runner
-  commands otherwise have no application-owned step, queue, or time limits;
-  outside compaction, providers replay the conversation without a timeout.
-- Add roots to Knip; exclude tests from production. Pin Playwright 1.62.1/
+  session, and stop/timeout signals only its group. Agent launches and runner
+  commands have no other application-owned step, queue or time limits; outside
+  compaction, providers replay the conversation untimed.
+- Add roots to Knip; exclude tests from production. Pin Playwright 1.62.1 and
   Vitest 4.1.10: probes couple to Playwright `<launching>` and Vitest launch.
