@@ -284,15 +284,15 @@ Project memory.
   WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.
 - Tools use persisted user settings, defaulting to 30 minutes and 20,000 Unicode
-  characters. Writes upsert on the partial index; keep its conflict
-  predicate schema-aligned. Each run snapshots both for its prompt, schemas,
-  engine/runner deadline, sleep, skills/session tools, and final model-facing
-  result bound; changes apply next run and realtime updates stay user-scoped.
-  Loading clears its timer and aborts its signal on settlement. `parallel`
-  shares one budget; `ask_questions` waits outside it. One truncation
-  path/notice owns model-facing output; positional pagination keeps valid
-  continuation envelopes; input/security/transport bounds stay separate. Shell
-  has a runner timer; each POSIX command gets a session and stop/timeout signals
-  its process group. Write/edit cancellation is best-effort post-mutation.
+  characters. Writes upsert on the partial index; keep its conflict predicate
+  schema-aligned. Each run snapshots both for its prompt, schemas, engine/runner
+  deadline, sleep, skills/session tools, and final model-facing result bound;
+  changes apply next run and realtime updates stay user-scoped. Loading clears
+  its timer and aborts its signal on settlement. `parallel` shares one budget;
+  `ask_questions` waits outside it. One truncation path/notice owns model-facing
+  output; positional pagination keeps valid continuation envelopes;
+  input/security/transport bounds stay separate. Shell has a runner timer; each
+  POSIX command gets a session and stop/timeout signals its process group.
+  Write/edit cancellation is best-effort post-mutation.
 - Add runtime roots/standalone build entries to matching Knip configs; exclude
   test support from production patterns.
