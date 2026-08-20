@@ -30,8 +30,10 @@ Living project memory.
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
-  `bun run test:browser` for Chromium; its bare path needs `--no-orphans`;
-  Playwright 1.62.1/Vitest 4.1.10 stay pinned for compatibility.
+  `bun run test:browser` for Chromium. Bun 1.3.14's `--no-orphans` fails for
+  `./`-prefixed or absolute script paths, so keep its path bare; the script pins
+  headless and `PWDEBUG=0`. Playwright 1.62.1/Vitest 4.1.10 stay pinned because
+  probes couple to Playwright `<launching>` output and Vitest launch behavior.
 - `bun run check` runs every static check, each standalone too; `bun run format`
   / `lint:fix` write fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and

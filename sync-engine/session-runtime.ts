@@ -6,8 +6,6 @@ import type {
 import type { ProviderRequestState } from "./agent-model-options.ts";
 import type { SessionRestartRequester } from "./session-restart-requester.ts";
 
-type SessionPendingState = SessionRuntimePending;
-
 export type RestartScope =
   | { readonly kind: "server" }
   | { readonly kind: "runner"; readonly runnerId: string };
@@ -27,7 +25,7 @@ interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
-  pending: SessionPendingState;
+  pending: SessionRuntimePending;
   persistRestart:
     | ((request: RestartRequest, durable: boolean) => Promise<void> | void)
     | undefined;
@@ -116,7 +114,7 @@ export class SessionRuntimes {
   pending(
     sessionId: string,
     generation: number,
-  ): SessionPendingState | undefined {
+  ): SessionRuntimePending | undefined {
     const runtime = this.#active.get(sessionId);
     return runtime?.generation === generation ? runtime.pending : undefined;
   }

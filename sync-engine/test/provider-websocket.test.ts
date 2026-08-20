@@ -154,6 +154,34 @@ test("accepts terminal-only responses on a fresh socket", async () => {
   socket.close();
 });
 
+test("adopts the first response ID observed after unidentified admission", async () => {
+  const request = beginLifecycleRequest([]);
+  const pending = request.pending;
+  const socket = request.socket;
+  socket.receive({ type: "response.created" });
+  socket.receive({
+    delta: "Done.",
+    response_id: "identified-later",
+    type: "response.output_text.delta",
+  });
+  completeResponse(socket, "identified-later");
+  expectDoneStep(await pending);
+  socket.close();
+});
+
+test("retries provider errors received before admission", async () => {
+  const retry = retryingSocket();
+  const first = requireProviderSocket(retry.sockets, 0);
+  first.open();
+  first.receive({
+    error: { code: "server_error", message: "Try again" },
+    type: "error",
+  });
+  await replaceProviderSocket(retry.sockets);
+  expectDoneStep(await retry.pending);
+  expect(retry.delays).toEqual([1_000]);
+});
+
 test("bounds admission through unknown frames", async () => {
   const observedStates: ("active" | "admission")[] = [];
   const request = beginLifecycleRequest(observedStates);

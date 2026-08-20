@@ -258,6 +258,11 @@ export class ProviderWebSocketSession {
             options.onRequestState?.("active");
           } else if (
             eventResponseId !== undefined &&
+            currentResponseId === undefined
+          ) {
+            currentResponseId = eventResponseId;
+          } else if (
+            eventResponseId !== undefined &&
             eventResponseId !== currentResponseId
           ) {
             return;
