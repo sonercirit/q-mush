@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { explainAttachment } from "../attachment-fallback-model.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 
@@ -64,6 +65,7 @@ function options(
       currentProviderTag: null,
       factory,
       prompt: "Extract requirements",
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       resources: {
         attachmentFallbacks: () => selections,
         discoverModels: () =>

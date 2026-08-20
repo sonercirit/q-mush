@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
 import {
   TEST_AGENT_IMAGE,
@@ -220,6 +221,16 @@ test("renders independently filtered session instructions and activity", () => {
           toolName: "read",
         },
       ],
+      turns: [
+        {
+          boundaryMessageId: null,
+          endedAt: 5,
+          executionGeneration: 0,
+          id: "turn-1",
+          startedAt: 1,
+          toolSettings: DEFAULT_TOOL_SETTINGS,
+        },
+      ],
       maxContextTokens: 200_000,
       model: "gpt-5-codex",
       provider: "openai",
@@ -260,7 +271,7 @@ test("renders independently filtered session instructions and activity", () => {
   expect(html).not.toContain("data-scroll-on-change");
   expect(html).not.toContain("data-scroll-revision");
   expect(html).toContain(
-    "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
+    "Every tool call, including sleep, is limited to 30 minutes",
   );
   expect(html).toContain("Always run Bun tests.");
   expect(html).not.toContain('&lt;project_instructions path="AGENTS.md">');

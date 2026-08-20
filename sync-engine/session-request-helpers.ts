@@ -6,7 +6,7 @@ import {
   RUNNER_DIRECTORY_COMMAND,
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
-import { readIdentifier } from "../shared/validation.ts";
+import { readIdentifier, throwIfSignalAborted } from "../shared/validation.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
 import {
@@ -132,12 +132,14 @@ export class SessionRequestHelpers {
         },
         signal,
       );
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       const value: unknown = JSON.parse(result.output);
       return {
         listing: readRunnerDirectoryListing(value),
         status: "listed",
       };
     } catch {
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return { status: "directory_unavailable" };
     }
   }
@@ -219,15 +221,27 @@ export class SessionRequestHelpers {
         : createApiError("runner_unavailable", 409);
     }
 
-    const result = await this.browseDirectories(
-      {
-        path,
-        runnerId,
-        sessionId: `directory-picker:${user.id}`,
-        userId: user.id,
-      },
-      AbortSignal.any([request.signal, AbortSignal.timeout(15_000)]),
-    );
+    const browseSignal = AbortSignal.any([
+      request.signal,
+      AbortSignal.timeout(15_000),
+    ]);
+    let result: RunnerDirectoryBrowseResult;
+    try {
+      result = await this.browseDirectories(
+        {
+          path,
+          runnerId,
+          sessionId: `directory-picker:${user.id}`,
+          userId: user.id,
+        },
+        browseSignal,
+      );
+    } catch (error) {
+      // Browser disconnects and the route deadline cancel the broker command.
+      // The HTTP boundary must still settle with its normal browse error.
+      if (!browseSignal.aborted) throw error;
+      result = { status: "directory_unavailable" };
+    }
     switch (result.status) {
       case "directory_unavailable":
         return createApiError("directory_unavailable", 502);

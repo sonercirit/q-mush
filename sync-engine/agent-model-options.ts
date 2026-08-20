@@ -8,6 +8,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
 export function agentModelOpenRouterProviderRouting(
@@ -45,5 +46,6 @@ export interface AgentModelRequestOptions {
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly systemPrompt?: string;
+  readonly toolSettings: ToolSettings;
   readonly tools?: readonly AgentSessionToolName[];
 }

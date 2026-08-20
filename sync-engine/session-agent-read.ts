@@ -1,6 +1,5 @@
 import type { AgentToolCall } from "../shared/agent-loop.ts";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
-import { utf8ByteLength, utf8Prefix } from "../shared/utf8.ts";
 
 export const READ_SESSION_CATEGORIES = [
   "system",
@@ -19,12 +18,6 @@ export const DEFAULT_READ_SESSION_CATEGORIES: readonly ReadSessionCategory[] = [
 ];
 export const DEFAULT_READ_SESSION_LIMIT = 20;
 export const MAXIMUM_READ_SESSION_LIMIT = 100;
-const MAXIMUM_READ_SESSION_OUTPUT_BYTES = 32_768;
-
-const MAXIMUM_READ_SESSION_RECORD_BYTES = 8_000;
-const MAXIMUM_READ_SESSION_SYSTEM_BYTES = 10_000;
-const MAXIMUM_READ_SESSION_TOOL_SECTION_BYTES = 10_000;
-const TRUNCATION_MARKER = "\n[truncated]";
 
 export interface ReadSessionToolInput {
   readonly categories: readonly ReadSessionCategory[];
@@ -54,117 +47,9 @@ interface ReadSessionIdentity {
   readonly title: string;
 }
 
-interface ReadSessionOutputOptions {
-  readonly categories: readonly ReadSessionCategory[];
-  readonly matchedRecords: number;
-  readonly requestedLimit: number;
-  readonly session: ReadSessionIdentity;
-  readonly totalToolDefinitions: number;
-}
-
-interface ReadSessionOutputState {
-  outputBytesTruncated: boolean;
-  recordContentTruncated: boolean;
-  records: ReadSessionRecord[];
-  systemPrompt: string | undefined;
-  systemPromptTruncated: boolean;
-  toolDefinitions: ReadSessionToolDefinition[] | undefined;
-}
-
-function truncateText(
-  value: string,
-  maximumBytes: number,
-): { readonly text: string; readonly truncated: boolean } {
-  if (utf8ByteLength(value) <= maximumBytes) {
-    return { text: value, truncated: false };
-  }
-  const markerBytes = utf8ByteLength(TRUNCATION_MARKER);
-  return {
-    text: `${utf8Prefix(
-      value,
-      Math.max(0, maximumBytes - markerBytes),
-    )}${TRUNCATION_MARKER}`,
-    truncated: true,
-  };
-}
-
-function boundedToolCalls(toolCalls: readonly AgentToolCall[]): {
-  readonly toolCalls: readonly AgentToolCall[];
-  readonly truncated: boolean;
-} {
-  const selected: AgentToolCall[] = [];
-  let truncated = false;
-  for (const toolCall of toolCalls) {
-    const arguments_ = truncateText(
-      toolCall.arguments,
-      MAXIMUM_READ_SESSION_RECORD_BYTES / 2,
-    );
-    const candidate = {
-      arguments: arguments_.text,
-      id: toolCall.id,
-      name: toolCall.name,
-    };
-    if (
-      utf8ByteLength(JSON.stringify([...selected, candidate])) >
-      MAXIMUM_READ_SESSION_RECORD_BYTES
-    ) {
-      truncated = true;
-      continue;
-    }
-    selected.push(candidate);
-    truncated ||= arguments_.truncated;
-  }
-  return { toolCalls: selected, truncated };
-}
-
 type ReadSessionMessage = AgentSessionMessage & {
   readonly role: "assistant" | "error" | "thinking" | "tool" | "user";
 };
-
-function commonRecord(message: ReadSessionMessage, content: string) {
-  return {
-    content,
-    createdAt: message.createdAt,
-    id: message.id,
-    role: message.role,
-  };
-}
-
-function messageRecord(message: ReadSessionMessage): {
-  readonly record: ReadSessionRecord;
-  readonly truncated: boolean;
-} {
-  const content = truncateText(
-    message.content,
-    MAXIMUM_READ_SESSION_RECORD_BYTES,
-  );
-  if (message.role === "assistant") {
-    const toolCalls = boundedToolCalls(message.toolCalls);
-    return {
-      record: {
-        ...commonRecord(message, content.text),
-        toolCalls: toolCalls.toolCalls,
-      },
-      truncated: content.truncated || toolCalls.truncated,
-    };
-  }
-  if (message.role === "tool") {
-    return {
-      record: {
-        ...commonRecord(message, content.text),
-        ...(message.toolCallId === null
-          ? {}
-          : { toolCallId: message.toolCallId }),
-        ...(message.toolName === null ? {} : { toolName: message.toolName }),
-      },
-      truncated: content.truncated,
-    };
-  }
-  return {
-    record: commonRecord(message, content.text),
-    truncated: content.truncated,
-  };
-}
 
 function isReadSessionMessage(
   message: AgentSessionMessage,
@@ -178,127 +63,26 @@ function isReadSessionMessage(
   );
 }
 
-function toolSection(definitions: readonly ReadSessionToolDefinition[]): {
-  readonly definitions: ReadSessionToolDefinition[];
-  readonly truncated: boolean;
-} {
-  const selected: ReadSessionToolDefinition[] = [];
-  let truncated = false;
-  for (const definition of definitions) {
-    const candidate = [...selected, definition];
-    if (
-      utf8ByteLength(JSON.stringify(candidate)) >
-      MAXIMUM_READ_SESSION_TOOL_SECTION_BYTES
-    ) {
-      truncated = true;
-      continue;
-    }
-    selected.push(definition);
-  }
-  return { definitions: selected, truncated };
-}
-
-function createOutput(
-  options: ReadSessionOutputOptions,
-  state: ReadSessionOutputState,
-): Readonly<Record<string, unknown>> {
-  const truncatedByLimit = options.matchedRecords > options.requestedLimit;
-  const returnedToolDefinitions = state.toolDefinitions?.length ?? 0;
-  const toolDefinitionsTruncated =
-    state.toolDefinitions !== undefined &&
-    returnedToolDefinitions < options.totalToolDefinitions;
-  const characterCap =
-    state.recordContentTruncated || state.systemPromptTruncated;
-  const truncated =
-    truncatedByLimit ||
-    characterCap ||
-    toolDefinitionsTruncated ||
-    state.outputBytesTruncated;
-  return {
-    content: {
-      records: state.records,
-      ...(state.systemPrompt === undefined
-        ? {}
-        : { systemPrompt: state.systemPrompt }),
-      ...(state.toolDefinitions === undefined
-        ? {}
-        : { toolDefinitions: state.toolDefinitions }),
-    },
-    metadata: {
-      matchedRecords: options.matchedRecords,
-      requestedLimit: options.requestedLimit,
-      returnedRecords: state.records.length,
-      selectedCategories: options.categories,
-      toolDefinitions: {
-        matched: options.totalToolDefinitions,
-        returned: returnedToolDefinitions,
-      },
-      truncated,
-      truncation: {
-        characterCap,
-        limit: truncatedByLimit,
-        outputBytes: state.outputBytesTruncated,
-        records: state.outputBytesTruncated,
-        systemPrompt: state.systemPromptTruncated,
-        toolDefinitions: toolDefinitionsTruncated,
-      },
-    },
-    session: options.session,
+function messageRecord(message: ReadSessionMessage): ReadSessionRecord {
+  const common = {
+    content: message.content,
+    createdAt: message.createdAt,
+    id: message.id,
+    role: message.role,
   };
-}
-
-function shrinkState(update: () => boolean, serialize: () => string): string {
-  let output = serialize();
-  while (
-    utf8ByteLength(output) > MAXIMUM_READ_SESSION_OUTPUT_BYTES &&
-    update()
-  ) {
-    output = serialize();
+  if (message.role === "assistant") {
+    return { ...common, toolCalls: message.toolCalls };
   }
-  return output;
-}
-
-function serializeBoundedOutput(
-  options: Parameters<typeof createOutput>[0],
-  state: ReadSessionOutputState,
-): string {
-  const serialize = (): string =>
-    JSON.stringify(createOutput(options, state), null, 2);
-  shrinkState(() => {
-    if (state.records.shift() === undefined) {
-      return false;
-    }
-    state.outputBytesTruncated = true;
-    return true;
-  }, serialize);
-  shrinkState(() => {
-    if (
-      state.systemPrompt === undefined ||
-      state.systemPrompt.length <= TRUNCATION_MARKER.length
-    ) {
-      return false;
-    }
-    state.systemPrompt = truncateText(
-      state.systemPrompt,
-      Math.max(
-        utf8ByteLength(TRUNCATION_MARKER),
-        Math.floor(utf8ByteLength(state.systemPrompt) / 2),
-      ),
-    ).text;
-    state.systemPromptTruncated = true;
-    return true;
-  }, serialize);
-  const output = shrinkState(
-    () => state.toolDefinitions?.pop() !== undefined,
-    serialize,
-  );
-
-  if (utf8ByteLength(output) > MAXIMUM_READ_SESSION_OUTPUT_BYTES) {
-    throw new Error(
-      "The bounded session output could not be serialized safely",
-    );
+  if (message.role === "tool") {
+    return {
+      ...common,
+      ...(message.toolCallId === null
+        ? {}
+        : { toolCallId: message.toolCallId }),
+      ...(message.toolName === null ? {} : { toolName: message.toolName }),
+    };
   }
-  return output;
+  return common;
 }
 
 export function readSessionOutput(options: {
@@ -310,41 +94,40 @@ export function readSessionOutput(options: {
   readonly toolDefinitions: readonly ReadSessionToolDefinition[];
 }): string {
   const selected = new Set(options.input.categories);
-  let recordContentTruncated = false;
-  const matches = options.messages.flatMap(
-    (message): readonly ReadSessionRecord[] => {
-      if (!isReadSessionMessage(message) || !selected.has(message.role)) {
-        return [];
-      }
-      const { record, truncated } = messageRecord(message);
-      recordContentTruncated ||= truncated;
-      return [record];
-    },
-  );
-  const boundedSystemPrompt = selected.has("system")
-    ? truncateText(options.systemPrompt, MAXIMUM_READ_SESSION_SYSTEM_BYTES)
-    : undefined;
-  const boundedTools = selected.has("tools")
-    ? toolSection(options.toolDefinitions)
-    : undefined;
-  const state: ReadSessionOutputState = {
-    outputBytesTruncated: false,
-    recordContentTruncated,
-    records: matches.slice(-options.input.limit),
-    systemPrompt: boundedSystemPrompt?.text,
-    systemPromptTruncated: boundedSystemPrompt?.truncated ?? false,
-    toolDefinitions: boundedTools?.definitions,
-  };
-  return serializeBoundedOutput(
+  const matches = options.messages
+    .filter(
+      (message): message is ReadSessionMessage =>
+        isReadSessionMessage(message) && selected.has(message.role),
+    )
+    .map(messageRecord);
+  const records = matches.slice(-options.input.limit);
+  const matchedRecords = options.matchedRecords ?? matches.length;
+  const truncatedByLimit = matchedRecords > options.input.limit;
+  const definitions = selected.has("tools") ? options.toolDefinitions : [];
+  return JSON.stringify(
     {
-      categories: options.input.categories,
-      matchedRecords: options.matchedRecords ?? matches.length,
-      requestedLimit: options.input.limit,
+      content: {
+        records,
+        ...(selected.has("system")
+          ? { systemPrompt: options.systemPrompt }
+          : {}),
+        ...(selected.has("tools") ? { toolDefinitions: definitions } : {}),
+      },
+      metadata: {
+        matchedRecords,
+        requestedLimit: options.input.limit,
+        returnedRecords: records.length,
+        selectedCategories: options.input.categories,
+        toolDefinitions: {
+          matched: definitions.length,
+          returned: definitions.length,
+        },
+        truncated: truncatedByLimit,
+        truncation: { limit: truncatedByLimit },
+      },
       session: options.session,
-      totalToolDefinitions: selected.has("tools")
-        ? options.toolDefinitions.length
-        : 0,
     },
-    state,
+    null,
+    2,
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   chatCompletionsDone,
@@ -19,7 +20,7 @@ function apiKeyChatOptions(
   provider: "generic" | "openai" | "openrouter",
   model: string,
   promptCacheKey: string | undefined,
-): Omit<ModelOptions, "fetch"> {
+): Omit<ModelOptions, "fetch" | "toolSettings"> {
   return {
     credential: {
       accountId: null,
@@ -37,10 +38,11 @@ function apiKeyChatOptions(
 }
 
 async function captureChat(
-  options: Omit<ModelOptions, "fetch">,
+  options: Omit<ModelOptions, "fetch" | "toolSettings">,
 ): Promise<{ readonly body: unknown; readonly request: Request }> {
   let captured: Request | undefined;
   const model = new ChatCompletionsAgentModel({
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     fetch: (request) => {
       captured = request;
@@ -96,6 +98,7 @@ describe("prompt cache request state", () => {
     const sockets = new FakeProviderSockets();
     let captured: Request | undefined;
     const model = new ChatCompletionsAgentModel({
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       credential: codexOAuthCredential(),
       fetch: (request) => {
         captured = request;

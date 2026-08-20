@@ -1,5 +1,3 @@
-import { utf8ByteLength } from "../shared/utf8.ts";
-
 function paginationMetadata(
   page: number,
   pageSize: number,
@@ -23,50 +21,35 @@ function paginationMetadata(
   };
 }
 
+/** Pagination remains positional; the shared model-facing result bound applies later. */
 export function boundedPaginatedOutput(input: {
   readonly fields?: Readonly<Record<string, unknown>>;
   readonly filters: Readonly<Record<string, unknown>>;
   readonly items: readonly unknown[];
-  readonly maximumBytes: number;
   readonly page: number;
   readonly pageSize: number;
   readonly sourceFields: boolean;
-  readonly tooLargeMessage: string;
   readonly totalItems: number;
 }): string {
   const {
     fields = {},
     filters,
     items,
-    maximumBytes,
     page,
     pageSize,
     sourceFields,
-    tooLargeMessage,
     totalItems,
   } = input;
-  return boundedJsonOutput(
+  return JSON.stringify(
     {
       ...fields,
       filters,
       ...paginationMetadata(page, pageSize, totalItems),
       items,
       truncated: sourceFields,
-      truncation: { outputBytes: false, sourceFields },
+      truncation: { sourceFields },
     },
-    maximumBytes,
-    tooLargeMessage,
+    null,
+    2,
   );
-}
-
-function boundedJsonOutput(
-  value: unknown,
-  maximumBytes: number,
-  tooLargeMessage: string,
-): string {
-  const output = JSON.stringify(value, null, 2);
-  if (utf8ByteLength(output) > maximumBytes) {
-    throw new Error(tooLargeMessage);
-  }
-  return output;
 }

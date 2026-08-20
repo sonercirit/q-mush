@@ -116,6 +116,7 @@ export const RUNNER_EXECUTABLE_PATH = "/runner/executable";
 export const RUNNER_SUPERVISOR_PATH = "/runner/supervisor";
 export const RUNNER_EXECUTABLE_SHA256_HEADER = "x-q-mush-runner-sha256";
 export const SESSIONS_PATH = `${API_BASE_PATH}/sessions`;
+export const TOOL_SETTINGS_PATH = `${API_BASE_PATH}/tool-settings`;
 export const SESSION_ATTACHMENT_FALLBACKS_PATH = `${SESSIONS_PATH}/attachment-fallbacks`;
 export const SESSION_MODELS_PATH = `${SESSIONS_PATH}/models`;
 export const SESSION_OPENROUTER_PROVIDERS_PATH = `${SESSIONS_PATH}/openrouter-providers`;

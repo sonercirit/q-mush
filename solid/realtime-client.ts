@@ -578,7 +578,7 @@ export class RealtimeConnection {
       this.#deliver(event);
       return;
     }
-    if (event.type === "health") {
+    if (event.type === "health" || event.type === "tool_settings") {
       this.#deliver(event);
       return;
     }

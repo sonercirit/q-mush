@@ -360,14 +360,18 @@ async function completedSessionContaining(
 
 test("rejects invalid compact and steer dispatch arguments", async () => {
   const outputs = await Promise.all([
-    executeSessionAgentTool(unusedSessionToolActions(), "compact_session", {
-      sessionId: SESSION_ID,
-      unexpected: true,
-    }),
-    executeSessionAgentTool(unusedSessionToolActions(), "steer_session", {
-      message: "",
-      sessionId: SESSION_ID,
-    }),
+    executeSessionAgentTool(
+      unusedSessionToolActions(),
+      "compact_session",
+      { sessionId: SESSION_ID, unexpected: true },
+      new AbortController().signal,
+    ),
+    executeSessionAgentTool(
+      unusedSessionToolActions(),
+      "steer_session",
+      { message: "", sessionId: SESSION_ID },
+      new AbortController().signal,
+    ),
   ]);
 
   expect(outputs[0].output).toContain("invalid arguments");

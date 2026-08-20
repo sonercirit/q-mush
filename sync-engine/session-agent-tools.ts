@@ -13,10 +13,10 @@ import {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
   type RunnerCommandArguments,
-  type RunnerCommandResult,
 } from "../shared/runner-command-broker.ts";
 import { MAXIMUM_RUNNER_PATH_LENGTH } from "../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { completedRunnerCommandResult } from "./runner-command-result.ts";
 import type { ListSessionsToolInput } from "./session-agent-list.ts";
 import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
@@ -54,15 +54,31 @@ export interface SpawnSessionToolInput extends Pick<
   readonly prompt: string;
 }
 
+type SignaledSessionAction<Arguments extends readonly unknown[], Result> = (
+  ...arguments_: [...Arguments, signal: AbortSignal]
+) => Result;
+type SignaledMessageAction = SignaledSessionAction<
+  [sessionId: string, message: string],
+  Promise<string>
+>;
+
 export interface SessionAgentToolActions {
   readonly browseRunnerDirectories: (
     runnerId: string,
     path: string,
+    signal: AbortSignal,
   ) => Promise<string>;
-  readonly compactSession: (sessionId: string) => Promise<string>;
-  readonly continueSession: (sessionId: string) => Promise<string>;
+  readonly compactSession: (
+    sessionId: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
+  readonly continueSession: (
+    sessionId: string,
+    signal: AbortSignal,
+  ) => Promise<string>;
   readonly getSessionOptions: (
     input: GetSessionOptionsToolInput,
+    signal: AbortSignal,
   ) => Promise<string>;
   readonly listRunners: () => string;
   readonly listSessions: (input: ListSessionsToolInput) => string;
@@ -71,17 +87,19 @@ export interface SessionAgentToolActions {
     sessionId: string,
     runnerId: string,
     workingDirectory: string,
+    signal: AbortSignal,
   ) => string;
-  readonly sendToSession: (
-    sessionId: string,
-    message: string,
+  readonly sendToSession: SignaledMessageAction;
+  readonly spawnSession: (
+    input: SpawnSessionToolInput,
+    signal: AbortSignal,
   ) => Promise<string>;
-  readonly spawnSession: (input: SpawnSessionToolInput) => Promise<string>;
-  readonly steerSession: (
+  readonly steerSession: SignaledMessageAction;
+  readonly stopSession: (
     sessionId: string,
-    message: string,
-  ) => Promise<string>;
-  readonly stopSession: (sessionId: string, cascade: boolean) => string;
+    cascade: boolean,
+    signal: AbortSignal,
+  ) => string;
 }
 
 function sessionId(arguments_: Readonly<Record<string, unknown>>): string {
@@ -213,13 +231,14 @@ function message(arguments_: Readonly<Record<string, unknown>>): string {
 }
 
 function failedToolOutput(error: unknown): RunnerCommandResult {
-  return failedRunnerCommandResult(error, 500);
+  return failedRunnerCommandResult(error);
 }
 
 export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
   arguments_: RunnerCommandArguments,
+  signal: AbortSignal,
 ): Promise<RunnerCommandResult> {
   try {
     let output: Promise<string>;
@@ -244,24 +263,25 @@ export function executeSessionAgentTool(
             "The browse_runner_directories arguments are invalid",
           );
         }
-        output = actions.browseRunnerDirectories(runnerId, path);
+        output = actions.browseRunnerDirectories(runnerId, path, signal);
         break;
       }
       case "compact_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("compact_session received invalid arguments");
         }
-        output = actions.compactSession(sessionId(arguments_));
+        output = actions.compactSession(sessionId(arguments_), signal);
         break;
       case "continue_session":
         if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
           throw new Error("continue_session received invalid arguments");
         }
-        output = actions.continueSession(sessionId(arguments_));
+        output = actions.continueSession(sessionId(arguments_), signal);
         break;
       case "get_session_options":
         output = actions.getSessionOptions(
           getSessionOptionsToolInput(arguments_),
+          signal,
         );
         break;
       case "list_runners":
@@ -287,6 +307,7 @@ export function executeSessionAgentTool(
             input.sessionId,
             input.runnerId,
             input.workingDirectory,
+            signal,
           ),
         );
         break;
@@ -295,15 +316,17 @@ export function executeSessionAgentTool(
         output = actions.sendToSession(
           sessionId(arguments_),
           message(arguments_),
+          signal,
         );
         break;
       case "spawn_session":
-        output = actions.spawnSession(spawnInput(arguments_));
+        output = actions.spawnSession(spawnInput(arguments_), signal);
         break;
       case "steer_session":
         output = actions.steerSession(
           sessionId(arguments_),
           message(arguments_),
+          signal,
         );
         break;
       case "stop_session": {
@@ -317,7 +340,7 @@ export function executeSessionAgentTool(
           throw new Error("stop_session received invalid arguments");
         }
         output = Promise.resolve(
-          actions.stopSession(sessionId(arguments_), cascade ?? true),
+          actions.stopSession(sessionId(arguments_), cascade ?? true, signal),
         );
         break;
       }

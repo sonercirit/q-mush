@@ -63,6 +63,27 @@ describe("runner attachments", () => {
     ).toContain('"description":"hello"');
   });
 
+  test.each(["description", "id", "mediaType", "name"] as const)(
+    "bounds attachment %s strings",
+    async (field) => {
+      const metadata = {
+        description: "hello",
+        id: "attachment-1",
+        mediaType: "text/plain",
+        name: "notes.txt",
+        [field]: "x".repeat(4_097),
+      };
+
+      await expect(
+        executeAttachmentCommand(
+          await temporaryDirectory(),
+          ATTACHMENT_WRITE_COMMAND,
+          metadata,
+        ),
+      ).rejects.toThrow(`Attachment argument ${field} is invalid`);
+    },
+  );
+
   test("writes through a contained attachment-directory symlink", async () => {
     const root = await temporaryDirectory();
     const attachmentDirectory = join(root, ".q-mush", "attachments");

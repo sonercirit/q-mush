@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
 import { runners, users } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -100,7 +101,11 @@ export function expectRecoveredSession(
   before: ReturnType<SessionStore["get"]>,
   sessionId: string,
 ): void {
-  const restarted = new SessionStore(database);
+  const restarted = new SessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
   expect(restarted.failInterrupted(TEST_NOW + 3)).toEqual([]);
   expect(restarted.get(TEST_USER_ID, sessionId)).toEqual(before);
   expectRunnerRequired(restarted.get(TEST_USER_ID, sessionId));

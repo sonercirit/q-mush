@@ -163,6 +163,7 @@ export function queueStoredSession(options: {
       previousExecutionGeneration: stored.executionGeneration,
       segment: stored.currentSegment,
       sessionId,
+      toolSettings: resources.toolSettings(userId),
       userId,
     });
     if (prompt !== undefined && messageId !== undefined) {

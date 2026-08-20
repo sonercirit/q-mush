@@ -3,6 +3,7 @@ import {
   runAgentLoop,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
@@ -100,6 +101,7 @@ function openRouterModel(
   deltas?: ProviderTextDelta[],
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     credential: {
       accountId: null,
       secret: "sk-or-secret",
