@@ -143,3 +143,18 @@ test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
   expect(stream.pendingFrames).toEqual([]);
   stream.stop();
 });
+
+test("reclaims an epoch only after its barriers and updates are gone", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const first = buffer.markBarrier(SESSION_ID);
+  buffer.queue(identifiedModelDelta(SESSION_ID, STREAM_ID));
+  buffer.releaseBarrier(first);
+
+  const overlapping = buffer.markBarrier(SESSION_ID);
+  expect(overlapping.epoch).toBe(1);
+  buffer.releaseBarrier(overlapping);
+  buffer.takeNext();
+
+  const reclaimed = buffer.markBarrier(SESSION_ID);
+  expect(reclaimed.epoch).toBe(0);
+});

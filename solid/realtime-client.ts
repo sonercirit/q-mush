@@ -340,6 +340,10 @@ export class RealtimeConnection {
           ? event.sessionId
           : undefined;
     if (sessionId !== undefined) {
+      const previousBarrier = this.#stateBarriers.get(key);
+      if (previousBarrier !== undefined) {
+        this.#buffer.releaseBarrier(previousBarrier);
+      }
       this.#stateBarriers.set(key, this.#buffer.markBarrier(sessionId));
       this.#invalidateStreamFrame();
     }
@@ -391,6 +395,7 @@ export class RealtimeConnection {
     }
     this.#stateEvents.delete(key);
     this.#stateBarriers.delete(key);
+    if (barrier !== undefined) this.#buffer.releaseBarrier(barrier);
     this.#deliverDeferredStateEvent(queued);
     return true;
   }

@@ -104,6 +104,7 @@ export class RealtimeStreamBuffer {
   readonly #resync = new Map<string, { sessionId: string; streamId: string }>();
   #selectedId: string | undefined;
   readonly #epochs = new Map<string, number>();
+  readonly #barrierCounts = new Map<string, number>();
   readonly #toolStates = new Map<string, RetainedToolState>();
   get pending(): boolean {
     return this.#order.size > 0;
@@ -129,11 +130,31 @@ export class RealtimeStreamBuffer {
     this.#order.clear();
     this.#toolKeys.clear();
     this.#epochs.clear();
+    this.#barrierCounts.clear();
   }
   markBarrier(sessionId: string): RealtimeStreamBarrier {
     const epoch = this.#sessionEpoch(sessionId);
     this.#epochs.set(sessionId, epoch + 1);
+    this.#barrierCounts.set(
+      sessionId,
+      (this.#barrierCounts.get(sessionId) ?? 0) + 1,
+    );
     return { epoch, sessionId };
+  }
+  releaseBarrier(barrier: RealtimeStreamBarrier): void {
+    const count = this.#barrierCounts.get(barrier.sessionId);
+    if (count === undefined) return;
+    if (count > 1) {
+      this.#barrierCounts.set(barrier.sessionId, count - 1);
+      return;
+    }
+    this.#barrierCounts.delete(barrier.sessionId);
+    this.#deleteUnusedEpoch(barrier.sessionId);
+  }
+  #deleteUnusedEpoch(sessionId: string): void {
+    if (!this.#barrierCounts.has(sessionId) && !this.#pending.has(sessionId)) {
+      this.#epochs.delete(sessionId);
+    }
   }
   #sessionEpoch(sessionId: string): number {
     return this.#epochs.get(sessionId) ?? 0;
@@ -165,7 +186,10 @@ export class RealtimeStreamBuffer {
     }
     this.#bytes -= updatePendingBytes(update);
     this.#fragments -= updateFragments(update);
-    if (pending.size === 0) this.#pending.delete(sessionId);
+    if (pending.size === 0) {
+      this.#pending.delete(sessionId);
+      this.#deleteUnusedEpoch(sessionId);
+    }
     return update;
   }
   #deletePending(
