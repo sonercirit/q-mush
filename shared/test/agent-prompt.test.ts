@@ -29,10 +29,12 @@ test("states the global tool limits once for every environment", () => {
   expect(DEFAULT_LIMITS_STATEMENT).toContain("ask_questions");
   // A parallel call is one budgeted call: its batch shares the time limit.
   expect(DEFAULT_LIMITS_STATEMENT).toContain("parallel batch shares");
-  expect(createAgentSystemPrompt(null)).toContain(DEFAULT_LIMITS_STATEMENT);
-  expect(createAgentSystemPrompt(null, "container")).toContain(
-    DEFAULT_LIMITS_STATEMENT,
-  );
+  expect(
+    createAgentSystemPrompt(null, "bare_metal", DEFAULT_TOOL_SETTINGS),
+  ).toContain(DEFAULT_LIMITS_STATEMENT);
+  expect(
+    createAgentSystemPrompt(null, "container", DEFAULT_TOOL_SETTINGS),
+  ).toContain(DEFAULT_LIMITS_STATEMENT);
 });
 
 test("renders one configured per-run snapshot", () => {
@@ -47,7 +49,11 @@ test("renders one configured per-run snapshot", () => {
 });
 
 test("describes the root Arch container environment for container sessions", () => {
-  const prompt = createAgentSystemPrompt(null, "container");
+  const prompt = createAgentSystemPrompt(
+    null,
+    "container",
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   expect(prompt).toContain("root");
   expect(prompt).toContain("Arch Linux");
@@ -65,14 +71,20 @@ test("describes the root Arch container environment for container sessions", () 
 });
 
 test("adds a selected workspace agent file to the system prompt", () => {
-  expect(createAgentSystemPrompt(null)).toBe(
+  expect(
+    createAgentSystemPrompt(null, "bare_metal", DEFAULT_TOOL_SETTINGS),
+  ).toBe(
     `${AGENT_SYSTEM_PROMPT}\nFile and shell tools execute directly on the selected runner.\n${DEFAULT_LIMITS_STATEMENT}`,
   );
 
-  const prompt = createAgentSystemPrompt({
-    content: "Run the focused tests before finishing.",
-    name: "AGENTS.md",
-  });
+  const prompt = createAgentSystemPrompt(
+    {
+      content: "Run the focused tests before finishing.",
+      name: "AGENTS.md",
+    },
+    "bare_metal",
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   expect(prompt.startsWith(AGENT_SYSTEM_PROMPT)).toBe(true);
   expect(prompt).toContain('<project_instructions path="AGENTS.md">');

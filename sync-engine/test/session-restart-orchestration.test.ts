@@ -8,6 +8,7 @@ import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
@@ -165,7 +166,11 @@ function manualCompactionSetup(
     complete: (messages: readonly AgentConversationMessage[]) => {
       if (
         options.systemPrompt !==
-        createAgentSystemPrompt(null, detail.executionEnvironment)
+        createAgentSystemPrompt(
+          null,
+          detail.executionEnvironment,
+          DEFAULT_TOOL_SETTINGS,
+        )
       ) {
         return Promise.reject(new Error("The agent model was unexpected"));
       }
@@ -612,8 +617,16 @@ test("recovered tool handoff compacts before its first request", async () => {
   expect(
     setup.modelFactories.mock.calls.map(([options]) => options.systemPrompt),
   ).toEqual([
-    createAgentSystemPrompt(null, setup.detail.executionEnvironment),
-    createAgentSystemPrompt(null, setup.detail.executionEnvironment),
+    createAgentSystemPrompt(
+      null,
+      setup.detail.executionEnvironment,
+      DEFAULT_TOOL_SETTINGS,
+    ),
+    createAgentSystemPrompt(
+      null,
+      setup.detail.executionEnvironment,
+      DEFAULT_TOOL_SETTINGS,
+    ),
   ]);
   const detail = persisted(setup);
   expect(detail).toMatchObject({

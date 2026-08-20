@@ -8,10 +8,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
@@ -65,6 +62,7 @@ export function createFallbackModel(
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
+    readonly toolSettings: ToolSettings;
   },
 ): AgentModel {
   return factory({
@@ -75,6 +73,7 @@ export function createFallbackModel(
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
+    toolSettings: selection.toolSettings,
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
@@ -129,6 +128,10 @@ export function createSessionAgentModels(options: {
   readonly toolSettings?: ToolSettings;
   readonly userId: string;
 }): SessionAgentModels {
+  if (options.toolSettings === undefined) {
+    throw new Error("Session agent models require tool settings");
+  }
+  const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();
   const startStep = (): void => {
@@ -167,7 +170,7 @@ export function createSessionAgentModels(options: {
   const systemPrompt = createAgentSystemPrompt(
     options.agentFile,
     options.detail.executionEnvironment,
-    options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+    toolSettings,
   );
   const publishCompaction = (
     event:
@@ -209,7 +212,7 @@ export function createSessionAgentModels(options: {
         options.detail,
         options.credential,
         systemPrompt,
-        options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+        toolSettings,
         onDelta,
         onStepStart,
       ),

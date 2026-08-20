@@ -13,10 +13,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -101,11 +98,13 @@ export class SessionStore extends SessionStoreRestarts {
   constructor(
     database: AppDatabase,
     generateId: IdGenerator = createUuidV7,
-    toolSettings: (userId: string) => ToolSettings = () =>
-      DEFAULT_TOOL_SETTINGS,
+    toolSettings?: (userId: string) => ToolSettings,
   ) {
     super(database, generateId);
     this.#resources = [database, generateId];
+    if (toolSettings === undefined) {
+      throw new Error("SessionStore requires a tool settings reader");
+    }
     this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({

@@ -4,10 +4,7 @@ import { type SessionAgentToolName } from "../shared/agent-tools.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { throwIfSignalAborted } from "../shared/validation.ts";
 import { createJsonResponse } from "./http.ts";
 import {
@@ -97,7 +94,7 @@ export class SessionAgentActions {
     parentSessionId: string,
     userId: string,
     parentGeneration: number,
-    toolSettings: ToolSettings = DEFAULT_TOOL_SETTINGS,
+    toolSettings: ToolSettings,
   ): SessionAgentToolActions {
     const authority: SessionExecutionAuthority = {
       generation: parentGeneration,

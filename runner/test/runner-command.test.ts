@@ -99,14 +99,17 @@ function parsedCommand(overrides: Partial<RunnerToolCommand> = {}) {
   });
 }
 
-function expectNoReadContinuation(output: string): void {
-  expect(output).not.toContain("Use offset=");
-  expect(output).not.toContain("�");
-}
-
 function expectRawOverflow(output: string, maximum: number): void {
   expect(unicodeCharacterCount(output)).toBe(maximum + 1);
   expect(output).not.toContain("Tool output truncated");
+}
+
+function expectPartialLineContinuation(output: string, maximum: number): void {
+  const expectedMarker = "Use offset=2 to continue.";
+  expect([
+    unicodeCharacterCount(output),
+    output.includes(expectedMarker),
+  ]).toEqual([maximum, true]);
 }
 
 describe("runner WebSocket protocol", () => {
@@ -208,8 +211,7 @@ describe("runner WebSocket protocol", () => {
       maximum,
     );
 
-    expectRawOverflow(output, maximum);
-    expectNoReadContinuation(output);
+    expectPartialLineContinuation(output, maximum);
   });
 
   test("uses offset and limit only to select a page", async () => {
@@ -257,8 +259,7 @@ describe("runner WebSocket protocol", () => {
       maximum,
     );
 
-    expectRawOverflow(output, maximum);
-    expectNoReadContinuation(output);
+    expectPartialLineContinuation(output, maximum);
     expect(output).not.toContain("does not fit");
     expect(output).not.toContain("saved to");
   });

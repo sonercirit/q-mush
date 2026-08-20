@@ -5,11 +5,7 @@ import {
   type AgentToolDefinition,
 } from "./agent-tools.ts";
 import { ASK_QUESTIONS_TOOL_NAME } from "./ask-questions-tool.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  toolExecutionLimitSeconds,
-  type ToolSettings,
-} from "./tool-limits.ts";
+import { toolExecutionLimitSeconds, type ToolSettings } from "./tool-limits.ts";
 
 function selectedParallelTool(
   selectedTools: readonly AgentToolDefinition[],
@@ -86,7 +82,7 @@ function toolDefinitionWithSettings(
 
 export function selectedAgentTools(
   names: readonly AgentSessionToolName[],
-  settings: ToolSettings = DEFAULT_TOOL_SETTINGS,
+  settings: ToolSettings,
 ): readonly AgentToolDefinition[] {
   const selectedTools = AGENT_TOOLS.filter(({ function: definition }) =>
     names.includes(definition.name),

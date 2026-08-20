@@ -18,10 +18,7 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import {
-  DEFAULT_TOOL_SETTINGS,
-  type ToolSettings,
-} from "../shared/tool-limits.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { optionalSignal } from "../shared/validation.ts";
 import {
   completionMessages,
@@ -437,7 +434,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
-    this.#toolSettings = options.toolSettings ?? DEFAULT_TOOL_SETTINGS;
+    if (options.toolSettings === undefined) {
+      throw new Error("Agent model requires tool settings");
+    }
+    this.#toolSettings = options.toolSettings;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
     this.#tools = selectedAgentTools(
       this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,

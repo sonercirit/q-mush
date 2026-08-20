@@ -116,7 +116,10 @@ test("patches bash and sleep schemas from one snapshot", () => {
 
 test("keeps sleep session-local and unavailable to parallel", () => {
   const sleep = AGENT_SESSION_TOOL_OPTIONS.find(({ name }) => name === "sleep");
-  const parallel = selectedAgentTools(["sleep", "parallel"]);
+  const parallel = selectedAgentTools(
+    ["sleep", "parallel"],
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   expect(sleep).toMatchObject({ classification: "session_tool" });
   expect(isBaseAgentToolName("sleep")).toBe(false);
@@ -275,7 +278,10 @@ test("derives picker metadata and classifications from every tool definition", (
 });
 
 test("limits parallel calls to enabled tools and skills", () => {
-  const tools = selectedAgentTools(["read", "parallel", "brave_search"]);
+  const tools = selectedAgentTools(
+    ["read", "parallel", "brave_search"],
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   expect(tools.map(({ function: definition }) => definition.name)).toEqual([
     "read",

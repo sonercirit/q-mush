@@ -7,6 +7,7 @@ import type {
   AgentSessionStatus,
   RestartHandoffOperation,
 } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
 import { startManualSessionCompaction } from "../../sync-engine/session-compaction-actions.ts";
@@ -372,7 +373,7 @@ function agentActionsSetup(
     runnerIsAvailable: () => true,
     store: setup.store,
     withCredential: credentialAction(credential),
-  }).actions(parent.id, TEST_USER_ID, parent.generation);
+  }).actions(parent.id, TEST_USER_ID, parent.generation, DEFAULT_TOOL_SETTINGS);
   return {
     ...setup,
     actions,

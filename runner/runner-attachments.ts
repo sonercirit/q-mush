@@ -80,7 +80,7 @@ export async function executeAttachmentCommand(
     const id = requiredString(arguments_, "id");
     const name = displayName(suppliedName);
     const directory = await secureAttachmentDirectory(root, true);
-    const attachmentId = safeIdentifier(requiredString({ id }, "id"));
+    const attachmentId = safeIdentifier(id);
     await mkdir(directory, { recursive: true });
     // Resolve after creation so a later swap of the lexical attachment symlink
     // cannot redirect the write away from this validated canonical directory.

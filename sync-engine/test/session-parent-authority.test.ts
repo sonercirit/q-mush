@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -188,7 +189,12 @@ function authoritySetup(options: {
       }
       return action(credential);
     },
-  }).actions(SESSION_ID, TEST_USER_ID, parent.generation);
+  }).actions(
+    SESSION_ID,
+    TEST_USER_ID,
+    parent.generation,
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   return {
     actions,

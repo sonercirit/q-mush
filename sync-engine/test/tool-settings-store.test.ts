@@ -140,7 +140,7 @@ describe("tool settings API", () => {
     const saved = await integration.collection(savedSettingsRequest());
     expect(saved.status).toBe(200);
     await expect(saved.json()).resolves.toEqual(apiSettings(6, 7_000));
-    expect(integration.read(TEST_USER_ID)).toEqual(apiSettings(6, 7_000));
+    expect(integration.store.read(TEST_USER_ID)).toEqual(apiSettings(6, 7_000));
     database.$client.close();
   });
 

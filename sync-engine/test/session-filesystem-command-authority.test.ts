@@ -7,6 +7,7 @@ import {
 } from "../../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { loadSessionAgentFile } from "../../sync-engine/session-agent-file.ts";
 import {
@@ -279,7 +280,12 @@ test("agent directory browsing passes parent identity, authorization, and signal
     readCredential: () => Promise.resolve(undefined),
     store,
     withCredential: () => Promise.resolve(new Response()),
-  }).actions(session.id, TEST_USER_ID, session.generation);
+  }).actions(
+    session.id,
+    TEST_USER_ID,
+    session.generation,
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   await expect(
     actions.browseRunnerDirectories(

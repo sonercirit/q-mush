@@ -1,6 +1,6 @@
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import { readToolSettings, type ToolSettings } from "../shared/tool-limits.ts";
+import { readToolSettings } from "../shared/tool-limits.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { AuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
 import {
@@ -14,7 +14,6 @@ import { ToolSettingsStore } from "./tool-settings-store.ts";
 export interface ToolSettingsIntegration {
   readonly store: ToolSettingsStore;
   collection(request: Request): Promise<Response> | Response;
-  read(userId: string): ToolSettings;
 }
 
 interface ToolSettingsDependencies {
@@ -42,21 +41,13 @@ class DrizzleToolSettingsIntegration
     );
   }
 
-  #collectionResponse(settings: ToolSettings): Response {
-    return createJsonResponse(settings);
-  }
-
   collection(request: Request): Promise<Response> | Response {
     const current = (userId: string): Response =>
-      this.#collectionResponse(this.store.read(userId));
+      createJsonResponse(this.store.read(userId));
     return this.collectionRoute(request, {
       GET: current,
       PUT: (userId) => this.#write(request, userId),
     });
-  }
-
-  read(userId: string): ToolSettings {
-    return this.store.read(userId);
   }
 
   async #write(request: Request, userId: string): Promise<Response> {
@@ -70,7 +61,7 @@ class DrizzleToolSettingsIntegration
       settings: saved,
       type: "tool_settings",
     });
-    return this.#collectionResponse(saved);
+    return createJsonResponse(saved);
   }
 }
 
