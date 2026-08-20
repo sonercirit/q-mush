@@ -32,6 +32,7 @@ import {
 import { defineElementSize } from "./element-size-test-helpers.ts";
 import { openAiProviderPanel } from "./provider-panel-fixtures.tsx";
 import { runnerSummary } from "./runner-fixtures.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import {
   mountSessionDetailBody,
   mountTestSessionDetail,
@@ -192,12 +193,12 @@ function mountSessionDetail(detail: AgentSessionDetail): {
   return mountTestSessionDetail(detail, disposals);
 }
 
-function applySessionDelta(
+function applyDeltaContent(
   controller: SessionController,
   sessionId: string,
   content: string,
 ): void {
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content,
     sessionId,
     thinking: "",
@@ -228,7 +229,7 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
 
   expectScrollLock(toggle, false);
 
-  applySessionDelta(controller, detail.id, "New output");
+  applyDeltaContent(controller, detail.id, "New output");
   expect(element.scrollTop).toBe(180);
 
   element.scrollTop = 400;
@@ -410,7 +411,7 @@ test("selected transcript deltas do not rebuild the multi-session hierarchy", ()
   const visibleRows = [...container.querySelectorAll("[data-session-id]")];
   const readsAfterMount = hierarchyReads;
 
-  applySessionDelta(controller, selected.id, "Live output");
+  applyDeltaContent(controller, selected.id, "Live output");
 
   expect(hierarchyReads).toBe(readsAfterMount);
   expect([...container.querySelectorAll("[data-session-id]")]).toEqual(

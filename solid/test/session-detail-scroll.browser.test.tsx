@@ -73,8 +73,11 @@ function setComposerValue(composer: HTMLTextAreaElement, value: string): void {
 }
 
 afterEach(() => {
-  for (const dispose of BROWSER_TEST_DISPOSALS.splice(0).reverse()) dispose();
+  // Detach first so browser observers cannot react while Solid disposers run.
   document.body.replaceChildren();
+  while (BROWSER_TEST_DISPOSALS.length > 0) {
+    BROWSER_TEST_DISPOSALS.pop()?.();
+  }
   document.documentElement.style.scrollBehavior = "auto";
 });
 
@@ -106,14 +109,36 @@ test("real session layout changes do not move the document or nested transcript"
     },
   };
   controller.applyDetail(withTranscript);
-  controller.applyDelta({
-    content: LARGE_CONTENT,
-    sessionId: withTranscript.id,
-    thinking: "",
-    type: "session_delta",
+  controller.applyStreamBatch({
+    type: "stream_batch",
+    updates: [
+      {
+        content: LARGE_CONTENT,
+        sessionId: withTranscript.id,
+        streamId: "scroll-regression-stream",
+        thinking: "",
+        type: "session_delta",
+      },
+      {
+        entry: {
+          arguments: "",
+          callId: "scroll-regression-tool",
+          index: 0,
+          name: "bash",
+          sequence: 2,
+          sessionId: withTranscript.id,
+          state: "running",
+          stderr: "",
+          stdout: LARGE_CONTENT,
+          streamId: "scroll-regression-stream",
+        },
+        terminal: false,
+        type: "tool_update",
+      },
+    ],
   });
   await nextPaint();
-  expect(window.scrollY, "live transcript and usage growth").toBe(documentTop);
+  expect(window.scrollY, "live model/tool and usage growth").toBe(documentTop);
   expect(transcript.scrollTop, "nested transcript after growth").toBe(
     transcriptTop,
   );
