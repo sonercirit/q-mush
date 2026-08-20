@@ -1,13 +1,15 @@
-import { For, Show, type JSX } from "solid-js";
+import { Show, type JSX } from "solid-js";
 import type { AgentSessionMessage } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
-import { LiveToolStream } from "./session-live-tool-activity.tsx";
+import { LiveToolStreamList } from "./session-live-tool-activity.tsx";
 import {
   StreamedMessageList,
   type StreamedMessageRenderer,
 } from "./session-streamed-messages.tsx";
 
 function RunningAgentBlock(props: {
+  readonly settings: ToolSettings;
   readonly toolStreams: readonly ToolStreamEntry[];
 }): JSX.Element {
   return (
@@ -20,15 +22,17 @@ function RunningAgentBlock(props: {
         </span>
       </p>
       <ul class="mt-3 space-y-2">
-        <For each={props.toolStreams}>
-          {(stream) => <LiveToolStream stream={stream} />}
-        </For>
+        <LiveToolStreamList
+          settings={props.settings}
+          streams={props.toolStreams}
+        />
       </ul>
     </div>
   );
 }
 
 export function ActiveStepAnchor(props: {
+  readonly settings: ToolSettings;
   readonly messages: readonly AgentSessionMessage[];
   readonly render: StreamedMessageRenderer;
   readonly timing: JSX.Element;
@@ -65,7 +69,10 @@ export function ActiveStepAnchor(props: {
             props.toolStreams.length > 0 && toolStreamHostId() === undefined
           }
         >
-          <RunningAgentBlock toolStreams={props.toolStreams} />
+          <RunningAgentBlock
+            settings={props.settings}
+            toolStreams={props.toolStreams}
+          />
         </Show>
         <div class="mt-3">{props.timing}</div>
       </li>

@@ -15,7 +15,10 @@ import type {
   AgentSessionMessage,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
@@ -25,7 +28,7 @@ import { CompactionRequestTranscriptMessage } from "./session-compaction-transcr
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import {
   LiveToolActivityContent,
-  LiveToolStream,
+  LiveToolStreamList,
   renderToolHeader,
 } from "./session-live-tool-activity.tsx";
 import { MarkdownView } from "./session-markdown.tsx";
@@ -196,6 +199,7 @@ function ConversationTranscriptMessage(props: {
   readonly liveToolStreams?: readonly ToolStreamEntry[];
   readonly message: AgentSessionMessage;
   readonly onFork?: ((messageId: string) => void) | undefined;
+  readonly settings: ToolSettings;
   readonly showContent?: boolean;
   readonly showTools?: boolean;
   readonly toolStreams?: Accessor<ReadonlyMap<string, ToolStreamEntry>>;
@@ -275,12 +279,17 @@ function ConversationTranscriptMessage(props: {
                     name: call.name,
                   })}
                   <div class="mt-2">
-                    {renderToolArguments(call.name, call.arguments)}
+                    {renderToolArguments(
+                      call.name,
+                      call.arguments,
+                      props.settings,
+                    )}
                   </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent
                         includeArguments={false}
+                        settings={props.settings}
                         stream={liveStream()}
                       />
                     )}
@@ -293,9 +302,10 @@ function ConversationTranscriptMessage(props: {
       ) : null}
       <Show when={showTools() && (props.liveToolStreams?.length ?? 0) > 0}>
         <ul class="mt-3 space-y-2">
-          <For each={props.liveToolStreams}>
-            {(stream) => <LiveToolStream stream={stream} />}
-          </For>
+          <LiveToolStreamList
+            settings={props.settings}
+            streams={props.liveToolStreams ?? []}
+          />
         </ul>
       </Show>
     </li>
@@ -306,6 +316,7 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly filters: Readonly<SessionTranscriptFilters>;
   readonly liveToolStreams: readonly ToolStreamEntry[];
   readonly nestedScrollKey: string;
+  readonly settings: ToolSettings;
   readonly onForkMessage?: ((messageId: string) => void) | undefined;
   readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
 };
@@ -319,6 +330,7 @@ function renderTranscriptMessage(
         <ConversationTranscriptMessage
           liveToolStreams={props.liveToolStreams}
           message={props.message}
+          settings={props.settings}
           onFork={props.onForkMessage}
           showContent={props.filters.assistantMessages}
           showTools={props.filters.toolActivity}
@@ -339,12 +351,18 @@ function renderTranscriptMessage(
         />
       );
     case "system":
-      return <ConversationTranscriptMessage message={props.message} />;
-    case "user":
       return (
         <ConversationTranscriptMessage
           message={props.message}
+          settings={props.settings}
+        />
+      );
+    case "user":
+      return (
+        <ConversationTranscriptMessage
           onFork={props.onForkMessage}
+          message={props.message}
+          settings={props.settings}
         />
       );
   }
@@ -469,6 +487,7 @@ export function SessionTranscript(props: {
           filters={props.filters}
           liveToolStreams={liveToolStreams()}
           message={message()}
+          settings={transcriptToolSettings()}
           nestedScrollKey={
             messageNestedScrollKeys().byMessageId.get(message().id) ??
             message().id
@@ -530,6 +549,7 @@ export function SessionTranscript(props: {
       >
         {(startedAt) => (
           <ActiveStepAnchor
+            settings={transcriptToolSettings()}
             messages={activeMessages()}
             render={renderStreamedMessage}
             timing={

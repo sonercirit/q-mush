@@ -246,7 +246,7 @@ async function loadModels(
         ...(options.toolStream === undefined
           ? {}
           : { toolStream: options.toolStream }),
-        toolSettings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+        toolSettings: settings,
         userId: runtime.userId,
       });
     },

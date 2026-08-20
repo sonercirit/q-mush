@@ -50,4 +50,34 @@ describe("session loading deadline completion", () => {
       }
     },
   );
+  test("reports the global loading limit as its timeout reason", async () => {
+    vi.useFakeTimers();
+    try {
+      const loading = withLoadingDeadline(
+        new AbortController().signal,
+        DEFAULT_TOOL_SETTINGS,
+        async (signal) => {
+          await new Promise<void>((resolve) => {
+            signal.addEventListener("abort", () => {
+              resolve();
+            });
+          });
+          throw new Error("loading aborted");
+        },
+        () => false,
+      );
+      const settled = loading.catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(
+        toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
+      );
+      const reason = await settled;
+      expect(reason).toMatchObject({ name: "TimeoutError" });
+      expect(reason).toHaveProperty(
+        "message",
+        expect.stringContaining("global 30-minute limit"),
+      );
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

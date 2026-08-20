@@ -2,8 +2,8 @@ import type { JSX } from "solid-js";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
 import { formatSessionTime } from "../shared/session-timing.ts";
 import {
-  DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitSeconds,
+  type ToolSettings,
 } from "../shared/tool-limits.ts";
 import { renderStructuredCode } from "./session-syntax.tsx";
 
@@ -12,18 +12,20 @@ const MILLISECONDS_PER_SECOND = 1_000;
 // recorded before the schema maximum changed from 3,600s to the global
 // tool limit can legitimately contain hour-long sleeps.
 const HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS = 3_600;
-const MAXIMUM_SLEEP_DURATION_SECONDS = Math.max(
-  HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS,
-  toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
-);
-const MAXIMUM_SLEEP_DURATION_MILLISECONDS =
-  MAXIMUM_SLEEP_DURATION_SECONDS * MILLISECONDS_PER_SECOND;
 
 function formatSleepDuration(milliseconds: number): string {
   return formatSessionTime(milliseconds).replace(/ 0[ms]$/u, "");
 }
 
-function sleepDurationMilliseconds(arguments_: string): number | undefined {
+function sleepDurationMilliseconds(
+  arguments_: string,
+  settings: ToolSettings,
+): number | undefined {
+  const maximumSeconds = Math.max(
+    HISTORICAL_MAXIMUM_SLEEP_DURATION_SECONDS,
+    toolExecutionLimitSeconds(settings),
+  );
+  const maximumMilliseconds = maximumSeconds * MILLISECONDS_PER_SECOND;
   const parsed = parseOptionalJsonRecord(arguments_);
   if (parsed === undefined || Object.keys(parsed).length !== 1) {
     return undefined;
@@ -34,7 +36,7 @@ function sleepDurationMilliseconds(arguments_: string): number | undefined {
     typeof durationSeconds === "number" &&
     Number.isSafeInteger(durationSeconds) &&
     durationSeconds > 0 &&
-    durationSeconds <= MAXIMUM_SLEEP_DURATION_SECONDS
+    durationSeconds <= maximumSeconds
   ) {
     return durationSeconds * MILLISECONDS_PER_SECOND;
   }
@@ -43,7 +45,7 @@ function sleepDurationMilliseconds(arguments_: string): number | undefined {
   return typeof durationMilliseconds === "number" &&
     Number.isSafeInteger(durationMilliseconds) &&
     durationMilliseconds > 0 &&
-    durationMilliseconds <= MAXIMUM_SLEEP_DURATION_MILLISECONDS
+    durationMilliseconds <= maximumMilliseconds
     ? durationMilliseconds
     : undefined;
 }
@@ -51,9 +53,12 @@ function sleepDurationMilliseconds(arguments_: string): number | undefined {
 export function renderToolArguments(
   name: string,
   arguments_: string,
+  settings: ToolSettings,
 ): JSX.Element {
   const durationMilliseconds =
-    name === "sleep" ? sleepDurationMilliseconds(arguments_) : undefined;
+    name === "sleep"
+      ? sleepDurationMilliseconds(arguments_, settings)
+      : undefined;
   return durationMilliseconds === undefined ? (
     renderStructuredCode(arguments_)
   ) : (

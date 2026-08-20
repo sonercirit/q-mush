@@ -94,6 +94,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
     await vi.advanceTimersByTimeAsync(
       toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
     );
+    expect(vi.getTimerCount()).toBe(0);
     disconnected.reject(new RunnerDisconnectedError());
     await run;
 

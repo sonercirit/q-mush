@@ -1,4 +1,5 @@
-import { Show, type JSX } from "solid-js";
+import { For, Show, type JSX } from "solid-js";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type {
   ToolStreamEntry,
   ToolStreamState,
@@ -44,6 +45,17 @@ function LiveToolOutput(props: {
   );
 }
 
+export function LiveToolStreamList(props: {
+  readonly settings: ToolSettings;
+  readonly streams: readonly ToolStreamEntry[];
+}): JSX.Element {
+  return (
+    <For each={props.streams}>
+      {(stream) => <LiveToolStream settings={props.settings} stream={stream} />}
+    </For>
+  );
+}
+
 function toolStreamDisplayName(stream: ToolStreamEntry): string {
   return stream.name || "Preparing tool";
 }
@@ -67,7 +79,8 @@ export function renderToolHeader(options: {
   );
 }
 
-export function LiveToolStream(props: {
+function LiveToolStream(props: {
+  readonly settings: ToolSettings;
   readonly stream: ToolStreamEntry;
 }): JSX.Element {
   const name = (): string => toolStreamDisplayName(props.stream);
@@ -89,13 +102,18 @@ export function LiveToolStream(props: {
         kind: "Tool call",
         name: name(),
       })}
-      <LiveToolActivityContent includeArguments={true} stream={props.stream} />
+      <LiveToolActivityContent
+        includeArguments={true}
+        settings={props.settings}
+        stream={props.stream}
+      />
     </li>
   );
 }
 
 export function LiveToolActivityContent(props: {
   readonly includeArguments: boolean;
+  readonly settings: ToolSettings;
   readonly stream: ToolStreamEntry;
 }): JSX.Element {
   const stream = (): ToolStreamEntry => props.stream;
@@ -106,7 +124,11 @@ export function LiveToolActivityContent(props: {
       </p>
       <Show when={props.includeArguments && stream().arguments.length > 0}>
         <div class="mt-2">
-          {renderToolArguments(stream().name, stream().arguments)}
+          {renderToolArguments(
+            stream().name,
+            stream().arguments,
+            props.settings,
+          )}
         </div>
       </Show>
       <LiveToolOutput channel="stdout" stream={stream()} />
