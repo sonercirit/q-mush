@@ -269,12 +269,13 @@ test("keeps a defensive-copy fence while the newest socket wins a concurrent res
     type: "response.output_text.delta",
   });
   acknowledgeProviderSocket(old, "current");
-  completeResponse(old, "current");
-  expectDoneStep(await reused);
   acknowledgeProviderSocket(next, "fresh");
   completeResponse(next, "fresh");
   expectDoneStep(await fresh);
+  completeResponse(old, "current");
+  expectDoneStep(await reused);
   expect(old.readyState).toBe(WebSocket.CLOSED);
+  expectProviderSocketReleased(old);
   const subsequent = complete(model);
   expect(next.sent).toHaveLength(2);
   acknowledgeProviderSocket(next, "subsequent");
