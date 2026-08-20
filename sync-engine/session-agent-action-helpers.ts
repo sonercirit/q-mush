@@ -253,6 +253,8 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
+  // Avoid credential reads during maintenance; pool candidates also enforce
+  // this signal, while the direct-credential path falls back to enqueue.
   if (restartSignal.aborted) {
     return responseToolOutput(serverRestartingResponse());
   }

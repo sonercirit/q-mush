@@ -191,11 +191,40 @@ test("restart-aborted credential candidates return server restarting", async () 
     AbortSignal.timeout(10_000),
   );
   const decoded = parseToolOutput(output);
-  expect(decoded).toHaveProperty("error", "server_restarting");
-  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+  const expectedCancellation: unknown = { error: "server_restarting" };
+  expect(decoded).toEqual(expectedCancellation);
+  const remainingSessions = setup.store.list(TEST_USER_ID);
   for (const database of [poolSetup.database, setup.database]) {
     database.$client.close();
   }
+  expect(remainingSessions).toHaveLength(1);
+});
+
+test("restart-aborted metadata rejection returns server restarting", async () => {
+  const restart = new SessionRestartAbort();
+  const restartReason = new DOMException("restart", "AbortError");
+  function restartSignal(): AbortSignal {
+    return restart.signal;
+  }
+  const setup = agentActionsSetup("none", false, {
+    discoverSessionMetadata: () => {
+      restart.abort(restartReason);
+      return Promise.reject(restartReason);
+    },
+    restartSignal,
+  });
+  const callerSignal = new AbortController().signal;
+  const input = spawnInput(setup, "restart canceled metadata");
+  const output = await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    input,
+    callerSignal,
+  );
+  expect(spawnedSession(setup)).toBeUndefined();
+  const decoded = parseToolOutput(output);
+  setup.database.$client.close();
+  expect(decoded).toEqual({ error: "server_restarting" });
 });
 
 test("caller-aborted metadata rejection retains the caller reason", async () => {
@@ -215,14 +244,28 @@ test("caller-aborted metadata rejection retains the caller reason", async () => 
       );
     },
   });
-  const output = await executeSessionAgentTool(
-    setup.actions,
+  // Deliberately use the direct-credential branch, unlike the pool cases above.
+  let rejectedReason: unknown;
+  const actions = {
+    ...setup.actions,
+    spawnSession: async (
+      ...arguments_: Parameters<typeof setup.actions.spawnSession>
+    ) => {
+      try {
+        return await setup.actions.spawnSession(...arguments_);
+      } catch (error) {
+        rejectedReason = error;
+        throw error;
+      }
+    },
+  };
+  await executeSessionAgentTool(
+    actions,
     "spawn_session",
     spawnInput(setup, "caller canceled"),
     caller.signal,
   );
-  expect(output).toMatchObject({ state: "failed" });
-  expect(output.output.endsWith(callerReason.message)).toBe(true);
+  expect(rejectedReason).toBe(callerReason);
   expect(spawnedSession(setup)).toBeUndefined();
   setup.database.$client.close();
 });
