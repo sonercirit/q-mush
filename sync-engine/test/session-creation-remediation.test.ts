@@ -230,8 +230,8 @@ test("classifies an unrepresentable post-commit result as uncertain without laun
 });
 
 test("classifies discovery with the captured restart signal after recovery", async () => {
+  const setup = setupCreation({ launch: vi.fn(() => false) });
   const restart = new SessionRestartAbort();
-  const setup = setupCreation({ launch: () => restart.signal.aborted });
   setup.dependencies.restartSignal = () => restart.signal;
   setup.dependencies.discoverModels = () => {
     const cancellation = new Error("discovery aborted by restart");

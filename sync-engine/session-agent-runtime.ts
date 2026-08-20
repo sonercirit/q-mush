@@ -15,7 +15,10 @@ import {
   type RunnerCommandBroker,
   type RunnerCommandOutputDelta,
 } from "../shared/runner-command-broker.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
 import {
   toolExecutionLimitSeconds,
   type ToolSettings,
@@ -84,6 +87,9 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly manualCompactionRequested: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly restartHandoffRequested: () => boolean;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;

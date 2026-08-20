@@ -48,6 +48,14 @@ async function expectModelDiscoveryFailure(options: {
   database.$client.close();
 }
 
+function recoverFromRestart(
+  restart: SessionRestartAbort,
+  reason: unknown,
+): void {
+  restart.abort(reason);
+  restart.restore();
+}
+
 test("model discovery retains restart identity across credential resolution", async () => {
   const credentialId = "restart-credential-resolution";
   const restart = new SessionRestartAbort();
@@ -58,8 +66,7 @@ test("model discovery retains restart identity across credential resolution", as
       return Promise.reject(new Error("restart cancellation"));
     },
     readCredential: () => {
-      restart.abort("restart");
-      restart.restore();
+      recoverFromRestart(restart, "restart");
       return Promise.resolve(createTestProviderCredential(credentialId));
     },
     restart,
@@ -70,10 +77,9 @@ test("model discovery classifies its captured restart signal after recovery", as
   const restart = new SessionRestartAbort();
   await expectModelDiscoveryFailure({
     credentialId: "restart-credential",
-    discoverModels: () => {
-      restart.abort(new DOMException("restart", "AbortError"));
-      restart.restore();
-      return Promise.reject(new Error("restart cancellation"));
+    discoverModels: async () => {
+      recoverFromRestart(restart, new DOMException("restart", "AbortError"));
+      throw new Error("restart cancellation");
     },
     readCredential: () =>
       Promise.resolve(createTestProviderCredential("restart-credential")),
@@ -92,8 +98,7 @@ test("recovery replacement cannot create a child", async () => {
   const restart = new SessionRestartAbort();
   const setup = agentActionsSetup("none", false, {
     discoverSessionMetadata: () => {
-      restart.abort("restart");
-      restart.restore();
+      recoverFromRestart(restart, "restart");
       return Promise.resolve({
         contextWindow: null,
         maxContextTokens: null,
@@ -198,10 +203,10 @@ test("attachment fallback validation retains restart identity across credential 
   const providerDiscovery = vi.fn(() => Promise.resolve({ providers: [] }));
   const integration = createAttachmentFallbackIntegration({
     database,
-    discoverModels: (_provider, _credential, signal) => {
+    discoverModels: async (_provider, _credential, signal) => {
       expect(signal).toBe(restart.signal);
-      expect(signal?.aborted).toBe(true);
-      return Promise.reject(new Error("restart cancellation"));
+      if (signal?.aborted !== true) throw new Error("signal was not aborted");
+      throw new Error("restart cancellation");
     },
     discoverOpenRouterProviders: providerDiscovery,
     generateId: () => crypto.randomUUID(),

@@ -89,6 +89,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
     notify: () => undefined,
     now: () => TEST_NOW + 2,
     operation: "agent",
+    pendingComponent: () => undefined,
     resources: {
       activeTools: new ActiveSessionTools(),
       actions: orchestrationActions(setup.database, setup.store),

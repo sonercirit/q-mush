@@ -69,10 +69,12 @@ export async function createSessionWithCredentialPool(
               ...dependencies,
               rejectCredentialErrors: balanced,
             },
-            user,
-            resolvedInput,
-            credential,
-            restartSignal,
+            {
+              credential,
+              input: resolvedInput,
+              restartSignal,
+              user,
+            },
           );
           if ("error" in metadata) {
             await requireJsonResponse(sessionMetadataErrorResponse(metadata));

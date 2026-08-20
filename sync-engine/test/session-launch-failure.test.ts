@@ -34,6 +34,7 @@ import { runLaunchedSession } from "./session-launch-test-helpers.ts";
 import {
   createStore,
   createTestSession,
+  emptyRuntimes,
 } from "./session-store-test-fixtures.ts";
 
 function markerlessStartupSession(database: AppDatabase): void {
@@ -54,6 +55,7 @@ function markerlessStartupSession(database: AppDatabase): void {
       return id;
     },
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   createTestSession(startupStore, TEST_NOW, {
     credentialId: CREDENTIAL_ID,

@@ -12,6 +12,7 @@ import {
   createRunningTestSession,
   createSessionInput,
 } from "./session-store-create-hardening-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 export type ReassignmentSessionSetup = ReturnType<typeof connectedSessionSetup>;
 
@@ -21,6 +22,7 @@ export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
     setup.database,
     () => ids.shift() ?? "unexpected-race-id",
     () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   createRunningTestSession(
     store,

@@ -3,7 +3,9 @@ import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import type { ProviderRequestState } from "../agent-model-options.ts";
 import { explainAttachment } from "../attachment-fallback-model.ts";
+import type { AgentModelFactory } from "../session-agent-models.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 
 const ATTACHMENT: AgentAttachment = {
@@ -38,15 +40,26 @@ function options(
   selections = [FALLBACK],
 ) {
   const stepStarts: string[] = [];
+  const requestStates: ProviderRequestState[] = [];
+  const requestStateCallbacks: NonNullable<
+    Parameters<AgentModelFactory>[0]["onRequestState"]
+  >[] = [];
   const complete = vi.fn(() => {
     // Records ordering: the step must be marked before the request.
     stepStarts.push("complete");
     return Promise.resolve(providerStep("explained"));
   });
-  const factory = vi.fn(() => ({ complete }));
+  const factory = vi.fn((factoryOptions: Parameters<AgentModelFactory>[0]) => {
+    if (factoryOptions.onRequestState !== undefined) {
+      requestStateCallbacks.push(factoryOptions.onRequestState);
+    }
+    return { complete };
+  });
   return {
     complete,
     factory,
+    requestStateCallbacks,
+    requestStates,
     stepStarts,
     value: {
       attachment: ATTACHMENT,
@@ -64,6 +77,9 @@ function options(
       currentProviderPricing: null,
       currentProviderTag: null,
       factory,
+      onRequestState: (state: ProviderRequestState) => {
+        requestStates.push(state);
+      },
       prompt: "Extract requirements",
       toolSettings: DEFAULT_TOOL_SETTINGS,
       resources: {
@@ -119,6 +135,9 @@ describe("explain attachment", () => {
         systemPrompt: "Extract requirements",
       }),
     );
+    expect(setup.requestStateCallbacks).toHaveLength(1);
+    setup.requestStateCallbacks[0]?.("admission");
+    expect(setup.requestStates).toEqual(["admission"]);
   });
 
   test("appends the truncation notice to a length-stopped explanation", async () => {

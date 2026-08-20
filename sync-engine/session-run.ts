@@ -2,6 +2,7 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
@@ -34,6 +35,9 @@ interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly operation: RestartHandoffOperation;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly resources: SessionModelRuntimeResources;
   readonly restartPersistence: DurableRestartPersistence;
   readonly store: SessionStore;
@@ -195,6 +199,7 @@ export async function runPersistedSession(
       options.userId,
       options.controller,
       () => options.restartRequest() !== undefined,
+      options.pendingComponent,
     );
     const manualCompaction = options.operation !== "agent";
     const outcome = await (manualCompaction

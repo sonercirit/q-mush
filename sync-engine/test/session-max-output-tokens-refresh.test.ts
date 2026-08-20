@@ -125,6 +125,7 @@ describe("lazy Anthropic request metadata refresh", () => {
       },
       ...IDLE_RUNTIME_SIGNALS,
       isCurrent: () => true,
+      pendingComponent: () => undefined,
       modelFactory: (factoryOptions: AgentModelRequestOptions) => {
         selections.push(factoryOptions);
         return model;

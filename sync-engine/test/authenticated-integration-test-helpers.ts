@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { expect } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
@@ -346,8 +347,22 @@ export function createSchemaCompatibleTestDatabase(): AppDatabase {
   return database;
 }
 
-export function createAuthenticatedTestDatabase(): AppDatabase {
-  const database = createSchemaCompatibleTestDatabase();
+export function createAuthenticatedTestDatabase(
+  options: { expiresAt?: number; path?: string } = {},
+): AppDatabase {
+  const { expiresAt = TEST_NOW + 60_000, path } = options;
+  const database =
+    path === undefined
+      ? createSchemaCompatibleTestDatabase()
+      : createDatabase(path);
+  if (path !== undefined) ensureWaveOneColumns(database);
+  // A reopened fixture already has its stable authenticated user/session rows.
+  const fixtureAlreadyInitialized = database
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, TEST_USER_ID))
+    .get();
+  if (fixtureAlreadyInitialized !== undefined) return database;
 
   database
     .insert(users)
@@ -363,7 +378,7 @@ export function createAuthenticatedTestDatabase(): AppDatabase {
     .insert(sessions)
     .values({
       ...testAuditFields(),
-      expiresAt: new Date(TEST_NOW + 60_000),
+      expiresAt: new Date(expiresAt),
       id: SESSION_ID,
       token: SESSION_TOKEN,
       userId: TEST_USER_ID,

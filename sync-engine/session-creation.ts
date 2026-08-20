@@ -14,7 +14,10 @@ import {
   sessionMetadataFromDependencies,
   type SessionMetadataResult,
 } from "./session-provider-selection.ts";
-import { serverRestartingResponse } from "./session-restart-gate.ts";
+import {
+  abortedServerRestartResponse,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -214,19 +217,24 @@ export function sessionMetadataErrorResponse(
 type PreparedSessionInput = CreateSessionInput &
   Pick<CreateAgentSession, "workspaceId">;
 
+type SessionCredentialPreparationDependencies = Pick<
+  SessionCreationDependencies,
+  | "discoverModels"
+  | "discoverOpenRouterProviders"
+  | "rejectCredentialErrors"
+  | "restartSignal"
+>;
+
 export function prepareSessionCredential(
-  dependencies: Pick<
-    SessionCreationDependencies,
-    | "discoverModels"
-    | "discoverOpenRouterProviders"
-    | "rejectCredentialErrors"
-    | "restartSignal"
-  >,
-  user: AuthenticatedUser,
-  input: PreparedSessionInput,
-  credential: ProviderCredentialAccess,
-  restartSignal: AbortSignal,
+  dependencies: SessionCredentialPreparationDependencies,
+  options: {
+    readonly credential: ProviderCredentialAccess;
+    readonly input: PreparedSessionInput;
+    readonly restartSignal: AbortSignal;
+    readonly user: AuthenticatedUser;
+  },
 ): Promise<SessionMetadataResult> {
+  const { credential, input, restartSignal, user } = options;
   return sessionMetadataFromDependencies({
     credential,
     dependencies,
@@ -326,20 +334,18 @@ export async function createValidatedSession(
   credential: ProviderCredentialAccess,
   restartSignal: AbortSignal,
 ): Promise<Response> {
-  if (restartSignal.aborted) {
-    return serverRestartingResponse();
-  }
+  const restarting = abortedServerRestartResponse(restartSignal);
+  if (restarting !== undefined) return restarting;
   let metadata: SessionMetadataResult;
   try {
-    metadata = await prepareSessionCredential(
-      dependencies,
-      user,
-      input,
+    metadata = await prepareSessionCredential(dependencies, {
       credential,
+      input,
       restartSignal,
-    );
+      user,
+    });
   } catch (error) {
-    if (restartSignal.reason === undefined) throw error;
+    if (!restartSignal.aborted) throw error;
     return serverRestartingResponse();
   }
   return "error" in metadata

@@ -1,6 +1,9 @@
 import type { AttachmentFallbackSelection } from "../shared/attachment-fallback.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -45,6 +48,8 @@ export function sessionModelRuntime(
   userId: string,
   controller: AbortController,
   restartHandoffRequested: () => boolean = () => false,
+  markPending: (component: SessionRuntimePendingComponent) => void = () =>
+    undefined,
 ): SessionAgentRuntimeDependencies {
   const toolSettings = resources.store.toolSettings(
     detail.id,
@@ -77,6 +82,7 @@ export function sessionModelRuntime(
       resources.store.manualCompactionPending(detail.id, detail.generation),
     modelFactory: resources.modelFactory,
     now: resources.now,
+    pendingComponent: markPending,
     restartHandoffRequested,
     notify: () => {
       if (

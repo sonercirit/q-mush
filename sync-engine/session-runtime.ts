@@ -1,4 +1,9 @@
-import type { RestartHandoffRequester } from "../shared/session-model.ts";
+import type {
+  RestartHandoffRequester,
+  SessionRuntimePending,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import type {
   RestartRequestPersistence,
   SessionRestartRequester,
@@ -40,6 +45,7 @@ interface ActiveSessionRuntime {
   readonly boundary: RestartBoundary;
   readonly controller: AbortController;
   readonly generation: number;
+  pending: SessionRuntimePending;
   restartRequestedAt: number | undefined;
   persistRestart: RestartRequestPersistence | undefined;
   pendingPersistence: PendingRestartPersistence[];
@@ -53,6 +59,9 @@ interface ActiveSessionRuntime {
 
 interface SessionRuntimeContext extends SessionRestartRequester {
   readonly controller: AbortController;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => boolean;
   readonly settled: (clearDurable: () => Promise<void> | void) => void;
 }
 
@@ -78,6 +87,12 @@ function trackRestartPersistence(
   };
   void pending.promise.then(settled, settled);
   return pending.promise;
+}
+
+export function sessionPendingComponentFromProviderState(
+  state: ProviderRequestState,
+): SessionRuntimePendingComponent {
+  return state === "admission" ? "provider_admission" : "provider_request";
 }
 
 function scopeIncludes(scope: RestartScope, runnerId: string): boolean {
@@ -130,8 +145,8 @@ function applyRequest(
 export class SessionRuntimes {
   readonly #active = new Map<string, ActiveSessionRuntime>();
   readonly #drainingRunners = new Map<string, RunnerRestartGate>();
-  #drainingServer: RestartRequest | undefined;
   readonly #now: () => number;
+  #drainingServer: RestartRequest | undefined;
 
   constructor(now: () => number = Date.now) {
     this.#now = now;
@@ -224,6 +239,14 @@ export class SessionRuntimes {
     return this.activeGenerationMatches(sessionId, generation);
   }
 
+  pending(
+    sessionId: string,
+    generation: number,
+  ): SessionRuntimePending | undefined {
+    const runtime = this.#active.get(sessionId);
+    return runtime?.generation === generation ? runtime.pending : undefined;
+  }
+
   abort(sessionId: string): void {
     this.#active.get(sessionId)?.controller.abort();
   }
@@ -232,15 +255,18 @@ export class SessionRuntimes {
     return this.#active.get(sessionId)?.generation === generation;
   }
 
-  abortForGeneration(sessionId: string, generation: number): boolean {
+  abortForGeneration(
+    sessionId: string,
+    generation: number,
+    reason: DOMException = new DOMException(
+      "The session tools changed",
+      "AbortError",
+    ),
+  ): boolean {
     if (!this.activeGenerationMatches(sessionId, generation)) {
       return false;
     }
-    this.#active
-      .get(sessionId)
-      ?.controller.abort(
-        new DOMException("The session tools changed", "AbortError"),
-      );
+    this.#active.get(sessionId)?.controller.abort(reason);
     return true;
   }
 
@@ -399,6 +425,7 @@ export class SessionRuntimes {
       forceParked: false,
       generation,
       pendingPersistence: [],
+      pending: { component: "startup", since: this.#now() },
       persistRestart: undefined,
       restartDurable: false,
       restartRequest: undefined,
@@ -412,6 +439,17 @@ export class SessionRuntimes {
       runtime.settled = Promise.resolve(
         run({
           controller,
+          pendingComponent: (component) => {
+            if (this.#active.get(sessionId) !== runtime) {
+              return false;
+            }
+            const unchanged = runtime.pending.component === component;
+            if (unchanged && component !== "provider_admission") {
+              return false;
+            }
+            runtime.pending = { component, since: this.#now() };
+            return true;
+          },
           restartRequest: (persist) => {
             if (persist !== undefined) {
               runtime.persistRestart = persist;

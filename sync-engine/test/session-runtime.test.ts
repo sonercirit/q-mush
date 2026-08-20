@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import {
   SessionRuntimes,
   type RestartRequest,
@@ -39,16 +40,26 @@ function deferredRuntime(
   };
 }
 
-function runnerRequest(restartId: string): RestartRequest {
-  return { boundary: "handoff", requestedBy: "runner", restartId };
-}
-
-function expectOnlyFirstRunnerScoped(
-  active: readonly [DeferredRuntime, DeferredRuntime],
-  restartId: string,
-): void {
-  expect(active[0].request()).toEqual(runnerRequest(restartId));
-  expect(active[1].request()).toBeUndefined();
+function pendingRuntime(runtimes: SessionRuntimes, generation: number) {
+  let finish: (() => void) | undefined;
+  let pending:
+    ((component: SessionRuntimePendingComponent) => void) | undefined;
+  const launched = runtimes.launch(
+    "session-1",
+    "runner-1",
+    generation,
+    ({ pendingComponent }) => {
+      pending = pendingComponent;
+      return deferredPromise((resolve) => {
+        finish = resolve;
+      });
+    },
+  );
+  return {
+    finish: () => finish?.(),
+    launched,
+    pending: (value: SessionRuntimePendingComponent) => pending?.(value),
+  };
 }
 
 function activeRuntimes(runtimes: SessionRuntimes) {
@@ -129,6 +140,55 @@ function restoreRunnerGate(
 }
 
 describe("session runtimes", () => {
+  test("tracks pending components with a shared clock and generation fencing", async () => {
+    let now = 101;
+    const runtimes = new SessionRuntimes(() => now);
+    const runtime = pendingRuntime(runtimes, 4);
+    expect(runtime.launched).toBe(true);
+
+    runtime.pending("provider_admission");
+    expect(runtimes.pending("session-1", 4)).toEqual({
+      component: "provider_admission",
+      since: 101,
+    });
+    expect(runtimes.pending("session-1", 3)).toBeUndefined();
+
+    now = 202;
+    runtime.pending("provider_request");
+    expect(runtimes.pending("session-1", 4)).toEqual({
+      component: "provider_request",
+      since: 202,
+    });
+    runtime.finish();
+    await runtimes.settled("session-1");
+    expect(runtimes.pending("session-1", 4)).toBeUndefined();
+  });
+
+  test("fences stale callbacks and aborts after generation replacement", async () => {
+    const runtimes = new SessionRuntimes();
+    const stale = pendingRuntime(runtimes, 1);
+    expect(stale.launched).toBe(true);
+    stale.finish();
+    await runtimes.settled("session-1");
+
+    const replacement = Promise.withResolvers<undefined>();
+    let replacementSignal: AbortSignal | undefined;
+    expect(
+      runtimes.launch("session-1", "runner-1", 2, ({ controller }) => {
+        replacementSignal = controller.signal;
+        return replacement.promise;
+      }),
+    ).toBe(true);
+    stale.pending("provider_request");
+
+    expect(runtimes.pending("session-1", 2)).toMatchObject({
+      component: "startup",
+    });
+    expect(runtimes.abortForGeneration("session-1", 1)).toBe(false);
+    expect(replacementSignal).toMatchObject({ aborted: false });
+    replacement.resolve();
+  });
+
   test("rejects duplicate launches without replacing the active runtime", async () => {
     const runtimes = new SessionRuntimes();
     const first = deferredRuntime(runtimes, "session-1", "runner-1");
@@ -209,7 +269,12 @@ describe("session runtimes", () => {
     await Promise.resolve();
 
     const drain = runtimes.drain(runnerScope(), "restart-1");
-    expectOnlyFirstRunnerScoped(active, "restart-1");
+    expect(active[0].request()).toEqual({
+      boundary: "handoff",
+      requestedBy: "runner",
+      restartId: "restart-1",
+    });
+    expect(active[1].request()).toBeUndefined();
     expect([
       runtimes.accepts("runner-1"),
       runtimes.accepts("runner-2"),
@@ -248,7 +313,7 @@ describe("session runtimes", () => {
     expect(runtimes.draining).toBe(false);
   });
 
-  test("promotes a runner request when an overlapping server drain takes authority", async () => {
+  test("preserves the first request during overlapping drains", async () => {
     const runtimes = new SessionRuntimes();
     const runtime = deferredRuntime(runtimes, "session-1", "runner-1");
     await Promise.resolve();
@@ -259,8 +324,8 @@ describe("session runtimes", () => {
     ];
     const storedRequest = runtime.request();
     expect(storedRequest).toMatchObject({
-      requestedBy: "server",
-      restartId: "server-restart",
+      requestedBy: "runner",
+      restartId: "runner-restart",
     });
 
     runtime.finish();
@@ -287,9 +352,11 @@ describe("session runtimes", () => {
     expect(() =>
       runtimes.restoreRunner("runner-1", "restart-conflict"),
     ).toThrow("different restart");
-    expect(runtimes.drainRequest(runnerScope())).toEqual(
-      runnerRequest("restart-restored"),
-    );
+    expect(runtimes.drainRequest(runnerScope())).toEqual({
+      boundary: "handoff",
+      requestedBy: "runner",
+      restartId: "restart-restored",
+    });
     expectRunnerBlocked(runtimes);
     releaseRunner(runtimes, "wrong-restart", false);
     releaseRunner(runtimes, "restart-restored", true);
@@ -305,28 +372,6 @@ describe("session runtimes", () => {
 
     expectRunnerAccepts(runtimes, false);
     releaseRunner(runtimes, "runner-restart", true);
-  });
-
-  test("starting the server clears only the abandoned drain's requests", async () => {
-    const runtimes = new SessionRuntimes(() => 5_000);
-    const active = await activeRuntimePair(runtimes);
-    const abandoned = runtimes.drain({ kind: "server" }, "abandoned-restart");
-
-    // A newer runner drain covers only the first runtime's runner.
-    const runnerDrain = runtimes.drain(runnerScope(), "runner-restart");
-    runtimes.start();
-
-    // The abandoned server request is gone, but the still-gated runner drain
-    // keeps its session as pending work it can force-park.
-    expectOnlyFirstRunnerScoped(active, "runner-restart");
-    expect(runtimes.drainProgress().map(({ sessionId }) => sessionId)).toEqual([
-      "session-1",
-    ]);
-    expectRunnerAccepts(runtimes, false);
-    expect(runtimes.accepts("runner-2")).toBe(true);
-
-    await settleAll(abandoned, ...active);
-    await runnerDrain;
   });
 
   test("rejects conflicting restart IDs for one scope", async () => {

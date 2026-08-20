@@ -217,8 +217,9 @@ test("recovery replacement cannot fork after credential candidates resolve", asy
   };
   dependencies.restartSignal = () => restart.signal;
 
-  await expect(fork(dependencies)).rejects.toMatchObject({
-    code: "server_restarting",
-  });
-  expect(storeFork).not.toHaveBeenCalled();
+  await expect(fork(dependencies)).rejects.toHaveProperty(
+    "code",
+    "server_restarting",
+  );
+  expect(storeFork).toHaveBeenCalledTimes(0);
 });

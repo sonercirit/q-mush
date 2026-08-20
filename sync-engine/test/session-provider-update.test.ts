@@ -19,6 +19,7 @@ import {
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 function createProviderUpdateSession(
   store: SessionStore,
@@ -54,7 +55,12 @@ function setup(userContextTokenCap?: number) {
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
   const readSettings = () => DEFAULT_TOOL_SETTINGS;
-  const store = new SessionStore(database, undefined, readSettings);
+  const store = new SessionStore(
+    database,
+    undefined,
+    readSettings,
+    emptyRuntimes,
+  );
   const created = createProviderUpdateSession(store, userContextTokenCap);
   if (created.status !== "created") throw new Error("Fixture failed");
   const cancelSessionGeneration = vi.fn<

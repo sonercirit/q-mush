@@ -58,6 +58,7 @@ export function createFallbackModel(
     readonly credential: ProviderCredentialAccess;
     readonly maxOutputTokens: number | null;
     readonly model: string;
+    readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: ProviderId;
@@ -70,13 +71,16 @@ export function createFallbackModel(
     credential: selection.credential,
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
+    ...(selection.onRequestState === undefined
+      ? {}
+      : { onRequestState: selection.onRequestState }),
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
-    toolSettings: selection.toolSettings,
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
+    toolSettings: selection.toolSettings,
     tools: [],
   });
 }
@@ -88,6 +92,7 @@ function modelOptions(
   toolSettings: ToolSettings,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
+  onRequestState?: AgentModelFactoryOptions["onRequestState"],
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
@@ -104,6 +109,7 @@ function modelOptions(
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
+    ...(onRequestState === undefined ? {} : { onRequestState }),
     promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
@@ -121,6 +127,7 @@ export function createSessionAgentModels(options: {
   readonly factory: AgentModelFactory;
   readonly id?: () => string;
   readonly isCurrent: () => boolean;
+  readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
   readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly streamId?: string;
@@ -212,6 +219,7 @@ export function createSessionAgentModels(options: {
         toolSettings,
         onDelta,
         onStepStart,
+        options.onRequestState,
       ),
     );
   return {

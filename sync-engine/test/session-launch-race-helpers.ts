@@ -102,12 +102,12 @@ export type AgentActionsTestSetup = SessionStoreTestSetup & {
   readonly target: AgentSessionDetail | undefined;
 };
 
-function helperClock(): () => number {
+export function testClock(): () => number {
   let now = TEST_NOW;
   return () => (now += 1);
 }
 
-function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
+export function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
   const turns = detail.turns ?? [];
   const activeTurns = turns.filter(({ endedAt }) => endedAt === null);
   expect(activeTurns).toHaveLength(1);
@@ -175,7 +175,7 @@ export function agentActionsSetup(
   overrides: Partial<ConstructorParameters<typeof SessionAgentActions>[0]> = {},
 ): AgentActionsTestSetup {
   const setup: SessionStoreTestSetup = createStore();
-  const now = helperClock();
+  const now = testClock();
   const parent = createTestSession(setup.store);
   transitionTestSession(setup, parent, "running", now);
   const target = includeTarget ? createTestSession(setup.store) : undefined;

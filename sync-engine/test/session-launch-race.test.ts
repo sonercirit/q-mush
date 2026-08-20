@@ -15,7 +15,6 @@ import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import {
   createTestProviderCredential,
   TEST_AUTHENTICATED_USER,
-  TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
@@ -23,12 +22,14 @@ import {
   closeSessionTestDatabase,
   expectedRestartHandoff,
   expectJsonResponse,
+  expectLaunchTurnRotation,
   expectStoredSession,
   launchRace,
   parseToolOutput,
   type SessionStoreTestSetup,
   spawnedSession,
   spawnInput,
+  testClock,
   transitionTestSession,
   unsupportedFixtureStatus,
 } from "./session-launch-race-helpers.ts";
@@ -97,11 +98,6 @@ function testModelCatalog() {
   return Promise.resolve().then(() => ({ defaultModel: null, models: [] }));
 }
 
-function testClock(): () => number {
-  let now = TEST_NOW;
-  return () => (now += 1);
-}
-
 function sessionInput(
   detail: AgentSessionDetail,
   prompt = "Exercise the launch boundary",
@@ -121,22 +117,6 @@ function sessionInput(
     workingDirectory: detail.workingDirectory,
     workspaceId: detail.workspaceId,
   };
-}
-
-function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
-  const turns = detail.turns ?? [];
-  const activeTurns = turns.filter(({ endedAt }) => endedAt === null);
-  expect(activeTurns).toHaveLength(1);
-  const active = activeTurns[0];
-  if (active === undefined) {
-    throw new Error("The launched session has no active turn");
-  }
-  const previous = turns.at(-2);
-  if (previous !== undefined) {
-    expect(previous.endedAt).not.toBeNull();
-    expect(active.startedAt).toBeGreaterThan(previous.startedAt);
-    expect(previous.endedAt).toBeLessThanOrEqual(active.startedAt);
-  }
 }
 
 function assertLaunchRaceState(

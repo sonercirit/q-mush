@@ -42,6 +42,24 @@ async function waitForFile(pathname: string): Promise<void> {
     .toBe(true);
 }
 
+async function waitForJson(pathname: string): Promise<unknown> {
+  let payload: unknown;
+  await expect
+    .poll(
+      async () => {
+        try {
+          payload = await Bun.file(pathname).json();
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      { interval: 10, timeout: 5_000 },
+    )
+    .toBe(true);
+  return payload;
+}
+
 async function expectStableStartCount(
   pathname: string,
   expected: number,
@@ -331,8 +349,7 @@ process.on("SIGTERM", () => {
         reportPath,
       ]),
     );
-    await waitForFile(serverPath);
-    const serverState: unknown = await Bun.file(serverPath).json();
+    const serverState = await waitForJson(serverPath);
     const url =
       typeof serverState === "object" &&
       serverState !== null &&
@@ -350,7 +367,7 @@ process.on("SIGTERM", () => {
 
     await stoppedWithin(server, 60);
     server = undefined;
-    expect(await Bun.file(reportPath).json()).toEqual({
+    expect(await waitForJson(reportPath)).toEqual({
       keepaliveTimers: 1,
       openHandles: [
         "keepalive timer",
@@ -520,7 +537,7 @@ async function useRecoveryFixture(
         statePath,
         mode,
       );
-      await waitForFile(statePath);
+      await waitForJson(statePath);
       await stop(server);
       await expectRecoveredSession(databasePath, statePath);
     },

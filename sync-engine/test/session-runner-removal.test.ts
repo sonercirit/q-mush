@@ -73,6 +73,7 @@ function testSession(): AgentSessionDetail {
     providerPricing: null,
     reasoningEffort: null,
     restartHandoff: null,
+    runtimePending: null,
     runnerId: REMOVED_RUNNER_ID,
     runnerRequired: true,
     status: base.status,
