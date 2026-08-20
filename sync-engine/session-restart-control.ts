@@ -301,13 +301,20 @@ export function createSessionRestartControl(
         const serverId = serverRestartId();
         if (serverId !== undefined && serverDeadline !== undefined) {
           sharedServerRestartIds.set(runnerId, restartId);
-          await boundedDrain(
-            { kind: "server" },
-            serverId,
-            true,
-            serverDeadline,
-            false,
-          );
+          try {
+            await boundedDrain(
+              { kind: "server" },
+              serverId,
+              true,
+              serverDeadline,
+              false,
+            );
+          } catch (error) {
+            if (sharedServerRestartIds.get(runnerId) === restartId) {
+              sharedServerRestartIds.delete(runnerId);
+            }
+            throw error;
+          }
           return;
         }
         warn(

@@ -514,7 +514,9 @@ export class SessionRuntimes {
             ...runnerGate,
             boundary: runtime.boundary,
           };
-          runtime.restartRequestedAt = this.#now();
+          // The runner request already started this session's clock before the
+          // server drain took authority. Preserve that honest elapsed time;
+          // force-parked sessions have no clock and stay out of progress.
           continue;
         }
         runtime.restartRequest = undefined;
