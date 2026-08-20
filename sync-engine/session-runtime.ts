@@ -171,6 +171,7 @@ export class SessionRuntimes {
     const candidates = [...this.#active.entries()].filter(
       ([, runtime]) =>
         runtime.restartRequest !== undefined &&
+        !runtime.forceParked &&
         scopeIncludes(scope, runtime.runnerId),
     );
     const persistence: Promise<void>[] = [];

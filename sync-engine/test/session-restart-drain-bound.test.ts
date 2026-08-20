@@ -173,18 +173,25 @@ function pendingRunnerDrain() {
   return { ...fixture, runtime };
 }
 
-function beginRunnerThenServerDrain(
+async function beginRunnerThenServerDrain(
+  clock: SessionRestartTestClock,
   control: ReturnType<typeof testRestartControl>,
-): readonly [Promise<void>, Promise<void>] {
-  return [
-    control.drainRunner("runner-1", "runner-restart"),
-    control.drainServer(),
-  ];
+): Promise<readonly [Promise<void>, Promise<void>]> {
+  const runnerDrain = control.drainRunner("runner-1", "runner-restart");
+  await waitUntil(() => {
+    const progress = control.drainProgress();
+    return progress.length === 1 && progress[0]?.elapsedMs === 0;
+  });
+  clock.advance(500);
+  return [runnerDrain, control.drainServer()];
 }
 
 async function runnerUnderServerDrain() {
   const fixture = pendingRunnerDrain();
-  const drains = beginRunnerThenServerDrain(fixture.control);
+  const drains = await beginRunnerThenServerDrain(
+    fixture.clock,
+    fixture.control,
+  );
   await waitUntil(() => fixture.control.drainProgress().length === 1);
   return { ...fixture, drains };
 }
@@ -310,10 +317,10 @@ describe("bounded restart drain", () => {
 
     control.restoreServerDrain();
 
-    // requestDrain uses ??= when the server takes authority, so this directly
-    // observes that the pre-existing value is the runner drain's start time.
+    // The runner started 500 ms before the server and requestDrain preserves
+    // that earlier timestamp when the server takes authority.
     expect(control.drainProgress()).toEqual([
-      expect.objectContaining({ elapsedMs: 1_500, runnerId: "runner-1" }),
+      expect.objectContaining({ elapsedMs: 2_000, runnerId: "runner-1" }),
     ]);
     runtime.finish();
     await Promise.all(drains);
@@ -332,26 +339,29 @@ describe("bounded restart drain", () => {
     runtime.finish();
   });
 
-  test("clears a shared runner association when its bounded timer throws", async () => {
-    const runtimes = new SessionRuntimes();
-    const control = createSessionRestartControl(
-      runtimes,
-      () => "server-restart",
-      {
-        setTimeout: () => {
-          throw new Error("timer failed");
-        },
-      },
-    );
+  test("a later escalation does not re-park restored force-parked work", async () => {
+    const logged: string[] = Array.from<string>({ length: 0 });
+    const fixture = await singleSessionDrain(logged);
+    const runtime = fixture.session;
+    const { drained } = await startedDrain(fixture.control);
+    fixture.clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
+    await drained;
+    expectForceParked(runtime);
+    expect(logged).toHaveLength(1);
 
-    await expect(control.drainServer()).rejects.toThrow("timer failed");
-    await expect(
-      control.drainRunner("runner-1", "runner-restart"),
-    ).rejects.toThrow("timer failed");
-
-    expect(control.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
-      false,
+    fixture.control.restoreServerDrain();
+    const runnerDrain = fixture.control.drainRunner(
+      "runner-1",
+      "runner-restart",
     );
+    expect(
+      fixture.control.escalateRunnerDrain("runner-1", "runner-restart"),
+    ).toBe(true);
+    await runnerDrain;
+
+    expect(runtime.durable()).toHaveLength(2);
+    expect(logged).toHaveLength(1);
+    runtime.finish();
   });
 
   test("final preparation retires a bounded runner continuation and leaves final drain unbounded", async () => {

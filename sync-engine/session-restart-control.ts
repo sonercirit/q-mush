@@ -310,6 +310,9 @@ export function createSessionRestartControl(
               false,
             );
           } catch (error) {
+            // Defensive bookkeeping cleanup: when timer setup itself throws,
+            // no bounded server drain exists for the stale association to
+            // escalate, so this branch has no separately observable outcome.
             if (sharedServerRestartIds.get(runnerId) === restartId) {
               sharedServerRestartIds.delete(runnerId);
             }
