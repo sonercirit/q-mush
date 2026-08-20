@@ -242,15 +242,34 @@ test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
   stream.stop();
 });
 
+function expectOrderedToolResync(buffer: RealtimeStreamBuffer): void {
+  expect(buffer.takeToolResyncRequests()).toContainEqual({
+    sessionId: SESSION_ID,
+    streamId: STREAM_ID,
+  });
+}
+
+test("requests resync when an evicted terminal update leaves delivered running state", () => {
+  const buffer = new RealtimeStreamBuffer();
+  queueRunningToolOutput(buffer, "delivered-output");
+  const delivered = drainUpdates(buffer).find(
+    (update) =>
+      update.type === "tool_update" && update.entry.state === "running",
+  );
+  expect(delivered).toBeDefined();
+
+  buffer.queue(orderedToolDelta(3, { state: "completed" }));
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER, "terminal-eviction");
+
+  expectOrderedToolResync(buffer);
+});
+
 test("requests resync when pending tool output is evicted", () => {
   const buffer = new RealtimeStreamBuffer();
   queueRunningToolOutput(buffer, "evicted-output");
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER, "tool-eviction");
 
-  expect(buffer.takeToolResyncRequests()).toContainEqual({
-    sessionId: SESSION_ID,
-    streamId: STREAM_ID,
-  });
+  expectOrderedToolResync(buffer);
 });
 
 function queueEvictableEpoch(

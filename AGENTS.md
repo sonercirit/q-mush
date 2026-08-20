@@ -117,24 +117,26 @@ Project memory.
   settlement rebases streams. Disconnect drops unrendered fragments, resyncing
   active paused tools; evicting pending active-tool output also resyncs.
   Barriers and compact 100/session, 1,000/user caps block stale revival and key
-  reuse. Epochs stay monotonic while updates or barriers are queued; releasing
-  the last barrier reclaims its epoch after updates drain. Terminal cleanup
-  can't reset epochs with later barriers. Resets replace models; state events
-  coalesce one/frame; ready, health, and commands apply directly; no-op
-  snapshots suppress notices. Solid keeps focus/scroll; detail disables document
-  anchoring and only bottom-pinned transcripts follow output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else first) and credential, first discovered
-  model, latest directory, top reported effort. Unknown modalities imply no
-  attachment support; choices show provider/Q Mush modalities.
-  `solid/custom-select.tsx` shares search normalization, paginates past ten
-  items, owns accessible keyboard/focus. Focus mode fills the app viewport (not
-  browser Fullscreen), keeping drafts and scroll; its rail overlays on desktop,
-  becomes a drawer, collapses on selection, closing with Escape first.
-  `shared/agent-prompt.ts` builds the model system prompt and transcript
-  display; reasoning summaries persist as `thinking` messages omitted from
-  replay. Session and transcript rows sit in `agent_sessions` and
+  reuse. Evicting any pending tool update, including a terminal tombstone, must
+  request a snapshot: committing an undelivered terminal locally does not clear
+  the controller's previously rendered running row. Epochs stay monotonic while
+  updates or barriers are queued; releasing the last barrier reclaims its epoch
+  after updates drain. Terminal cleanup can't reset epochs with later barriers.
+  Resets replace models; state events coalesce one/frame; ready, health, and
+  commands apply directly; no-op snapshots suppress notices. Solid keeps
+  focus/scroll; detail disables document anchoring and only bottom-pinned
+  transcripts follow output. `agent-model-discovery.ts` queries metadata,
+  signal-cancelable; `shared/agent-configuration.ts` owns catalog
+  types/validation. New sessions take the default online runner (else first) and
+  credential, first discovered model, latest directory, top reported effort.
+  Unknown modalities imply no attachment support; choices show provider/Q Mush
+  modalities. `solid/custom-select.tsx` shares search normalization, paginates
+  past ten items, owns accessible keyboard/focus. Focus mode fills the app
+  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
+  overlays on desktop, becomes a drawer, collapses on selection, closing with
+  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
+  transcript display; reasoning summaries persist as `thinking` messages omitted
+  from replay. Session and transcript rows sit in `agent_sessions` and
   `agent_messages`; `step_started_at` sets per model step, clears with
   `activeStartedAt` (live Step timer); interrupted processes mark active
   sessions failed for resumption; rebuilds add interrupted tool errors on

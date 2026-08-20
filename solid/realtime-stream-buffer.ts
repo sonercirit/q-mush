@@ -270,7 +270,7 @@ export class RealtimeStreamBuffer {
     if (sessionId === undefined) return;
     const update = this.#removePending(sessionId, key);
     if (update?.kind === "tool") {
-      if (!update.value.terminal) this.#requestToolResync(update.value.entry);
+      this.#requestToolResync(update.value.entry);
       this.#commitToolState(
         materializeToolUpdate(update.value),
         update.value.terminal,
