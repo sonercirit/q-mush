@@ -28,8 +28,8 @@ function integrationResources(
   shutdownInterrupted: ShutdownInterruptedSessionStore,
   rejectDrain: () => Promise<void>,
 ): SessionIntegrationApiResources {
-  const resources: SessionIntegrationApiResources = new Proxy(
-    {},
+  const resources = new Proxy<SessionIntegrationApiResources>(
+    Object.create(null),
     {
       get: (_target, property) => {
         if (property === "shutdownInterrupted") return shutdownInterrupted;
