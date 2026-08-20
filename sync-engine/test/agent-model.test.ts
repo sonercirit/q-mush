@@ -24,10 +24,12 @@ const IMAGE_MESSAGE = {
   images: [TEST_AGENT_IMAGE],
   role: "user" as const,
 };
-function apiKeyCredential(secret: string) {
-  return { accountId: null, secret, source: "api_key" as const };
-}
-const OPENROUTER_IMAGE_OPTIONS = {
+const apiKeyCredential = (secret: string) => ({
+  accountId: null,
+  secret,
+  source: "api_key" as const,
+});
+const OR_IMAGE_OPTIONS = {
   credential: apiKeyCredential("sk-or-secret"),
   maxOutputTokens: null,
   model: "openai/gpt-4.1-mini",
@@ -100,7 +102,7 @@ function openRouterModelWithTools(
   capture: RequestCapture,
   tools: readonly (typeof AGENT_SESSION_TOOL_NAMES)[number][],
 ): ChatCompletionsAgentModel {
-  return capturedModel(capture, { ...OPENROUTER_IMAGE_OPTIONS, tools });
+  return capturedModel(capture, { ...OR_IMAGE_OPTIONS, tools });
 }
 function genericModel(
   capture: RequestCapture,
@@ -196,7 +198,7 @@ describe("chat completions agent model", () => {
     };
     const model = respondingModel(
       {
-        ...OPENROUTER_IMAGE_OPTIONS,
+        ...OR_IMAGE_OPTIONS,
         credential: { ...apiKeyCredential("sk-or-secret"), accountId: "a-1" },
         reasoningEffort: "high",
         systemPrompt: "Workspace instructions from AGENTS.md",
@@ -307,7 +309,7 @@ describe("chat completions agent model", () => {
     >,
   ) {
     return capturedModel(capture, {
-      ...OPENROUTER_IMAGE_OPTIONS,
+      ...OR_IMAGE_OPTIONS,
       openRouterProviderRouting,
     });
   }
@@ -367,7 +369,7 @@ describe("chat completions agent model", () => {
   test("sends image inputs through chat completions", async () => {
     const capture = new RequestCapture();
     const model = respondingModel(
-      OPENROUTER_IMAGE_OPTIONS,
+      OR_IMAGE_OPTIONS,
       { choices: [{ message: { content: "I see the image." } }] },
       capture,
     );
