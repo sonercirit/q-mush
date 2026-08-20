@@ -14,7 +14,6 @@ function continuationMarker(
 
 function boundedContinuationPage(
   requested: readonly string[],
-  remaining: readonly string[],
   offset: number,
   maximum: number,
   totalLines: number,
@@ -33,12 +32,13 @@ function boundedContinuationPage(
     shownLines = candidateLines;
   }
   if (shownLines === 0) {
-    const fallback = `${remaining.join("\n")}${continuationMarker(
+    const fallback = `${requested.join("\n")}${continuationMarker(
       offset,
       requested.length,
       totalLines,
     )}`;
-    return codePointPrefix(fallback, maximum + 1);
+    const padding = Math.max(0, maximum + 1 - unicodeCharacterCount(fallback));
+    return codePointPrefix(`${fallback}${"\n".repeat(padding)}`, maximum + 1);
   }
   return `${requested.slice(0, shownLines).join("\n")}${continuationMarker(
     offset,
@@ -75,7 +75,6 @@ export function readContinuation(
   }
   return boundedContinuationPage(
     requested,
-    lines.slice(start),
     offset,
     maximumCharacters,
     lines.length,
