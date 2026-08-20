@@ -46,10 +46,13 @@ TS Bun/Solid; tests `test/`; `/`, `/app`.
   may request their own restart. `DevelopmentRestartLifecycle` bounds a dev
   restart with one shared 120s supervisor deadline, rejects new work, reports
   scoped active-tool counts, force-parks stragglers only after durable handoffs,
-  bounds cleanup, and escalates repeats. A rejected drain restores maintenance,
-  shutdown state, recovery, its gate and abort signal; requests capture one
+  bounds cleanup with purpose-named, identity-bearing restart timers, and
+  escalates repeats. A rejected drain restores maintenance, shutdown state,
+  recovery, its gate and abort signal; requests capture one
   `SessionRestartAbort` signal identity across awaits, and aborted controllers
-  remain aborted through recovery. Final shutdown cancels the lifecycle,
+  remain aborted through recovery. It clears each session's abandoned server
+  request (still-gating runner requests stay), then reruns handoff recovery and
+  the queued launcher unless shutdown won. Final shutdown cancels the lifecycle,
   promotes runner handoffs to server markers and fences live markers from
   liveness scans. Text handlers precompress with zstd/Brotli/gzip/deflate;
   `/favicon.svg` revalidates by ETag.

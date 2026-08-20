@@ -122,14 +122,15 @@ async function loadModels(
     runtime.signal,
     settings,
     async (signal) => {
-      const agentFile = await executeForSession(runtime, () =>
-        loadSessionAgentFile(
+      const agentFile = await executeForSession(runtime, () => {
+        runtime.pendingComponent("runner_command");
+        return loadSessionAgentFile(
           runtime.broker,
           runtime.detail,
           signal,
           runtime.isCurrent,
-        ),
-      );
+        );
+      });
       writeRuntime(runtime, (sessionId, now, generation) => {
         runtime.store.setRuntimeAgentFile(
           sessionId,
@@ -139,6 +140,7 @@ async function loadModels(
         );
       });
       throwIfRestartRequested(runtime);
+      runtime.pendingComponent("provider_request");
       const metadata = await sessionRequestMetadata(
         runtime,
         (apply) => {
@@ -260,6 +262,7 @@ async function executeAgentTool(
     ? runtime.activeTools.begin(runtime.detail.id, call.id, call.name)
     : () => undefined;
   try {
+    runtime.pendingComponent("engine_tool");
     if (
       !isAgentSessionToolName(call.name) ||
       !stepTools.has(call.name) ||
@@ -339,6 +342,7 @@ export async function runSessionAgent(
     signal: AbortSignal = toolSignal,
     callId?: string,
   ): Promise<RunnerCommandResult> => {
+    runtime.pendingComponent("runner_command");
     const result = await executeForSession(
       runtime,
       () =>
@@ -396,6 +400,7 @@ export async function runSessionAgent(
         throw new Error("The runner returned invalid file attachment data");
       }
       throwIfRestartRequested(runtime);
+      runtime.pendingComponent("provider_request");
       const currentModel = await discoverCurrentSessionModel(runtime, signal);
       // Discovery may ignore cancellation and settle after the wrapper already
       // reported timed-out; never start explanation model work afterward.

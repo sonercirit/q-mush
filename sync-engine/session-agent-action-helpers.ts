@@ -153,6 +153,17 @@ export async function spawnAgentSession(options: {
     options.signal === undefined
       ? restartSignal
       : AbortSignal.any([options.signal, restartSignal]);
+  const cancellationResponse = (): Response | undefined => {
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
+    return restartSignal.aborted ? serverRestartingResponse() : undefined;
+  };
+  const translateCancellation = (error: unknown): Response => {
+    const response = cancellationResponse();
+    if (response !== undefined) return response;
+    throw error;
+  };
   const parent = options.dependencies.store.get(
     options.userId,
     options.authority.sessionId,
@@ -173,21 +184,22 @@ export async function spawnAgentSession(options: {
     credential: ProviderCredentialAccess,
     workspaceId: string,
   ): Promise<Response> {
-    const metadata = await options.dependencies.discoverSessionMetadata(
-      input,
-      credential,
-      options.userId,
-      balanced,
-      operationSignal,
-    );
+    let metadata: SessionRequestModelMetadata;
+    try {
+      metadata = await options.dependencies.discoverSessionMetadata(
+        input,
+        credential,
+        options.userId,
+        balanced,
+        operationSignal,
+      );
+    } catch (error) {
+      return translateCancellation(error);
+    }
     // Discovery settles even when the deadline fires mid-flight; never
     // create a child after the caller already reported timed-out.
-    if (options.signal?.aborted === true) {
-      throw abortSignalError(options.signal, "The spawn was canceled");
-    }
-    if (restartSignal.aborted) {
-      return serverRestartingResponse();
-    }
+    const cancellation = cancellationResponse();
+    if (cancellation !== undefined) return cancellation;
     const created = options.dependencies.store.create(
       {
         ...input,
@@ -242,11 +254,16 @@ export async function spawnAgentSession(options: {
     return notifiedResponse("spawned");
   }
   if (pool !== undefined && balanced) {
-    const credentials = await pool.candidates(
-      options.userId,
-      selection,
-      operationSignal,
-    );
+    let credentials: readonly ProviderCredentialAccess[];
+    try {
+      credentials = await pool.candidates(
+        options.userId,
+        selection,
+        operationSignal,
+      );
+    } catch (error) {
+      return responseToolOutput(translateCancellation(error));
+    }
     if (credentials.length === 0) {
       return responseToolOutput(
         createJsonResponse({ error: "credential_unavailable" }, 409),

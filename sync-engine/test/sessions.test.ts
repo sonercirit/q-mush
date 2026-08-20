@@ -195,10 +195,10 @@ describe("agent sessions", () => {
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
-    // Four 3s ticks: creation, message, failure, and settlement.
+    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, and settlement.
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
-        activeDurationMs: 12_000,
+        activeDurationMs: 18_000,
         activeStartedAt: null,
         messages: [
           { role: "user" },
@@ -238,7 +238,6 @@ describe("agent sessions", () => {
     );
 
     expect(await response.clone().json()).toMatchObject({ autoCompact: false });
-    // Six 3s ticks: two SessionRuntimes reads, creation, message, completion, settle.
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
       autoCompact: false,
     });
@@ -275,7 +274,7 @@ describe("agent sessions", () => {
     const response = await setup.sessions.collection(imageRequest);
 
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
-      activeDurationMs: 12_000,
+      activeDurationMs: 18_000,
       activeStartedAt: null,
       messages: [
         {

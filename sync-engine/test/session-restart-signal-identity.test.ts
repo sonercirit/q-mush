@@ -140,6 +140,73 @@ test("recovery replacement cannot create a child", async () => {
   setup.database.$client.close();
 });
 
+test("restart-aborted credential candidates return server restarting", async () => {
+  const restart = new SessionRestartAbort();
+  const credential = createTestProviderCredential("rejecting-candidate");
+  const poolSetup = agentActionsSetup("none", false);
+  const pool = new ModelCredentialPool(
+    {
+      database: poolSetup.database,
+      readCredential: () => Promise.resolve(credential),
+    },
+    new CredentialPoolBalancer(),
+  );
+  vi.spyOn(pool, "candidates").mockImplementation(
+    (_userId, _selection, signal) => {
+      restart.abort(new DOMException("restart", "AbortError"));
+      return Promise.reject(
+        signal.reason instanceof Error ? signal.reason : new Error("restart"),
+      );
+    },
+  );
+  const setup = agentActionsSetup("none", false, {
+    modelCredentialPool: pool,
+    restartSignal: () => restart.signal,
+  });
+  const spawnArguments = spawnInput(setup, "blocked candidates");
+  spawnArguments.credentialId = balancedCredentialId(setup.parent.provider);
+  const output = await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    spawnArguments,
+    AbortSignal.timeout(10_000),
+  );
+  const decoded = parseToolOutput(output);
+  expect(decoded).toHaveProperty("error", "server_restarting");
+  expect(spawnedSession(setup)).toBeUndefined();
+  setup.database.$client.close();
+  poolSetup.database.$client.close();
+});
+
+test("caller-aborted metadata rejection retains the caller reason", async () => {
+  const caller = new AbortController();
+  const callerReason = new Error("caller cancellation");
+  const setup = agentActionsSetup("none", false, {
+    discoverSessionMetadata: (
+      _input,
+      _credential,
+      _userId,
+      _balanced,
+      signal,
+    ) => {
+      caller.abort(callerReason);
+      return Promise.reject(
+        signal?.reason instanceof Error ? signal.reason : callerReason,
+      );
+    },
+  });
+  const output = await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    spawnInput(setup, "caller canceled"),
+    caller.signal,
+  );
+  expect(output).toMatchObject({ state: "failed" });
+  expect(output.output.endsWith(callerReason.message)).toBe(true);
+  expect(spawnedSession(setup)).toBeUndefined();
+  setup.database.$client.close();
+});
+
 import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
 import { restartReplacementDiscovery } from "./session-restart-gate-fixtures.ts";
 
