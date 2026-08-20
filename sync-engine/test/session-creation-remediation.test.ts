@@ -7,6 +7,7 @@ import {
   type SessionCreationDependencies,
 } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
+import { SessionRestartAbort } from "../../sync-engine/session-restart-abort.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
 
@@ -174,4 +175,26 @@ test("classifies an unrepresentable post-commit result as uncertain without laun
   expect(setup.store.create).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
   expect(setup.dependencies.onCreated).not.toHaveBeenCalled();
+});
+
+test("classifies discovery with the captured restart signal after recovery", async () => {
+  const restart = new SessionRestartAbort();
+  const setup = setupCreation({ launch: () => restart.signal.aborted });
+  setup.dependencies.restartSignal = () => restart.signal;
+  setup.dependencies.discoverModels = () => {
+    const cancellation = new Error("discovery aborted by restart");
+    restart.abort(cancellation);
+    restart.restore();
+    return Promise.reject(cancellation);
+  };
+
+  const response = await createWithSetup(setup);
+
+  expect({
+    status: response.status,
+    writes: vi.mocked(setup.store.create).mock.calls,
+  }).toEqual({
+    status: 503,
+    writes: [],
+  });
 });

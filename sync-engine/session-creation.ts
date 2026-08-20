@@ -14,10 +14,7 @@ import {
   sessionMetadataFromDependencies,
   type SessionMetadataResult,
 } from "./session-provider-selection.ts";
-import {
-  restartSignalIsAborted,
-  serverRestartingResponse,
-} from "./session-restart-gate.ts";
+import { serverRestartingResponse } from "./session-restart-gate.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -228,13 +225,14 @@ export function prepareSessionCredential(
   user: AuthenticatedUser,
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
+  restartSignal = dependencies.restartSignal(),
 ): Promise<SessionMetadataResult> {
   return sessionMetadataFromDependencies({
     credential,
     dependencies,
     input,
     ownerId: user.id,
-    signal: dependencies.restartSignal(),
+    signal: restartSignal,
     ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
   });
 }
@@ -245,8 +243,9 @@ export function createPreparedSession(
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
+  restartSignal = dependencies.restartSignal(),
 ): Response {
-  if (restartSignalIsAborted(dependencies.restartSignal)) {
+  if (restartSignal.aborted) {
     return serverRestartingResponse();
   }
   const capError = contextTokenCapValidationError(
@@ -326,7 +325,8 @@ export async function createValidatedSession(
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
 ): Promise<Response> {
-  if (restartSignalIsAborted(dependencies.restartSignal)) {
+  const restartSignal = dependencies.restartSignal();
+  if (restartSignal.aborted) {
     return serverRestartingResponse();
   }
   let metadata: SessionMetadataResult;
@@ -336,14 +336,20 @@ export async function createValidatedSession(
       user,
       input,
       credential,
+      restartSignal,
     );
   } catch (error) {
-    if (restartSignalIsAborted(dependencies.restartSignal)) {
-      return serverRestartingResponse();
-    }
-    throw error;
+    if (restartSignal.reason === undefined) throw error;
+    return serverRestartingResponse();
   }
   return "error" in metadata
     ? sessionMetadataErrorResponse(metadata)
-    : createPreparedSession(dependencies, user, input, credential, metadata);
+    : createPreparedSession(
+        dependencies,
+        user,
+        input,
+        credential,
+        metadata,
+        restartSignal,
+      );
 }

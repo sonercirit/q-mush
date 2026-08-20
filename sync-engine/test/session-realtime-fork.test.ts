@@ -16,7 +16,10 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
-import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
+import {
+  restartCanceledDiscovery,
+  restartReplacementDiscovery,
+} from "./session-restart-gate-fixtures.ts";
 
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -195,4 +198,25 @@ describe("balanced session forks", () => {
       }),
     );
   });
+});
+
+test("recovery replacement cannot fork after discovery", async () => {
+  const replacement = restartReplacementDiscovery(catalog());
+  const storeFork = vi.fn(function blockedFork() {
+    return FORKED_RESULT;
+  });
+  const dependencies = forkDependencies(
+    replacement.discover,
+    undefined,
+    storeFork,
+  );
+  dependencies.restartSignal = replacement.signal;
+
+  try {
+    await fork(dependencies);
+    throw new Error("Fork unexpectedly succeeded");
+  } catch (error) {
+    expect(error).toMatchObject({ code: "server_restarting" });
+  }
+  expect(storeFork).toHaveBeenCalledTimes(0);
 });

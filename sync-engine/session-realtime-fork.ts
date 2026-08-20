@@ -44,7 +44,9 @@ async function selectedForkConfiguration(
   userId: string,
   input: SessionForkInput,
   source: AgentSessionDetail,
+  restartSignal: AbortSignal,
 ) {
+  const capturedRestartSignal = () => restartSignal;
   const selection = sessionForkSelection(input);
   if (selection === undefined) return undefined;
   const balanced = isBalancedCredentialId(
@@ -66,7 +68,7 @@ async function selectedForkConfiguration(
           ? source.openRouterProviderTag
           : null;
       const metadata = await withRestartErrorTranslation(
-        dependencies.restartSignal,
+        capturedRestartSignal,
         async (signal) =>
           discoverRequiredSessionMetadata({
             credential,
@@ -118,14 +120,16 @@ export async function forkSessionForUser(options: {
   readonly source: AgentSessionDetail;
   readonly user: AuthenticatedUser;
 }): Promise<AgentSessionDetail> {
-  throwIfServerRestarting(options.dependencies.restartSignal());
+  const restartSignal = options.dependencies.restartSignal();
+  throwIfServerRestarting(restartSignal);
   const selected = await selectedForkConfiguration(
     options.dependencies,
     options.user.id,
     options.input,
     options.source,
+    restartSignal,
   );
-  throwIfServerRestarting(options.dependencies.restartSignal());
+  throwIfServerRestarting(restartSignal);
   const result = options.dependencies.store.fork(
     options.user.id,
     options.input.sourceSessionId,

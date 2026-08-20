@@ -16,7 +16,6 @@ import {
 } from "./session-provider-selection.ts";
 import { updateStoredSessionProvider } from "./session-provider-update-store.ts";
 import {
-  restartSignalIsAborted,
   throwIfServerRestarting,
   withRestartErrorTranslation,
 } from "./session-restart-gate.ts";
@@ -43,7 +42,9 @@ async function targetMetadata(
   dependencies: SessionProviderUpdateDependencies,
   userId: string,
   input: SessionProviderUpdateInput,
+  restartSignal: AbortSignal,
 ) {
+  const capturedRestartSignal = () => restartSignal;
   let credential;
   try {
     credential = await readSessionCredential(dependencies.providers, userId, {
@@ -52,25 +53,23 @@ async function targetMetadata(
       workspaceId: input.workspaceId,
     });
   } catch {
-    if (restartSignalIsAborted(dependencies.restartSignal)) {
-      throwIfServerRestarting(dependencies.restartSignal());
+    if (restartSignal.aborted) {
+      throwIfServerRestarting(restartSignal);
     }
     throw new RealtimeCommandError("credential_refresh_failed");
   }
   if (credential === undefined) {
     throw new RealtimeCommandError("credential_unavailable");
   }
-  return withRestartErrorTranslation(
-    dependencies.restartSignal,
-    async (signal) =>
-      discoverRequiredSessionMetadata({
-        credential,
-        dependencies,
-        input,
-        ownerId: userId,
-        signal,
-        ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
-      }),
+  return withRestartErrorTranslation(capturedRestartSignal, async (signal) =>
+    discoverRequiredSessionMetadata({
+      credential,
+      dependencies,
+      input,
+      ownerId: userId,
+      signal,
+      ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
+    }),
   );
 }
 
@@ -97,9 +96,15 @@ export async function applySessionProviderUpdate(
     throw new RealtimeCommandError("cache_warning_required");
   }
 
-  throwIfServerRestarting(dependencies.restartSignal());
-  const metadata = await targetMetadata(dependencies, userId, input);
-  throwIfServerRestarting(dependencies.restartSignal());
+  const restartSignal = dependencies.restartSignal();
+  throwIfServerRestarting(restartSignal);
+  const metadata = await targetMetadata(
+    dependencies,
+    userId,
+    input,
+    restartSignal,
+  );
+  throwIfServerRestarting(restartSignal);
   const result = updateStoredSessionProvider(
     dependencies.store.database,
     dependencies.store.read,

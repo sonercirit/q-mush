@@ -40,7 +40,8 @@ export async function createSessionWithCredentialPool(
 ): SessionRealtimeActionResult {
   const { dependencies, input, user, workspaceId } = options;
   const scopedInput = { ...input, workspaceId };
-  const restarting = (): boolean => dependencies.restartSignal().aborted;
+  const restartSignal = dependencies.restartSignal();
+  const restarting = (): boolean => restartSignal.aborted;
   if (restarting()) {
     throw new RealtimeCommandError("server_restarting");
   }
@@ -68,6 +69,7 @@ export async function createSessionWithCredentialPool(
             user,
             resolvedInput,
             credential,
+            restartSignal,
           );
           if ("error" in metadata) {
             await requireJsonResponse(sessionMetadataErrorResponse(metadata));
@@ -85,6 +87,7 @@ export async function createSessionWithCredentialPool(
             resolvedInput,
             credential,
             metadata,
+            restartSignal,
           );
           await requireJsonResponse(response);
           if (created.detail === undefined) {

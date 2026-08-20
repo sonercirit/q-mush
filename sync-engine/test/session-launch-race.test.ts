@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
   RestartHandoffOperation,
 } from "../../shared/session-model.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
 import { startManualSessionCompaction } from "../../sync-engine/session-compaction-actions.ts";
 import { createValidatedSession } from "../../sync-engine/session-creation.ts";
@@ -21,17 +18,19 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 import {
+  agentActionsSetup,
   closeSessionTestDatabase,
   expectedRestartHandoff,
   expectJsonResponse,
   expectStoredSession,
+  parseToolOutput,
   type SessionStoreTestSetup,
+  spawnedSession,
+  spawnInput,
   transitionTestSession,
   unsupportedFixtureStatus,
 } from "./session-launch-race-helpers.ts";
-import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
 import {
   createStore,
   createTestSession,
@@ -54,14 +53,6 @@ interface FailedLaunchRaceSetup extends FailedLaunchTestSetup {
   readonly runtimes: SessionRuntimes;
 }
 
-interface AgentActionsTestSetup extends SessionStoreTestSetup {
-  readonly actions: ReturnType<SessionAgentActions["actions"]>;
-  readonly launch: LaunchRaceRun;
-  readonly parent: AgentSessionDetail;
-  readonly runtimes: SessionRuntimes;
-  readonly target: AgentSessionDetail | undefined;
-}
-
 interface LaunchRaceExpectation {
   readonly error: "server_restarting" | "session_launch_failed";
   readonly label: string;
@@ -72,7 +63,10 @@ interface LaunchRaceExpectation {
 interface ExistingLaunchPath {
   readonly initialStatus: "failed" | "idle";
   readonly label:
-    "send" | "continue" | "manual compaction" | "manual compact and continue";
+    | "ordinary send"
+    | "ordinary continue"
+    | "manual compaction"
+    | "manual compact and continue";
   readonly operation: RestartHandoffOperation;
   readonly run: (setup: FailedLaunchRaceSetup) => Promise<Response>;
 }
@@ -325,88 +319,6 @@ function launchBoundary(setup: FailedLaunchRaceSetup) {
   };
 }
 
-export function agentActionsSetup(
-  race: LaunchRace,
-  includeTarget: boolean,
-  overrides: Partial<ConstructorParameters<typeof SessionAgentActions>[0]> = {},
-): AgentActionsTestSetup {
-  const setup = createStore();
-  const now = testClock();
-  const parent = createTestSession(setup.store);
-  expect(
-    setup.store.transitionRuntime(
-      parent.id,
-      "running",
-      now(),
-      parent.generation,
-    ),
-  ).toBe(true);
-  const target = includeTarget ? createTestSession(setup.store) : undefined;
-  if (target !== undefined) {
-    failCreatedSession(setup, target, now);
-  }
-  const credential = createTestProviderCredential(parent.credentialId);
-  const launch = launchRace(setup, race, now);
-  const actions = new SessionAgentActions({
-    abortSession: () => undefined,
-    activeSession: () => false,
-    broker: new RunnerCommandBroker(),
-    browseDirectories: () =>
-      Promise.resolve({ status: "directory_unavailable" }),
-    cleanupSession: () => undefined,
-    database: setup.database,
-    discoverModels: testModelCatalog,
-    discoverSessionMetadata: () =>
-      Promise.resolve().then(() => EMPTY_SESSION_REQUEST_MODEL_METADATA),
-    launchSession: (_credential, detail) => launch.fail(detail),
-    listOnlineRunners: () => [],
-    ...sessionAgentActionRuntimeDefaults(),
-    now,
-    pendingRestart: (runnerId) => launch.runtimes.pendingRestart(runnerId),
-    readCredential: () => Promise.resolve(credential),
-    store: setup.store,
-    withCredential: credentialAction(credential),
-    ...overrides,
-  }).actions(parent.id, TEST_USER_ID, parent.generation, DEFAULT_TOOL_SETTINGS);
-  return {
-    ...setup,
-    actions,
-    launch,
-    parent,
-    runtimes: launch.runtimes,
-    target,
-  };
-}
-
-export function spawnInput(
-  setup: Pick<AgentActionsTestSetup, "parent">,
-  prompt: string,
-) {
-  return {
-    credentialId: setup.parent.credentialId,
-    executionEnvironment: setup.parent.executionEnvironment,
-    model: setup.parent.model,
-    prompt,
-    provider: setup.parent.provider,
-    runnerId: setup.parent.runnerId,
-    tools: AGENT_SESSION_TOOL_NAMES,
-    workingDirectory: setup.parent.workingDirectory,
-  };
-}
-
-export function spawnedSession(setup: AgentActionsTestSetup) {
-  return setup.store
-    .list(TEST_USER_ID)
-    .find(({ id }) => id !== setup.parent.id);
-}
-
-export function parseToolOutput(
-  result: Awaited<ReturnType<typeof executeSessionAgentTool>>,
-): unknown {
-  const value: unknown = JSON.parse(result.output);
-  return value;
-}
-
 function queueLaunchCase(
   setup: FailedLaunchRaceSetup,
   prompt?: { readonly images: readonly []; readonly prompt: string },
@@ -453,14 +365,14 @@ function manualCompactionLaunchPath(
 const EXISTING_LAUNCH_PATHS: readonly ExistingLaunchPath[] = [
   {
     initialStatus: "failed",
-    label: "send",
+    label: "ordinary send",
     operation: "agent",
     run: (setup) =>
       queueLaunchCase(setup, { images: [], prompt: "Queued follow-up" }),
   },
   {
     initialStatus: "failed",
-    label: "continue",
+    label: "ordinary continue",
     operation: "agent",
     run: (setup) => queueLaunchCase(setup),
   },
@@ -521,7 +433,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
     const output = await executeSessionAgentTool(
       setup.actions,
       "spawn_session",
-      spawnInput(setup, "Delegate"),
+      spawnInput(setup, "Delegate through the production spawn path"),
       new AbortController().signal,
     );
 
@@ -543,7 +455,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
     if (expected.race === "none") {
       expect(child.messages).toEqual([
         expect.objectContaining({
-          content: "Delegate",
+          content: "Delegate through the production spawn path",
           role: "user",
         }),
       ]);

@@ -17,3 +17,15 @@ export function restartCanceledDiscovery(): RestartCanceledDiscovery {
     },
   };
 }
+
+export function restartReplacementDiscovery<Value>(value: Value) {
+  let controller = new AbortController();
+  return {
+    discover: () => {
+      controller.abort(new Error("restart"));
+      controller = new AbortController();
+      return Promise.resolve(value);
+    },
+    signal: () => controller.signal,
+  };
+}

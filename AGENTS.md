@@ -50,17 +50,17 @@ Project memory.
   restarts only from it. `runner-executable.ts` fingerprints runner
   source/compiler, builds privately, caches, serves `/runner/executable`.
   Restarts drain active steps and queue work, so sessions may request their own;
-  `DevelopmentRestartLifecycle` bounds a dev one with one supervisor-issued
-  absolute 120s deadline (fresh per restart, shared in flight), rejecting new
-  steps and provider/auxiliary requests, reporting scoped active-tool counts,
-  force-parking stragglers after durable handoffs, then bounding cleanup,
-  repeats escalating and timers naming a test purpose. A rejected drain keeps
-  serving, restoring maintenance, shutdown state, recovery, the abort signal
-  (`SessionRestartAbort`: aborted controllers stay aborted) and the gate,
-  clearing each session's abandoned server request (still-gating runner ones
-  stay), then rerunning handoff recovery and the queued launcher unless a final
-  shutdown won and only logs; failed chains release. Final shutdown cancels it,
-  promotes runner handoffs to a server marker, then runs unbounded, fencing live
+  `DevelopmentRestartLifecycle` bounds a dev one with one supervisor 120s
+  deadline (fresh per restart, shared in flight), rejecting new steps and
+  provider/auxiliary requests, reporting active-tool counts, parking stragglers
+  after durable handoffs, then bounding cleanup, repeats escalating and
+  purpose-named timers. A rejected drain keeps serving, restoring maintenance,
+  shutdown state, recovery, the abort signal (`SessionRestartAbort`: requests
+  capture one signal identity across awaits; aborted controllers stay aborted)
+  and the gate, clearing each session's abandoned server request (still-gating
+  runner ones stay), then rerunning handoff recovery and the queued launcher
+  unless shutdown won and only logs; chains release. Final shutdown cancels it,
+  promotes runner handoffs to a server marker, runs unbounded, fencing live
   markers from liveness scans. Text handlers precompress once, negotiating zstd,
   Brotli, gzip, deflate; `/favicon.svg` revalidates by ETag.
 - `pages.tsx` renders both server page shells via Solid's SSR runtime,

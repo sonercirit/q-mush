@@ -16,7 +16,10 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
-import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
+import {
+  restartCanceledDiscovery,
+  restartReplacementDiscovery,
+} from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 function createProviderUpdateSession(
@@ -309,19 +312,31 @@ describe("session provider update", () => {
     }
   };
 
+  async function expectRestartBlockedWithoutMutation(
+    setupValue: ReturnType<typeof setup>,
+  ): Promise<void> {
+    await expect(applyUpdate(setupValue)).rejects.toMatchObject({
+      code: "server_restarting",
+    });
+    expect(sessionRow(setupValue)).toMatchObject({ generation: 0 });
+  }
+
   test("returns server_restarting without mutating when discovery is canceled", async () => {
     const setupValue = setup();
     const canceled = restartCanceledDiscovery();
     setupValue.dependencies.restartSignal = () => canceled.controller.signal;
     setupValue.dependencies.discoverOpenRouterProviders = canceled.discover;
 
-    await expect(applyUpdate(setupValue)).rejects.toMatchObject({
-      code: "server_restarting",
-    });
-    expect(sessionRow(setupValue)).toMatchObject({
-      generation: 0,
-      provider: "openai",
-    });
+    await expectRestartBlockedWithoutMutation(setupValue);
+  });
+
+  test("recovery replacement cannot mutate after discovery", async () => {
+    const setupValue = setup();
+    const replacement = restartReplacementDiscovery({ providers: [] });
+    setupValue.dependencies.restartSignal = replacement.signal;
+    setupValue.dependencies.discoverOpenRouterProviders = replacement.discover;
+
+    await expectRestartBlockedWithoutMutation(setupValue);
   });
 
   test("requires confirmation before changing the provider", async () => {

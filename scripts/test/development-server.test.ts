@@ -248,6 +248,7 @@ setInterval(() => undefined, 1_000);
         await waitForStartCount(startsPath, 2);
         const elapsed = performance.now() - startedAt;
         expect(elapsed).toBeGreaterThan(300);
+        // 500ms is less than two independent 300ms drain budgets.
         expect(elapsed).toBeLessThan(500);
         expect(await Bun.file(overlapPath).exists()).toBe(false);
       } finally {
