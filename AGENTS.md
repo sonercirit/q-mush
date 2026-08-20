@@ -58,8 +58,7 @@
   shutdown won and it only logs. Failed chains release. Final shutdown cancels
   that deadline, promotes runner handoffs to a server marker, then stays
   unbounded, fencing live markers from liveness scans. Text handlers precompress
-  once, negotiating zstd, Brotli, gzip and deflate; `/favicon.svg` revalidates
-  by ETag.
+  once, negotiating zstd, Brotli, gzip and deflate; `/favicon.svg` uses ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
