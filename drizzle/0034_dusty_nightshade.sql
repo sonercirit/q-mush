@@ -16,7 +16,6 @@ CREATE TABLE `tool_settings` (
 CREATE INDEX `tool_settings_user_deletion_index` ON `tool_settings` (`user_id`,`is_deleted`);--> statement-breakpoint
 CREATE UNIQUE INDEX `tool_settings_user_active_unique` ON `tool_settings` (`user_id`) WHERE NOT "tool_settings"."is_deleted";--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
--- Turn tool-setting defaults mirror DEFAULT_TOOL_SETTINGS in shared/tool-limits.ts.
 CREATE TABLE `__new_agent_session_turns` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,

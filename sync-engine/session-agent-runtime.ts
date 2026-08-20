@@ -21,7 +21,6 @@ import type {
   AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
 import {
-  DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitSeconds,
   type ToolSettings,
 } from "../shared/tool-limits.ts";
@@ -86,7 +85,7 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
   readonly store: SessionStore;
-  readonly toolSettings?: ToolSettings;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }
 
@@ -202,7 +201,7 @@ async function loadModels(
     readonly toolStream?: ToolStreamPublisher;
   } = {},
 ): Promise<SessionAgentModels> {
-  const settings = runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS;
+  const settings = runtime.toolSettings;
   return withLoadingDeadline(
     runtime.signal,
     settings,
@@ -309,11 +308,7 @@ function boundRuntimeToolOutput(
   result: RunnerCommandResult,
   toolName?: string,
 ): RunnerCommandResult {
-  return boundSessionToolOutput(
-    result,
-    runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
-    toolName,
-  );
+  return boundSessionToolOutput(result, runtime.toolSettings, toolName);
 }
 
 async function executeAgentTool(
@@ -348,7 +343,7 @@ async function executeAgentTool(
       dispatch: dispatchTool,
       executeSkill: skills.executeResult,
       outerSignal: toolSignal,
-      settings: runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+      settings: runtime.toolSettings,
       runtime,
       stepTools,
     });
@@ -369,7 +364,7 @@ async function executeAgentTool(
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
-  const settings = runtime.toolSettings ?? DEFAULT_TOOL_SETTINGS;
+  const settings = runtime.toolSettings;
   const streamId = createUuidV7();
   const initialMessages = sessionRuntimeConversation(runtime);
   const messages =

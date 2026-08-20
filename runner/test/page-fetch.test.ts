@@ -171,7 +171,7 @@ describe("page_fetch", () => {
       status: 200,
       text: CAPTURE.text,
       title: CAPTURE.title,
-      truncated: { links: false, metadata: false, output: false, text: false },
+      truncated: { links: false, metadata: false, text: false },
     });
   });
 

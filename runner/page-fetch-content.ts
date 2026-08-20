@@ -3,7 +3,6 @@ import { isRecord } from "../shared/auth-model.ts";
 export const MAXIMUM_RESPONSE_BYTES = 16 * 1_024 * 1_024;
 const MAXIMUM_LINKS = 200;
 const MAXIMUM_METADATA_FIELDS = 100;
-const MAXIMUM_CAPTURE_TEXT_BYTES = MAXIMUM_RESPONSE_BYTES;
 
 export const PAGE_CAPTURE_EXPRESSION = String.raw`(() => {
   const byteLength = (value) => new TextEncoder().encode(value).byteLength;
@@ -67,7 +66,7 @@ export const PAGE_CAPTURE_EXPRESSION = String.raw`(() => {
     .replace(/\n[\t ]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  const text = bounded(rawText, ${String(MAXIMUM_CAPTURE_TEXT_BYTES)});
+  const text = bounded(rawText, ${String(MAXIMUM_RESPONSE_BYTES)});
   return {
     links,
     metadata,
@@ -154,7 +153,7 @@ export function readCapture(value: unknown): PageCapture {
   if (
     !isRecord(capture) ||
     typeof capture["text"] !== "string" ||
-    Buffer.byteLength(capture["text"]) > MAXIMUM_CAPTURE_TEXT_BYTES ||
+    Buffer.byteLength(capture["text"]) > MAXIMUM_RESPONSE_BYTES ||
     typeof capture["title"] !== "string" ||
     Buffer.byteLength(capture["title"]) > 2_048 ||
     !isRecord(capture["metadata"]) ||
@@ -199,7 +198,6 @@ function outputRecord(response: PageResponse, capture: PageCapture) {
     truncated: {
       links: capture.truncated.links,
       metadata: capture.truncated.metadata,
-      output: false,
       text: capture.truncated.text,
     },
   };

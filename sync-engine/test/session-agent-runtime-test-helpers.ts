@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentRuntimeDependencies } from "../session-agent-runtime.ts";
 
 function completeTestBrokerCommand(
@@ -77,6 +78,7 @@ export const IDLE_RUNTIME_SIGNALS: Pick<
   | "notify"
   | "realtime"
   | "restartHandoffRequested"
+  | "toolSettings"
 > = {
   continuous: false,
   hasPendingSteeringInput: () => false,
@@ -84,4 +86,5 @@ export const IDLE_RUNTIME_SIGNALS: Pick<
   notify: () => undefined,
   realtime: undefined,
   restartHandoffRequested: () => false,
+  toolSettings: DEFAULT_TOOL_SETTINGS,
 };
