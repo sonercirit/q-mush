@@ -39,7 +39,7 @@ import {
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
 
-function runningSetup() {
+export function runningSetup() {
   const { database, generateId, store } = createStore();
   const detail = createTestSession(store);
   const running = store.transitionCurrent(
@@ -51,14 +51,14 @@ function runningSetup() {
   return { database, detail, generateId, store };
 }
 
-function closeSetup(
+export function closeSetup(
   setup: Pick<ReturnType<typeof createStore>, "database">,
 ): void {
   const database = setup.database.$client;
   database.close();
 }
 
-function watchdogSetup(
+export function watchdogSetup(
   setup: Pick<ReturnType<typeof createStore>, "database" | "store">,
   options: {
     readonly actions?: ConstructorParameters<
@@ -121,7 +121,7 @@ function scanPastGrace(
   watchdog.scan();
 }
 
-function launchRuntime(
+export function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
   generation: number,
@@ -446,46 +446,18 @@ test("fails a queued runner command even when its runner recently connected", as
   closeSetup(setup);
 });
 
-function markedShutdownSession(
-  setup: ReturnType<typeof runningSetup>,
-  watchdog: ReturnType<typeof watchdogSetup>,
-  restartId: string,
-): void {
+test("recovers a durable shutdown marker instead of failing its session", () => {
+  const setup = runningSetup();
+  const watchdog = watchdogSetup(setup, { graceMs: 1_000 });
   expect(
     watchdog.shutdownInterrupted.mark(
       setup.detail.id,
       setup.detail.generation,
-      restartId,
+      "bounded-shutdown",
       "agent",
       TEST_NOW + 2,
     ),
   ).toBe(true);
-}
-
-test("a live drain marker is not recovered by production liveness scans", () => {
-  const setup = runningSetup();
-  const runtimeSet = new SessionRuntimes();
-  const watchdog = watchdogSetup(setup, { runtimes: runtimeSet });
-  const runtime = launchRuntime(setup, runtimeSet, setup.detail.generation);
-  watchdog.shutdownInterrupted.beginLiveDrain();
-  markedShutdownSession(setup, watchdog, "live-drain");
-
-  for (let scan = 0; scan < 2; scan += 1) watchdog.scan();
-
-  const duringDrain = setup.store.get(TEST_USER_ID, setup.detail.id);
-  expect(duringDrain).toMatchObject({
-    generation: setup.detail.generation,
-    restartHandoff: null,
-    status: "running",
-  });
-  runtime.resolve(undefined);
-  closeSetup(setup);
-});
-
-test("recovers a durable shutdown marker instead of failing its session", () => {
-  const setup = runningSetup();
-  const watchdog = watchdogSetup(setup, { graceMs: 1_000 });
-  markedShutdownSession(setup, watchdog, "bounded-shutdown");
   watchdog.scan();
 
   const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);

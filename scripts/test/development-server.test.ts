@@ -172,7 +172,7 @@ await new Promise(() => {});
 
 test("development restart uses IPC and a repeated trigger escalates before SIGTERM", async () => {
   await useDevelopmentServer(
-    "q-mush-dev-protocol-test-",
+    "dev-protocol-",
     async (directory, triggerPath) => {
       const childPath = join(directory, "restart-child.ts");
       const eventsPath = join(directory, "restart-events.txt");
@@ -185,15 +185,8 @@ const record = (event) => appendFileSync(eventsPath, event + "\\n");
 record("started");
 process.on("message", (message) => {
   if (typeof message === "object" && message?.type === "q-mush:development-restart-request" && typeof message.deadlineAt === "number") record("development-request");
-  if (message === "q-mush:development-restart-escalate") {
-    record("development-escalate");
-    process.send?.("q-mush:development-restart-ready");
-  }
-  if (message === "q-mush:final-shutdown-request") {
-    record("final-request");
-    process.send?.("q-mush:final-shutdown-prepared");
-    process.exit();
-  }
+  if (message === "q-mush:development-restart-escalate") { record("development-escalate"); process.send?.("q-mush:development-restart-ready"); }
+  if (message === "q-mush:final-shutdown-request") { record("final-request"); process.send?.("q-mush:final-shutdown-prepared"); process.exit(); }
 });
 process.on("SIGTERM", () => { record("sigterm"); process.exit(); });
 setInterval(() => {}, 1_000);
@@ -228,17 +221,15 @@ setInterval(() => {}, 1_000);
 });
 
 test("development restart bounds the whole pre-kill lifecycle to one deadline", async () => {
-  await useDevelopmentServer(
-    "q-mush-dev-bound-test-",
-    async (directory, triggerPath) => {
-      const childPath = join(directory, "bound-child.ts");
-      const startsPath = join(directory, "bound-starts.txt");
-      const overlapPath = join(directory, "bound-overlap.txt");
-      await Bun.write(
-        childPath,
-        `import { appendFileSync, existsSync, readFileSync } from "node:fs";
+  await useDevelopmentServer("dev-bound-", async (directory, triggerPath) => {
+    const childPath = join(directory, "bound-child.ts");
+    const startsPath = join(directory, "bound-starts.txt");
+    const overlapPath = join(directory, "bound-overlap.txt");
+    await Bun.write(
+      childPath,
+      `import { appendFileSync, existsSync, readFileSync } from "node:fs";
 const [startsPath, overlapPath] = process.argv.slice(2);
-if (startsPath === undefined || overlapPath === undefined) throw new Error("Missing path");
+if (!startsPath || !overlapPath) throw new Error("Missing path");
 if (existsSync(startsPath)) {
   const prior = Number(readFileSync(startsPath, "utf8").trim().split("\\n").at(-1));
   try {
@@ -250,30 +241,28 @@ appendFileSync(startsPath, "started\\n" + String(process.pid) + "\\n");
 process.on("SIGTERM", () => undefined);
 setInterval(() => undefined, 1_000);
 `,
-      );
-      const server = startDevelopmentServer({
-        command: [process.execPath, childPath, startsPath, overlapPath],
-        cwd: directory,
-        restartDelayMilliseconds: 10,
-        restartTriggerPath: triggerPath,
-        shutdownForceMilliseconds: 300,
-        shutdownPreparationMilliseconds: 300,
-      });
-      try {
-        await waitForStartCount(startsPath, 1);
-        const startedAt = performance.now();
-        await triggerDevelopmentRestart(triggerPath);
-        await waitForStartCount(startsPath, 2);
-        const elapsed = performance.now() - startedAt;
-        expect(elapsed).toBeGreaterThan(300);
-        // 500ms is less than two independent 300ms drain budgets.
-        expect(elapsed).toBeLessThan(500);
-        expect(await Bun.file(overlapPath).exists()).toBe(false);
-      } finally {
-        await server.stop();
-      }
-    },
-  );
+    );
+    const server = startDevelopmentServer({
+      command: [process.execPath, childPath, startsPath, overlapPath],
+      cwd: directory,
+      restartDelayMilliseconds: 10,
+      restartTriggerPath: triggerPath,
+      shutdownForceMilliseconds: 300,
+      shutdownPreparationMilliseconds: 300,
+    });
+    try {
+      await waitForStartCount(startsPath, 1);
+      const startedAt = performance.now();
+      await triggerDevelopmentRestart(triggerPath);
+      await waitForStartCount(startsPath, 2);
+      const elapsed = performance.now() - startedAt;
+      expect(elapsed).toBeGreaterThan(300);
+      expect(elapsed).toBeLessThan(500);
+      expect(await Bun.file(overlapPath).exists()).toBe(false);
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 test("bounds shutdown and force-closes active server resources", async () => {
@@ -403,50 +392,47 @@ const RECOVERY_FIXTURE_PATH = join(
 );
 
 test("the production engine exits after a drained development restart", async () => {
-  await useDevelopmentServer(
-    "q-mush-dev-index-restart-test-",
-    async (directory, triggerPath) => {
-      const databasePath = join(directory, "index.sqlite");
-      const startsPath = join(directory, "index-starts.txt");
-      const wrapperPath = join(directory, "index-wrapper.ts");
-      await Bun.write(
-        wrapperPath,
-        `import { appendFileSync } from "node:fs";
+  await useDevelopmentServer("dev-index-", async (directory, triggerPath) => {
+    const databasePath = join(directory, "index.sqlite");
+    const startsPath = join(directory, "index-starts.txt");
+    const wrapperPath = join(directory, "index-wrapper.ts");
+    await Bun.write(
+      wrapperPath,
+      `import { appendFileSync } from "node:fs";
 const [indexPath, startsPath, databasePath] = process.argv.slice(2);
 if (indexPath === undefined || startsPath === undefined || databasePath === undefined) {
-  throw new Error("Missing production index fixture argument");
+  throw new Error("Missing fixture argument");
 }
 Bun.env.DATABASE_PATH = databasePath;
 Bun.env.PORT = "0";
 await import(indexPath);
 appendFileSync(startsPath, "started\\n");
 `,
-      );
-      const server = startDevelopmentServer({
-        command: [
-          process.execPath,
-          wrapperPath,
-          INDEX_PATH,
-          startsPath,
-          databasePath,
-        ],
-        cwd: PROJECT_ROOT,
-        restartDelayMilliseconds: 10,
-        restartTriggerPath: triggerPath,
-        shutdownPreparationMilliseconds: 1_000,
-      });
+    );
+    const server = startDevelopmentServer({
+      command: [
+        process.execPath,
+        wrapperPath,
+        INDEX_PATH,
+        startsPath,
+        databasePath,
+      ],
+      cwd: PROJECT_ROOT,
+      restartDelayMilliseconds: 10,
+      restartTriggerPath: triggerPath,
+      shutdownPreparationMilliseconds: 1_000,
+    });
 
-      try {
-        await waitForStartCount(startsPath, 1, 60_000);
-        await triggerDevelopmentRestart(triggerPath);
-        await waitForStartCount(startsPath, 2, 60_000);
-        await server.stop();
-      } catch (error) {
-        await server.forceStop();
-        throw error;
-      }
-    },
-  );
+    try {
+      await waitForStartCount(startsPath, 1, 60_000);
+      await triggerDevelopmentRestart(triggerPath);
+      await waitForStartCount(startsPath, 2, 60_000);
+      await server.stop();
+    } catch (error) {
+      await server.forceStop();
+      throw error;
+    }
+  });
 }, 90_000);
 
 async function runRecoveryFixture(
