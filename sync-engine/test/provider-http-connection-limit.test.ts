@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
@@ -42,7 +43,10 @@ describe("provider HTTP connection-limit classification", () => {
         return Promise.resolve();
       },
     };
-    const model = new ChatCompletionsAgentModel(modelOptions);
+    const model = new ChatCompletionsAgentModel({
+      ...modelOptions,
+      toolSettings: DEFAULT_TOOL_SETTINGS,
+    });
     const failure = await captureRejection(model.complete(USER_MESSAGE));
 
     expect(fetchCount).toBe(1);

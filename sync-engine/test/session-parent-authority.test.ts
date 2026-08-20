@@ -128,6 +128,7 @@ function authoritySetup(options: {
   const store = new SessionStore(
     database,
     () => ids.shift() ?? "unexpected-parent-authority-id",
+    () => DEFAULT_TOOL_SETTINGS,
   );
   const parent = createStoredSession(store, SESSION_ID, RUNNER_ID);
   transition(store, parent, "running", TEST_NOW + 1);

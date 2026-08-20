@@ -90,6 +90,7 @@ if (mode === "start" || mode === "start-no-ack") {
   const store = new SessionStore(
     database,
     (timestamp) => generatedIds.shift() ?? createUuidV7(timestamp),
+    () => DEFAULT_TOOL_SETTINGS,
   );
   // Split from the create literal to break a jscpd clone against the
   // session-store hardening helpers; keep the shape if editing.

@@ -35,7 +35,11 @@ function terminalMessage(): AgentRecordedMessage {
 }
 
 function recreate(setup: ReturnType<typeof runningCompactionStore>) {
-  return new SessionStore(setup.database, () => "terminal-recovery-message");
+  return new SessionStore(
+    setup.database,
+    () => "terminal-recovery-message",
+    () => DEFAULT_TOOL_SETTINGS,
+  );
 }
 
 function recreateCommitted(

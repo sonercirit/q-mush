@@ -14,9 +14,7 @@ import {
   chatCompletionsDone,
 } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
-
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
-
 const DONE_CODEX_OUTPUT = {
   content: [{ text: "Done.", type: "output_text" }],
   type: "message",
@@ -29,22 +27,18 @@ const IMAGE_MESSAGE = {
 function apiKeyCredential(secret: string) {
   return { accountId: null, secret, source: "api_key" as const };
 }
-
 const OPENROUTER_IMAGE_OPTIONS = {
   credential: apiKeyCredential("sk-or-secret"),
   maxOutputTokens: null,
   model: "openai/gpt-4.1-mini",
   provider: "openrouter" as const,
 };
-
 class RequestCapture {
   request?: Request;
 }
-
 async function capturedBody(capture: RequestCapture): Promise<unknown> {
   return capture.request?.json();
 }
-
 function captureRequest(
   capture: RequestCapture,
   response: () => Response,
@@ -54,7 +48,6 @@ function captureRequest(
     return Promise.resolve(response());
   };
 }
-
 function capturedToolNames(body: unknown): readonly unknown[] {
   return isRecord(body) && Array.isArray(body["tools"])
     ? body["tools"].map((tool) =>
@@ -64,7 +57,6 @@ function capturedToolNames(body: unknown): readonly unknown[] {
       )
     : [];
 }
-
 function parallelToolUseSchema(
   body: unknown,
 ): Readonly<Record<string, unknown>> {
@@ -92,28 +84,24 @@ function parallelToolUseSchema(
   const toolUses = parameters["properties"]["tool_uses"];
   return isRecord(toolUses) ? toolUses : {};
 }
-
 function expectUnboundedParallelSchema(body: unknown): void {
   const schema = parallelToolUseSchema(body);
   expect(schema).toMatchObject({ minItems: 2, type: "array" });
   expect(schema).not.toHaveProperty("maxItems");
   expect(() => JSON.stringify(body)).not.toThrow();
 }
-
 function capturedModel(
   capture: RequestCapture,
   options: Omit<ModelOptions, "fetch">,
 ): ChatCompletionsAgentModel {
   return respondingModel(options, chatCompletionsDone(), capture);
 }
-
 function openRouterModelWithTools(
   capture: RequestCapture,
   tools: readonly (typeof AGENT_SESSION_TOOL_NAMES)[number][],
 ): ChatCompletionsAgentModel {
   return capturedModel(capture, { ...OPENROUTER_IMAGE_OPTIONS, tools });
 }
-
 function genericModel(
   capture: RequestCapture,
   options: {
@@ -137,7 +125,6 @@ function genericModel(
     tools: [],
   });
 }
-
 async function completeGenericModel(
   options: Parameters<typeof genericModel>[1],
 ): Promise<{ readonly body: unknown; readonly capture: RequestCapture }> {
@@ -145,7 +132,6 @@ async function completeGenericModel(
   await completeHello(genericModel(capture, options));
   return { body: await capturedBody(capture), capture };
 }
-
 function respondingModel(
   options: Omit<ModelOptions, "fetch">,
   responseBody: unknown,
@@ -157,7 +143,6 @@ function respondingModel(
     fetch: captureRequest(capture, () => createJsonResponse(responseBody)),
   });
 }
-
 function codexModel(
   options: Omit<ModelOptions, "credential" | "maxOutputTokens" | "provider">,
 ): ChatCompletionsAgentModel {
@@ -173,7 +158,6 @@ function codexModel(
     provider: "openai",
   });
 }
-
 function capturedCodexModel(
   capture: RequestCapture,
   response: Response,
@@ -181,7 +165,6 @@ function capturedCodexModel(
 ): ChatCompletionsAgentModel {
   return codexModel({ fetch: captureRequest(capture, () => response), model });
 }
-
 function codexEventResponse(
   output: readonly unknown[],
   prefix = "",
@@ -195,13 +178,11 @@ function codexEventResponse(
     `${prefix}data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
   );
 }
-
 function completeHello(
   model: ChatCompletionsAgentModel,
 ): Promise<AgentModelStep> {
   return model.complete([{ content: "Hello", role: "user" }]);
 }
-
 describe("chat completions agent model", () => {
   test("sends the native tool protocol to OpenRouter and reads tool calls", async () => {
     const capture = new RequestCapture();
@@ -240,11 +221,9 @@ describe("chat completions agent model", () => {
       },
       capture,
     );
-
     const step = await model.complete([
       { content: "Inspect the source", role: "user" },
     ]);
-
     expect(step).toEqual({
       content: "Inspecting.",
       contextTokens: 12_345,
@@ -278,7 +257,6 @@ describe("chat completions agent model", () => {
     expect(serializedBody).not.toContain("read_file");
     expect(serializedBody).not.toContain("list_files");
   });
-
   test("uses a generic OpenAI-compatible chat-completions endpoint", async () => {
     const { body, capture } = await completeGenericModel({
       baseUrl: "https://models.example.test/openai/v1",
@@ -286,7 +264,6 @@ describe("chat completions agent model", () => {
       reasoningEffort: "high",
       secret: "generic-secret",
     });
-
     expect(capture.request?.url).toBe(
       "https://models.example.test/openai/v1/chat/completions",
     );
@@ -306,17 +283,14 @@ describe("chat completions agent model", () => {
       stream: true,
     });
   });
-
   test("omits authorization for a keyless generic endpoint", async () => {
     const completed = await completeGenericModel({
       baseUrl: "http://localhost:11434/v1",
       model: "qwen3",
       secret: "",
     });
-
     expect(completed.capture.request?.headers.has("authorization")).toBe(false);
   });
-
   async function expectOpenRouterProvider(
     capture: RequestCapture,
     model: ReturnType<typeof capturedModel>,
@@ -325,7 +299,6 @@ describe("chat completions agent model", () => {
     await completeHello(model);
     expect(await capturedBody(capture)).toMatchObject({ provider });
   }
-
   function routedModel(
     capture: RequestCapture,
     openRouterProviderRouting: NonNullable<
@@ -337,7 +310,6 @@ describe("chat completions agent model", () => {
       openRouterProviderRouting,
     });
   }
-
   test("maps all OpenRouter routing selections to provider preferences", async () => {
     const selections = [
       [{ sort: "price", type: "sort" }, { sort: "price" }],
@@ -350,61 +322,47 @@ describe("chat completions agent model", () => {
         { order: ["google-vertex/us"] },
       ],
     ] as const;
-
     for (const [openRouterProviderRouting, provider] of selections) {
       const capture = new RequestCapture();
       const model = routedModel(capture, openRouterProviderRouting);
-
       await expectOpenRouterProvider(capture, model, provider);
     }
   });
-
   test("uses only the ordered selected OpenRouter serving provider", async () => {
     const capture = new RequestCapture();
     const model = routedModel(capture, {
       tag: "google-vertex/us",
       type: "provider",
     });
-
     await expectOpenRouterProvider(capture, model, {
       allow_fallbacks: false,
       order: ["google-vertex/us"],
     });
   });
-
   test("sends the unbounded schema through OpenAI Responses", async () => {
     const capture = new RequestCapture();
     const output = [DONE_CODEX_OUTPUT];
     const model = capturedCodexModel(capture, codexEventResponse(output));
-
     await completeHello(model);
-
     expectUnboundedParallelSchema(await capturedBody(capture));
   });
-
   test("filters definitions to the selected tools and skills", async () => {
     const capture = new RequestCapture();
     const selectedTools = ["read", "brave_search"] as const;
     const model = openRouterModelWithTools(capture, selectedTools);
-
     await completeHello(model);
-
     expect(capturedToolNames(await capturedBody(capture))).toEqual(
       selectedTools,
     );
   });
-
   test("omits the tool protocol when none are selected", async () => {
     const capture = new RequestCapture();
     const model = openRouterModelWithTools(capture, []);
-
     await completeHello(model);
-
     const body = await capturedBody(capture);
     expect(body).not.toMatchObject({ tool_choice: "auto" });
     expect(capturedToolNames(body)).toEqual([]);
   });
-
   test("sends image inputs through chat completions", async () => {
     const capture = new RequestCapture();
     const model = respondingModel(
@@ -412,11 +370,9 @@ describe("chat completions agent model", () => {
       { choices: [{ message: { content: "I see the image." } }] },
       capture,
     );
-
     await model.complete([
       { ...IMAGE_MESSAGE, content: "What is in this screenshot?" },
     ]);
-
     expect(await capturedBody(capture)).toMatchObject({
       messages: [
         { role: "system" },
@@ -435,16 +391,13 @@ describe("chat completions agent model", () => {
       ],
     });
   });
-
   test("sends image inputs through the Responses protocol", async () => {
     const capture = new RequestCapture();
     const model = capturedCodexModel(
       capture,
       codexEventResponse([DONE_CODEX_OUTPUT]),
     );
-
     await model.complete([IMAGE_MESSAGE]);
-
     expect(await capturedBody(capture)).toMatchObject({
       input: [
         {
@@ -461,7 +414,6 @@ describe("chat completions agent model", () => {
       ],
     });
   });
-
   test("uses the OpenAI chat-completions reasoning parameter", async () => {
     const capture = new RequestCapture();
     const model = respondingModel(
@@ -475,15 +427,12 @@ describe("chat completions agent model", () => {
       chatCompletionsDone(),
       capture,
     );
-
     await model.complete([{ content: "Fix the bug", role: "user" }]);
-
     expect(await capturedBody(capture)).toMatchObject({
       model: "gpt-5-codex",
       reasoning_effort: "low",
     });
   });
-
   test("uses the Codex Responses protocol for an OpenAI OAuth credential", async () => {
     const capture = new RequestCapture();
     const response = codexEventResponse(
@@ -507,7 +456,6 @@ describe("chat completions agent model", () => {
       model: "gpt-5-codex",
       reasoningEffort: "medium",
     });
-
     const conversation = [
       { content: "Hello", role: "user" as const },
       {
@@ -559,7 +507,6 @@ describe("chat completions agent model", () => {
     expect(JSON.stringify(body)).toContain("function_call_output");
     expect(JSON.stringify(body)).toContain("previous-call");
   });
-
   test("uses streamed Codex output when the completed response omits it", async () => {
     const model = codexModel({
       fetch: () =>
@@ -582,7 +529,6 @@ describe("chat completions agent model", () => {
       model: "codex-test-model",
       reasoningEffort: "max",
     });
-
     expect(await completeHello(model)).toEqual({
       content: "Hello there.",
       contextTokens: null,
@@ -598,7 +544,6 @@ describe("chat completions agent model", () => {
       ],
     });
   });
-
   test("accepts Codex event streams without a local response-size limit", async () => {
     const padding = `:${"x".repeat(10 * 1_024 * 1_024)}\n\n`;
     const model = codexModel({
@@ -606,13 +551,12 @@ describe("chat completions agent model", () => {
         Promise.resolve(codexEventResponse([DONE_CODEX_OUTPUT], padding)),
       model: "gpt-5-codex",
     });
-
     expectDoneStep(await completeHello(model));
   });
-
   test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({
       credential: apiKeyCredential("secret"),
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       maxOutputTokens: null,
       fetch: () =>
         Promise.resolve(
@@ -633,7 +577,6 @@ describe("chat completions agent model", () => {
     const error = await captureRejection(
       model.complete([{ content: "Hello", role: "user" }]),
     );
-
     expect(requireError(error).message).toBe(
       "OpenAI request failed with status 400: The selected model does not support tools.",
     );
