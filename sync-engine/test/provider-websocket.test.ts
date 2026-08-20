@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
+import { ProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
   acknowledgeProviderSocket,
@@ -227,27 +228,54 @@ test.each([
 );
 
 test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
-  const request = beginLifecycleRequest([]);
-  const { model, pending: first, socket } = request;
-  const oversizedId = "r".repeat(16 * 1024 * 1024 + 1);
-  acknowledgeProviderSocket(socket, oversizedId);
-  completeResponse(socket, oversizedId);
+  const sockets = new FakeProviderSockets();
+  const session = new ProviderWebSocketSession(2);
+  const completeSession = () =>
+    session.complete({
+      body: {},
+      createSocket: sockets.create,
+      headers: {},
+      url: "wss://provider.test/responses",
+    });
+  const first = completeSession();
+  const socket = requireProviderSocket(sockets, 0);
+  socket.open();
+  acknowledgeProviderSocket(socket, "big");
+  completeResponse(socket, "big");
   expectDoneStep(await first);
   expect(socket.readyState).toBe(WebSocket.CLOSED);
 
-  const second = complete(model);
-  const replacement = requireProviderSocket(request.sockets, 1);
+  const second = completeSession();
+  const replacement = requireProviderSocket(sockets, 1);
   replacement.open();
-  socket.receive(responseEvent("response.created", oversizedId));
+  socket.receive(responseEvent("response.created", "big"));
   socket.receive({
     delta: "Late stale output",
-    response_id: oversizedId,
+    response_id: "big",
     type: "response.output_text.delta",
   });
   await expectRequestPending(second);
-  acknowledgeProviderSocket(replacement, oversizedId);
-  completeResponse(replacement, oversizedId);
+  acknowledgeProviderSocket(replacement, "big");
+  completeResponse(replacement, "big");
   expectDoneStep(await second);
+  replacement.close();
+});
+
+test("retires a socket after an unidentified response", async () => {
+  const request = beginLifecycleRequest([]);
+  request.socket.receive({ response: {}, type: "response.created" });
+  request.socket.receive(COMPLETED_EVENT);
+  expectDoneStep(await request.pending);
+  expect(request.socket.readyState).toBe(WebSocket.CLOSED);
+  expectProviderSocketReleased(request.socket);
+
+  const next = complete(request.model);
+  expect(request.sockets.created).toHaveLength(2);
+  const replacement = requireProviderSocket(request.sockets, 1);
+  replacement.open();
+  acknowledgeProviderSocket(replacement, "identified");
+  completeResponse(replacement, "identified");
+  expectDoneStep(await next);
   replacement.close();
 });
 

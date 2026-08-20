@@ -89,6 +89,7 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
+  readonly #maxRetainedResponseIdBytes: number;
   // A provider controls response-ID length and request completion rate, so the
   // documented 60-minute socket lifetime cannot by itself bound this fence.
   // Retain at most the explicit memory budget above, then retire rather than
@@ -98,6 +99,10 @@ export class ProviderWebSocketSession {
   #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;
+
+  constructor(maxRetainedResponseIdBytes = MAX_RETAINED_RESPONSE_ID_BYTES) {
+    this.#maxRetainedResponseIdBytes = maxRetainedResponseIdBytes;
+  }
 
   close(): void {
     const socket = this.#socket;
@@ -175,14 +180,22 @@ export class ProviderWebSocketSession {
               priorResponseIds.add(currentResponseId);
               retainedBytes += textEncoder.encode(currentResponseId).byteLength;
             }
-            if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
+            if (
+              currentResponseId !== undefined &&
+              retainedBytes <= this.#maxRetainedResponseIdBytes
+            ) {
               this.#priorResponseIds = priorResponseIds;
               this.#priorResponseIdBytes = retainedBytes;
               this.#socket = socket;
             } else {
               this.#priorResponseIds.clear();
               this.#priorResponseIdBytes = 0;
-              socket.close(1000, "Response ID retention limit reached");
+              socket.close(
+                1000,
+                currentResponseId === undefined
+                  ? "Unidentified response complete"
+                  : "Response ID retention limit reached",
+              );
             }
           } else {
             socket.close(1000, "Connection superseded");

@@ -275,18 +275,17 @@
   them. Frozen clocks may collapse admission transitions; production cannot.
   Live OpenAI/Codex sockets emitted `response.created` with an ID; the first
   identified non-terminal `response.*` also admits servers omitting it.
-  WebSocket Mode expires after 60 minutes; both observed limit error spellings
-  replace the socket once per step, then bounded retries replay the step.
-  WebSocket send enters bounded admission until `response.created`; HTTP header
-  waits stay unbounded. Discard unknown, pre-creation, and mismatched-ID frames.
-  Since 60 minutes cannot bound provider-controlled ID size/rate, use a 16 MiB
-  ID memory budget, then retire (never evict) the fence. This borrows
-  `Bun.serve` WebSocket's documented default `maxPayloadLength` as a
-  transport-scale bound, not a client limit; observed IDs are ~53 bytes. After
-  ID-less admission skips retained IDs until a new ID. Concurrency closes
-  superseded sockets. Fenced watchdog failures abort. Other provider errors
-  retry before persistence; exhausted sockets use HTTP. Permanent errors/aborts
-  do not retry; terminal failures persist.
+  WebSocket Mode expires after 60 minutes; either observed limit error replaces
+  the socket once per step, then bounded retries replay it. WebSocket sends have
+  bounded admission until `response.created`; HTTP header waits do not. Discard
+  unknown, pre-creation, and mismatched-ID frames. Since provider-controlled ID
+  size/rate is unbounded, use a 16 MiB fence budget, then retire (never evict).
+  The 16 MiB is `Bun.serve`'s transport-scale default, not a client limit; IDs
+  are ~53 bytes. ID-less admission skips retained IDs until a new ID;
+  concurrency closes superseded sockets. Fenced watchdog failures abort.
+  Requests unacknowledged through the five-minute liveness grace fail without
+  retry but remain resumable via `continue`. Other provider errors retry before
+  persistence; exhausted sockets use HTTP. Permanent errors/aborts do not retry.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;
