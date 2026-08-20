@@ -1,3 +1,4 @@
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -31,7 +32,7 @@ function storeWithRunner() {
     takeValue(credentialIds, "The hardening test ran out of IDs");
   return {
     database,
-    store: new SessionStore(database, generateId),
+    store: new SessionStore(database, generateId, () => DEFAULT_TOOL_SETTINGS),
   };
 }
 
