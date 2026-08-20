@@ -274,15 +274,17 @@ is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
   `response.created`. WebSocket Mode expires after 60 minutes; either observed
   limit error replaces the socket once per step, then bounded retries replay it.
   WebSocket sends have bounded admission until `response.created`; HTTP header
-  waits do not. Discard unknown, pre-creation, and mismatched-ID frames; an
-  uncorrelated pre-admission error on a reused socket retires it and retries
-  fresh. Since provider-controlled ID size/rate is unbounded, use a 16 MiB fence
-  budget, then retire (never evict). IDs are ~53 bytes. ID-less admission skips
-  retained IDs until a new ID and completion retires the socket; concurrency
-  closes superseded sockets. Fenced watchdog failures abort. Requests
-  unacknowledged through the five-minute liveness grace fail without retry but
-  remain resumable via `continue`. Other provider errors retry before
-  persistence; exhausted sockets use HTTP. Permanent errors/aborts do not retry.
+  waits do not. Discard unknown, pre-creation, mismatched-ID, and retained-ID
+  frames/errors. On a reused socket, an uncorrelated pre-admission error retries
+  fresh unless permanent, which surfaces; an unidentified post-admission error
+  also retires the socket and retries fresh. Since provider-controlled ID
+  size/rate is unbounded, use a 16 MiB fence budget, then retire (never evict).
+  IDs are ~53 bytes. ID-less admission skips retained IDs until a new ID and
+  completion retires the socket; concurrency closes superseded sockets. Fenced
+  watchdog failures abort. Requests unacknowledged through the five-minute
+  liveness grace fail without retry but remain resumable via `continue`. Other
+  provider errors retry before persistence; exhausted sockets use HTTP.
+  Permanent errors/aborts do not retry.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

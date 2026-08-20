@@ -180,27 +180,21 @@ export class ProviderWebSocketSession {
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
           if (requestGeneration === this.#socketGeneration) {
-            if (
-              currentResponseId !== undefined &&
-              !priorResponseIds.has(currentResponseId)
-            ) {
-              priorResponseIds.add(currentResponseId);
-              retainedBytes += textEncoder.encode(currentResponseId).byteLength;
-            }
-            if (
-              currentResponseId !== undefined &&
-              retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES
-            ) {
-              this.#priorResponseIds = priorResponseIds;
-              this.#priorResponseIdBytes = retainedBytes;
-              this.#socket = socket;
+            if (currentResponseId === undefined) {
+              socket.close(1000, "Unidentified response complete");
             } else {
-              socket.close(
-                1000,
-                currentResponseId === undefined
-                  ? "Unidentified response complete"
-                  : "Response ID retention limit reached",
-              );
+              if (!priorResponseIds.has(currentResponseId)) {
+                priorResponseIds.add(currentResponseId);
+                retainedBytes +=
+                  textEncoder.encode(currentResponseId).byteLength;
+              }
+              if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
+                this.#priorResponseIds = priorResponseIds;
+                this.#priorResponseIdBytes = retainedBytes;
+                this.#socket = socket;
+              } else {
+                socket.close(1000, "Response ID retention limit reached");
+              }
             }
           } else {
             socket.close(1000, "Connection superseded");
