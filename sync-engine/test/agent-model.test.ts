@@ -270,8 +270,6 @@ describe("chat completions agent model", () => {
     expect(capture.request?.headers.get("authorization")).toBe(
       "Bearer generic-secret",
     );
-    // Generic OpenAI-format endpoints get plain messages: local runtimes
-    // such as Ollama reject array content carrying cache markers.
     expect(isRecord(body) ? body["messages"] : undefined).toEqual([
       { content: AGENT_SYSTEM_PROMPT, role: "system" },
       { content: "Hello", role: "user" },

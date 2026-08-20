@@ -155,6 +155,7 @@ function genericSession(response: Response): {
     realtime: undefined,
     streamId: "initial-step",
     toolStream,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     userId: "user-1",
   });
 
