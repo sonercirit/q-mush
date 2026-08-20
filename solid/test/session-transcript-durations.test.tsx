@@ -299,34 +299,49 @@ test("uses each persisted turn's configured sleep limit", () => {
   ).toContain('"durationSeconds": 7200');
 });
 
-test("uses the latest configured limit for live sleep streams", () => {
-  const liveMessage = {
+const renderLatestConfiguredSleep = (
+  messageId: string,
+  liveStreams: readonly ReturnType<typeof testToolStream>[],
+): string => {
+  const streamedMessage = {
     ...assistantToolCall({
       arguments: '{"durationSeconds":7200}',
       id: "message-sleep",
       name: "sleep",
     }),
-    id: "stream:live-assistant",
+    id: messageId,
   };
-  const html = renderMessages(
-    [liveMessage],
+  return renderMessages(
+    [streamedMessage],
     AGENT_SESSION_TOOL_NAMES,
     DEFAULT_SESSION_TRANSCRIPT_FILTERS,
     null,
     undefined,
     [
       {
-        boundaryMessageId: liveMessage.id,
+        boundaryMessageId: streamedMessage.id,
         endedAt: null,
         executionGeneration: 2,
-        id: "live-turn",
+        id: "latest-turn",
         startedAt: 1,
         toolSettings: { ...DEFAULT_TOOL_SETTINGS, executionLimitMinutes: 120 },
       },
     ],
-    [testToolStream("message-sleep", '{"durationSeconds":7200}', "sleep")],
+    liveStreams,
     "running",
   );
+};
+
+test("uses the latest configured limit for streamed sleep messages without a live stream", () => {
+  const html = renderLatestConfiguredSleep("stream:assistant", []);
+
+  expect(html).toContain("Duration: 2h");
+});
+
+test("uses the latest configured limit for inline live sleep streams", () => {
+  const html = renderLatestConfiguredSleep("stream:live-assistant", [
+    testToolStream("message-sleep", '{"durationSeconds":7200}', "sleep"),
+  ]);
 
   expect(html).toContain("Duration: 2h");
 });
