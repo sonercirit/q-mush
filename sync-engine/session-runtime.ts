@@ -3,7 +3,6 @@ import type {
   SessionRuntimePending,
   SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
-import type { ProviderRequestState } from "./agent-model-options.ts";
 import type {
   RestartRequestPersistence,
   SessionRestartRequester,
@@ -87,12 +86,6 @@ function trackRestartPersistence(
   };
   void pending.promise.then(settled, settled);
   return pending.promise;
-}
-
-export function sessionPendingComponentFromProviderState(
-  state: ProviderRequestState,
-): SessionRuntimePendingComponent {
-  return state === "admission" ? "provider_admission" : "provider_request";
 }
 
 function scopeIncludes(scope: RestartScope, runnerId: string): boolean {

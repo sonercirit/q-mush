@@ -12,6 +12,7 @@ import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { createSessionForUser } from "../../sync-engine/session-user-actions.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
+import { createStore } from "./session-store-test-fixtures.ts";
 
 const TEST_USER = {
   email: "mushroom@example.com",
@@ -136,11 +137,11 @@ test("HTTP creation retains restart identity across credential lookup", async ()
       discoverModels: setup.dependencies.discoverModels,
       discoverOpenRouterProviders:
         setup.dependencies.discoverOpenRouterProviders,
-      launchBoundary: () =>
-        ({
-          ...setup.dependencies,
-          runtimes: new SessionRuntimes(),
-        }) as never,
+      launchBoundary: () => ({
+        ...setup.dependencies,
+        runtimes: new SessionRuntimes(),
+        store: createStore().store,
+      }),
       restartSignal: () => restart.signal,
       runnerIsAvailable: () => true,
       withCredential: async (_userId, _selection, action) => {

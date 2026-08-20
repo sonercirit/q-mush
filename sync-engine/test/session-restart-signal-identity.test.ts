@@ -78,6 +78,7 @@ test("model discovery classifies its captured restart signal after recovery", as
   await expectModelDiscoveryFailure({
     credentialId: "restart-credential",
     discoverModels: async () => {
+      await Promise.resolve();
       recoverFromRestart(restart, new DOMException("restart", "AbortError"));
       throw new Error("restart cancellation");
     },
@@ -204,6 +205,7 @@ test("attachment fallback validation retains restart identity across credential 
   const integration = createAttachmentFallbackIntegration({
     database,
     discoverModels: async (_provider, _credential, signal) => {
+      await Promise.resolve();
       expect(signal).toBe(restart.signal);
       if (signal?.aborted !== true) throw new Error("signal was not aborted");
       throw new Error("restart cancellation");

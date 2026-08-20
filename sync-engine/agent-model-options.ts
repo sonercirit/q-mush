@@ -32,7 +32,7 @@ export function usesAnthropicFormat(
   return provider === "generic" && credential.apiFormat === "anthropic";
 }
 
-export type ProviderRequestState = "active" | "admission";
+type ProviderRequestState = "active" | "admission";
 
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
