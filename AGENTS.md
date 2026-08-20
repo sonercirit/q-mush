@@ -14,17 +14,16 @@ Project memory.
 - Preserve patterns and improve touched code.
 - TDD: fail first, implement, refactor green. Keep authoritative logic simple;
   avoid premature abstraction.
-- Never invent tunables: probe omission, prefer provider defaults, else use
-  metadata or docs.
+- Research provider docs via Brave Search; probe APIs. For tunables, probe
+  omission, prefer provider defaults, then metadata/docs.
+- Fix defects on sight, even pre-existing; if harmful, codify why in a test.
 - Integrate completely the first time: wire every session capability to each
   protocol's native control, recording what a protocol lacks.
 - Never weaken checks or claim unperformed verification; disclose gaps.
-- Record new decisions, gotchas, and lessons here in the same change, unprompted
-  — a repeated user instruction means a rule is missing; condense elsewhere to
-  fit the size cap. When evidence overturns a recorded finding, fix the code it
-  justified and every stale record in that change; act, don't ask.
-- Keep workflows local-first: narrow checks, then broad suites, then rerun
-  failures.
+- Record decisions and lessons here unprompted; repeated guidance means a rule
+  is missing. Condense to fit. If evidence overturns a finding, fix its code and
+  all stale records in that change; act, don't ask.
+- Keep workflows local-first: narrow checks, then broad, then failures.
 - Never commit secrets, generated artifacts, or env files.
 
 ## Setup, Commands

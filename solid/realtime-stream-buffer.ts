@@ -46,6 +46,7 @@ export interface RealtimeStreamBarrier {
   readonly sessionId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
+// Share the user tool-stream cap for both queued fragments and distinct keys.
 const MAXIMUM_PENDING_STREAM_ITEMS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
@@ -305,6 +306,13 @@ export class RealtimeStreamBuffer {
     while (!this.#hasCapacity(bytes, fragments, additionalKey)) {
       const oldest = this.#oldestEvictable(protectedKey);
       if (oldest === undefined) return false;
+      const oldestSessionId = this.#order.get(oldest);
+      const oldestUpdate =
+        oldestSessionId === undefined
+          ? undefined
+          : this.#pendingSession(oldestSessionId)?.get(oldest);
+      if (oldestUpdate !== undefined) this.#compactPending(oldestUpdate);
+      if (this.#hasCapacity(bytes, fragments, additionalKey)) return true;
       this.#evictPending(oldest);
     }
     return true;
