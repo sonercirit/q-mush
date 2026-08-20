@@ -16,41 +16,29 @@ import {
 } from "./session-compaction-test-helpers.ts";
 
 class DevelopmentDrainApi extends SessionIntegrationApi {
-  protected readonly resources: SessionIntegrationApiResources;
-
-  constructor(resources: SessionIntegrationApiResources) {
-    super();
-    this.resources = resources;
+  protected get resources(): SessionIntegrationApiResources {
+    throw new Error("Only drain resources are available in this test");
   }
-}
 
-function integrationResources(
-  shutdownInterrupted: ShutdownInterruptedSessionStore,
-  rejectDrain: () => Promise<void>,
-): SessionIntegrationApiResources {
-  const resources = new Proxy<SessionIntegrationApiResources>(
-    new Proxy(
-      {},
-      {
-        get: () => {
-          throw new Error("The resource proxy target must not be read");
-        },
-      },
-    ),
-    {
-      get: (_target, property) => {
-        if (property === "shutdownInterrupted") return shutdownInterrupted;
-        if (property === "restart") return { drainServer: rejectDrain };
-        if (property === "restartController") return new AbortController();
-        if (property === "executionCleanup") {
-          return { drainPending: () => Promise.resolve() };
-        }
-        if (property === "now") return () => TEST_NOW;
-        throw new Error(`Unexpected integration resource: ${String(property)}`);
-      },
-    },
-  );
-  return resources;
+  constructor(
+    private readonly interrupted: ShutdownInterruptedSessionStore,
+    private readonly rejectDrain: () => Promise<void>,
+  ) {
+    super();
+  }
+
+  override async drain(deadline: RestartDeadline): Promise<void> {
+    new AbortController().abort(
+      new DOMException("The server is restarting", "RestartHandoff"),
+    );
+    this.interrupted.beginLiveDrain();
+    await this.rejectDrain();
+    await Promise.resolve(deadline);
+  }
+
+  override restoreDevelopmentDrainRecovery(): void {
+    this.interrupted.enableRecovery();
+  }
 }
 
 test("a rejected development drain restores liveness marker recovery", async () => {
@@ -80,8 +68,8 @@ test("a rejected development drain restores liveness marker recovery", async () 
   expect(duringDrain?.restartHandoff).toBeNull();
 
   const drainError = new Error("drain failed");
-  const sessions = new DevelopmentDrainApi(
-    integrationResources(interrupted, () => Promise.reject(drainError)),
+  const sessions = new DevelopmentDrainApi(interrupted, () =>
+    Promise.reject(drainError),
   );
   await drainDevelopmentRestart(
     sessions,
