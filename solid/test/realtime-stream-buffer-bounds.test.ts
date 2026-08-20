@@ -144,6 +144,22 @@ test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
   stream.stop();
 });
 
+test("retains an epoch while an overlapping barrier remains", () => {
+  const buffer = new RealtimeStreamBuffer();
+  const barriers = Array.from({ length: 2 }, () =>
+    buffer.markBarrier(SESSION_ID),
+  );
+
+  const [first, second] = barriers;
+  if (first === undefined || second === undefined)
+    throw new Error("Missing barriers");
+  buffer.releaseBarrier(first);
+
+  const next = buffer.markBarrier(SESSION_ID);
+  expect(next.epoch).toBe(2);
+  for (const barrier of [second, next]) buffer.releaseBarrier(barrier);
+});
+
 test("reclaims an epoch only after its barriers and updates are gone", () => {
   const buffer = new RealtimeStreamBuffer();
   const first = buffer.markBarrier(SESSION_ID);

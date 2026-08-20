@@ -324,6 +324,7 @@ export class RealtimeConnection {
     this.#stateEventGeneration += 1;
     this.#stateEventFrame = undefined;
     this.#stateEvents.clear();
+    // Callers must immediately clear the stream buffer to discard these barriers.
     this.#stateBarriers.clear();
     for (const resolve of this.#stateWaiters.splice(0)) {
       resolve(false);

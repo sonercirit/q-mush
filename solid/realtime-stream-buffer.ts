@@ -46,10 +46,7 @@ export interface RealtimeStreamBarrier {
   readonly sessionId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
-// Deliberately share the per-user stream cap so queued fragments and keys have
-// the same bounded cardinality.
-const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
-const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
+const MAXIMUM_PENDING_STREAM_ITEMS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
 ): RealtimeStreamBatch | undefined {
@@ -153,6 +150,7 @@ export class RealtimeStreamBuffer {
     this.#deleteUnusedEpoch(barrier.sessionId);
   }
   #deleteUnusedEpoch(sessionId: string): void {
+    // An epoch may be reused only when no barrier or queued update can observe it.
     if (!this.#barrierCounts.has(sessionId) && !this.#pending.has(sessionId)) {
       this.#epochs.delete(sessionId);
     }
@@ -283,8 +281,8 @@ export class RealtimeStreamBuffer {
   ): boolean {
     return (
       bytes <= MAXIMUM_PENDING_STREAM_BYTES - this.#bytes &&
-      fragments <= MAXIMUM_PENDING_STREAM_FRAGMENTS - this.#fragments &&
-      (!additionalKey || this.#order.size < MAXIMUM_PENDING_STREAM_KEYS)
+      fragments <= MAXIMUM_PENDING_STREAM_ITEMS - this.#fragments &&
+      (!additionalKey || this.#order.size < MAXIMUM_PENDING_STREAM_ITEMS)
     );
   }
   #makeRoom(

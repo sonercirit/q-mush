@@ -37,6 +37,12 @@ import { toolStreamKey } from "./tool-stream-client.ts";
 // separately rendered stale detail during navigation.
 const MAXIMUM_STREAMED_SESSIONS_PER_USER = 100;
 
+function orderedToolStreams(
+  streams: readonly ToolStreamEntry[],
+): readonly ToolStreamEntry[] {
+  return [...streams].sort((left, right) => left.index - right.index);
+}
+
 function replaceToolStream(
   streams: readonly ToolStreamEntry[],
   update: RealtimeToolStreamUpdate,
@@ -45,9 +51,7 @@ function replaceToolStream(
   const retained = streams.filter((entry) => toolStreamKey(entry) !== key);
   return update.terminal
     ? retained
-    : [...retained, update.entry].sort(
-        (left, right) => left.index - right.index,
-      );
+    : orderedToolStreams([...retained, update.entry]);
 }
 
 function toolStreamsMatch(
@@ -382,7 +386,7 @@ export class SessionRealtimeState {
     const retained = this.#view.value.toolStreams.filter(
       (entry) => entry.streamId !== event.streamId,
     );
-    const toolStreams = [...retained, ...streams];
+    const toolStreams = orderedToolStreams([...retained, ...streams]);
     if (toolStreamsMatch(this.#view.value.toolStreams, toolStreams)) return;
     this.#view.patch({ toolStreams });
   }
