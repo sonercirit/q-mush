@@ -46,7 +46,10 @@ export interface RealtimeStreamBarrier {
   readonly sessionId: string;
 }
 const MAXIMUM_PENDING_STREAM_BYTES = USER_REALTIME_MAX_PAYLOAD_LENGTH - 1;
-const MAXIMUM_PENDING_STREAM_ITEMS = MAXIMUM_TOOL_STREAMS_PER_USER;
+// Keep both queue dimensions at the protocol's per-user stream ceiling while
+// naming them independently: one bounds buffered identities, the other chunks.
+const MAXIMUM_PENDING_STREAM_KEYS = MAXIMUM_TOOL_STREAMS_PER_USER;
+const MAXIMUM_PENDING_STREAM_FRAGMENTS = MAXIMUM_TOOL_STREAMS_PER_USER;
 function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
 ): RealtimeStreamBatch | undefined {
@@ -268,6 +271,7 @@ export class RealtimeStreamBuffer {
     if (sessionId === undefined) return;
     const update = this.#removePending(sessionId, key);
     if (update?.kind === "tool") {
+      this.#requestToolResync(update.value.entry);
       this.#commitToolState(
         materializeToolUpdate(update.value),
         update.value.terminal,
@@ -281,8 +285,8 @@ export class RealtimeStreamBuffer {
   ): boolean {
     return (
       bytes <= MAXIMUM_PENDING_STREAM_BYTES - this.#bytes &&
-      fragments <= MAXIMUM_PENDING_STREAM_ITEMS - this.#fragments &&
-      (!additionalKey || this.#order.size < MAXIMUM_PENDING_STREAM_ITEMS)
+      fragments <= MAXIMUM_PENDING_STREAM_FRAGMENTS - this.#fragments &&
+      (!additionalKey || this.#order.size < MAXIMUM_PENDING_STREAM_KEYS)
     );
   }
   #makeRoom(

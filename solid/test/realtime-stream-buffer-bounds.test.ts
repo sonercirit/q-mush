@@ -98,11 +98,22 @@ test("compacts a protected model stream at the fragment cap", () => {
   expect(modelContents(buffer)).toContain(parts.join(""));
 });
 
+function queueRunningToolOutput(
+  buffer: RealtimeStreamBuffer,
+  content: string,
+): void {
+  for (const event of [
+    orderedToolDelta(0, { state: "preparing" }),
+    orderedToolDelta(1, { state: "running" }),
+    orderedToolDelta(2, { content }),
+  ]) {
+    buffer.queue(event);
+  }
+}
+
 test("preserves a protected tool stream when compacting it at the fragment cap", () => {
   const buffer = new RealtimeStreamBuffer();
-  buffer.queue(orderedToolDelta(0, { state: "preparing" }));
-  buffer.queue(orderedToolDelta(1, { state: "running" }));
-  buffer.queue(orderedToolDelta(2, { content: "tool-first" }));
+  queueRunningToolOutput(buffer, "tool-first");
   buffer.queue(orderedToolDelta(3, { content: "-tool-middle" }));
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "tool-filler");
   buffer.queue(orderedToolDelta(4, { content: "-tool-second" }));
@@ -231,23 +242,59 @@ test("bounds terminal tombstones and permits evicted tool-key reuse", () => {
   stream.stop();
 });
 
+test("requests resync when pending tool output is evicted", () => {
+  const buffer = new RealtimeStreamBuffer();
+  queueRunningToolOutput(buffer, "evicted-output");
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER, "tool-eviction");
+
+  expect(buffer.takeToolResyncRequests()).toContainEqual({
+    sessionId: SESSION_ID,
+    streamId: STREAM_ID,
+  });
+});
+
+function queueEvictableEpoch(
+  buffer: RealtimeStreamBuffer,
+  fillerPrefix: string,
+): void {
+  const initialBarrier = buffer.markBarrier(SESSION_ID);
+  buffer.queue(identifiedModelDelta(SESSION_ID, "evicted-stream", "old"));
+  buffer.releaseBarrier(initialBarrier);
+  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 1, fillerPrefix);
+}
+
+function takePendingBarrierUpdates(
+  buffer: RealtimeStreamBuffer,
+): RealtimeStreamBatch["updates"] | undefined {
+  const barrier = buffer.markBarrier(SESSION_ID);
+  expect(buffer.barrierPending(barrier)).toBe(true);
+  return buffer.takeBarrier(barrier)?.updates;
+}
+
 test("keeps an epoch monotonic when eviction replaces its last update", () => {
   const buffer = new RealtimeStreamBuffer();
-  const initialBarrier = buffer.markBarrier(SESSION_ID);
-  const evicted = identifiedModelDelta(SESSION_ID, "evicted-stream", "old");
-  buffer.queue(evicted);
-  buffer.releaseBarrier(initialBarrier);
-  queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 1, "epoch-filler");
+  queueEvictableEpoch(buffer, "epoch-filler");
 
   buffer.queue(
     identifiedModelDelta(SESSION_ID, "replacement", "earlier-on-wire"),
   );
-  const barrier = buffer.markBarrier(SESSION_ID);
 
-  expect(buffer.barrierPending(barrier)).toBe(true);
-  expect(buffer.takeBarrier(barrier)?.updates).toContainEqual(
+  expect(takePendingBarrierUpdates(buffer)).toContainEqual(
     expect.objectContaining({ content: "earlier-on-wire" }),
   );
+});
+
+test("refreshes a tool update epoch after making room reclaims it", () => {
+  const buffer = new RealtimeStreamBuffer();
+  queueEvictableEpoch(buffer, "tool-epoch-filler");
+
+  buffer.queue(activeToolDelta("replacement-tool"));
+
+  const updates = takePendingBarrierUpdates(buffer);
+  expect(updates?.[0]).toMatchObject({ type: "tool_update" });
+  const update = updates?.[0];
+  if (update?.type !== "tool_update") throw new Error("Missing tool update");
+  expect(update.entry.streamId).toBe("replacement-tool");
 });
 
 test("retains an epoch while an overlapping barrier remains", () => {
