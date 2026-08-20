@@ -192,10 +192,8 @@ describe("provider HTTP step recovery", () => {
       "active",
     ]);
 
-    // Model the session liveness scan after its grace: only admission is
-    // bounded, while an active HTTP header wait remains provider-owned.
-    if (states.at(-1) === "admission") controller.abort();
-    await Promise.resolve();
+    // An active HTTP header wait remains provider-owned after WebSocket
+    // admission fallback, so the liveness watchdog does not abort it.
     expect(controller.signal.aborted).toBe(false);
     releaseHeaders?.();
     await expect(completion).resolves.toMatchObject({ content: "Done." });

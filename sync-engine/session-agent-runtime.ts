@@ -23,7 +23,6 @@ import type {
 } from "../shared/session-model.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
-import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills, type AgentSkillExecutor } from "./agent-skills.ts";
 import {
   isAskQuestionsPause,
@@ -60,6 +59,7 @@ import {
   executeForSession,
   isRestartHandoffError,
 } from "./session-runner-execution.ts";
+import { sessionPendingComponentFromProviderState } from "./session-runtime.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -76,7 +76,6 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly hasPendingSteeringInput: () => boolean;
   readonly isCurrent: () => boolean;
   readonly manualCompactionRequested: () => boolean;
-  readonly markPending?: (state: ProviderRequestState) => void;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
   readonly pendingComponent?: (
@@ -89,6 +88,13 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly signal: AbortSignal;
   readonly store: SessionStore;
   readonly userId: string;
+}
+
+function markProviderPending(
+  runtime: SessionAgentRuntimeDependencies,
+  state: Parameters<typeof sessionPendingComponentFromProviderState>[0],
+): void {
+  runtime.pendingComponent?.(sessionPendingComponentFromProviderState(state));
 }
 
 function writeRuntime(
@@ -202,7 +208,7 @@ async function loadModels(
     detail: { ...runtime.detail, ...metadata },
     factory: runtime.modelFactory,
     isCurrent: runtime.isCurrent,
-    onRequestState: runtime.markPending,
+    onRequestState: markProviderPending.bind(undefined, runtime),
     onStepStart: markRuntimeStepStart.bind(undefined, runtime),
     realtime: runtime.realtime,
     ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
@@ -469,8 +475,8 @@ export async function runSessionAgent(
         currentProvider: runtime.detail.provider,
         currentProviderPricing: runtime.detail.providerPricing,
         currentProviderTag: runtime.detail.openRouterProviderTag,
+        onRequestState: markProviderPending.bind(undefined, runtime),
         factory: runtime.modelFactory,
-        onRequestState: runtime.markPending,
         onStepStart: markRuntimeStepStart.bind(undefined, runtime),
         prompt: typeof promptValue === "string" ? promptValue : null,
         resources: runtime,

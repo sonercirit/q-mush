@@ -178,7 +178,6 @@ export class ProviderWebSocketSession {
             if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
               this.#priorResponseIds = priorResponseIds;
               this.#priorResponseIdBytes = retainedBytes;
-              this.#socket?.close(1000, "Connection superseded");
               this.#socket = socket;
             } else {
               this.#priorResponseIds.clear();
