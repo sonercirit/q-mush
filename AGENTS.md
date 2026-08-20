@@ -103,8 +103,8 @@ Project memory.
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
   pickers use canonical schemas. `read_session` spans transcript categories and
-  definitions with positional pagination; `get_session_options` pages spawn
-  choices. Grouped tools manage non-blocking owned children, deliver final
+  definitions with positional record pagination; `get_session_options` pages
+  spawn choices. Grouped tools manage non-blocking owned children, deliver final
   messages, and resume idle parents; `parallel` uses four ordered workers for 2+
   calls and propagates cancellation. `session-transcript.tsx` renders prompts,
   definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
@@ -240,40 +240,40 @@ Project memory.
   `compile.outfile` (`outputs[0]` is bundled JS): build in a temp dir, read it
   before cleanup.
 - Bare-metal tools accept any runner-account-accessible path; relative paths use
-  the workspace. Container tools and attachments stay host-contained. Container
-  shells are disposable per-session root Arch (`archlinux:latest` by default),
-  with network/default capabilities and only the workspace mounted, so pacman
-  works. `read` pages files. Directory browsing escapes the workspace, returns
-  bounded directory-only metadata, times out stalls, maps HTTP cancellation to a
-  browse error, and propagates tool cancellation. Stopping aborts the model
-  request and runner commands, ending an active shell. OpenAI API-key and OAuth
-  requests prefer Responses WebSockets, falling back to HTTP streaming;
-  OpenRouter and generic endpoints stream chat completions, Anthropic-format
-  ones Messages events. OpenAI OAuth refreshes its token bundle before expiry.
-  Sessions need an explicit model ID. Catalogs: OpenAI `/v1/models`, OpenRouter
-  `/api/v1/models/user`, ChatGPT Codex `/models`, or generic `/models`;
-  Anthropic-format catalogs read `display_name`, `max_input_tokens`,
-  `max_tokens`, the `capabilities` tree (`agent-model-discovery-anthropic.ts`:
-  effort and adaptive-thinking support are independent; modalities come only
-  from `image_input`/`pdf_input` leaves), page via `has_more`/`last_id` at
-  `limit=1000` with stale-cursor and page-count guards, probing the endpoint's
-  OpenAI-style listing only where capabilities left efforts unknown. Codex
-  parsing retains streamed output-text and function-call argument deltas since
-  completed events may omit `output`. Only listed efforts are offered; OpenAI's
-  catalog lacks reasoning data. Optional reasoning uses `reasoning_effort` for
-  OpenAI/generic chat completions and `reasoning.effort` for OpenRouter and
-  Codex Responses; Anthropic Messages sends `output_config.effort`; unless
-  persisted `adaptiveThinking` is false it adds
-  `thinking: {type: "adaptive", display: "summarized"}`. Lazy metadata refresh
-  fills null fields independently, never replacing a known capability or output
-  limit while learning the other. It sends neither for `none`, maps `minimal` to
-  `low`. Adaptive-only models (Fable) ignore `enabled`; newer models default
-  `display` to `omitted` — empty thinking text plus a signature while thinking
-  tokens bill. The local proxy tolerates tool-loop replay without signed
-  thinking blocks; strict endpoints might not. Streamed reasoning deltas group
-  by `output_index`/`summary_index`; separate summary parts with paragraphs
-  since completed responses may omit them. OpenAI's WebSocket Mode has a
-  60-minute limit; the canonical `websocket_connection_limit_reached` and
+  the workspace. Container file tools and attachment records run on the host and
+  stay host-contained. Container shells are disposable per-session root Arch
+  (`archlinux:latest` by default), with network/default capabilities and only
+  the workspace mounted, so pacman works. `read` pages files. Directory browsing
+  escapes the workspace, returns bounded directory-only metadata, times out
+  stalls, maps HTTP cancellation to a browse error, and propagates tool
+  cancellation. Stopping aborts the model request and runner commands, ending an
+  active shell. OpenAI API-key and OAuth requests prefer Responses WebSockets,
+  falling back to HTTP streaming; OpenRouter and generic endpoints stream chat
+  completions, Anthropic-format ones Messages events. OpenAI OAuth refreshes its
+  token bundle before expiry. Sessions need an explicit model ID. Catalogs:
+  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
+  `/models`, or generic `/models`; Anthropic-format catalogs read
+  `display_name`, `max_input_tokens`, `max_tokens`, the `capabilities` tree
+  (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
+  are independent; modalities come only from `image_input`/`pdf_input` leaves),
+  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
+  guards, probing the endpoint's OpenAI-style listing only where capabilities
+  left efforts unknown. Codex parsing retains streamed output-text and
+  function-call argument deltas since completed events may omit `output`. Only
+  listed efforts are offered; OpenAI's catalog lacks reasoning data. Optional
+  reasoning uses `reasoning_effort` for OpenAI/generic chat completions and
+  `reasoning.effort` for OpenRouter and Codex Responses; Anthropic Messages
+  sends `output_config.effort`; unless persisted `adaptiveThinking` is false it
+  adds `thinking: {type: "adaptive", display: "summarized"}`. Lazy metadata
+  refresh fills null fields independently, never replacing a known capability or
+  output limit while learning the other. It sends neither for `none`, maps
+  `minimal` to `low`. Adaptive-only models (Fable) ignore `enabled`; newer
+  models default `display` to `omitted` — empty thinking text plus a signature
+  while thinking tokens bill. The local proxy tolerates tool-loop replay without
+  signed thinking blocks; strict endpoints might not. Streamed reasoning deltas
+  group by `output_index`/`summary_index`; separate summary parts with
+  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
+  has a 60-minute limit; the canonical `websocket_connection_limit_reached` and
   observed underscore-free variant replace the socket once per step, then bound
   retries, replaying only an unpersisted step. Other WebSocket/HTTP
   interruptions or provider errors retry before persistence; replays reset
