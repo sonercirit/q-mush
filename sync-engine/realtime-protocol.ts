@@ -28,7 +28,10 @@ export type RunnerClientMessage =
       readonly commandId: string;
       readonly type: "result";
     })
-  | { readonly restartId: string; readonly type: "restart" }
+  | {
+      readonly restartId: string;
+      readonly type: "restart" | "restart_escalate";
+    }
   | { readonly type: "heartbeat" };
 
 export interface RunnerConnectMessage extends RunnerConnectMetadata {
@@ -156,7 +159,7 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
     return { type: "heartbeat" };
   }
 
-  if (value["type"] === "restart") {
+  if (value["type"] === "restart" || value["type"] === "restart_escalate") {
     const restartId = value["restartId"];
     if (
       Object.keys(value).length !== 2 ||
@@ -166,7 +169,7 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
     ) {
       throw new Error("The runner WebSocket message was invalid");
     }
-    return { restartId, type: "restart" };
+    return { restartId, type: value["type"] };
   }
 
   const commandId = value["commandId"];

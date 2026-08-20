@@ -179,7 +179,6 @@ function authoritySetup(options: {
         providerPricing: null,
       };
     },
-    draining: () => false,
     launchSession: launch,
     notify,
     now: () => TEST_NOW + 3,

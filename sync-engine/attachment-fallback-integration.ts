@@ -12,6 +12,7 @@ import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-access.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
+import { captureRestartSignal } from "./session-restart-gate.ts";
 
 export function createAttachmentFallbackIntegration(options: {
   readonly database: AppDatabase;
@@ -20,7 +21,8 @@ export function createAttachmentFallbackIntegration(options: {
   readonly generateId: IdGenerator;
   readonly now: () => number;
   readonly providers: SessionCredentialReaders;
-  readonly requests: SessionRequestHelpers;
+  readonly requests: Pick<SessionRequestHelpers, "authenticate" | "forUser">;
+  readonly restartSignal: () => AbortSignal;
 }): {
   readonly api: AttachmentFallbackApi;
   readonly store: AttachmentFallbackStore;
@@ -34,6 +36,9 @@ export function createAttachmentFallbackIntegration(options: {
     requests: options.requests,
     store,
     validate: async (user, selection) => {
+      const { signal: restartSignal } = captureRestartSignal(
+        options.restartSignal,
+      );
       const credential = await options.providers[
         selection.provider
       ]?.readCredential(user.id, selection.credentialId, GLOBAL_WORKSPACE_ID);
@@ -46,6 +51,7 @@ export function createAttachmentFallbackIntegration(options: {
           selection.provider,
           credential,
           selection.model,
+          restartSignal,
         );
         if (
           model === undefined ||
@@ -64,7 +70,7 @@ export function createAttachmentFallbackIntegration(options: {
           user.id,
           credential,
           selection.model,
-          { force: true },
+          { force: true, signal: restartSignal },
         );
         return providers.providers.some(({ tag }) => tag === routing.tag);
       } catch {

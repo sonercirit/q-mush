@@ -38,6 +38,7 @@ import {
   RenderDebugToggle,
   RenderDebugView,
 } from "./render-debug.tsx";
+import { restartProgressNotice } from "./restart-progress.ts";
 import { RunnerController } from "./runner-controller.ts";
 import { SessionController } from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
@@ -275,6 +276,8 @@ function SignIn(props: {
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
+  const [restartProgress, setRestartProgress] =
+    createSignal<Parameters<typeof restartProgressNotice>[0]>();
   const [storageHealth, setStorageHealth] =
     createSignal<EngineHealthSnapshot>();
   const [session, setSession] = createSignal<AuthSession>();
@@ -292,6 +295,9 @@ function App(): JSX.Element {
       switch (event.type) {
         case "health":
           setStorageHealth(event.health);
+          break;
+        case "development_restart_progress":
+          setRestartProgress(event.progress);
           break;
         case "runners":
           runners.applyRealtime(event.runners);
@@ -351,6 +357,7 @@ function App(): JSX.Element {
   let scopedLoadRevision = 0;
   const reloadScopedData = (workspaceId: string): void => {
     const revision = ++scopedLoadRevision;
+    setRestartProgress(undefined);
     realtime.stop();
     agentSessions.setWorkspace(workspaceId);
     runners.setWorkspace(workspaceId);
@@ -473,6 +480,16 @@ function App(): JSX.Element {
             <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
               Coordinate your local swarm from one authenticated workspace.
             </p>
+            <Show when={restartProgressNotice(restartProgress())}>
+              {(notice) => (
+                <p
+                  class="mt-8 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-sm text-cyan-100"
+                  role="status"
+                >
+                  {notice()}
+                </p>
+              )}
+            </Show>
             <Show when={storageHealthWarning(storageHealth())}>
               {(warning) => (
                 <p

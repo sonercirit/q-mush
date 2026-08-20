@@ -1,12 +1,11 @@
 import { expect, test, vi } from "vitest";
-import {
-  RunnerCommandBroker,
-  RunnerDisconnectedError,
-} from "../../shared/runner-command-broker.ts";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitMilliseconds,
 } from "../../shared/tool-limits.ts";
+import { ActiveSessionTools } from "../active-session-tools.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
@@ -53,6 +52,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
           {},
           {
             actions: orchestrationActions(setup.database, setup.store),
+            activeTools: new ActiveSessionTools(),
             braveSearch: new (class {
               execute(): Promise<string> {
                 return Promise.resolve("unused loading search result");

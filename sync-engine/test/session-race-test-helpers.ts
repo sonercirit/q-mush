@@ -1,4 +1,5 @@
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 
 export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   adaptiveThinking: null,
@@ -8,14 +9,12 @@ export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
 } as const;
 
 export function sessionAgentActionDefaults() {
+  const runtimeDefaults = sessionAgentActionRuntimeDefaults();
   return {
     broker: new RunnerCommandBroker(),
     cleanupSession: () => undefined,
     discoverModels: () => Promise.resolve({ defaultModel: null, models: [] }),
-    draining: () => false,
-    listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-    pendingRestart: () => undefined,
-    runnerIsAvailable: () => true,
+    ...runtimeDefaults,
   };
 }
 

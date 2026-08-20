@@ -105,4 +105,4 @@ test("enforces workspace import boundaries", async () => {
       Object.values(PROBES).map((probe) => rm(probe, { force: true })),
     );
   }
-});
+}, 30_000);

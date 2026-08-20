@@ -96,7 +96,7 @@ function tombstonedCommand(commandId: string): Readonly<{
   if (dispatched?.id !== commandId) throw new Error("Command unavailable");
   const rejection = captureBrokerRejection(result);
   broker.disconnectRunner(RUNNER_ID);
-  broker.cancelSession(`session-${commandId}`);
+  broker.cancelSessionCommands(`session-${commandId}`);
   return { broker, rejection };
 }
 
@@ -130,7 +130,7 @@ test("failed fresh-process delivery rolls authority and survival state back toge
   const canceledRejection = captureBrokerRejection(canceled);
   const surviving = broker.dispatch(commandInput("session-surviving"));
   broker.disconnectRunner(RUNNER_ID);
-  broker.cancelSession("session-canceled");
+  broker.cancelSessionCommands("session-canceled");
   const inFlight = broker.dispatch(commandInput("session-in-flight"));
   acceptImmediateDelivery = false;
   const newlyQueued = broker.dispatch(commandInput("session-newly-queued"));
@@ -214,7 +214,7 @@ test("cancellation frames precede surviving queued command frames on the wire", 
   const canceledRejection = captureBrokerRejection(canceled);
   const surviving = broker.dispatch(commandInput("session-wire-surviving"));
   broker.disconnectRunner(RUNNER_ID);
-  broker.cancelSession("session-wire-canceled");
+  broker.cancelSessionCommands("session-wire-canceled");
 
   const connected = connectedRecordedRunnerRealtimeTestSocket(
     brokerRealtime(broker),

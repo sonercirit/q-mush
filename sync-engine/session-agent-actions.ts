@@ -64,7 +64,7 @@ interface SessionAgentActionsDependencies
   extends SessionAgentActionDependencies, SessionControlActionDependencies {
   readonly abortSession: (sessionId: string) => void;
   readonly activeSession: (sessionId: string) => boolean;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
+  readonly broker: Pick<RunnerCommandBroker, "cancelSessionCommands">;
   readonly cleanupSession: (detail: AgentSessionDetail) => void;
   readonly browseDirectories: (
     request: RunnerDirectoryRequest,
@@ -306,7 +306,7 @@ export class SessionAgentActions {
 
   #cancel = (sessionId: string): void => {
     this.#dependencies.abortSession(sessionId);
-    this.#dependencies.broker.cancelSession(sessionId);
+    this.#dependencies.broker.cancelSessionCommands(sessionId);
   };
 
   #wakeReportedParent(parentId: string | undefined, userId: string): void {

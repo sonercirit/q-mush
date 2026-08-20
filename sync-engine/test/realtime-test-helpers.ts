@@ -308,6 +308,7 @@ export type RealtimeSessionOverrides = Partial<
     | "deliverRunnerCommands"
     | "detailForUser"
     | "drainRunner"
+    | "escalateRunnerDrain"
     | "listForUser"
     | "onChange"
     | "pendingQuestionForUser"
@@ -337,7 +338,12 @@ export function realtimeTestSessions(
     detailForUser: () => undefined,
     directories: () => Promise.resolve(new Response()),
     drain: () => Promise.resolve(),
+    drainFinal: () => Promise.resolve(),
+    drainProgress: () => [],
+    drainProgressForSessions: () => [],
     drainRunner: () => Promise.resolve(),
+    escalateDrain: () => false,
+    escalateRunnerDrain: () => false,
     item: () => new Response(),
     listForUser: () => [],
     message: () => Promise.resolve(new Response()),
@@ -346,6 +352,7 @@ export function realtimeTestSessions(
     openRouterProviders: () => Promise.resolve(new Response()),
     pendingQuestionForUser: () => null,
     prepareFinalShutdown: () => Promise.resolve(),
+    restoreDevelopmentDrainRecovery: () => undefined,
     hasPendingDatabaseWrites: () => false,
     reconcileDatabaseWrites: () => true,
     pendingRunnerRestart: () => ({ status: "none" }),

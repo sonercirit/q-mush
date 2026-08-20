@@ -1,11 +1,17 @@
+import type { ClockedTimeoutOptions } from "../shared/clocked-timeout.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
+import type {
+  RestartSetTimeout,
+  RestartTimer,
+} from "./session-restart-timers.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
 import type { ToolSettingsStore } from "./tool-settings-store.ts";
 
@@ -23,7 +29,13 @@ interface SessionLivenessOptions {
   readonly testScan?: (scan: () => void) => void;
 }
 
+type SessionRestartTimingOptions = ClockedTimeoutOptions<
+  RestartTimer,
+  RestartSetTimeout
+>;
+
 export interface SessionDependencies {
+  readonly activeTools?: ActiveSessionTools;
   readonly broker?: RunnerCommandBroker;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly database?: AppDatabase;
@@ -34,6 +46,7 @@ export interface SessionDependencies {
   readonly liveness?: SessionLivenessOptions;
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
+  readonly restartTiming?: Partial<SessionRestartTimingOptions>;
   readonly toolSettings?: Pick<ToolSettingsStore, "read">;
   readonly workspaces?: SessionWorkspaceReader;
 }

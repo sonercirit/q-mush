@@ -1,4 +1,5 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
+import type { RestartDeadline } from "../shared/restart-deadline.ts";
 import type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
@@ -8,6 +9,7 @@ import type { AgentSessionSummary } from "../shared/session-model.ts";
 
 import type { SessionDetailReader } from "./session-command-types.ts";
 import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
+import type { RestartDrainSessionProgress } from "./session-restart-control.ts";
 import type { DurableRunnerRestartGate } from "./session-restart-coordinator.ts";
 
 interface RunnerCommandDeliveryOptions {
@@ -40,8 +42,18 @@ export interface SessionIntegration extends SessionDetailReader {
   acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean;
   runnerOperational(runnerId: string, restartId?: string): void;
   directories(request: Request, runnerId: string): Promise<Response>;
-  drain(): Promise<void>;
+  escalateDrain(): boolean;
+  drain(deadline?: RestartDeadline): Promise<void>;
+  drainFinal(): Promise<void>;
+  readonly drainProgress: (
+    userId?: string,
+    workspaceId?: string,
+  ) => readonly RestartDrainSessionProgress[];
+  readonly drainProgressForSessions: (
+    sessionIds: ReadonlySet<string>,
+  ) => readonly RestartDrainSessionProgress[];
   prepareFinalShutdown(): Promise<void>;
+  restoreDevelopmentDrainRecovery(): void;
   hasPendingDatabaseWrites(): boolean;
   reconcileDatabaseWrites(): boolean;
   item(request: Request, sessionId: string): Response;
@@ -61,6 +73,7 @@ export interface SessionIntegration extends SessionDetailReader {
   onChange(listener: (userId: string, sessionId: string) => void): void;
   reassign(request: Request, sessionId: string): Promise<Response>;
   drainRunner(runnerId: string, restartId: string): Promise<void>;
+  escalateRunnerDrain(runnerId: string, restartId: string): boolean;
   runnerConnected(runnerId: string): void;
   runnerDisconnected(runnerId: string): void;
   streamRunnerCommand(

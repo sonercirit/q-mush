@@ -22,6 +22,7 @@ import {
   type SessionOptionsSource,
 } from "./session-agent-options.ts";
 
+import { captureRestartSignal } from "./session-restart-gate.ts";
 const optionsPageOffset = (page: number): number =>
   (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
@@ -44,6 +45,7 @@ interface SessionAgentOptionDependencies {
   };
   readonly modelCredentialPool?: ModelCredentialPool;
   readonly readCredential: SessionAgentActionDependencies["readCredential"];
+  readonly restartSignal: () => AbortSignal;
 }
 
 async function singleCredential(
@@ -99,6 +101,9 @@ async function modelOptions(
   ) {
     throw new Error("The model credential or provider is unavailable");
   }
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
   const credentials =
     balanced && dependencies.modelCredentialPool !== undefined
       ? await dependencies.modelCredentialPool.representative(
@@ -118,11 +123,14 @@ async function modelOptions(
         await dependencies.discoverModels(
           selection.provider,
           credential,
-          signal,
+          signal === undefined
+            ? restartSignal
+            : AbortSignal.any([signal, restartSignal]),
         )
       ).models;
     } catch (error) {
       throwIfSignalAborted(signal, "Model option discovery was canceled");
+      if (restartSignal.aborted) throw error;
       failure = error;
     }
   }

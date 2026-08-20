@@ -1,14 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   AgentSessionStatus,
   RestartHandoffOperation,
 } from "../../shared/session-model.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
 import { startManualSessionCompaction } from "../../sync-engine/session-compaction-actions.ts";
 import { createValidatedSession } from "../../sync-engine/session-creation.ts";
@@ -18,33 +15,35 @@ import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import {
   createTestProviderCredential,
   TEST_AUTHENTICATED_USER,
-  TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  agentActionsSetup,
   closeSessionTestDatabase,
   expectedRestartHandoff,
   expectJsonResponse,
+  expectLaunchTurnRotation,
   expectStoredSession,
+  launchRace,
+  parseToolOutput,
   type SessionStoreTestSetup,
+  spawnedSession,
+  spawnInput,
+  testClock,
   transitionTestSession,
   unsupportedFixtureStatus,
 } from "./session-launch-race-helpers.ts";
-import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
 import {
   createStore,
   createTestSession,
 } from "./session-store-test-fixtures.ts";
-
 const RESTART_ID = "restart-launch-race";
 type LaunchRace = "restart" | "none" | "stale";
-
 interface LaunchRaceRun {
   readonly fail: (detail: AgentSessionDetail) => boolean;
   readonly launchedSession: () => AgentSessionDetail;
   readonly runtimes: SessionRuntimes;
 }
-
 interface FailedLaunchTestSetup extends SessionStoreTestSetup {
   readonly credential: ProviderCredentialAccess;
   readonly detail: AgentSessionDetail;
@@ -54,14 +53,6 @@ interface FailedLaunchTestSetup extends SessionStoreTestSetup {
 interface FailedLaunchRaceSetup extends FailedLaunchTestSetup {
   readonly launch: LaunchRaceRun;
   readonly runtimes: SessionRuntimes;
-}
-
-interface AgentActionsTestSetup extends SessionStoreTestSetup {
-  readonly actions: ReturnType<SessionAgentActions["actions"]>;
-  readonly launch: LaunchRaceRun;
-  readonly parent: AgentSessionDetail;
-  readonly runtimes: SessionRuntimes;
-  readonly target: AgentSessionDetail | undefined;
 }
 
 interface LaunchRaceExpectation {
@@ -107,11 +98,6 @@ function testModelCatalog() {
   return Promise.resolve().then(() => ({ defaultModel: null, models: [] }));
 }
 
-function testClock(): () => number {
-  let now = TEST_NOW;
-  return () => (now += 1);
-}
-
 function sessionInput(
   detail: AgentSessionDetail,
   prompt = "Exercise the launch boundary",
@@ -131,65 +117,6 @@ function sessionInput(
     workingDirectory: detail.workingDirectory,
     workspaceId: detail.workspaceId,
   };
-}
-
-function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
-  const turns = detail.turns ?? [];
-  const activeTurns = turns.filter(({ endedAt }) => endedAt === null);
-  expect(activeTurns).toHaveLength(1);
-  const active = activeTurns[0];
-  if (active === undefined) {
-    throw new Error("The launched session has no active turn");
-  }
-  const previous = turns.at(-2);
-  if (previous !== undefined) {
-    expect(previous.endedAt).not.toBeNull();
-    expect(active.startedAt).toBeGreaterThan(previous.startedAt);
-    expect(previous.endedAt).toBeLessThanOrEqual(active.startedAt);
-  }
-}
-
-function failCreatedSession(
-  setup: SessionStoreTestSetup,
-  detail: AgentSessionDetail,
-  now: () => number,
-): void {
-  transitionTestSession(setup, detail, "failed", now);
-}
-
-function launchRace(
-  setup: SessionStoreTestSetup,
-  race: LaunchRace,
-  now: () => number,
-): LaunchRaceRun {
-  const runtimes = new SessionRuntimes();
-  let launched: AgentSessionDetail | undefined;
-  const fail = (detail: AgentSessionDetail): boolean => {
-    launched = detail;
-    expectLaunchTurnRotation(detail);
-    if (race === "stale") {
-      failCreatedSession(setup, detail, now);
-      const requeued = setup.store.queue(TEST_USER_ID, detail.id, now());
-      expect(requeued.status).toBe("queued");
-      if (requeued.status === "queued") {
-        expectLaunchTurnRotation(requeued.detail);
-      }
-    }
-    if (race !== "none") {
-      void runtimes.drain(
-        { kind: "runner", runnerId: detail.runnerId },
-        RESTART_ID,
-      );
-    }
-    return false;
-  };
-  const launchedSession = (): AgentSessionDetail => {
-    if (launched === undefined) {
-      throw new Error("The production launch callback was not reached");
-    }
-    return launched;
-  };
-  return { fail, launchedSession, runtimes };
 }
 
 function assertLaunchRaceState(
@@ -263,6 +190,14 @@ function credentialAction(
   return (_userId, _detail, action) => Promise.resolve(action(credential));
 }
 
+function failCreatedSession(
+  setup: SessionStoreTestSetup,
+  detail: AgentSessionDetail,
+  now: () => number,
+): void {
+  transitionTestSession(setup, detail, "failed", now);
+}
+
 function launchableSessionSetup(
   status: AgentSessionStatus,
 ): FailedLaunchTestSetup {
@@ -328,89 +263,6 @@ function launchBoundary(setup: FailedLaunchRaceSetup) {
     runtimes: setup.runtimes,
     store: setup.store,
   };
-}
-
-function agentActionsSetup(
-  race: LaunchRace,
-  includeTarget: boolean,
-): AgentActionsTestSetup {
-  const setup = createStore();
-  const now = testClock();
-  const parent = createTestSession(setup.store);
-  expect(
-    setup.store.transitionRuntime(
-      parent.id,
-      "running",
-      now(),
-      parent.generation,
-    ),
-  ).toBe(true);
-  const target = includeTarget ? createTestSession(setup.store) : undefined;
-  if (target !== undefined) {
-    failCreatedSession(setup, target, now);
-  }
-  const credential = createTestProviderCredential(parent.credentialId);
-  const launch = launchRace(setup, race, now);
-  const actions = new SessionAgentActions({
-    abortSession: () => undefined,
-    activeSession: () => false,
-    broker: new RunnerCommandBroker(),
-    browseDirectories: () =>
-      Promise.resolve({ status: "directory_unavailable" }),
-    cleanupSession: () => undefined,
-    database: setup.database,
-    discoverModels: testModelCatalog,
-    discoverSessionMetadata: () =>
-      Promise.resolve().then(() => EMPTY_SESSION_REQUEST_MODEL_METADATA),
-    draining: () => false,
-    launchSession: (_credential, detail) => launch.fail(detail),
-    listOnlineRunners: () => [],
-    listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-    notify: () => undefined,
-    now,
-    pendingRestart: (runnerId) => launch.runtimes.pendingRestart(runnerId),
-    readCredential: () => Promise.resolve(credential),
-    runnerIsAvailable: () => true,
-    store: setup.store,
-    withCredential: credentialAction(credential),
-  }).actions(parent.id, TEST_USER_ID, parent.generation, DEFAULT_TOOL_SETTINGS);
-  return {
-    ...setup,
-    actions,
-    launch,
-    parent,
-    runtimes: launch.runtimes,
-    target,
-  };
-}
-
-function spawnInput(
-  setup: Pick<AgentActionsTestSetup, "parent">,
-  prompt: string,
-) {
-  return {
-    credentialId: setup.parent.credentialId,
-    executionEnvironment: setup.parent.executionEnvironment,
-    model: setup.parent.model,
-    prompt,
-    provider: setup.parent.provider,
-    runnerId: setup.parent.runnerId,
-    tools: AGENT_SESSION_TOOL_NAMES,
-    workingDirectory: setup.parent.workingDirectory,
-  };
-}
-
-function spawnedSession(setup: AgentActionsTestSetup) {
-  return setup.store
-    .list(TEST_USER_ID)
-    .find(({ id }) => id !== setup.parent.id);
-}
-
-function parseToolOutput(
-  result: Awaited<ReturnType<typeof executeSessionAgentTool>>,
-): unknown {
-  const value: unknown = JSON.parse(result.output);
-  return value;
 }
 
 function queueLaunchCase(
@@ -493,12 +345,14 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
         launch: (detail) => launch.fail(detail),
         notify: () => undefined,
         now,
+        restartSignal: () => new AbortController().signal,
         runtimes: launch.runtimes,
         store: setup.store,
       },
       TEST_AUTHENTICATED_USER,
       sessionInput(inputSource),
       credential,
+      new AbortController().signal,
     );
 
     const authoritative = assertLaunchRaceState(

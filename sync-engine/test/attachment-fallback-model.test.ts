@@ -3,7 +3,7 @@ import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import type { ProviderRequestState } from "../agent-model-options.ts";
+
 import { explainAttachment } from "../attachment-fallback-model.ts";
 import type { AgentModelFactory } from "../session-agent-models.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
@@ -40,7 +40,7 @@ function options(
   selections = [FALLBACK],
 ) {
   const stepStarts: string[] = [];
-  const requestStates: ProviderRequestState[] = [];
+  const requestStates: ("active" | "admission")[] = [];
   const requestStateCallbacks: NonNullable<
     Parameters<AgentModelFactory>[0]["onRequestState"]
   >[] = [];
@@ -77,7 +77,7 @@ function options(
       currentProviderPricing: null,
       currentProviderTag: null,
       factory,
-      onRequestState: (state: ProviderRequestState) => {
+      onRequestState: (state: "active" | "admission") => {
         requestStates.push(state);
       },
       prompt: "Extract requirements",

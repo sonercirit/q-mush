@@ -5,6 +5,7 @@ import type {
   SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
@@ -26,6 +27,7 @@ export interface SessionModelRuntimeResources extends Omit<
   AttachmentFallbackRuntimeResources,
   "attachmentFallbacks"
 > {
+  readonly activeTools: ActiveSessionTools;
   readonly actions: SessionAgentActionsLike;
   readonly attachmentFallbacks?: (
     userId: string,
@@ -54,6 +56,7 @@ export function sessionModelRuntime(
     detail.generation,
   );
   return {
+    activeTools: resources.activeTools,
     ...(resources.attachmentFallbacks === undefined
       ? {}
       : {

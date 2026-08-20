@@ -1,4 +1,7 @@
-import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import {
+  isSessionAgentToolName,
+  type AgentSessionToolName,
+} from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
   aggregateParallelToolResults,
@@ -44,6 +47,12 @@ interface AgentSkillsOptions {
   readonly currentTools?:
     (() => readonly AgentSessionToolName[] | undefined) | undefined;
   readonly executeTool: AgentSkillExecutor;
+  readonly trackTool?: (
+    callId: string | undefined,
+    name: string,
+    runnerCommand: boolean,
+  ) => () => void;
+  readonly restartRequested?: () => boolean;
   readonly tools: readonly AgentSessionToolName[];
   readonly userId: string;
   readonly workspaceId?: string;
@@ -57,6 +66,7 @@ export interface AgentSkills {
 }
 
 interface ParallelSkillCall {
+  readonly nestedId: string;
   readonly parameters: JsonRecord;
   readonly recipientName: string;
   readonly toolName: string;
@@ -75,33 +85,36 @@ function parallelSkillCalls(
     return undefined;
   }
 
-  const calls = toolUses.flatMap((toolUse): readonly ParallelSkillCall[] => {
-    if (!isRecord(toolUse)) {
-      return [];
-    }
-    const recipientValue = toolUse["recipient_name"];
-    const recipientName =
-      typeof recipientValue === "string" ? recipientValue : undefined;
-    const toolName =
-      recipientName === undefined
-        ? undefined
-        : normalizedToolName(recipientName);
-    if (
-      recipientName === undefined ||
-      toolName === undefined ||
-      !isRecord(toolUse["parameters"]) ||
-      toolName === PARALLEL_TOOL_NAME
-    ) {
-      return [];
-    }
-    return [
-      {
-        parameters: toolUse["parameters"],
-        recipientName,
-        toolName,
-      },
-    ];
-  });
+  const calls = toolUses.flatMap(
+    (toolUse, index): readonly ParallelSkillCall[] => {
+      if (!isRecord(toolUse)) {
+        return [];
+      }
+      const recipientValue = toolUse["recipient_name"];
+      const recipientName =
+        typeof recipientValue === "string" ? recipientValue : undefined;
+      const toolName =
+        recipientName === undefined
+          ? undefined
+          : normalizedToolName(recipientName);
+      if (
+        recipientName === undefined ||
+        toolName === undefined ||
+        !isRecord(toolUse["parameters"]) ||
+        toolName === PARALLEL_TOOL_NAME
+      ) {
+        return [];
+      }
+      return [
+        {
+          nestedId: String(index),
+          parameters: toolUse["parameters"],
+          recipientName,
+          toolName,
+        },
+      ];
+    },
+  );
   return calls.length === toolUses.length ? calls : undefined;
 }
 
@@ -153,36 +166,58 @@ function executeParallelSkills(
 
   return mapWithParallelConcurrency(
     calls,
-    ({ parameters, recipientName, toolName }) =>
+    ({ nestedId, parameters, recipientName, toolName }) =>
       executeParallelResultCall(
         recipientName,
-        () =>
-          !isConfiguredToolName(options, toolName) ||
-          options.currentTools?.()?.includes(toolName) === false
-            ? Promise.resolve(
-                completedRunnerCommandResult(
-                  `Error: ${recipientName} is not enabled for this session.`,
-                ),
-              )
-            : toolName === SLEEP_TOOL_NAME
+        async () => {
+          if (options.restartRequested?.() === true) {
+            return {
+              output:
+                "Error: this parallel tool call was canceled because the server is restarting.",
+              state: "canceled",
+            };
+          }
+          const nestedCallId = `${callId ?? "parallel"}:${nestedId}`;
+          const runnerCommand =
+            toolName !== BRAVE_SEARCH_TOOL_NAME &&
+            (!isConfiguredToolName(options, toolName) ||
+              !isSessionAgentToolName(toolName));
+          const finishTracking = options.trackTool?.(
+            nestedCallId,
+            toolName,
+            runnerCommand,
+          );
+          try {
+            return await (!isConfiguredToolName(options, toolName) ||
+            options.currentTools?.()?.includes(toolName) === false
               ? Promise.resolve(
                   completedRunnerCommandResult(
-                    "Error: sleep cannot run inside parallel.",
+                    `Error: ${recipientName} is not enabled for this session.`,
                   ),
                 )
-              : isAskQuestionsToolName(toolName)
+              : toolName === SLEEP_TOOL_NAME
                 ? Promise.resolve(
                     completedRunnerCommandResult(
-                      "Error: ask_questions cannot run inside parallel or another tool.",
+                      "Error: sleep cannot run inside parallel.",
                     ),
                   )
-                : toolName === BRAVE_SEARCH_TOOL_NAME
-                  ? executeBraveSearch(options, parameters, signal).then(
-                      completedRunnerCommandResult,
+                : isAskQuestionsToolName(toolName)
+                  ? Promise.resolve(
+                      completedRunnerCommandResult(
+                        "Error: ask_questions cannot run inside parallel or another tool.",
+                      ),
                     )
-                  : options
-                      .executeTool(toolName, parameters, signal, callId)
-                      .then(normalizedResult),
+                  : toolName === BRAVE_SEARCH_TOOL_NAME
+                    ? executeBraveSearch(options, parameters, signal).then(
+                        completedRunnerCommandResult,
+                      )
+                    : options
+                        .executeTool(toolName, parameters, signal, nestedCallId)
+                        .then(normalizedResult));
+          } finally {
+            finishTracking?.();
+          }
+        },
         signal,
       ),
     signal,

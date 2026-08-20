@@ -39,7 +39,7 @@ import {
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
 
-function runningSetup() {
+export function runningSetup() {
   const { database, generateId, store } = createStore();
   const detail = createTestSession(store);
   const running = store.transitionCurrent(
@@ -51,14 +51,14 @@ function runningSetup() {
   return { database, detail, generateId, store };
 }
 
-function closeSetup(
+export function closeSetup(
   setup: Pick<ReturnType<typeof createStore>, "database">,
 ): void {
   const database = setup.database.$client;
   database.close();
 }
 
-function watchdogSetup(
+export function watchdogSetup(
   setup: Pick<ReturnType<typeof createStore>, "database" | "store">,
   options: {
     readonly actions?: ConstructorParameters<
@@ -121,7 +121,7 @@ function scanPastGrace(
   watchdog.scan();
 }
 
-function launchRuntime(
+export function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
   generation: number,
@@ -458,7 +458,6 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
       TEST_NOW + 2,
     ),
   ).toBe(true);
-
   watchdog.scan();
 
   const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);

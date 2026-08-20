@@ -16,6 +16,10 @@ import {
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
+import {
+  restartSignalIsAborted,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -30,7 +34,7 @@ export interface SessionAgentActionDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly store: SessionStore;
   readonly now: () => number;
-  readonly draining: () => boolean;
+  readonly restartSignal: () => AbortSignal;
   readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
@@ -144,6 +148,22 @@ export async function spawnAgentSession(options: {
   readonly signal?: AbortSignal;
   readonly userId: string;
 }): Promise<string> {
+  const restartSignal = options.dependencies.restartSignal();
+  const operationSignal =
+    options.signal === undefined
+      ? restartSignal
+      : AbortSignal.any([options.signal, restartSignal]);
+  const cancellationResponse = (): Response | undefined => {
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
+    return restartSignal.aborted ? serverRestartingResponse() : undefined;
+  };
+  const translateCancellation = (error: unknown): Response => {
+    const response = cancellationResponse();
+    if (response !== undefined) return response;
+    throw error;
+  };
   const parent = options.dependencies.store.get(
     options.userId,
     options.authority.sessionId,
@@ -164,18 +184,22 @@ export async function spawnAgentSession(options: {
     credential: ProviderCredentialAccess,
     workspaceId: string,
   ): Promise<Response> {
-    const metadata = await options.dependencies.discoverSessionMetadata(
-      input,
-      credential,
-      options.userId,
-      balanced,
-      options.signal,
-    );
+    let metadata: SessionRequestModelMetadata;
+    try {
+      metadata = await options.dependencies.discoverSessionMetadata(
+        input,
+        credential,
+        options.userId,
+        balanced,
+        operationSignal,
+      );
+    } catch (error) {
+      return translateCancellation(error);
+    }
     // Discovery settles even when the deadline fires mid-flight; never
     // create a child after the caller already reported timed-out.
-    if (options.signal?.aborted === true) {
-      throw abortSignalError(options.signal, "The spawn was canceled");
-    }
+    const cancellation = cancellationResponse();
+    if (cancellation !== undefined) return cancellation;
     const created = options.dependencies.store.create(
       {
         ...input,
@@ -195,7 +219,7 @@ export async function spawnAgentSession(options: {
       options.dependencies.notify(options.userId, child.id);
       return sessionLaunchResponse(child.id, status);
     };
-    if (options.dependencies.draining()) {
+    if (restartSignalIsAborted(() => restartSignal)) {
       return notifiedResponse("queued");
     }
     const launch = options.dependencies.launchSession(
@@ -229,12 +253,22 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
+  // Avoid credential reads during maintenance; pool candidates also enforce
+  // this signal, while the direct-credential path falls back to enqueue.
+  if (restartSignal.aborted) {
+    return responseToolOutput(serverRestartingResponse());
+  }
   if (pool !== undefined && balanced) {
-    const credentials = await pool.candidates(
-      options.userId,
-      selection,
-      options.signal,
-    );
+    let credentials: readonly ProviderCredentialAccess[];
+    try {
+      credentials = await pool.candidates(
+        options.userId,
+        selection,
+        operationSignal,
+      );
+    } catch (error) {
+      return responseToolOutput(translateCancellation(error));
+    }
     if (credentials.length === 0) {
       return responseToolOutput(
         createJsonResponse({ error: "credential_unavailable" }, 409),

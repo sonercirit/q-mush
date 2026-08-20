@@ -28,7 +28,7 @@ interface SessionLivenessWatchdogOptions {
   >;
   readonly broker: Pick<
     RunnerCommandBroker,
-    "cancelSession" | "sessionCommandPhase"
+    "cancelSessionCommands" | "sessionCommandPhase"
   >;
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
@@ -215,12 +215,13 @@ export class SessionLivenessWatchdog {
     ) {
       return;
     }
+    this.#options.broker.cancelSessionCommands(session.id);
     this.#options.runtimes.abortForGeneration(
       session.id,
       session.executionGeneration,
       new DOMException(error, "AbortError"),
     );
-    this.#options.broker.cancelSession(session.id);
+    this.#options.broker.cancelSessionCommands(session.id);
     const detail = this.#options.store.get(session.userId, session.id);
     this.#options.notify(session.userId, session.id);
     if (detail === undefined) {

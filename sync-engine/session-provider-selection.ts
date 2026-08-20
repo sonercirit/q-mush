@@ -1,8 +1,9 @@
+import { abortSignalIsAborted } from "../shared/abort-signal.ts";
 import {
   readOpenRouterProviderRouting,
   type OpenRouterProviderCatalog,
 } from "../shared/agent-configuration.ts";
-import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import { mapWithParallelConcurrency } from "../shared/parallel.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type {
@@ -18,13 +19,14 @@ import {
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
-import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
+import type { PooledCredentialDiscoveryRequestOptions } from "./session-credential-discovery-options.ts";
 import type {
   PreparedSessionCredentialProviderState,
   SessionCredentialMetadataUpdate,
   SessionCredentialReassignmentSnapshot,
 } from "./session-credential-reassignment-store.ts";
+import { type SessionModelDiscoveryDependencies } from "./session-model-discovery-dependencies.ts";
 import { readIdentifier } from "./session-request-helpers.ts";
 import { requestSearchSelection } from "./session-search-selection.ts";
 
@@ -59,17 +61,33 @@ export type WithCredential = (
   action: CredentialResponseAction,
 ) => Promise<Response>;
 
+function restartResponseIfNeeded(
+  signal: AbortSignal | undefined,
+): Response | undefined {
+  if (!abortSignalIsAborted(signal)) return undefined;
+  return createApiError("server_restarting", 503);
+}
+
+function restartResponseOrThrow(
+  signal: AbortSignal | undefined,
+  error: unknown,
+): Response {
+  const restarting = restartResponseIfNeeded(signal);
+  if (restarting !== undefined) return restarting;
+  throw error;
+}
+
 /**
  * The supplied credential reader is the authorization hook. Workspace scopes
  * must resolve through this callback so endpoint discovery cannot widen access.
  */
-export async function openRouterProvidersForUser(options: {
-  readonly discover: OpenRouterProviderDiscoverer;
-  readonly pool: Pick<ModelCredentialPool, "representative">;
-  readonly request: Request;
-  readonly user: AuthenticatedUser;
-  readonly withCredential: WithCredential;
-}): Promise<Response> {
+export async function openRouterProvidersForUser(
+  options: PooledCredentialDiscoveryRequestOptions<WithCredential> & {
+    readonly discover: OpenRouterProviderDiscoverer;
+  },
+): Promise<Response> {
+  const initialRestart = restartResponseIfNeeded(options.signal);
+  if (initialRestart !== undefined) return initialRestart;
   const { credentialId, search } = requestSearchSelection(options.request);
   const model = search.get("model");
   const workspaceId = readIdentifier(search.get("workspaceId"));
@@ -93,14 +111,16 @@ export async function openRouterProvidersForUser(options: {
         options.user.id,
         credential,
         model,
+        optionalSignal(options.signal),
       );
+      throwIfAgentAborted(options.signal);
       const response = createJsonResponse(catalog);
       return response;
     } catch (error) {
       if (error instanceof Error && error.message.includes("identifier")) {
         return createApiError("invalid_request", 400);
       }
-      throw error;
+      return restartResponseOrThrow(options.signal, error);
     }
   };
   if (isBalancedCredentialId("openrouter", credentialId)) {
@@ -111,8 +131,15 @@ export async function openRouterProvidersForUser(options: {
     for (const credential of credentials) {
       try {
         return await discover(credential);
-      } catch {
-        // Discovery is read-only; any pool member may represent the selection.
+      } catch (error) {
+        let restarting: Response;
+        try {
+          restarting = restartResponseOrThrow(options.signal, error);
+        } catch {
+          // Discovery is read-only; any pool member may represent the selection.
+          continue;
+        }
+        return restarting;
       }
     }
     return createApiError("provider_unavailable", 502);
@@ -206,7 +233,7 @@ export type SessionMetadataResult =
  * a session whose explicit tag is non-null. That keeps provider tags valid
  * under same-provider credential and workspace-scope changes.
  */
-export function requireSessionMetadata(
+function requireSessionMetadata(
   metadata: SessionMetadataResult,
 ): Exclude<SessionMetadataResult, { readonly error: string }> {
   if ("error" in metadata) {
@@ -231,32 +258,39 @@ interface SessionMetadataInput {
   readonly provider: ProviderId;
 }
 
-interface SessionMetadataOptions {
+interface SessionMetadataCoreOptions {
   readonly credential: ProviderCredentialAccess;
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverProviders: OpenRouterProviderDiscoverer;
   readonly input: SessionMetadataInput;
   readonly ownerId: string;
   readonly rejectCredentialErrors?: boolean;
   readonly signal?: AbortSignal;
 }
 
-export function sessionMetadataFromDependencies(options: {
-  readonly credential: ProviderCredentialAccess;
-  readonly dependencies: {
-    readonly discoverModels: AgentModelDiscoverer;
-    readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
-  };
-  readonly input: SessionMetadataInput;
-  readonly ownerId: string;
-  readonly rejectCredentialErrors?: boolean;
-}): Promise<SessionMetadataResult> {
+interface SessionMetadataOptions extends SessionMetadataCoreOptions {
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly discoverProviders: OpenRouterProviderDiscoverer;
+}
+
+interface SessionMetadataDependencyOptions extends SessionMetadataCoreOptions {
+  readonly dependencies: SessionModelDiscoveryDependencies;
+}
+
+export async function discoverRequiredSessionMetadata(
+  options: SessionMetadataDependencyOptions,
+) {
+  return requireSessionMetadata(await sessionMetadataFromDependencies(options));
+}
+
+export function sessionMetadataFromDependencies(
+  options: SessionMetadataDependencyOptions,
+): Promise<SessionMetadataResult> {
   return sessionMetadata({
     credential: options.credential,
     discoverModels: options.dependencies.discoverModels,
     discoverProviders: options.dependencies.discoverOpenRouterProviders,
     input: options.input,
     ownerId: options.ownerId,
+    ...optionalSignal(options.signal),
     ...optionalCredentialRejection(options.rejectCredentialErrors),
   });
 }
@@ -276,6 +310,15 @@ function credentialFailure(
     throw new RealtimeCommandError("provider_unavailable");
   }
   return fallback;
+}
+
+function rethrowRestartOrReturn(
+  options: SessionMetadataOptions,
+  error: unknown,
+  fallback: SessionMetadataResult,
+): SessionMetadataResult {
+  if (abortSignalIsAborted(options.signal)) throw error;
+  return credentialFailure(options, error, fallback);
 }
 
 export async function sessionMetadata(
@@ -304,7 +347,9 @@ export async function sessionMetadata(
             providerPricing: selected.pricing,
           };
     } catch (error) {
-      return credentialFailure(options, error, { error: "validation_failed" });
+      return rethrowRestartOrReturn(options, error, {
+        error: "validation_failed",
+      });
     }
   }
 
@@ -323,7 +368,7 @@ export async function sessionMetadata(
       providerPricing: model?.pricing ?? null,
     };
   } catch (error) {
-    return credentialFailure(options, error, {
+    return rethrowRestartOrReturn(options, error, {
       adaptiveThinking: null,
       maxContextTokens: null,
       maxOutputTokens: null,

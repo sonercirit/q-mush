@@ -1,6 +1,7 @@
 import { expect } from "vitest";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { ActiveSessionTools } from "../active-session-tools.ts";
 import type { SessionAgentRuntimeDependencies } from "../session-agent-runtime.ts";
 
 function completeTestBrokerCommand(
@@ -72,6 +73,7 @@ export function runtimeTestCredential(
 
 export const IDLE_RUNTIME_SIGNALS: Pick<
   SessionAgentRuntimeDependencies,
+  | "activeTools"
   | "continuous"
   | "hasPendingSteeringInput"
   | "manualCompactionRequested"
@@ -80,6 +82,7 @@ export const IDLE_RUNTIME_SIGNALS: Pick<
   | "restartHandoffRequested"
   | "toolSettings"
 > = {
+  activeTools: new ActiveSessionTools(),
   continuous: false,
   hasPendingSteeringInput: () => false,
   manualCompactionRequested: () => false,

@@ -17,7 +17,6 @@ import {
 } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
-  AgentSessionUsageUpdate,
   SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import {
@@ -25,6 +24,7 @@ import {
   type ToolSettings,
 } from "../shared/tool-limits.ts";
 import type { RunnerCommandResult } from "../shared/tool-stream.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import type { ProviderRequestState } from "./agent-model-options.ts";
@@ -33,8 +33,19 @@ import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
+import { activeToolTracker } from "./session-active-tool-tracking.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
+import {
+  executeForSession,
+  isRestartHandoffError,
+  markSessionStepStart,
+  recordCompaction,
+  recordRuntimeUsage,
+  throwIfRestartRequested,
+  writeRuntime,
+} from "./session-agent-runtime-state.ts";
+
 import {
   createSessionAgentModels,
   type AgentModelFactory,
@@ -49,11 +60,7 @@ import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
-import {
-  agentStepUsage,
-  compactionUsage,
-  type CompactionUsage,
-} from "./session-compaction-usage.ts";
+import { agentStepUsage, compactionUsage } from "./session-compaction-usage.ts";
 import {
   discoverCurrentSessionModel,
   sessionRequestMetadata,
@@ -61,12 +68,7 @@ import {
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
-import {
-  executeForSession,
-  isRestartHandoffError,
-} from "./session-runner-execution.ts";
 import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
-import { sessionPendingComponentFromProviderState } from "./session-runtime.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -74,6 +76,7 @@ import { boundSessionToolOutput } from "./session-tool-output.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
+  readonly activeTools: ActiveSessionTools;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
@@ -102,76 +105,9 @@ function markProviderPending(
   runtime: SessionAgentRuntimeDependencies,
   state: ProviderRequestState,
 ): void {
-  runtime.pendingComponent(sessionPendingComponentFromProviderState(state));
-}
-
-function writeRuntime(
-  runtime: SessionAgentRuntimeDependencies,
-  write: (sessionId: string, now: number, generation: number) => void,
-): void {
-  write(runtime.detail.id, runtime.now(), runtime.detail.generation);
-  runtime.notify();
-}
-
-function markRuntimeStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // Status- and generation-guarded: a racing stop or restart makes this
-  // write match zero rows instead of throwing.
-  const { store } = runtime;
-  writeRuntime(runtime, store.markRuntimeStepStart.bind(store));
-}
-
-function recordUsage(
-  runtime: SessionAgentRuntimeDependencies,
-  usage: AgentSessionUsageUpdate,
-): void {
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.updateRuntimeUsage(sessionId, usage, now, generation);
-  });
-}
-
-function recordContext(
-  runtime: SessionAgentRuntimeDependencies,
-  contextTokens: number | null,
-): void {
-  if (contextTokens !== null) {
-    recordUsage(runtime, {
-      contextTokens,
-      costBasis: null,
-      costUsd: null,
-    });
-  }
-}
-
-function recordCompaction(
-  runtime: SessionAgentRuntimeDependencies,
-  summary: string,
-  usage: CompactionUsage,
-  startedAt: number,
-  terminal = false,
-): void {
-  recordContext(runtime, usage.contextTokens);
-  writeRuntime(runtime, (sessionId, now, generation) => {
-    if (terminal) {
-      runtime.store.compactRuntimeTerminal(
-        sessionId,
-        summary,
-        usage,
-        now,
-        generation,
-        startedAt,
-        runtime.detail.restartHandoff,
-      );
-      return;
-    }
-    runtime.store.compactRuntimeConversation(
-      sessionId,
-      summary,
-      usage,
-      now,
-      generation,
-      startedAt,
-    );
-  });
+  runtime.pendingComponent(
+    state === "admission" ? "provider_admission" : "provider_request",
+  );
 }
 
 async function loadModels(
@@ -203,6 +139,7 @@ async function loadModels(
           generation,
         );
       });
+      throwIfRestartRequested(runtime);
       runtime.pendingComponent("provider_request");
       const metadata = await sessionRequestMetadata(
         runtime,
@@ -211,7 +148,10 @@ async function loadModels(
         },
         signal,
       );
-      const onRequestState = markProviderPending.bind(undefined, runtime);
+      throwIfRestartRequested(runtime);
+      const onRequestState = (state: ProviderRequestState) => {
+        markProviderPending(runtime, state);
+      };
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
@@ -219,7 +159,9 @@ async function loadModels(
         factory: runtime.modelFactory,
         isCurrent: runtime.isCurrent,
         onRequestState,
-        onStepStart: markRuntimeStepStart.bind(undefined, runtime),
+        onStepStart: () => {
+          markSessionStepStart(runtime);
+        },
         realtime: runtime.realtime,
         ...(options.streamId === undefined
           ? {}
@@ -306,9 +248,19 @@ async function executeAgentTool(
     ? Input
     : never,
 ): Promise<RunnerCommandResult> {
-  if (isRestartHandoffError(toolSignal.reason)) {
+  if (
+    isRestartHandoffError(toolSignal.reason) ||
+    runtime.restartHandoffRequested()
+  ) {
     return restartInterruptedToolResult();
   }
+  const trackOuterCall =
+    call.name === "brave_search" ||
+    call.name === "parallel" ||
+    (isAgentSessionToolName(call.name) && isSessionAgentToolName(call.name));
+  const finishOuterTracking = trackOuterCall
+    ? runtime.activeTools.begin(runtime.detail.id, call.id, call.name)
+    : () => undefined;
   try {
     runtime.pendingComponent("engine_tool");
     if (
@@ -341,6 +293,8 @@ async function executeAgentTool(
       return restartInterruptedToolResult();
     }
     throw error;
+  } finally {
+    finishOuterTracking();
   }
 }
 
@@ -368,8 +322,9 @@ export async function runSessionAgent(
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  const stepBoundaryRequested = (): boolean =>
-    runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
+  // Resumed runs park at their next step boundary too; exempting them let a
+  // drain that caught one never converge.
+  const stepBoundaryRequested = runtime.restartHandoffRequested;
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
       current: runtime.currentTools?.(),
@@ -380,6 +335,7 @@ export async function runSessionAgent(
     const tools = readAgentSessionToolNames(currentToolNames());
     return tools === undefined ? undefined : new Set(tools);
   };
+  const trackTool = activeToolTracker(runtime.activeTools, runtime.detail.id);
   const dispatchRunnerTool = async (
     name: string,
     toolArguments: Readonly<Record<string, unknown>>,
@@ -419,68 +375,79 @@ export async function runSessionAgent(
     if (name !== "explain_file" || result.state !== "completed") {
       return result;
     }
-    const promptValue = toolArguments["prompt"];
-    if (
-      promptValue !== undefined &&
-      (typeof promptValue !== "string" || promptValue.length > 4_000)
-    ) {
-      throw new Error(
-        "Tool argument prompt must be a string of at most 4000 characters",
-      );
-    }
-    let attachment: AgentAttachment | undefined;
+    const finishExplanationTracking = trackTool(
+      callId ?? createUuidV7(),
+      name,
+      { runnerCommand: false },
+    );
     try {
-      attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
-    } catch {
-      attachment = undefined;
+      const promptValue = toolArguments["prompt"];
+      if (
+        promptValue !== undefined &&
+        (typeof promptValue !== "string" || promptValue.length > 4_000)
+      ) {
+        throw new Error(
+          "Tool argument prompt must be a string of at most 4000 characters",
+        );
+      }
+      let attachment: AgentAttachment | undefined;
+      try {
+        attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
+      } catch {
+        attachment = undefined;
+      }
+      if (attachment === undefined) {
+        throw new Error("The runner returned invalid file attachment data");
+      }
+      throwIfRestartRequested(runtime);
+      runtime.pendingComponent("provider_request");
+      const currentModel = await discoverCurrentSessionModel(runtime, signal);
+      // Discovery may ignore cancellation and settle after the wrapper already
+      // reported timed-out; never start explanation model work afterward.
+      throwIfAgentAborted(signal);
+      throwIfRestartRequested(runtime);
+      if (currentModel === undefined) {
+        throw new Error(
+          "The session model is unavailable for file explanation",
+        );
+      }
+      const explanation = await explainAttachment(
+        {
+          attachment,
+          currentCredential: runtime.credential,
+          currentModel,
+          currentModelId: runtime.detail.model,
+          currentProvider: runtime.detail.provider,
+          currentProviderPricing: runtime.detail.providerPricing,
+          currentProviderTag: runtime.detail.openRouterProviderTag,
+          factory: runtime.modelFactory,
+          onStepStart: () => {
+            markSessionStepStart(runtime);
+          },
+          prompt: typeof promptValue === "string" ? promptValue : null,
+          resources: runtime,
+          restartRequested: runtime.restartHandoffRequested,
+          toolSettings: runtime.toolSettings,
+          userId: runtime.userId,
+          workspaceId: runtime.detail.workspaceId,
+        },
+        signal,
+      );
+      const usage = agentStepUsage(
+        { contextTokens: null, ...explanation.usage },
+        (step) =>
+          estimateAgentStepCost(
+            { providerPricing: explanation.providerPricing },
+            step.tokenUsage,
+          ),
+      );
+      if (usage !== undefined) {
+        recordRuntimeUsage(runtime, usage);
+      }
+      return { output: explanation.content, state: "completed" };
+    } finally {
+      finishExplanationTracking();
     }
-    if (attachment === undefined) {
-      throw new Error("The runner returned invalid file attachment data");
-    }
-    runtime.pendingComponent("provider_request");
-    const currentModel = await discoverCurrentSessionModel(runtime, signal);
-    // Discovery may ignore cancellation and settle after the wrapper already
-    // reported timed-out; never start explanation model work afterward.
-    throwIfAgentAborted(signal);
-    if (currentModel === undefined) {
-      throw new Error("The session model is unavailable for file explanation");
-    }
-    const onRequestState = markProviderPending.bind(undefined, runtime);
-    const explanation = await explainAttachment(
-      {
-        attachment,
-        currentCredential: runtime.credential,
-        currentModel,
-        currentModelId: runtime.detail.model,
-        currentProvider: runtime.detail.provider,
-        currentProviderPricing: runtime.detail.providerPricing,
-        currentProviderTag: runtime.detail.openRouterProviderTag,
-        factory: runtime.modelFactory,
-        onRequestState,
-        onStepStart: markRuntimeStepStart.bind(undefined, runtime),
-        prompt: typeof promptValue === "string" ? promptValue : null,
-        resources: runtime,
-        toolSettings: runtime.toolSettings,
-        userId: runtime.userId,
-        workspaceId: runtime.detail.workspaceId,
-      },
-      signal,
-    );
-    const usage = agentStepUsage(
-      { contextTokens: null, ...explanation.usage },
-      (step) =>
-        estimateAgentStepCost(
-          { providerPricing: explanation.providerPricing },
-          step.tokenUsage,
-        ),
-    );
-    if (usage !== undefined) {
-      recordUsage(runtime, usage);
-    }
-    return {
-      output: explanation.content,
-      state: "completed",
-    };
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -516,6 +483,9 @@ export async function runSessionAgent(
     braveSearch: runtime.braveSearch,
     currentTools: currentToolNames,
     executeTool: dispatchTool,
+    restartRequested: runtime.restartHandoffRequested,
+    trackTool: (callId, name, runnerCommand) =>
+      trackTool(callId ?? createUuidV7(), name, { runnerCommand }),
     tools: runtime.detail.tools,
     userId: runtime.userId,
     workspaceId: runtime.detail.workspaceId,

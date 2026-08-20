@@ -6,6 +6,7 @@ import type {
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
+import { isRestartHandoffError } from "./session-agent-runtime-state.ts";
 import {
   compactSessionConversation,
   runSessionAgent,
@@ -22,7 +23,6 @@ import type {
   SessionRestartRequester,
 } from "./session-restart-requester.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
-import { isRestartHandoffError } from "./session-runner-execution.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import { sessionHasStatus } from "./session-status.ts";
 import type { SessionStore } from "./session-store.ts";

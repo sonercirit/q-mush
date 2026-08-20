@@ -195,7 +195,7 @@ describe("agent sessions", () => {
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
-    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, settle.
+    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, and settlement.
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
         activeDurationMs: 18_000,
@@ -238,7 +238,6 @@ describe("agent sessions", () => {
     );
 
     expect(await response.clone().json()).toMatchObject({ autoCompact: false });
-    // Six 3s ticks: two SessionRuntimes reads, creation, message, completion, settle.
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
       autoCompact: false,
     });
@@ -332,7 +331,7 @@ describe("agent sessions", () => {
   });
 
   test("browses directories through an owned online runner", async () => {
-    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const setup = connectedSessionSetup(new ScriptedAgentModel([]), "api_key");
     const browseResponse = setup.sessions.directories(
       createAuthenticatedRequest(
         runnerDirectoriesPath(RUNNER_ID),
