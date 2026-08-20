@@ -129,6 +129,8 @@ test("reads and validates a running session pending component", () => {
       runtimePending: { component: "provider_request", since: 1.5 },
       status: "running",
     },
+    // Keep this construction distinct from the adjacent fractional-value case
+    // so the zero-threshold CPD check does not conflate separate codec bounds.
     Object.assign({}, DETAIL, {
       runtimePending: { component: "provider_request", since: -1 },
       status: "running",

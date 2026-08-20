@@ -5,7 +5,7 @@ import {
   apiKeyModel,
   complete,
   COMPLETED_EVENT,
-  type FakeProviderSocket,
+  completeProviderSocket,
   FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
@@ -80,9 +80,7 @@ export function responseEvent(
     type,
   };
 }
-export function completeResponse(socket: FakeProviderSocket, id: string): void {
-  socket.receive(responseEvent("response.completed", id));
-}
+export { completeProviderSocket as completeResponse };
 export async function expectRequestPending(
   pending: Promise<unknown>,
 ): Promise<void> {

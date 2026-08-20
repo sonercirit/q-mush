@@ -128,24 +128,30 @@ function sessionCostText(
       return `Cost: ${formatSessionCost(session.costUsd)}`;
   }
 }
-
 function liveDuration(now: number, startedAt: number): string {
   return formatSessionTime(Math.max(0, now - startedAt));
 }
-
 function LiveDuration(props: {
   readonly kind: "run" | "step";
   readonly now: () => number;
-  readonly startedAt: number;
+  readonly startedAt: number | null;
 }): JSX.Element {
   return (
-    <span
-      class={props.kind === "run" ? "text-emerald-200" : "text-emerald-200/80"}
-      data-session-run-duration={props.kind === "run" ? "true" : undefined}
-      data-session-step-duration={props.kind === "step" ? "true" : undefined}
-    >
-      {`${props.kind === "run" ? "Run" : "Step"}: ${liveDuration(props.now(), props.startedAt)}`}
-    </span>
+    <Show when={props.startedAt} keyed>
+      {(startedAt) => (
+        <span
+          class={
+            props.kind === "run" ? "text-emerald-200" : "text-emerald-200/80"
+          }
+          data-session-run-duration={props.kind === "run" ? "true" : undefined}
+          data-session-step-duration={
+            props.kind === "step" ? "true" : undefined
+          }
+        >
+          {`${props.kind === "run" ? "Run" : "Step"}: ${liveDuration(props.now(), startedAt)}`}
+        </span>
+      )}
+    </Show>
   );
 }
 
@@ -167,19 +173,20 @@ function SessionMetrics(props: {
       <span>
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
-      <Show when={props.session.activeStartedAt} keyed>
-        {(startedAt) => (
-          <LiveDuration kind="run" now={now} startedAt={startedAt} />
-        )}
-      </Show>
-      {props.session.activeStartedAt !== null &&
-      props.session.stepStartedAt !== null ? (
-        <LiveDuration
-          kind="step"
-          now={now}
-          startedAt={props.session.stepStartedAt}
-        />
-      ) : null}
+      <LiveDuration
+        kind="run"
+        now={now}
+        startedAt={props.session.activeStartedAt}
+      />
+      <LiveDuration
+        kind="step"
+        now={now}
+        startedAt={
+          props.session.activeStartedAt === null
+            ? null
+            : props.session.stepStartedAt
+        }
+      />
       <Show when={props.session.runtimePending} keyed>
         {(pending) => (
           <span class="text-amber-200/90" data-session-pending-component="true">
@@ -338,7 +345,6 @@ function sessionListRowMatches(
       (rightSession.pendingQuestions === null) &&
     leftSession.provider === rightSession.provider &&
     leftSession.reasoningEffort === rightSession.reasoningEffort &&
-    // Rows render only the component; include `since` here if they display it.
     leftSession.runtimePending?.component ===
       rightSession.runtimePending?.component &&
     leftSession.runnerRequired === rightSession.runnerRequired &&

@@ -50,15 +50,21 @@ test("retries a late prior-response error on a reused socket", async () => {
   completeProviderSocket(reused, "prior");
   expectDoneStep(await first);
 
+  const firstBody = reused.sent[0];
   const second = complete(model);
+  expect(reused.sent[1]).toBe(firstBody);
   reused.receive({
     error: { code: "late_error", message: "Stale failure" },
     type: "error",
   });
   await setup.waitForAttempt(1);
+  const replacement = requireProviderSocket(setup, 1);
+  replacement.open();
+  expect(replacement.sent).toEqual([firstBody]);
   expect(reused.readyState).toBe(WebSocket.CLOSED);
   expect(reused.closeReason).toBe("Uncorrelated provider error");
-  await replaceProviderSocket(setup, 1);
+  acknowledgeProviderSocket(replacement, "fresh");
+  completeProviderSocket(replacement, "fresh");
   expectDoneStep(await second);
 });
 

@@ -239,7 +239,7 @@ describe("agent sessions", () => {
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
-    // Six 3s ticks: failure.
+    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, settle.
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
         activeDurationMs: 18_000,
@@ -268,8 +268,6 @@ describe("agent sessions", () => {
         "POST",
       ),
     );
-    // Fail closed: no credential is read (or decrypted) for a runner the
-    // user cannot reach, and the restart gate shares this ordering.
     await expectJsonResponse(response, 409, { error: "runner_unavailable" });
     expect(credentialReads).toBe(0);
     setup.database.$client.close();
@@ -282,7 +280,7 @@ describe("agent sessions", () => {
     );
 
     expect(await response.clone().json()).toMatchObject({ autoCompact: false });
-    // Six 3s ticks: completion.
+    // Six 3s ticks: two SessionRuntimes reads, creation, message, completion, settle.
     expect(await expectSessionReaches(setup, response, "idle")).toMatchObject({
       autoCompact: false,
     });

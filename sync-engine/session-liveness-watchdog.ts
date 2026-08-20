@@ -225,7 +225,7 @@ export class SessionLivenessWatchdog {
     if (detail === undefined) {
       return;
     }
-    void this.#options.cleanup(detail);
+    void Promise.resolve(this.#options.cleanup(detail)).catch(() => undefined);
     this.#options.actions.stopChildren(detail, session.userId);
     this.#options.actions.finished(detail, session.userId);
   }

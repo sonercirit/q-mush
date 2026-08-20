@@ -1,8 +1,17 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import { ProviderStreamError } from "./provider-error.ts";
+import {
+  ProviderStreamError,
+  readProviderStreamError,
+} from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
 import { createProviderStreamAccumulator } from "./provider-stream.ts";
+
+function uncorrelatedError(message: string): ProviderWebSocketError {
+  return new ProviderWebSocketError(message, false, {
+    reconnectImmediately: true,
+  });
+}
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;
@@ -266,14 +275,17 @@ export class ProviderWebSocketSession {
           if (!requestActive) {
             if (value["type"] === "error") {
               if (reusedSocket !== undefined) {
+                const providerError = readProviderStreamError(value);
+                if (!providerError.transient) {
+                  accumulator.push(value);
+                  return;
+                }
                 // An uncorrelated error can be a delayed frame from the prior
                 // response. Retire the reused socket and replay this request
                 // on a fresh connection rather than assigning stale failure.
                 fail(
-                  new ProviderWebSocketError(
+                  uncorrelatedError(
                     "The reused provider WebSocket returned an uncorrelated error",
-                    false,
-                    { reconnectImmediately: true },
                   ),
                 );
                 socket.close(1011, "Uncorrelated provider error");
@@ -305,6 +317,19 @@ export class ProviderWebSocketSession {
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");
+          } else if (
+            value["type"] === "error" &&
+            currentResponseId !== undefined &&
+            eventResponseId === undefined &&
+            !readProviderStreamError(value).reconnectWebSocket
+          ) {
+            fail(
+              uncorrelatedError(
+                "The provider WebSocket returned an uncorrelated error",
+              ),
+            );
+            socket.close(1011, "Uncorrelated provider error");
+            return;
           } else if (
             eventResponseId !== undefined &&
             currentResponseId === undefined

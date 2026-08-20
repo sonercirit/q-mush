@@ -101,37 +101,36 @@
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads exact-root
   `AGENTS.md` (else `CLAUDE.md`).
 
-  `runner/runner-workspace.ts` owns canonical workspace and tool path
-  resolution. Tool, skill, model, and effort choices persist per session;
-  pickers use canonical schemas. Bounded `read_session` spans transcript
-  categories and definitions; `get_session_options` pages spawn choices. Grouped
-  tools manage non-blocking owned children, report final messages, resume idle
-  parents; `parallel` takes 2+ calls on four ordered workers, bounds output,
-  propagates cancellation. `solid/session-transcript.tsx` renders prompts, tool
-  definitions, raw details, Markdown, code/JSON, diffs, and contextual results,
-  preserving user line breaks; session lists page by ten. Live sessions use
-  `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  `solid/session-controller.ts`: model deltas combine once per frame per
-  session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
-  scroll anchor, and only bottom-pinned transcripts follow live output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else the first) and credential, first
-  discovered model, last directory, top reported effort. Unknown modalities
-  imply no attachment support; choices show provider and Q Mush modalities.
-  `solid/custom-select.tsx` shares search normalization, paginates past ten
-  items, owns accessible keyboard/focus. Focus mode fills the app viewport (not
-  browser Fullscreen), keeping drafts and scroll; its rail overlays on desktop,
-  becomes a drawer, collapses on selection, closing with Escape first.
-  `shared/agent-prompt.ts` builds the model system prompt and transcript
-  display; reasoning summaries persist as `thinking` messages omitted from
-  replay. Session and transcript rows sit in `agent_sessions` and
-  `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer); interrupted processes mark active
-  sessions failed for resumption; rebuilds add interrupted tool errors on
-  resume.
+`runner/runner-workspace.ts` owns canonical workspace and tool path resolution.
+Tool, skill, model, and effort choices persist per session; pickers use
+canonical schemas. Bounded `read_session` spans transcript categories and
+definitions; `get_session_options` pages spawn choices. Grouped tools manage
+non-blocking owned children, report final messages, resume idle parents;
+`parallel` takes 2+ calls on four ordered workers, bounds output, propagates
+cancellation. `solid/session-transcript.tsx` renders prompts, tool definitions,
+raw details, Markdown, code/JSON, diffs, and contextual results, preserving user
+line breaks; session lists page by ten. Live sessions use
+`solid/realtime-client.ts`, `solid/session-client.tsx`,
+`solid/session-controller.ts`: model deltas combine once per frame per session,
+other events are immediate, unchanged snapshots suppress notifications, keyed
+messages rerender only changes. The long-lived Solid root preserves focus and
+scroll; the changing session detail is not a document scroll anchor, and only
+bottom-pinned transcripts follow live output. `agent-model-discovery.ts` queries
+metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
+types/validation. New sessions take the default online runner (else the first)
+and credential, first discovered model, last directory, top reported effort.
+`solid/custom-select.tsx` shares search normalization, paginates past ten items,
+owns accessible keyboard/focus. Focus mode its rail overlays on desktop, becomes
+a drawer, collapses on selection, closing with Escape first.
+`shared/agent-prompt.ts` builds the model system prompt and transcript display;
+reasoning summaries persist as `thinking` messages omitted from replay. Session
+and transcript rows sit in `agent_sessions` and `agent_messages`;
+`step_started_at` sets per model step, clears with `activeStartedAt` (live Step
+timer); interrupted processes mark active sessions fail for resumption; rebuilds
+add interrupted tool errors. Replays reset partial UI deltas; terminal failures
+persist as non-replayed errors. While running, server-derived `runtimePending`
+is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
+`provider_admission`; the codec rejects it otherwise and the UI displays it.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -145,14 +144,12 @@
   `provider-credentials.ts`, `connected-account-oauth.ts`, the
   `solid/provider-*` client modules.
 - Measure cache hits against the cacheable prefix; total input dilutes with
-  fresh tool output. Persistent shortfalls are bugs, lone misses noise. Codex
-  sockets stay open per run, reconnect on failure, and close at run end. UI
-  rates divide by summed input minus the final request (summary) or the prior
-  step's input (per step), clamped at 100%, counting only fully reported steps.
-  OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
-  `session_id` header (cache routing); that surface rejects
-  `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
-  Anthropic-format requests mark one-hour `cache_control` breakpoints on the
+  fresh tool output. UI rates divide by summed input minus the final request
+  (summary) or the prior step's input (per step), clamped at 100%, counting only
+  fully reported steps. OpenAI/Codex requests carry the session ID as
+  `prompt_cache_key` and the Codex `session_id` header (cache routing); that
+  surface rejects `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter
+  and Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
   (`provider-prompt-cache.ts`); OpenAI rejects markers, and generic
   OpenAI-format endpoints get neither markers nor `prompt_cache_key` (Ollama

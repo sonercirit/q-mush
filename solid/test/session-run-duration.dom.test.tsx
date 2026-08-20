@@ -106,13 +106,21 @@ test("a running session shows and ticks its current step duration", () => {
   expect(stepDurationText(container)).toBe("Step: 1s");
   expect(runDurationText(container)).toBe("Run: 4s");
 
+  controller.applyDetail({
+    ...running,
+    stepStartedAt: null,
+    updatedAt: running.updatedAt + 2,
+  });
+
+  expect(stepDurationText(container)).toBeUndefined();
+
   // A stale step timestamp without an active run must render nothing.
   controller.applyDetail({
     ...running,
     activeStartedAt: null,
     status: "idle",
     stepStartedAt: Date.now(),
-    updatedAt: running.updatedAt + 2,
+    updatedAt: running.updatedAt + 3,
   });
 
   expect(stepDurationText(container)).toBeUndefined();
