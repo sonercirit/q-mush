@@ -103,10 +103,10 @@ Project memory.
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
   pickers use canonical schemas. `read_session` spans transcript categories and
-  definitions with positional record pagination; `get_session_options` pages
-  spawn choices. Grouped tools manage non-blocking owned children, report final
-  messages, resume idle parents; `parallel` takes 2+ calls on four ordered
-  workers, propagating cancels. `session-transcript.tsx` renders prompts,
+  definitions with positional pagination; `get_session_options` pages spawn
+  choices. Grouped tools manage non-blocking owned children, deliver final
+  messages, and resume idle parents; `parallel` uses four ordered workers for 2+
+  calls and propagates cancellation. `session-transcript.tsx` renders prompts,
   definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
   diffs/results, keeping user line breaks; lists page by ten. Live streams use
   four-key preparation frames; batches patch once, compacting the oldest or
@@ -119,24 +119,24 @@ Project memory.
   key reuse. Epochs stay monotonic while updates or barriers are queued;
   releasing the last barrier reclaims its epoch after updates drain. Terminal
   cleanup can't reset epochs having later barriers. Resets replace models; state
-  events coalesce one/frame; ready, health, tool settings, commands apply
-  directly; no-op snapshots suppress notices. Solid keeps focus/scroll; detail
-  disables document anchoring and only bottom-pinned transcripts follow output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `agent-configuration.ts` owns catalog types/validation. New sessions take the
-  default online runner (else first) and credential, first discovered model,
-  latest directory, top reported effort. Unknown modalities imply no attachment
-  support; choices show provider/Q Mush modalities. `custom-select.tsx` shares
-  search normalization, paginates past ten items, owns accessible
-  keyboard/focus. Focus mode fills the app viewport (not browser Fullscreen),
-  keeping drafts and scroll; its rail overlays on desktop, becomes a drawer,
-  collapses on selection, closing with Escape first. `agent-prompt.ts` builds
-  the system prompt and transcript display; reasoning summaries persist as
-  `thinking` messages omitted in replay. Session/transcript rows sit in
-  `agent_sessions` and `agent_messages`; `step_started_at` sets per model step,
-  clears with `activeStartedAt` (live Step timer); interrupted processes mark
-  active sessions failed for resumption; rebuilds add interrupted tool errors on
-  resume.
+  events coalesce one/frame; ready, health, commands, and user-scoped
+  tool-setting updates apply directly; no-op snapshots suppress notices. Solid
+  preserves focus/scroll; detail disables document anchoring, and only
+  bottom-pinned transcripts follow output. `agent-model-discovery.ts` queries
+  metadata, signal-cancelable; `agent-configuration.ts` owns catalog
+  types/validation. New sessions take the default online runner (else first) and
+  credential, first discovered model, latest directory, top reported effort.
+  Unknown modalities imply no attachment support; choices show provider/Q Mush
+  modalities. `custom-select.tsx` shares search normalization, paginates past
+  ten items, owns accessible keyboard/focus. Focus mode fills the app viewport
+  (not browser Fullscreen), keeping drafts and scroll; its rail overlays on
+  desktop, becomes a drawer, collapses on selection, closing with Escape first.
+  `agent-prompt.ts` builds the system prompt and transcript display; reasoning
+  summaries persist as `thinking` messages omitted in replay. Session/transcript
+  rows sit in `agent_sessions` and `agent_messages`; `step_started_at` sets per
+  model step, clears with `activeStartedAt` (live Step timer); interrupted
+  processes mark active sessions failed for resumption; rebuilds add interrupted
+  tool errors on resume.
 
 - `openai.ts`, `openrouter.ts`, `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -206,92 +206,91 @@ Project memory.
 
 ## Gotchas
 
-- HTTP port 12345 (`PORT` overrides). Google login reads `GOOGLE_CLIENT_ID`,
-  `GOOGLE_CLIENT_SECRET`, optional `GOOGLE_REDIRECT_URI`; the two appear
-  together; register `http://localhost:12345/api/auth/google/callback` on the
-  OAuth client. Never expose the secret to browser code.
-- `DATABASE_PATH` selects SQLite (default `data/q-mush.sqlite`; `data/`
-  ignored). Update `shared/database/schema.ts`, register tables in
-  `databaseSchema`, `bun run db:generate`, commit the migration and metadata;
-  `db:migrate` runs without HTTP. Drizzle Kit runs its config under Node; never
+- HTTP port 12345 (`PORT` overrides). Google login reads `GOOGLE_CLIENT_ID` and
+  `GOOGLE_CLIENT_SECRET` together, plus optional `GOOGLE_REDIRECT_URI`; register
+  `http://localhost:12345/api/auth/google/callback` on the OAuth client. Never
+  expose the secret to browser code.
+- `DATABASE_PATH` selects SQLite (default ignored path `data/q-mush.sqlite`).
+  Update `shared/database/schema.ts`, register tables in `databaseSchema`, run
+  `bun run db:generate`, and commit the migration and metadata; `db:migrate`
+  runs without HTTP. Drizzle Kit runs its config under Node, so never
   transitively import `bun:sqlite` there. Its migration transaction nullifies
-  foreign-key PRAGMAs, so `createDatabase` disables foreign keys first,
-  reenabling after.
-- Credential storage needs stable, private, 32-byte base64url `*_CREDENTIAL_KEY`
+  foreign-key PRAGMAs; `createDatabase` therefore disables foreign keys first
+  and reenables them afterward.
+- Credential storage needs private, stable, 32-byte base64url `*_CREDENTIAL_KEY`
   secrets per provider; redirect URIs end in `/api/<provider>/oauth/callback`.
-  OpenAI defaults to the Codex public OAuth client with a localhost-only
-  callback on its registered `http://localhost:1455/auth/callback` (keep that
-  port free); a differing `OPENAI_CLIENT_ID` disables that loopback and must
-  allow the configured or request-origin callback. OpenRouter OAuth needs no
-  client credentials, yielding a user-controlled key. Removal soft-deletes the
-  audit record, clears the payload; provider-side access stays.
+  OpenAI defaults to the public Codex OAuth client with a localhost-only
+  callback at `http://localhost:1455/auth/callback` (keep its port free); a
+  different `OPENAI_CLIENT_ID` disables that loopback and must allow the
+  configured or request-origin callback. OpenRouter OAuth needs no client
+  credentials and yields a user-controlled key. Removal soft-deletes the audit
+  record and clears its payload; provider-side access remains.
 - `shared/ids.ts` owns UUIDv7 generation and the `SYSTEM` audit actor; user
   actions use the internal user UUID. Never hard-delete: set `isDeleted`,
   `updatedAt`, `updatedById`, excluding soft-deleted rows from active queries.
   Audit actor fields aren't foreign keys — `SYSTEM` is no user.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
   connects bound at 10s, under the tool deadline.
-- Knip severities alone don't activate default-off issue types; keep the
-  included-issue list complete. Don't run the full test suite parallel to lint
-  or repo scans; tooling-policy tests probe `solid`.
+- Knip severities don't activate default-off issue types; keep the included list
+  complete. Don't run the full test suite alongside lint or repo scans;
+  tooling-policy tests probe `solid`.
 - Install commands use the request origin: connect other machines through a
   reachable one, not `localhost`. Removal leaves `~/.q-mush/runner`.
 - Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
   `compile.outfile` (`outputs[0]` is bundled JS): build in a temp dir, read it
   before cleanup.
-- Bare-metal file tools resolve relative paths against the runner workspace but
-  accept any runner-account-accessible path; container file tools and attachment
-  records stay contained (they run on the host). Container shells run as root in
-  a disposable per-session Arch container (`archlinux:latest` default) with
-  network/default capabilities, so pacman works; only the workspace mounts.
-  `read` pages files. Directory browsing escapes the session workspace, returns
+- Bare-metal tools accept any runner-account-accessible path; relative paths use
+  the workspace. Container tools and attachments stay host-contained. Container
+  shells are disposable per-session root Arch (`archlinux:latest` by default),
+  with network/default capabilities and only the workspace mounted, so pacman
+  works. `read` pages files. Directory browsing escapes the workspace, returns
   bounded directory-only metadata, times out stalls, maps HTTP cancellation to a
-  browse error, propagates agent-tool cancellation. Stopping a session aborts
-  its model request and cancels runner commands, ending an active shell. OpenAI
-  API-key and OAuth requests prefer Responses WebSockets, falling back to HTTP
-  streaming; OpenRouter and generic endpoints stream chat completions,
-  Anthropic-format ones Messages events. OpenAI OAuth refreshes its token bundle
-  before expiry. Sessions need an explicit model ID. Catalogs: OpenAI
-  `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex `/models`, or
-  generic `/models`; Anthropic-format catalogs read `display_name`,
-  `max_input_tokens`, `max_tokens`, the `capabilities` tree
-  (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
-  are independent; modalities come only from `image_input`/`pdf_input` leaves),
-  page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
-  guards, probing the endpoint's OpenAI-style listing only where capabilities
-  left efforts unknown. Codex parsing retains streamed output-text and
-  function-call argument deltas since completed events may omit `output`. Only
-  listed efforts are offered; OpenAI's catalog lacks reasoning data. Optional
-  reasoning uses `reasoning_effort` for OpenAI/generic chat completions and
-  `reasoning.effort` for OpenRouter and Codex Responses; Anthropic Messages
-  sends `output_config.effort`; unless persisted `adaptiveThinking` is false it
-  adds `thinking: {type: "adaptive", display: "summarized"}`. Lazy metadata
-  refresh fills null fields independently, never replacing a known capability or
-  output limit while learning the other. It sends neither for `none`, maps
-  `minimal` to `low`. Adaptive-only models (Fable) ignore `enabled`; newer
-  models default `display` to `omitted` — empty thinking text plus a signature
-  while thinking tokens bill. The local proxy tolerates tool-loop replay without
-  signed thinking blocks; strict endpoints might not. Streamed reasoning deltas
-  group by `output_index`/`summary_index`; separate summary parts with
-  paragraphs since completed responses may omit them. OpenAI's WebSocket Mode
-  has a 60-minute limit; the canonical `websocket_connection_limit_reached` and
+  browse error, and propagates tool cancellation. Stopping aborts the model
+  request and runner commands, ending an active shell. OpenAI API-key and OAuth
+  requests prefer Responses WebSockets, falling back to HTTP streaming;
+  OpenRouter and generic endpoints stream chat completions, Anthropic-format
+  ones Messages events. OpenAI OAuth refreshes its token bundle before expiry.
+  Sessions need an explicit model ID. Catalogs: OpenAI `/v1/models`, OpenRouter
+  `/api/v1/models/user`, ChatGPT Codex `/models`, or generic `/models`;
+  Anthropic-format catalogs read `display_name`, `max_input_tokens`,
+  `max_tokens`, the `capabilities` tree (`agent-model-discovery-anthropic.ts`:
+  effort and adaptive-thinking support are independent; modalities come only
+  from `image_input`/`pdf_input` leaves), page via `has_more`/`last_id` at
+  `limit=1000` with stale-cursor and page-count guards, probing the endpoint's
+  OpenAI-style listing only where capabilities left efforts unknown. Codex
+  parsing retains streamed output-text and function-call argument deltas since
+  completed events may omit `output`. Only listed efforts are offered; OpenAI's
+  catalog lacks reasoning data. Optional reasoning uses `reasoning_effort` for
+  OpenAI/generic chat completions and `reasoning.effort` for OpenRouter and
+  Codex Responses; Anthropic Messages sends `output_config.effort`; unless
+  persisted `adaptiveThinking` is false it adds
+  `thinking: {type: "adaptive", display: "summarized"}`. Lazy metadata refresh
+  fills null fields independently, never replacing a known capability or output
+  limit while learning the other. It sends neither for `none`, maps `minimal` to
+  `low`. Adaptive-only models (Fable) ignore `enabled`; newer models default
+  `display` to `omitted` — empty thinking text plus a signature while thinking
+  tokens bill. The local proxy tolerates tool-loop replay without signed
+  thinking blocks; strict endpoints might not. Streamed reasoning deltas group
+  by `output_index`/`summary_index`; separate summary parts with paragraphs
+  since completed responses may omit them. OpenAI's WebSocket Mode has a
+  60-minute limit; the canonical `websocket_connection_limit_reached` and
   observed underscore-free variant replace the socket once per step, then bound
   retries, replaying only an unpersisted step. Other WebSocket/HTTP
   interruptions or provider errors retry before persistence; replays reset
   partial UI deltas and exhausted WebSockets fall back to HTTP. Permanent errors
   and aborts don't retry; terminal failures persist as non-replayed `error`
   messages.
-- Tools use persisted user settings (`tool-settings*.ts`), defaulting to 30
-  minutes and 20,000 Unicode characters. Writes upsert on the partial index;
-  keep its conflict predicate schema-aligned. Each run snapshots both for its
-  prompt, schemas, engine/runner deadline, sleep, skills/session tools, and
-  final model-facing result bound; changes apply next run, realtime updates stay
-  user-scoped. Loading clears its timer, aborts its signal on settling.
-  `parallel` shares one budget; `ask_questions` waits outside it. One truncation
-  path/notice owns model-facing output; positional pagination keeps valid
-  continuation envelopes; input/security/transport bounds stay separate. Shell
-  has a runner timer; each POSIX command gets a session, stop/timeout signaling
-  its group. Write/edit cancellation is best-effort post-mutation. Outside
-  compaction, providers replay without a timeout.
+- Tools persist user settings (`tool-settings*.ts`), defaulting to 30 minutes
+  and 20,000 Unicode characters. Writes upsert on a partial index whose
+  predicate must match the schema. Runs snapshot both settings for the prompt,
+  schemas, engine/runner deadline, sleep, skills/session tools, and final
+  model-facing result bound; changes apply next run. Loading clears its timer
+  and aborts on settlement. `parallel` shares one budget; `ask_questions` waits
+  outside it. One truncation path/notice owns model-facing output; positional
+  pagination preserves continuation envelopes; input/security/transport bounds
+  remain separate. Shell has a runner timer; each POSIX command gets a session
+  whose group is signaled on stop/timeout. Write/edit cancellation is
+  best-effort after mutation. Outside compaction, provider replay has no
+  timeout.
 - Pin Playwright 1.62.1/Vitest 4.1.10: probes couple to Playwright `<launching>`
   and Vitest launch.
