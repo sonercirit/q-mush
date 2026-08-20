@@ -75,14 +75,16 @@ test("bounds admission through unknown frames", async () => {
   const observedStates: ("active" | "admission")[] = [];
   const request = beginLifecycleRequest(observedStates);
   request.socket.receive({ type: "provider.keepalive" });
-  expectRequestStates(observedStates, "active", "admission");
+  expectRequestStates(observedStates, "admission");
   await expectRequestPending(request.pending);
+  request.socket.receive(responseEvent("response.created", "current"));
   request.socket.receive({
     delta: "Done.",
-    response_id: "current",
+    item_id: "message-current",
+    output_index: 0,
     type: "response.output_text.delta",
   });
-  expectRequestStates(observedStates, "active", "admission", "active");
+  expectRequestStates(observedStates, "admission", "active");
   request.socket.receive({
     response: { id: "stale", output: [{ content: "Wrong" }] },
     type: "response.completed",
@@ -129,7 +131,7 @@ test("correlates deltas on a reused socket", async () => {
   const request = beginLifecycleRequest(states);
   const { model, pending: first, socket } = request;
   acknowledgeProviderSocket(socket, "response-1");
-  expectRequestStates(states, "active", "admission", "active");
+  expectRequestStates(states, "admission", "active");
   completeResponse(socket, "response-1");
   await first;
   const controller = new AbortController();
@@ -138,13 +140,7 @@ test("correlates deltas on a reused socket", async () => {
     controller.signal,
   );
   expect(socket.sent).toHaveLength(2);
-  const waitingStates = [
-    "active",
-    "admission",
-    "active",
-    "active",
-    "admission",
-  ] as const;
+  const waitingStates = ["admission", "active", "admission"] as const;
   expectRequestStates(states, ...waitingStates);
   expect(socket.listenerCount("message")).toBe(1);
   socket.receive(responseEvent("response.created", "response-1"));

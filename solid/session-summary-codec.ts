@@ -114,6 +114,7 @@ function readRuntimePending(
   return isRuntimePendingComponent(component) &&
     since !== undefined &&
     Number.isSafeInteger(since) &&
+    since >= 0 &&
     exactObjectKeys(record, ["component", "since"])
     ? { component, since }
     : undefined;

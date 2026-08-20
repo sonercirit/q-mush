@@ -189,8 +189,6 @@ export class ProviderWebSocketSession {
               this.#priorResponseIdBytes = retainedBytes;
               this.#socket = socket;
             } else {
-              this.#priorResponseIds.clear();
-              this.#priorResponseIdBytes = 0;
               socket.close(
                 1000,
                 currentResponseId === undefined

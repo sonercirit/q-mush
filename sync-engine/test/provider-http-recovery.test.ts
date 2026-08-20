@@ -184,7 +184,6 @@ describe("provider HTTP step recovery", () => {
       expect(states.at(-1)).toBe("active");
     });
     expect(states).toEqual([
-      "active",
       "admission",
       "admission",
       "admission",

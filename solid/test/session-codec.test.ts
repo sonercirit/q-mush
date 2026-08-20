@@ -129,6 +129,10 @@ test("reads and validates a running session pending component", () => {
       runtimePending: { component: "provider_request", since: 1.5 },
       status: "running",
     },
+    Object.assign({}, DETAIL, {
+      runtimePending: { component: "provider_request", since: -1 },
+      status: "running",
+    }),
   ]) {
     expectInvalidSession(invalid);
   }
