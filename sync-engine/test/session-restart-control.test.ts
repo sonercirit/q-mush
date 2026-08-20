@@ -177,6 +177,21 @@ function control(
   };
 }
 
+function throwingTimerOptions(setTimer: () => number = () => 0) {
+  return {
+    clearTimeout: () => undefined,
+    setTimeout: setTimer,
+  };
+}
+
+function timerFailureControl(setTimer: () => number) {
+  return control(() => "server", throwingTimerOptions(setTimer));
+}
+
+async function expectTimerFailure(promise: Promise<void>): Promise<void> {
+  await expect(promise).rejects.toThrow("the drain timer failed");
+}
+
 function recordedDeadlineControl() {
   const clock = { now: 100 };
   const delays = new Array<number>();
@@ -450,23 +465,42 @@ describe("session restart control", () => {
     const record = (reason: unknown) => unhandled.push(reason);
     process.on("unhandledRejection", record);
     try {
-      const { restart, runtimes } = control(() => "server", {
-        clearTimeout: () => undefined,
-        setTimeout: () => {
-          throw new Error("the drain timer failed");
-        },
+      const { restart, runtimes } = timerFailureControl(() => {
+        throw new Error("the drain timer failed");
       });
       runtimes.persistenceFailure = new Error("the restart marker failed");
 
-      await expect(restart.drainServer()).rejects.toThrow(
-        "the drain timer failed",
-      );
+      await expectTimerFailure(restart.drainServer());
       // Let any unobserved rejection surface before the listener is removed.
       await new Promise((resolve) => globalThis.setTimeout(resolve, 10));
       expect(unhandled).toEqual([]);
     } finally {
       process.off("unhandledRejection", record);
     }
+  });
+
+  test("a failed shared runner timer cannot escalate a later server retry", async () => {
+    let timerSetups = 0;
+    const { restart, runtimes } = timerFailureControl(() => {
+      timerSetups += 1;
+      if (timerSetups <= 2) throw new Error("the drain timer failed");
+      return timerSetups;
+    });
+    runtimes.settleDrainsImmediately = false;
+
+    await expectTimerFailure(restart.drainServer());
+    await expectTimerFailure(
+      restart.drainRunner("runner-1", "stale-runner-restart"),
+    );
+
+    const retriedServerDrain = restart.drainServer();
+    expect(
+      restart.escalateRunnerDrain("runner-1", "stale-runner-restart"),
+    ).toBe(false);
+    expect(runtimes.forceParkCalls).toBe(0);
+
+    runtimes.settleDrain();
+    await retriedServerDrain;
   });
 
   test("force-park failure still settles the bounded drain", async () => {

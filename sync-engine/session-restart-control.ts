@@ -310,9 +310,9 @@ export function createSessionRestartControl(
               false,
             );
           } catch (error) {
-            // Defensive bookkeeping cleanup: when timer setup itself throws,
-            // no bounded server drain exists for the stale association to
-            // escalate, so this branch has no separately observable outcome.
+            // Timer setup can fail while the runtime's server drain marker
+            // remains active. Remove this association so the failed runner
+            // restart cannot escalate a later bounded server-drain retry.
             if (sharedServerRestartIds.get(runnerId) === restartId) {
               sharedServerRestartIds.delete(runnerId);
             }

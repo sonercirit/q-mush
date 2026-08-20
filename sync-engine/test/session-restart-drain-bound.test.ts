@@ -340,23 +340,24 @@ describe("bounded restart drain", () => {
   });
 
   test("a later escalation does not re-park restored force-parked work", async () => {
-    const logged: string[] = Array.from<string>({ length: 0 });
-    const fixture = await singleSessionDrain(logged);
-    const runtime = fixture.session;
-    const { drained } = await startedDrain(fixture.control);
-    fixture.clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
+    expect.hasAssertions();
+    const logged: string[] = [];
+    const {
+      clock,
+      control,
+      session: runtime,
+    } = await singleSessionDrain(logged);
+    const { drained } = await startedDrain(control);
+    clock.advance(DEVELOPMENT_RESTART_LIFECYCLE_MS);
     await drained;
     expectForceParked(runtime);
     expect(logged).toHaveLength(1);
 
-    fixture.control.restoreServerDrain();
-    const runnerDrain = fixture.control.drainRunner(
-      "runner-1",
-      "runner-restart",
+    control.restoreServerDrain();
+    const runnerDrain = control.drainRunner("runner-1", "runner-restart");
+    expect(control.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      true,
     );
-    expect(
-      fixture.control.escalateRunnerDrain("runner-1", "runner-restart"),
-    ).toBe(true);
     await runnerDrain;
 
     expect(runtime.durable()).toHaveLength(2);
