@@ -1,7 +1,5 @@
 # AGENTS.md
 
-Living project memory.
-
 - TypeScript ESM Bun/SolidJS; tests under `test/`. `/` is home, `/app` the app.
 
 ## Working Agreements
@@ -9,8 +7,7 @@ Living project memory.
 - Research provider docs, probe APIs/schemas. Call a capability impossible only
   with excluding evidence; otherwise record an open question.
 - Preserve patterns; improve touched code, tests, docs, performance, security,
-  and DX. Ship small improvements now; use TDD, DRY/KISS, no premature
-  abstraction.
+  and DX. Use TDD, DRY/KISS, no premature abstraction.
 - Never invent tunables: probe omission, prefer defaults, else use metadata or
   docs.
 - Integrate once: wire capabilities to each protocol's native control, recording
@@ -18,26 +15,25 @@ Living project memory.
 - No reward hacking: don't weaken tests, special-case checks, or claim unrun
   checks. Fix defects on sight; if a fix is harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change. A repeated
-  instruction means a rule is missing. If evidence overturns a finding, fix the
-  code it justified and all stale records in that change; act, don't ask.
+  instruction means a rule is missing. If evidence overturns a finding, fix its
+  code and stale records in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
-  captured, then rerun narrow failures. Never commit secrets, artifacts or env
-  files.
+  captured, then rerun narrow failures. Never commit secrets or artifacts.
 
 ## Setup, Commands
 
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
 - Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
 - Migrations: `bun run db:generate` / `db:migrate`
-- Test: `bun run test` (Vitest DOM/server plus Chromium) / `test:watch`; use
-  `bun run test:browser` for Chromium. Bun 1.3.14's `--no-orphans` fails for
-  `./`-prefixed or absolute script paths, so keep its path bare; the script pins
-  headless and `PWDEBUG=0`. Playwright 1.62.1/Vitest 4.1.10 stay pinned because
-  probes couple to Playwright `<launching>` output and Vitest launch behavior.
-- `bun run check` runs every static check, each standalone too; `bun run format`
-  / `lint:fix` write fixes.
+- Test: `bun run test` (Vitest DOM/server + Chromium) / `test:watch`;
+  `test:browser` runs Chromium. Bun 1.3.14's `--no-orphans` fails for `./` or
+  absolute script paths, so keep its path bare; it pins headless and
+  `PWDEBUG=0`. Playwright 1.62.1/Vitest 4.1.10 stay pinned: probes couple to
+  Playwright's `<launching>` output and Vitest launch behavior.
+- `bun run check` runs every static check,; `bun run format` / `lint:fix` write
+  fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
-  whitespace checks on Bun 1.3.14 with a frozen lockfile.
+  whitespace on Bun 1.3.14, frozen lockfile.
 
 ## Architecture and Conventions
 

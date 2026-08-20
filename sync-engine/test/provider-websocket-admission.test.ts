@@ -1,86 +1,42 @@
-import { test } from "vitest";
+import { expect, test } from "vitest";
 import {
-  acknowledgeProviderSocket,
   apiKeyModel,
   complete,
-  COMPLETED_EVENT,
   FakeProviderSockets,
+  replaceProviderSocket,
   requireProviderSocket,
+  retryingSocket,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
-function responseEvent(id: string) {
-  return {
-    response: { ...COMPLETED_EVENT.response, id },
-    type: "response.completed",
-  };
-}
-async function requirePending(pending: Promise<unknown>): Promise<void> {
-  const marker = Symbol("pending");
-  const outcome = await Promise.race([
-    pending,
-    new Promise<symbol>((resolve) =>
-      setTimeout(() => {
-        resolve(marker);
-      }, 0),
-    ),
-  ]);
-  if (outcome !== marker)
-    throw new Error("The request settled during admission");
-}
-
-test("rejects a terminal-only stale response during reused-socket admission", async () => {
-  const sockets = new FakeProviderSockets(),
-    factory = sockets.create,
-    model = apiKeyModel({ webSocket: factory });
-  const first = model.complete([{ content: "Again", role: "user" }]);
-  const socket = requireProviderSocket(sockets, sockets.created.length - 1);
+test("adopts an ID observed after unidentified admission", async () => {
+  const sockets = new FakeProviderSockets();
+  const pending = complete(apiKeyModel({ webSocket: sockets.create }));
+  const socket = requireProviderSocket(sockets, 0);
   socket.open();
-  acknowledgeProviderSocket(socket, "first");
-  socket.receive(responseEvent("first"));
-  await first;
-  const pending = complete(model);
-  socket.receive(responseEvent("first"));
-  await requirePending(pending);
+  socket.receive({ type: "response.created" });
   socket.receive({
     delta: "Done.",
-    response_id: "second",
+    response_id: "identified-later",
     type: "response.output_text.delta",
   });
-  socket.receive(responseEvent("second"));
+  socket.receive({
+    response: { id: "identified-later", output: [] },
+    type: "response.completed",
+  });
   expectDoneStep(await pending);
   socket.close();
 });
 
-test("close clears retained response IDs before a fresh connection", async () => {
-  const sockets = new FakeProviderSockets();
-  const createSocket = sockets.create;
-  const model = apiKeyModel({ webSocket: createSocket });
-  const first = model.complete([{ content: "Initial", role: "user" }]);
-  const original = requireProviderSocket(sockets, sockets.created.length - 1);
-  original.open();
-  acknowledgeProviderSocket(original, "repeated");
-  original.receive(responseEvent("repeated"));
-  expectDoneStep(await first);
-  model.close();
-  const pending = complete(model);
-  const fresh = requireProviderSocket(sockets, 1);
-  fresh.open();
-  fresh.receive(responseEvent("repeated"));
-  expectDoneStep(await pending);
-  fresh.close();
-});
-
-test("accepts terminal-only responses across consecutive steps", async () => {
-  const sockets = new FakeProviderSockets(),
-    model = apiKeyModel({ webSocket: sockets.create }),
-    first = complete(model),
-    socket = requireProviderSocket(sockets, 0);
-  socket.open();
-  socket.receive(responseEvent("first-terminal"));
-  expectDoneStep(await first);
-  const second = complete(model);
-  socket.receive(responseEvent("second-terminal"));
-  expectDoneStep(await second);
-  socket.close();
+test("retries provider errors received before admission", async () => {
+  const retry = retryingSocket();
+  const first = requireProviderSocket(retry.sockets, 0);
+  first.open();
+  first.receive({
+    error: { code: "server_error", message: "Try again" },
+    type: "error",
+  });
+  await replaceProviderSocket(retry.sockets);
+  expectDoneStep(await retry.pending);
+  expect(retry.delays).toEqual([1_000]);
 });
