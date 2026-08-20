@@ -100,6 +100,7 @@ export class ProviderWebSocketSession {
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;
 
+  // Injectable only so tests can exercise retirement without a 16 MiB ID.
   constructor(maxRetainedResponseIdBytes = MAX_RETAINED_RESPONSE_ID_BYTES) {
     this.#maxRetainedResponseIdBytes = maxRetainedResponseIdBytes;
   }

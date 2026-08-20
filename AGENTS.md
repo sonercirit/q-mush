@@ -280,12 +280,12 @@
   bounded admission until `response.created`; HTTP header waits do not. Discard
   unknown, pre-creation, and mismatched-ID frames. Since provider-controlled ID
   size/rate is unbounded, use a 16 MiB fence budget, then retire (never evict).
-  The 16 MiB is `Bun.serve`'s transport-scale default, not a client limit; IDs
-  are ~53 bytes. ID-less admission skips retained IDs until a new ID;
-  concurrency closes superseded sockets. Fenced watchdog failures abort.
-  Requests unacknowledged through the five-minute liveness grace fail without
-  retry but remain resumable via `continue`. Other provider errors retry before
-  persistence; exhausted sockets use HTTP. Permanent errors/aborts do not retry.
+  IDs are ~53 bytes. ID-less admission skips retained IDs until a new ID and
+  completion retires the socket; concurrency closes superseded sockets. Fenced
+  watchdog failures abort. Requests unacknowledged through the five-minute
+  liveness grace fail without retry but remain resumable via `continue`. Other
+  provider errors retry before persistence; exhausted sockets use HTTP.
+  Permanent errors/aborts do not retry.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner
   commands otherwise have no application-owned step, queue, or time limits;

@@ -244,6 +244,7 @@ test("retires rather than evicts a socket whose response-ID fence exceeds one fr
   completeResponse(socket, "big");
   expectDoneStep(await first);
   expect(socket.readyState).toBe(WebSocket.CLOSED);
+  expect(socket.closeReason).toBe("Response ID retention limit reached");
 
   const second = completeSession();
   const replacement = requireProviderSocket(sockets, 1);
@@ -267,6 +268,7 @@ test("retires a socket after an unidentified response", async () => {
   request.socket.receive(COMPLETED_EVENT);
   expectDoneStep(await request.pending);
   expect(request.socket.readyState).toBe(WebSocket.CLOSED);
+  expect(request.socket.closeReason).toBe("Unidentified response complete");
   expectProviderSocketReleased(request.socket);
 
   const next = complete(request.model);
