@@ -252,7 +252,11 @@ test("agent directory browsing passes parent identity, authorization, and signal
     },
   );
   const database = createAuthenticatedTestDatabase();
-  const store = new CurrentSessionStore(database);
+  const store = new CurrentSessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
   const session = testSession();
   const actions = new SessionAgentActions({
     ...actionDefaults(),
