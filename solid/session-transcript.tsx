@@ -442,7 +442,10 @@ export function SessionTranscript(props: {
   const serializedTools = createMemo(() => {
     const settings = transcriptToolSettings();
     return settings === undefined
-      ? undefined
+      ? JSON.stringify({
+          settings: "Tool limits for this transcript are unavailable.",
+          tools: props.tools,
+        })
       : JSON.stringify(selectedAgentTools(props.tools, settings), null, 2);
   });
   const stepTiming = createSessionStepTiming(
@@ -520,18 +523,27 @@ export function SessionTranscript(props: {
     );
   return (
     <>
-      <Show when={props.filters.systemPrompt && transcriptToolSettings()}>
-        {(settings) =>
-          renderTranscriptInstruction({
+      <Show when={props.filters.systemPrompt}>
+        <Show
+          fallback={renderTranscriptInstruction({
             boundaryKey: "system-prompt",
-            content: createAgentSystemPrompt(
-              null,
-              props.executionEnvironment,
-              settings(),
-            ),
+            content: "Tool limits for this transcript are unavailable.",
             label: "System prompt",
-          })
-        }
+          })}
+          when={transcriptToolSettings()}
+        >
+          {(settings) =>
+            renderTranscriptInstruction({
+              boundaryKey: "system-prompt",
+              content: createAgentSystemPrompt(
+                null,
+                props.executionEnvironment,
+                settings(),
+              ),
+              label: "System prompt",
+            })
+          }
+        </Show>
       </Show>
       <Show when={props.filters.agentInstructions && props.agentFile !== null}>
         {renderTranscriptInstruction({
@@ -540,8 +552,8 @@ export function SessionTranscript(props: {
           label: props.agentFile?.name ?? "Agent instructions",
         })}
       </Show>
-      <Show when={props.filters.toolDefinitions && serializedTools()}>
-        {(tools) => <ToolDefinitions serializedTools={tools()} />}
+      <Show when={props.filters.toolDefinitions && props.tools.length > 0}>
+        <ToolDefinitions serializedTools={serializedTools()} />
       </Show>
       <For each={messageGroups().stable}>{renderMessage}</For>
       <Show
@@ -551,11 +563,7 @@ export function SessionTranscript(props: {
             render={renderStreamedMessage}
           />
         }
-        when={
-          transcriptToolSettings() === undefined
-            ? undefined
-            : stepTiming().activeStartedAt
-        }
+        when={stepTiming().activeStartedAt}
         keyed
       >
         {(startedAt) => (
