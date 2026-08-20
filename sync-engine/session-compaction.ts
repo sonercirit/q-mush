@@ -138,6 +138,7 @@ export function compactStoredConversation(options: {
       segment: nextSegment,
       sessionId: options.sessionId,
       startedAt: options.startedAt,
+      toolSettings: "inherit",
       userId,
     });
     const handoff = {

@@ -9,6 +9,7 @@ import type {
 import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
+import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
 import { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import {
@@ -34,10 +35,7 @@ import {
   sessionCanResume,
   sessionIsActive,
 } from "./session-controller-guards.ts";
-import {
-  applyWhenViewingNewestHistory,
-  showNewestSessionHistory,
-} from "./session-controller-history.ts";
+import { showNewestSessionHistory } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
 import type { SessionToolUpdateResult } from "./session-controller-options.ts";
 import {
@@ -142,8 +140,10 @@ export class SessionController {
       showNewestSessionHistory(this.#view, detail.hasOlderSegments);
     }
   }
-  #applyNewestSnapshot(apply: () => void): void {
-    if (this.#view.value.history.page === undefined) this.#applySnapshot(apply);
+  #applyNewestSnapshot(apply: () => void, blocked?: () => void): void {
+    if (this.#view.value.history.page === undefined) {
+      this.#applySnapshot(apply, false, blocked);
+    }
   }
   applyCompaction(
     event: Parameters<SessionRealtimeState["applyCompaction"]>[0],
@@ -156,10 +156,15 @@ export class SessionController {
       this.#live.applyCompaction(event);
     });
   }
-  applyDelta(event: Parameters<SessionRealtimeState["applyDelta"]>[0]): void {
-    this.#applyNewestSnapshot(() => {
-      this.#live.applyDelta(event);
-    });
+  applyStreamBatch(event: RealtimeStreamBatch): void {
+    this.#applyNewestSnapshot(
+      () => {
+        this.#live.applyStreamBatch(event);
+      },
+      () => {
+        this.#live.freezeStreamBatch(event);
+      },
+    );
   }
   applyQuestions(
     event: Extract<RealtimeServerEvent, { type: "session_questions" }>,
@@ -171,24 +176,30 @@ export class SessionController {
       }
     });
   }
-  applyToolDelta(event: Parameters<SessionRealtimeState["applyToolDelta"]>[0]) {
-    applyWhenViewingNewestHistory(this.#view, () => {
-      this.#live.applyToolDelta(event);
-    });
-  }
   applyToolSnapshot(
     event: Parameters<SessionRealtimeState["applyToolSnapshot"]>[0],
   ) {
-    applyWhenViewingNewestHistory(this.#view, () => {
-      this.#live.applyToolSnapshot(event);
-    });
+    this.#applyNewestSnapshot(
+      () => {
+        this.#live.applyToolSnapshot(event);
+      },
+      () => {
+        this.#live.rebaseStream(event.sessionId);
+      },
+    );
   }
-  #applySnapshot(apply: () => void, applyWhileSending = false): void {
+  #applySnapshot(
+    apply: () => void,
+    applyWhileSending = false,
+    blocked?: () => void,
+  ): void {
     if (
       !sessionMutationPending(this.#view.value) ||
       (applyWhileSending && this.#view.value.sending)
     ) {
       apply();
+    } else {
+      blocked?.();
     }
   }
   applyRealtime(sessions: readonly AgentSessionSummary[]): void {
@@ -211,18 +222,13 @@ export class SessionController {
   get transport(): SessionCommandTransport | undefined {
     return this.#transport;
   }
-  get currentDraft() {
-    return this.#view.value.draft;
-  }
-  get detail() {
-    return this.#view.value.detail;
-  }
   addImages(files: readonly File[], follow: boolean) {
     return addSessionImages({ files, follow, view: this.#view });
   }
   answerQuestions(answers: AskQuestionAnswers) {
     return answerSessionQuestions({
       answers,
+      realtime: this.#live,
       transport: this.#transport,
       view: this.#view,
     });
@@ -282,6 +288,7 @@ export class SessionController {
   create() {
     return createSessionFromView({
       loader: this.#loader,
+      realtime: this.#live,
       reconciliation: this.#reconciliation,
       transport: this.#transport,
       view: this.#view,
@@ -303,7 +310,7 @@ export class SessionController {
   openDirectoryPicker(): void {
     openSessionDirectoryPicker(this);
   }
-  reassign(onlineRunnerIds: readonly string[]): Promise<void> {
+  reassign(onlineRunnerIds: readonly string[]) {
     return reassignSessionFromView(
       this.#mutationDependencies(),
       onlineRunnerIds,
@@ -322,7 +329,7 @@ export class SessionController {
   ensureProviders(credential: string, model: string): void {
     this.#providers.ensure(credential, model);
   }
-  select(sessionId: string): Promise<void> {
+  select(sessionId: string) {
     showNewestSessionHistory(this.#view, false);
     return this.#loader.select(sessionId);
   }
@@ -360,10 +367,10 @@ export class SessionController {
     );
   }
 
-  olderHistory(): Promise<void> {
+  olderHistory() {
     return this.#history("older");
   }
-  newerHistory(): Promise<void> {
+  newerHistory() {
     return this.#history("newer");
   }
   #patchHistory(patch: Partial<SessionViewState["history"]>): void {
@@ -412,7 +419,7 @@ export class SessionController {
   followUp() {
     return this.#pendingInputs.submit("follow_up");
   }
-  retryPendingInput(clientRequestId: string): Promise<void> {
+  retryPendingInput(clientRequestId: string) {
     return this.#pendingInputs.retry(clientRequestId);
   }
   fork(
@@ -422,13 +429,14 @@ export class SessionController {
     return forkSessionFromView({
       forkPointMessageId: messageId,
       loader: this.#loader,
+      realtime: this.#live,
       reconciliation: this.#reconciliation,
       selection,
       transport: this.#transport,
       view: this.#view,
     });
   }
-  send(): Promise<void> {
+  send() {
     return this.#send();
   }
   #patchReassignment(values: Partial<SessionViewState["reassignment"]>): void {

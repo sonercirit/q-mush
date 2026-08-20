@@ -31,6 +31,7 @@ import {
   tokenUsageColumns,
 } from "./schema-columns.ts";
 import { agentSessionTables } from "./session-operation-schema.ts";
+import { createToolSettingsTable } from "./tool-settings-schema.ts";
 
 export { auditColumns } from "./audit-columns.ts";
 
@@ -48,6 +49,7 @@ function userIdColumn() {
 }
 
 const userOwnedAuditColumns = () => ownedAuditColumns(() => users.id);
+export const toolSettings = createToolSettingsTable(() => users.id);
 
 const workspaceDefaultIndex = activeDefaultIndex(
   "workspaces_user_default_unique",

@@ -8,6 +8,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
 export function agentModelOpenRouterProviderRouting(
@@ -31,6 +32,8 @@ export function usesAnthropicFormat(
   return provider === "generic" && credential.apiFormat === "anthropic";
 }
 
+export type ProviderRequestState = "active" | "admission";
+
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
@@ -38,6 +41,7 @@ export interface AgentModelRequestOptions {
   readonly maxOutputTokens: number | null;
   readonly model: string;
   readonly onDelta?: (delta: ProviderTextDelta) => void;
+  readonly onRequestState?: (state: ProviderRequestState) => void;
   readonly onStepStart?: () => void;
   readonly openRouterProviderRouting?: OpenRouterProviderRouting;
   readonly openRouterProviderTag?: string;
@@ -45,5 +49,6 @@ export interface AgentModelRequestOptions {
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly systemPrompt?: string;
+  readonly toolSettings: ToolSettings;
   readonly tools?: readonly AgentSessionToolName[];
 }

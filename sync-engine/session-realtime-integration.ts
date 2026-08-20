@@ -95,6 +95,7 @@ interface RealtimeSessionCommandsOptions {
     "discoverModels" | "discoverOpenRouterProviders" | "providers" | "store"
   >;
   readonly questions: SessionQuestionActionDependencies;
+  readonly restartSignal: () => AbortSignal;
   readonly toolUpdates: Omit<
     SessionToolUpdateDependencies,
     "readCredentialSource" | "store"
@@ -306,6 +307,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         modelCredentialPool: this.#dependencies.modelCredentialPool,
         notify: this.#dependencies.notify,
         now: this.#dependencies.now,
+        restartSignal: this.#dependencies.restartSignal,
         store: this.#dependencies.store,
       },
       input,
@@ -373,6 +375,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       discover: this.#dependencies.discoverModels,
       pool: this.#dependencies.modelCredentialPool,
       selection: { ...selection, userId: selection.user.id },
+      signal: this.#dependencies.restartSignal(),
     });
   }
 
@@ -516,6 +519,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
           this.#dependencies.discoverOpenRouterProviders,
         providers: this.#dependencies.providers,
         rejectCredentialErrors,
+        restartSignal: this.#dependencies.restartSignal,
       },
       input,
       store: this.#providerUpdateStoreAccess(),

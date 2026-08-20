@@ -148,7 +148,9 @@ export async function createSessionFromView(
   }
   const descriptor = sessionCreationDescriptor(draft, credential, parsedCap);
   const previousIds = new Set(sessions.map(({ id }) => id));
+  const selectedId = options.view.value.selectedId;
   const revision = options.view.begin({ creating: true, error: undefined });
+  if (selectedId !== undefined) options.realtime.rebaseStream(selectedId);
   options.loader.noteMutationStarted();
   try {
     const detail = await createSession(descriptor, options.transport);

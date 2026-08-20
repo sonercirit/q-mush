@@ -50,6 +50,7 @@ function shutdownHandoff(
 
 export class ShutdownInterruptedSessionStore {
   readonly #options: ShutdownInterruptedSessionStoreOptions;
+  #recoveryEnabled = true;
 
   constructor(options: ShutdownInterruptedSessionStoreOptions) {
     this.#options = options;
@@ -91,6 +92,18 @@ export class ShutdownInterruptedSessionStore {
         ...updatedAuditFields(SYSTEM_ID, now),
       },
     );
+  }
+
+  beginLiveDrain(): void {
+    this.#recoveryEnabled = false;
+  }
+
+  enableRecovery(): void {
+    this.#recoveryEnabled = true;
+  }
+
+  recoveryEnabled(): boolean {
+    return this.#recoveryEnabled;
   }
 
   #markedSessions(): readonly StoredSessionSnapshot[] {
@@ -135,7 +148,7 @@ export class ShutdownInterruptedSessionStore {
   }
 
   recover(now: () => number): void {
-    if (this.#markedSessions().length === 0) {
+    if (!this.#recoveryEnabled || this.#markedSessions().length === 0) {
       return;
     }
     const recoveredAt = now();
@@ -144,6 +157,7 @@ export class ShutdownInterruptedSessionStore {
   }
 
   failInvalid(now: number): void {
+    if (!this.#recoveryEnabled) return;
     const invalid = this.#markedSessions().filter((session) => {
       try {
         return this.#marker(session) === undefined;
@@ -171,6 +185,7 @@ export class ShutdownInterruptedSessionStore {
   }
 
   restore(now: number): void {
+    if (!this.#recoveryEnabled) return;
     for (const session of this.#markedSessions()) {
       const marked = this.#sessionMarker(session);
       if (marked === undefined) {
@@ -192,6 +207,7 @@ export class ShutdownInterruptedSessionStore {
             ...sessionTimingUpdate(session, now),
             ...updatedAuditFields(SYSTEM_ID, now),
           },
+
         });
         if (advanced === undefined) return;
         const handoff = {

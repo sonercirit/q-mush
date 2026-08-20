@@ -7,8 +7,12 @@ import {
   type SessionCreationDependencies,
 } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
+import { SessionRestartAbort } from "../../sync-engine/session-restart-abort.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionForUser } from "../../sync-engine/session-user-actions.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
+import { createStore } from "./session-store-test-fixtures.ts";
 
 const TEST_USER = {
   email: "mushroom@example.com",
@@ -79,6 +83,7 @@ function setupCreation(options: {
     notify: vi.fn(),
     now: () => 20,
     onCreated: vi.fn(),
+    restartSignal: () => new AbortController().signal,
     runtimes: {
       accepts: () => true,
       pendingRestart: () => undefined,
@@ -104,8 +109,58 @@ async function createWithSetup(
     TEST_USER,
     input,
     TEST_CREDENTIAL,
+    setup.dependencies.restartSignal(),
   );
 }
+
+test("HTTP creation retains restart identity across credential lookup", async () => {
+  const restart = new SessionRestartAbort();
+  const setup = setupCreation({ launch: () => true });
+  const input = sessionInput();
+  const requestInput = {
+    autoCompact: input.autoCompact,
+    credentialId: input.credentialId,
+    executionEnvironment: input.executionEnvironment,
+    images: input.images,
+    model: input.model,
+    prompt: input.prompt,
+    provider: input.provider,
+    runnerId: input.runnerId,
+    tools: input.tools,
+    workingDirectory: input.workingDirectory,
+  };
+  const response = await createSessionForUser(
+    {
+      compactionBoundary: () => {
+        throw new Error("unused");
+      },
+      discoverModels: setup.dependencies.discoverModels,
+      discoverOpenRouterProviders:
+        setup.dependencies.discoverOpenRouterProviders,
+      launchBoundary: () => ({
+        ...setup.dependencies,
+        runtimes: new SessionRuntimes(),
+        store: createStore().store,
+      }),
+      restartSignal: () => restart.signal,
+      runnerIsAvailable: () => true,
+      withCredential: async (_userId, _selection, action) => {
+        restart.abort("restart");
+        restart.restore();
+        return action(TEST_CREDENTIAL);
+      },
+    },
+    new Request("http://localhost/api/sessions", {
+      body: JSON.stringify(requestInput),
+      headers: { "content-type": "application/json" },
+      method: "POST",
+    }),
+    TEST_USER,
+    input.workspaceId,
+  );
+  expect(response.status).toBe(503);
+  expect(setup.store.create).not.toHaveBeenCalled();
+});
 
 async function expectCreatedDetail(
   setup: ReturnType<typeof setupCreation>,
@@ -173,4 +228,26 @@ test("classifies an unrepresentable post-commit result as uncertain without laun
   expect(setup.store.create).toHaveBeenCalledOnce();
   expect(launch).not.toHaveBeenCalled();
   expect(setup.dependencies.onCreated).not.toHaveBeenCalled();
+});
+
+test("classifies discovery with the captured restart signal after recovery", async () => {
+  const setup = setupCreation({ launch: vi.fn(() => false) });
+  const restart = new SessionRestartAbort();
+  setup.dependencies.restartSignal = () => restart.signal;
+  setup.dependencies.discoverModels = () => {
+    const cancellation = new Error("discovery aborted by restart");
+    restart.abort(cancellation);
+    restart.restore();
+    return Promise.reject(cancellation);
+  };
+
+  const response = await createWithSetup(setup);
+
+  expect({
+    status: response.status,
+    writes: vi.mocked(setup.store.create).mock.calls,
+  }).toEqual({
+    status: 503,
+    writes: [],
+  });
 });

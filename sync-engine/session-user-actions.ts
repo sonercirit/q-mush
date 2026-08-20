@@ -20,6 +20,10 @@ import {
   type PromptInput,
 } from "./session-input.ts";
 import { queueSessionForUser } from "./session-queue.ts";
+import {
+  captureRestartSignal,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 export interface SessionUserActionDependencies {
@@ -29,6 +33,7 @@ export interface SessionUserActionDependencies {
   readonly discoverModels: AgentModelDiscoverer;
   readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
   readonly launchBoundary: () => SessionLaunchBoundary;
+  readonly restartSignal: () => AbortSignal;
   readonly runnerIsAvailable: SessionRunnerAvailability;
   readonly withCredential: (
     userId: string,
@@ -43,10 +48,19 @@ export async function createSessionForUser(
   user: AuthenticatedUser,
   workspaceId: string,
 ): Promise<Response> {
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
   const input = await parseJsonRequest(request, readCreateSession);
   return input === undefined
     ? createApiError("invalid_request", 400)
-    : createValidatedSessionForUser(dependencies, user, input, workspaceId);
+    : createValidatedSessionForUser(
+        dependencies,
+        user,
+        input,
+        workspaceId,
+        restartSignal,
+      );
 }
 
 function createValidatedSessionForUser(
@@ -54,7 +68,11 @@ function createValidatedSessionForUser(
   user: AuthenticatedUser,
   input: CreateSessionInput,
   workspaceId: string,
+  restartSignal: AbortSignal,
 ): Promise<Response> {
+  if (restartSignal.aborted) {
+    return Promise.resolve(serverRestartingResponse());
+  }
   const scopedInput = { ...input, workspaceId };
   const available = dependencies.runnerIsAvailable(
     user.id,
@@ -69,11 +87,13 @@ function createValidatedSessionForUser(
       {
         discoverModels: dependencies.discoverModels,
         discoverOpenRouterProviders: dependencies.discoverOpenRouterProviders,
+        restartSignal: dependencies.restartSignal,
         ...dependencies.launchBoundary(),
       },
       user,
       scopedInput,
       credential,
+      restartSignal,
     ),
   );
 }

@@ -8,6 +8,39 @@ import { runningStore } from "./session-store-lifecycle-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 describe("stored session reads", () => {
+  test("returns complete persisted source content before the final result bound", () => {
+    const { database, store } = runningStore();
+    const agentFileContent = `instructions:${"😀".repeat(12_000)}`;
+    const messageContent = `result:${"é".repeat(10_000)}`;
+    store.setCurrentAgentFile(
+      STORE_SESSION_ID,
+      { content: agentFileContent, name: "AGENTS.md" },
+      TEST_NOW + 2,
+    );
+    store.appendCurrentAgentMessage(
+      STORE_SESSION_ID,
+      {
+        content: messageContent,
+        role: "tool",
+        toolCallId: "call-read",
+        toolName: "read",
+      },
+      TEST_NOW + 3,
+    );
+
+    const snapshot = readSessionSnapshot(database, {
+      includeSystem: true,
+      limit: 10,
+      roles: ["tool"],
+      sessionId: STORE_SESSION_ID,
+      userId: TEST_USER_ID,
+    });
+
+    expect(snapshot?.agentFile?.content).toBe(agentFileContent);
+    expect(snapshot?.transcript.messages.at(-1)?.content).toBe(messageContent);
+    database.$client.close();
+  });
+
   test("returns persisted error notices when the error category is selected", () => {
     const { database, store } = runningStore();
     // Truncation and failure notices persist as error rows; the database

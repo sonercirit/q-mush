@@ -7,6 +7,7 @@ import {
   defineElementSize,
   defineElementWidth,
 } from "../element-size-test-helpers.ts";
+import { applySessionDelta } from "../session-controller-stream-test-helper.ts";
 import {
   messageBoundary,
   mountTestTranscript,
@@ -99,7 +100,7 @@ function applyTranscriptDelta(
   detail: AgentSessionDetail,
   content: string,
 ): void {
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content,
     sessionId: detail.id,
     thinking: "",
@@ -374,7 +375,7 @@ test("keeps persisted and streamed turns in canonical DOM order", () => {
   const stableUser = messageBoundary(container, "user-earlier");
   const stableAssistant = messageBoundary(container, "assistant-earlier");
 
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: "Live answer",
     sessionId: detail.id,
     thinking: "Live reasoning",
@@ -437,13 +438,13 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
   const stableUser = messageBoundary(container, "user-stable");
   const stableAssistant = messageBoundary(container, "assistant-stable");
 
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: "Streaming",
     sessionId: detail.id,
     thinking: "Streaming",
     type: "session_delta",
   });
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: " response",
     sessionId: detail.id,
     thinking: " thought",

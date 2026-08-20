@@ -3,6 +3,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 import {
   closeSpawnedChildSetup,
   completeSpawnedChildGeneration,
@@ -39,7 +40,7 @@ function requireChildCallback(setup: SpawnedChildReference) {
 
 function finisherCallbackContent(): string {
   const setup = spawnedChildSetup();
-  expect(deliverSpawnedChildCallback(setup)).toMatchObject({
+expect(deliverSpawnedChildCallback(setup)).toMatchObject({
     disposition: "promoted",
     parentId: setup.parentId,
   });

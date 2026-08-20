@@ -1,4 +1,6 @@
+import { abortSignalIsAborted } from "../shared/abort-signal.ts";
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
+import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
@@ -17,15 +19,27 @@ export async function discoverSessionModelsFromPool(options: {
   readonly discover: AgentModelDiscoverer;
   readonly pool: ModelCredentialPool;
   readonly selection: ModelDiscoverySelection;
+  readonly signal?: AbortSignal;
 }): Promise<AgentModelCatalog> {
-  const { discover, pool, selection } = options;
+  const { discover, pool, selection, signal } = options;
+  if (abortSignalIsAborted(signal)) {
+    throw new RealtimeCommandError("server_restarting");
+  }
   const credentials = await pool.representative(selection.userId, selection);
+  if (abortSignalIsAborted(signal)) {
+    throw new RealtimeCommandError("server_restarting");
+  }
   requireCredentialCandidates(credentials);
   let lastError: unknown;
   for (const credential of credentials) {
     try {
-      return await discover(selection.provider, credential);
+      const catalog = await discover(selection.provider, credential, signal);
+      throwIfAgentAborted(signal);
+      return catalog;
     } catch (error) {
+      if (abortSignalIsAborted(signal)) {
+        throw new RealtimeCommandError("server_restarting");
+      }
       lastError = error;
     }
   }

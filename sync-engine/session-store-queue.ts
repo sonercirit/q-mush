@@ -120,6 +120,8 @@ export function queueStoredSession(options: {
       now,
       sessionId,
       startTurn: messageId === undefined ? {} : { id: messageId },
+      toolSettings: resources.toolSettings(userId),
+      userId,
       values: {
         activeStartedAt: null,
         stepStartedAt: null,

@@ -2,6 +2,7 @@ import { createSignal } from "solid-js";
 import { render } from "solid-js/web";
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionSummary } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../../shared/tool-stream.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
@@ -165,6 +166,7 @@ test("a tool delta reads and replaces only its own concurrent stream", () => {
         executionGeneration: 0,
         id: "streaming-turn",
         startedAt: 1,
+        toolSettings: DEFAULT_TOOL_SETTINGS,
       },
     ],
     tools: [],

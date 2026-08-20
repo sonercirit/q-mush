@@ -1,61 +1,68 @@
-import { utf8ByteLength, utf8Prefix } from "./utf8.ts";
+const TOOL_OUTPUT_NOTICE_PREFIX = "\n\n[Tool output truncated: ";
+const TOOL_OUTPUT_NOTICE_SUFFIX =
+  " Unicode character limit reached; omitted content is unavailable.]";
 
-export const MAXIMUM_TOOL_OUTPUT_BYTES = 50 * 1_024;
-export const MAXIMUM_TOOL_OUTPUT_LINES = 2_000;
-
-export interface BoundedToolOutput {
-  readonly output: string;
-  readonly shownLines: number;
-  readonly truncated: boolean;
-}
-
-export function boundedToolOutputLines(
-  lines: readonly string[],
-  maximumLines = MAXIMUM_TOOL_OUTPUT_LINES,
-  partialFirstLine = true,
-): BoundedToolOutput {
-  let shownLines = Math.min(lines.length, maximumLines);
-  let output = lines.slice(0, shownLines).join("\n");
-  while (shownLines > 0 && utf8ByteLength(output) > MAXIMUM_TOOL_OUTPUT_BYTES) {
-    shownLines -= 1;
-    output = lines.slice(0, shownLines).join("\n");
+export function codePointPrefix(value: string, maximum: number): string {
+  if (maximum <= 0) return "";
+  let codePoints = 0;
+  let end = 0;
+  for (const character of value) {
+    if (codePoints === maximum) break;
+    end += character.length;
+    codePoints += 1;
   }
-  if (shownLines === 0 && lines.length > 0 && partialFirstLine) {
-    output = utf8Prefix(lines[0] ?? "", MAXIMUM_TOOL_OUTPUT_BYTES);
-    shownLines = 1;
+  return value.slice(0, end);
+}
+
+export function unicodeCharacterCount(value: string): number {
+  let count = 0;
+  let index = 0;
+  while (index < value.length) {
+    const codePoint = value.codePointAt(index);
+    index += codePoint !== undefined && codePoint > 0xffff ? 2 : 1;
+    count += 1;
   }
-  return {
-    output,
-    shownLines,
-    truncated:
-      shownLines < lines.length ||
-      output !== lines.slice(0, shownLines).join("\n"),
-  };
+  return count;
 }
 
-export function boundedToolOutput(output: string): BoundedToolOutput {
-  return boundedToolOutputLines(output.split("\n"));
+export function toolOutputTruncationNotice(maximum: number): string {
+  return `${TOOL_OUTPUT_NOTICE_PREFIX}${maximum.toLocaleString("en-US")}${TOOL_OUTPUT_NOTICE_SUFFIX}`;
 }
 
-export function formatBoundedToolOutput(
-  bounded: BoundedToolOutput,
-  notice: string,
+/** The sole final model-facing output bound, measured in Unicode code points. */
+function boundToolOutput(
+  output: string,
+  settings: { readonly outputLimitCharacters: number },
 ): string {
-  return [bounded.output, notice]
-    .filter((part) => part.length > 0)
-    .join("\n\n");
+  const maximum = settings.outputLimitCharacters;
+  if (unicodeCharacterCount(output) <= maximum) return output;
+  const notice = toolOutputTruncationNotice(maximum);
+  const noticeLength = unicodeCharacterCount(notice);
+  return `${codePointPrefix(output, maximum - noticeLength)}${notice}`;
 }
 
-export function applyToolOutputNotice(output: string, notice: string): string {
-  const bounded = boundedToolOutput(output);
-  return bounded.truncated ? formatBoundedToolOutput(bounded, notice) : output;
+function limitResultOutput<Result extends { readonly output: string }>(
+  result: Result,
+  maximum: number,
+): Result {
+  const output = codePointPrefix(result.output, maximum);
+  return output === result.output ? result : { ...result, output };
 }
 
-export function toolOutputLimitNotice(spillPath: string): string {
-  return `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_BYTES)} bytes). The full output has been saved to ${spillPath}. Use the read tool with offset/limit to continue.`;
+/** Retains one extra code point so the engine can detect runner overflow. */
+export function retainToolResultOverflow<
+  Result extends { readonly output: string },
+>(
+  result: Result,
+  settings: { readonly outputLimitCharacters: number },
+): Result {
+  return limitResultOutput(result, settings.outputLimitCharacters + 1);
 }
 
-export function hardTruncatedToolOutput(output: string): string {
-  const notice = `Output exceeds the per-call limit (${String(MAXIMUM_TOOL_OUTPUT_LINES)} lines or ${String(MAXIMUM_TOOL_OUTPUT_BYTES)} bytes). The full output could not be saved because the session runner is unreachable; this output was hard-truncated.`;
-  return applyToolOutputNotice(output, notice);
+export function boundToolResult<Result extends { readonly output: string }>(
+  result: Result,
+  settings: { readonly outputLimitCharacters: number },
+): Result {
+  const bounded = boundToolOutput(result.output, settings);
+  return bounded === result.output ? result : { ...result, output: bounded };
 }

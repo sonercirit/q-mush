@@ -13,10 +13,12 @@ import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discove
 import type { SessionCredentialSelection } from "./session-credential-access.ts";
 import { compactChangedSessionFork } from "./session-fork-compaction.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
+import { discoverRequiredSessionMetadata } from "./session-provider-selection.ts";
 import {
-  requireSessionMetadata,
-  sessionMetadataFromDependencies,
-} from "./session-provider-selection.ts";
+  captureRestartSignal,
+  throwIfServerRestarting,
+  withRestartErrorTranslation,
+} from "./session-restart-gate.ts";
 import type { SessionStore } from "./session-store.ts";
 
 interface SessionCredentialReader {
@@ -34,6 +36,7 @@ export interface SessionForkDependencies
     ModelCredentialPool,
     "candidates" | "reject"
   >;
+  readonly restartSignal: () => AbortSignal;
   readonly store: Pick<SessionStore, "fork">;
 }
 
@@ -42,6 +45,7 @@ async function selectedForkConfiguration(
   userId: string,
   input: SessionForkInput,
   source: AgentSessionDetail,
+  capturedRestartSignal: () => AbortSignal,
 ) {
   const selection = sessionForkSelection(input);
   if (selection === undefined) return undefined;
@@ -63,18 +67,21 @@ async function selectedForkConfiguration(
         selection.model === source.model
           ? source.openRouterProviderTag
           : null;
-      const metadata = requireSessionMetadata(
-        await sessionMetadataFromDependencies({
-          credential,
-          dependencies,
-          input: {
-            model: selection.model,
-            openRouterProviderTag,
-            provider: selection.provider,
-          },
-          ownerId: userId,
-          rejectCredentialErrors: balanced,
-        }),
+      const metadata = await withRestartErrorTranslation(
+        capturedRestartSignal,
+        async (signal) =>
+          discoverRequiredSessionMetadata({
+            credential,
+            dependencies,
+            input: {
+              model: selection.model,
+              openRouterProviderTag,
+              provider: selection.provider,
+            },
+            ownerId: userId,
+            rejectCredentialErrors: balanced,
+            signal,
+          }),
       );
       return {
         configuration: {
@@ -113,12 +120,17 @@ export async function forkSessionForUser(options: {
   readonly source: AgentSessionDetail;
   readonly user: AuthenticatedUser;
 }): Promise<AgentSessionDetail> {
+  const { read: capturedRestartSignal, signal: restartSignal } =
+    captureRestartSignal(options.dependencies.restartSignal);
+  throwIfServerRestarting(restartSignal);
   const selected = await selectedForkConfiguration(
     options.dependencies,
     options.user.id,
     options.input,
     options.source,
+    capturedRestartSignal,
   );
+  throwIfServerRestarting(restartSignal);
   const result = options.dependencies.store.fork(
     options.user.id,
     options.input.sourceSessionId,

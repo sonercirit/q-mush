@@ -82,6 +82,7 @@ export function settleTerminalRuntime(
           previousExecutionGeneration: session.executionGeneration,
           segment: session.currentSegment,
           sessionId,
+          toolSettings: "inherit",
           userId: session.userId,
         })
       : undefined;

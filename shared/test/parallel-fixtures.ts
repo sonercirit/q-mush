@@ -1,3 +1,5 @@
+import { expect } from "vitest";
+
 export interface ParallelToolUseFixture {
   readonly parameters: {
     readonly content: string;
@@ -5,6 +7,14 @@ export interface ParallelToolUseFixture {
     readonly path: string;
   };
   readonly recipient_name: string;
+}
+
+export function expectCompleteParallelPayload(
+  output: string,
+  payload: string,
+): void {
+  expect(output).toContain(payload);
+  expect(output).not.toContain("parallel output truncated");
 }
 
 export function createParallelToolUses(

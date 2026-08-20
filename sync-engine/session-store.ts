@@ -12,6 +12,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -33,6 +34,7 @@ import {
   queuedSessionDetails,
   queuedSessionOwnerIds,
 } from "./session-queued.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import {
   createStoredSession,
   type CreateAgentSession,
@@ -89,25 +91,34 @@ import {
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
+import { activeSessionToolSettings } from "./session-turn-store.ts";
 export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #reportParent: SessionStoreWriteResources["reportParent"];
   readonly #resources: readonly [AppDatabase, IdGenerator];
+  readonly #runtimes: Pick<SessionRuntimes, "pending">;
+  readonly #toolSettings: (userId: string) => ToolSettings;
   constructor(
     database: AppDatabase,
     generateId: IdGenerator = createUuidV7,
+    toolSettings: (userId: string) => ToolSettings,
+    runtimes: Pick<SessionRuntimes, "pending">,
     reportParent?: SessionStoreWriteResources["reportParent"],
   ) {
     super(database, generateId, reportParent);
     this.#resources = [database, generateId];
     this.#reportParent = reportParent;
+    this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,
+      toolSettings: (_userId, sessionId, executionGeneration) =>
+        activeSessionToolSettings(database, sessionId, executionGeneration),
     });
+    this.#runtimes = runtimes;
   }
   get #database(): AppDatabase {
     return this.#resources[0];
@@ -121,6 +132,7 @@ export class SessionStore extends SessionStoreRestarts {
       database,
       generateId,
       read,
+      toolSettings: this.#toolSettings,
       ...(this.#reportParent === undefined
         ? {}
         : { reportParent: this.#reportParent }),
@@ -143,6 +155,13 @@ export class SessionStore extends SessionStoreRestarts {
   }
   questions(): AskQuestionsStore {
     return this.#questions;
+  }
+  toolSettings(sessionId: string, executionGeneration: number): ToolSettings {
+    return activeSessionToolSettings(
+      this.#database,
+      sessionId,
+      executionGeneration,
+    );
   }
   #readPendingQuestions(userId: string, sessionId: string) {
     return this.#questions.pending(userId, sessionId);
@@ -180,6 +199,7 @@ export class SessionStore extends SessionStoreRestarts {
       userId,
       sessionId,
       workspaceId,
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
@@ -188,6 +208,7 @@ export class SessionStore extends SessionStoreRestarts {
       this.#readPendingQuestions.bind(this),
       userId,
       workspaceId,
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   history(
@@ -475,6 +496,7 @@ export class SessionStore extends SessionStoreRestarts {
         database: this.#database,
         generateId: this.#resources[1],
         read: (ownerId, id) => this.get(ownerId, id, workspaceId),
+        toolSettings: this.#toolSettings,
       },
       sessionId,
       userId,

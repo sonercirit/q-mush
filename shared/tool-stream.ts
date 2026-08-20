@@ -5,8 +5,8 @@ import { isRecord } from "./validation.ts";
 export const MAXIMUM_TOOL_STREAM_DELTA_BYTES = 32 * 1_024;
 export const MAXIMUM_TOOL_STREAM_FIELD_BYTES = 256 * 1_024;
 export const MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH = 1_024;
-const MAXIMUM_TOOL_STREAMS_PER_SESSION = 100;
-const MAXIMUM_TOOL_STREAMS_PER_USER = 1_000;
+export const MAXIMUM_TOOL_STREAMS_PER_SESSION = 100;
+export const MAXIMUM_TOOL_STREAMS_PER_USER = 1_000;
 export const TOOL_STREAM_TRUNCATED_MARKER = "\n[stream truncated]";
 
 export type ToolStreamTerminalState =

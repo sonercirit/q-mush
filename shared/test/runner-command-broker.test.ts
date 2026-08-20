@@ -1,10 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 import {
   RunnerCommandBroker,
-  RunnerDisconnectedError,
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
+import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -32,7 +32,7 @@ async function cancelAndExpectUnauthorized(
   broker: RunnerCommandBroker,
   result: Promise<RunnerCommandResult>,
 ): Promise<void> {
-  broker.cancelSession(SESSION_ID);
+  broker.cancelSessionCommands(SESSION_ID);
   await expectUnauthorizedRunnerCommand(result);
 }
 
@@ -143,6 +143,27 @@ test("pushes cancellation for an in-flight WebSocket command", async () => {
 });
 
 describe("runner command broker", () => {
+  test("reports duplicate pending runner tool counts", async () => {
+    let commandId = 0;
+    const broker = deliveredBroker(() => `progress-${String(++commandId)}`);
+    const first = broker.dispatch(brokerRunnerCommand({ tool: "read" }));
+    const second = broker.dispatch(brokerRunnerCommand({ tool: "read" }));
+    const third = broker.dispatch(
+      brokerRunnerCommand({ tool: "brave_search" }),
+    );
+
+    const progress = broker.pendingToolProgress(SESSION_ID);
+    expect(progress).toHaveLength(2);
+    expect(progress.find(({ name }) => name === "read")?.count).toBe(2);
+    expect(progress.find(({ name }) => name === "brave_search")?.count).toBe(1);
+    broker.cancelSessionCommands(SESSION_ID);
+    await Promise.all([
+      expectUnauthorizedRunnerCommand(first),
+      expectUnauthorizedRunnerCommand(second),
+      expectUnauthorizedRunnerCommand(third),
+    ]);
+  });
+
   test("rejects a queued command when authorization is revoked before take", async () => {
     const dispatch = revocableRunnerDispatch("revoked-take");
 
@@ -583,7 +604,7 @@ describe("runner command broker", () => {
     const result = broker.dispatch(
       brokerRunnerCommand({ arguments: { command: "sleep 10" } }),
     );
-    broker.cancelSession(SESSION_ID);
+    broker.cancelSessionCommands(SESSION_ID);
 
     expect(broker.take(RUNNER_ID)).toBeUndefined();
     const error = await captureBrokerRejection(result);

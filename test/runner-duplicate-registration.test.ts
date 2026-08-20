@@ -11,9 +11,9 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 import {
   RunnerCommandBroker,
-  RunnerDisconnectedError,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
+import { RunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import {
   RUNNER_SUPERSEDED_CLOSE_CODE,
   runnerConnectMessage,

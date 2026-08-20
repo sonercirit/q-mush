@@ -3,8 +3,10 @@ import type { AgentFile } from "../../shared/agent-file.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type {
   AgentSessionMessage,
+  AgentSessionStatus,
   AgentSessionTurn,
 } from "../../shared/session-model.ts";
+import type { ToolStreamEntry } from "../../shared/tool-stream.ts";
 import {
   DEFAULT_SESSION_TRANSCRIPT_FILTERS,
   type SessionTranscriptFilters,
@@ -81,6 +83,8 @@ export function renderMessages(
   agentFile: AgentFile | null = null,
   onFork?: (messageId: string) => void,
   turns?: readonly AgentSessionTurn[],
+  toolStreams?: readonly ToolStreamEntry[],
+  status?: AgentSessionStatus,
 ): string {
   return renderSolidToString((): JSX.Element => (
     <SessionTranscript
@@ -91,6 +95,8 @@ export function renderMessages(
       {...(onFork === undefined ? {} : { onFork })}
       tools={tools}
       turns={turns}
+      {...(toolStreams === undefined ? {} : { toolStreams })}
+      {...(status === undefined ? {} : { status })}
     />
   ));
 }

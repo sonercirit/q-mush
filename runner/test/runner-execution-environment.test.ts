@@ -239,31 +239,29 @@ describe("container runner commands", () => {
     expect(containers.cleaned).toEqual(["session-1"]);
   });
 
-  test("preserves tool spills during nonterminal container cleanup", async () => {
+  test("retains raw container overflow for the engine finalizer", async () => {
     const root = await workspace();
     const containers = new FakeContainers();
-    containers.shellOutput = "x".repeat(60_000);
+    containers.shellOutput = "😀".repeat(500);
     const executor = new RunnerCommandExecutor(containers);
-    const output = await executor.execute(command("bash", "container", root));
+    const output = await executor.execute({
+      ...command("bash", "container", root),
+      outputLimitCharacters: 200,
+    });
 
-    expect(output).toContain("per-call limit");
-    const path = /saved to (.+)\. Use the read tool/u.exec(output)?.[1] ?? "";
+    expect(Array.from(output)).toHaveLength(201);
+    expect(output).not.toContain("Tool output truncated");
+    expect(output).not.toContain("saved to");
+
     const cleanup = command("cleanup_execution_environment", "container", root);
     await executor.execute(cleanup);
-    expect(await Bun.file(path).exists()).toBe(true);
-
-    const terminal = {
-      ...cleanup,
-      arguments: { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true },
-      id: "terminal-cleanup",
-    };
-    expect(await executor.execute(terminal)).toBe(
-      "Session execution resources removed.",
-    );
     expect(
-      await Bun.file(path).exists(),
-      "terminal cleanup should remove the spill",
-    ).toBe(false);
+      await executor.execute({
+        ...cleanup,
+        arguments: { [RUNNER_TERMINAL_CLEANUP_ARGUMENT]: true },
+        id: "terminal-cleanup",
+      }),
+    ).toBe("Session execution resources removed.");
   });
 
   test("keeps bare-metal behavior available", async () => {

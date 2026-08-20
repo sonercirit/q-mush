@@ -1,4 +1,4 @@
-import type { RunnerCommandResult } from "../shared/runner-command-broker.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 
 export function completedRunnerCommandResult(
   output: string,

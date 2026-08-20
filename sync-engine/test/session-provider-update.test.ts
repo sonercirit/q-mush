@@ -5,7 +5,9 @@ import {
   agentSessions,
   agentSessionTurns,
 } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
+import { SessionRestartAbort } from "../session-restart-abort.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   addTestProviderCredential,
@@ -15,7 +17,9 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 import { testStoreReadResources } from "./session-store-test-helpers.ts";
 
 function createProviderUpdateSession(
@@ -51,7 +55,13 @@ function setup(userContextTokenCap?: number) {
   addSessionTestRunner(database, "provider-update-machine", "runner-1");
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
-  const store = new SessionStore(database);
+  const readSettings = () => DEFAULT_TOOL_SETTINGS;
+  const store = new SessionStore(
+    database,
+    undefined,
+    readSettings,
+    emptyRuntimes,
+  );
   const created = createProviderUpdateSession(store, userContextTokenCap);
   if (created.status !== "created") throw new Error("Fixture failed");
   const cancelSessionGeneration = vi.fn<
@@ -93,6 +103,7 @@ function setup(userContextTokenCap?: number) {
       openai: { readCredential: () => undefined },
       openrouter: { readCredential },
     },
+    restartSignal: () => new AbortController().signal,
     runtimes: { abortForGeneration },
     store: {
       resources: testStoreReadResources(database, store),
@@ -303,6 +314,41 @@ describe("session provider update", () => {
       expect(error).toMatchObject({ code });
     }
   };
+
+  async function expectRestartBlockedWithoutMutation(
+    setupValue: ReturnType<typeof setup>,
+  ): Promise<void> {
+    await expect(applyUpdate(setupValue)).rejects.toMatchObject({
+      code: "server_restarting",
+    });
+    expect(sessionRow(setupValue)).toMatchObject({ generation: 0 });
+  }
+
+  test("returns server_restarting without mutating when discovery is canceled", async () => {
+    const setupValue = setup();
+    const canceled = restartCanceledDiscovery();
+    setupValue.dependencies.restartSignal = () => canceled.controller.signal;
+    setupValue.dependencies.discoverOpenRouterProviders = canceled.discover;
+
+    await expectRestartBlockedWithoutMutation(setupValue);
+  });
+
+  test("recovery replacement cannot mutate after credential lookup", async () => {
+    const setupValue = setup();
+    const restart = new SessionRestartAbort();
+    setupValue.dependencies.restartSignal = () => restart.signal;
+    const readCredential =
+      setupValue.dependencies.providers.openrouter.readCredential;
+    setupValue.dependencies.providers.openrouter.readCredential = vi.fn(
+      (...parameters) => {
+        restart.abort("restart");
+        restart.restore();
+        return readCredential(...parameters);
+      },
+    );
+
+    await expectRestartBlockedWithoutMutation(setupValue);
+  });
 
   test("requires confirmation before changing the provider", async () => {
     const setupValue = setup();

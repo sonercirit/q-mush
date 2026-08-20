@@ -9,7 +9,7 @@ import {
   type PromptInput,
 } from "../shared/prompt-model.ts";
 import type { GoogleAuth } from "./auth.ts";
-import { AuthenticatedIntegration } from "./authenticated-integration.ts";
+import { AuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
 import type { CollectionItemIntegration } from "./collection-item-integration.ts";
 import {
   createApiError,
@@ -125,7 +125,7 @@ function readPromptInput(value: unknown): PromptInput | undefined {
 }
 
 class DrizzlePromptIntegration
-  extends AuthenticatedIntegration
+  extends AuthenticatedCollectionIntegration
   implements PromptIntegration
 {
   readonly #now: () => number;
@@ -143,13 +143,12 @@ class DrizzlePromptIntegration
   }
 
   collection(request: Request): Promise<Response> | Response {
-    const serve = (userId: string, method: string) =>
-      method === "GET"
-        ? createJsonResponse({ prompts: this.#store.list(userId) })
-        : method === "POST"
-          ? this.#write(request, userId)
-          : createMethodNotAllowedResponse("GET, POST");
-    return this.route(request, serve);
+    const methods = {
+      GET: (userId: string) =>
+        createJsonResponse({ prompts: this.#store.list(userId) }),
+      POST: (userId: string) => this.#write(request, userId),
+    };
+    return this.collectionRoute(request, methods);
   }
 
   item(request: Request, promptId: string): Promise<Response> | Response {

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { MAXIMUM_RUNNER_RESULT_OUTPUT_CHARACTERS } from "../../shared/realtime-limits.ts";
 import {
   encodeRunnerActivationReceipt,
   runnerConnectMessage,
@@ -208,6 +209,12 @@ test("reads bounded output deltas and explicit final result states", () => {
   expectInvalidRunnerClientMessage({
     commandId: "command-1",
     output: "legacy result",
+    type: "result",
+  });
+  expectInvalidRunnerClientMessage({
+    commandId: "command-1",
+    output: "x".repeat(MAXIMUM_RUNNER_RESULT_OUTPUT_CHARACTERS + 2),
+    state: "completed",
     type: "result",
   });
 });

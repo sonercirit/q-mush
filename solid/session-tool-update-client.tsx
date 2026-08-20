@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { SessionEditorSection } from "./session-editor-client.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 
@@ -19,6 +20,7 @@ export function SessionToolUpdateEditor(props: {
     tools: readonly AgentSessionToolName[],
     confirmedCacheDrop: boolean,
   ) => Promise<{ readonly warning: string | null; readonly updated: boolean }>;
+  readonly settings?: ToolSettings | undefined;
 }): JSX.Element {
   const [tools, setTools] = createSignal<readonly AgentSessionToolName[]>(
     untrack(() => props.detail.tools),
@@ -58,6 +60,9 @@ export function SessionToolUpdateEditor(props: {
           controlsOnly
           disabled={props.disabled || applying()}
           onChange={setTools}
+          {...(props.settings === undefined
+            ? {}
+            : { settings: props.settings })}
           tools={tools()}
         />
       </div>

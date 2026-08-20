@@ -126,7 +126,9 @@ export async function executeContainerShell(options: {
   readonly handlers: Readonly<
     Partial<Record<"exec" | "run", ContainerOperationHandler>>
   >;
-  readonly onOutput?: Parameters<RunnerContainerManager["executeShell"]>[5];
+  readonly onOutput?: NonNullable<
+    Parameters<RunnerContainerManager["executeShell"]>[4]
+  >["publish"];
   readonly timeoutSeconds: number;
   readonly workspace: string;
 }): Promise<string> {
@@ -163,15 +165,16 @@ async function executeFakeShell(
   workspace: string,
   command: string,
   timeoutSeconds: number,
-  onOutput?: Parameters<RunnerContainerManager["executeShell"]>[5],
+  onOutput?: NonNullable<
+    Parameters<RunnerContainerManager["executeShell"]>[4]
+  >["publish"],
 ): Promise<string> {
   return await manager.executeShell(
     "session-1",
     workspace,
     command,
     timeoutSeconds,
-    undefined,
-    onOutput,
+    onOutput === undefined ? {} : { publish: onOutput },
   );
 }
 

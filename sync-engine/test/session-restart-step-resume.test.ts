@@ -20,7 +20,6 @@ import {
 import { startToolSession, toolCall } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
-  createSessionRequest,
   RUNNER_COMMAND_ID,
   RUNNER_ID,
   SESSION_ID,
@@ -31,11 +30,16 @@ import {
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import {
+  completeRestartCommands,
+  createRestartSessions,
+  expectRestartPaused,
   MultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
+  restartSessionDetail,
   restartSessionIds,
+  restartSessionsInclude,
   waitForRestartCommands,
 } from "./session-restart-step-resume-helpers.ts";
 import { completeTestRunnerCommands } from "./session-runner-command-helpers.ts";
@@ -114,7 +118,7 @@ function sessionFor(
   setup: ReturnType<typeof connectedSessionSetup>,
   sessionId: string,
 ) {
-  return setup.sessions.detailForUser(TEST_USER_ID, sessionId);
+  return restartSessionDetail(setup, sessionId);
 }
 
 async function waitForCompletedChild(
@@ -171,10 +175,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
   await drain;
 
-  expect(sessionFor(initial, childId)).toMatchObject({
-    restartHandoff: { operation: "agent" },
-    status: "paused",
-  });
+  expectRestartPaused(initial, childId);
   expect(completionReports(initial)).toHaveLength(0);
 
   const recreated = recreateSessionSetup(model, initial);
@@ -284,10 +285,7 @@ async function startParkedSessions(model: AgentModel) {
   const initial = connectedSessionSetup(model, "api_key", undefined, {
     commandId: nextCommandId("restart-multi-command"),
   });
-  for (let index = 0; index < RESTART_SESSION_COUNT; index += 1) {
-    const created = await initial.sessions.collection(createSessionRequest());
-    expect(created.status).toBe(201);
-  }
+  await createRestartSessions(initial, RESTART_SESSION_COUNT);
   return initial;
 }
 
@@ -296,11 +294,7 @@ async function completeMultiSessionCommands(
   tool: string,
   output: (sessionId: string) => string,
 ): Promise<void> {
-  const commands = await waitForRestartCommands(setup, tool);
-  completeTestRunnerCommands(setup, commands, (command) => ({
-    output: output(command.sessionId),
-    state: "completed",
-  }));
+  await completeRestartCommands(setup, tool, output);
 }
 
 async function drainParkedSessions(model: AgentModel): Promise<{
@@ -358,12 +352,7 @@ test("multiple sessions resume their interrupted steps after one server recreati
     () => "null",
   );
   await waitForSessionValue(
-    () =>
-      ids.every((id) =>
-        JSON.stringify(sessionFor(recreated, id)).includes(
-          "Completed after restart.",
-        ),
-      ),
+    () => restartSessionsInclude(recreated, ids, "Completed after restart."),
     (value) => value === true,
   );
   assertSessionStatuses(recreated, ids, "idle");

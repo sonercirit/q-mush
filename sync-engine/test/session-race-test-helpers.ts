@@ -6,6 +6,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
 
 export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   adaptiveThinking: null,
@@ -14,15 +15,13 @@ export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   providerPricing: null,
 } as const;
 
-function sessionAgentActionDefaults() {
+export function sessionAgentActionDefaults() {
+  const runtimeDefaults = sessionAgentActionRuntimeDefaults()
   return {
     broker: new RunnerCommandBroker(),
     cleanupSession: () => undefined,
     discoverModels: () => Promise.resolve({ defaultModel: null, models: [] }),
-    draining: () => false,
-    listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-    pendingRestart: () => undefined,
-    runnerIsAvailable: () => true,
+    ...runtimeDefaults,
   };
 }
 

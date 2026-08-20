@@ -9,6 +9,7 @@ import { SessionTranscript } from "../../solid/session-transcript.tsx";
 import type { SessionCommandTransport } from "../../solid/session-transport.ts";
 import { installFetch, withRestoredFetch } from "./controller-test-helpers.ts";
 import { renderSolidToString } from "./render-solid.tsx";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import {
   sessionDetailWithStatus,
@@ -133,7 +134,7 @@ function applyCompactionDelta(
     thinking: "",
     type: "session_delta" as const,
   };
-  controller.applyDelta(reset ? { ...delta, reset: true } : delta);
+  applySessionDelta(controller, reset ? { ...delta, reset: true } : delta);
 }
 
 function applyProductionResetSequence(
