@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   agentProviderRequestHeaders,
   ChatCompletionsAgentModel,
@@ -122,6 +123,7 @@ function anthropicHarness(
   const requests: Request[] = [];
   const remaining = [...responses];
   const model = new ChatCompletionsAgentModel({
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     credential: ANTHROPIC_CREDENTIAL,
     fetch: (request) => {
       requests.push(request);

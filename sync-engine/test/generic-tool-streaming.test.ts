@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamDeltaFrame } from "../../shared/tool-stream.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
@@ -121,6 +122,7 @@ function genericSession(response: Response): {
   let fetched = false;
   const factory: AgentModelFactory = (options) =>
     new ChatCompletionsAgentModel({
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       ...options,
       fetch: () => {
         if (fetched) {

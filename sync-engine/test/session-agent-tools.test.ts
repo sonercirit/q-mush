@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
@@ -506,7 +507,11 @@ describe("session agent tools", () => {
     const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
     expectRunnerRequired(child);
     await expectTranscriptExcludes(setup, "Spawned session completed");
-    const restartedStore = new SessionStore(setup.database);
+    const restartedStore = new SessionStore(
+      setup.database,
+      undefined,
+      () => DEFAULT_TOOL_SETTINGS,
+    );
     expect(restartedStore.pendingSpawnedSessions()).toEqual([]);
     expect(restartedStore.spawnedSessionLink(TEST_USER_ID, childId)).toEqual({
       parentGeneration: 0,

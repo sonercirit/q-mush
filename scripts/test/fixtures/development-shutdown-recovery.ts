@@ -8,6 +8,7 @@ import {
 } from "../../../shared/database/schema.ts";
 import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../../shared/tool-limits.ts";
 import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
 import { SessionStore } from "../../../sync-engine/session-store.ts";
@@ -159,7 +160,11 @@ if (mode === "start" || mode === "start-no-ack") {
   const interrupted = shutdownStore();
   interrupted.failInvalid(now);
   interrupted.restore(now);
-  const store = new SessionStore(database);
+  const store = new SessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
   store.failInterrupted(now + 1);
   const detail = store.get(state.userId, state.sessionId);
   if (detail === undefined) {
