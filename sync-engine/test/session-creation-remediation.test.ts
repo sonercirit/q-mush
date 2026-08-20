@@ -136,10 +136,11 @@ test("HTTP creation retains restart identity across credential lookup", async ()
       discoverModels: setup.dependencies.discoverModels,
       discoverOpenRouterProviders:
         setup.dependencies.discoverOpenRouterProviders,
-      launchBoundary: () => ({
-        ...setup.dependencies,
-        runtimes: new SessionRuntimes(),
-      }),
+      launchBoundary: () =>
+        ({
+          ...setup.dependencies,
+          runtimes: new SessionRuntimes(),
+        }) as never,
       restartSignal: () => restart.signal,
       runnerIsAvailable: () => true,
       withCredential: async (_userId, _selection, action) => {

@@ -24,6 +24,7 @@ import {
   expectedRestartHandoff,
   expectJsonResponse,
   expectStoredSession,
+  launchRace,
   parseToolOutput,
   type SessionStoreTestSetup,
   spawnedSession,
@@ -138,49 +139,6 @@ function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
   }
 }
 
-function failCreatedSession(
-  setup: SessionStoreTestSetup,
-  detail: AgentSessionDetail,
-  now: () => number,
-): void {
-  transitionTestSession(setup, detail, "failed", now);
-}
-
-function launchRace(
-  setup: SessionStoreTestSetup,
-  race: LaunchRace,
-  now: () => number,
-): LaunchRaceRun {
-  const runtimes = new SessionRuntimes();
-  let launched: AgentSessionDetail | undefined;
-  const fail = (detail: AgentSessionDetail): boolean => {
-    launched = detail;
-    expectLaunchTurnRotation(detail);
-    if (race === "stale") {
-      failCreatedSession(setup, detail, now);
-      const requeued = setup.store.queue(TEST_USER_ID, detail.id, now());
-      expect(requeued.status).toBe("queued");
-      if (requeued.status === "queued") {
-        expectLaunchTurnRotation(requeued.detail);
-      }
-    }
-    if (race !== "none") {
-      void runtimes.drain(
-        { kind: "runner", runnerId: detail.runnerId },
-        RESTART_ID,
-      );
-    }
-    return false;
-  };
-  const launchedSession = (): AgentSessionDetail => {
-    if (launched === undefined) {
-      throw new Error("The production launch callback was not reached");
-    }
-    return launched;
-  };
-  return { fail, launchedSession, runtimes };
-}
-
 function assertLaunchRaceState(
   setup: SessionStoreTestSetup,
   launch: LaunchRaceRun,
@@ -250,6 +208,14 @@ function credentialAction(
   action: (selected: ProviderCredentialAccess) => Promise<Response> | Response,
 ) => Promise<Response> {
   return (_userId, _detail, action) => Promise.resolve(action(credential));
+}
+
+function failCreatedSession(
+  setup: SessionStoreTestSetup,
+  detail: AgentSessionDetail,
+  now: () => number,
+): void {
+  transitionTestSession(setup, detail, "failed", now);
 }
 
 function launchableSessionSetup(

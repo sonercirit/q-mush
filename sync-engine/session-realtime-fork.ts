@@ -15,6 +15,7 @@ import { compactChangedSessionFork } from "./session-fork-compaction.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import { discoverRequiredSessionMetadata } from "./session-provider-selection.ts";
 import {
+  captureRestartSignal,
   throwIfServerRestarting,
   withRestartErrorTranslation,
 } from "./session-restart-gate.ts";
@@ -44,9 +45,8 @@ async function selectedForkConfiguration(
   userId: string,
   input: SessionForkInput,
   source: AgentSessionDetail,
-  restartSignal: AbortSignal,
+  capturedRestartSignal: () => AbortSignal,
 ) {
-  const capturedRestartSignal = () => restartSignal;
   const selection = sessionForkSelection(input);
   if (selection === undefined) return undefined;
   const balanced = isBalancedCredentialId(
@@ -120,14 +120,15 @@ export async function forkSessionForUser(options: {
   readonly source: AgentSessionDetail;
   readonly user: AuthenticatedUser;
 }): Promise<AgentSessionDetail> {
-  const restartSignal = options.dependencies.restartSignal();
+  const { read: capturedRestartSignal, signal: restartSignal } =
+    captureRestartSignal(options.dependencies.restartSignal);
   throwIfServerRestarting(restartSignal);
   const selected = await selectedForkConfiguration(
     options.dependencies,
     options.user.id,
     options.input,
     options.source,
-    restartSignal,
+    capturedRestartSignal,
   );
   throwIfServerRestarting(restartSignal);
   const result = options.dependencies.store.fork(

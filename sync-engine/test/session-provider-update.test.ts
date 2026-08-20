@@ -7,6 +7,7 @@ import {
 } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
+import { SessionRestartAbort } from "../session-restart-abort.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   addTestProviderCredential,
@@ -16,10 +17,7 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
-import {
-  restartCanceledDiscovery,
-  restartReplacementDiscovery,
-} from "./session-restart-gate-fixtures.ts";
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 
 function createProviderUpdateSession(
@@ -330,11 +328,19 @@ describe("session provider update", () => {
     await expectRestartBlockedWithoutMutation(setupValue);
   });
 
-  test("recovery replacement cannot mutate after discovery", async () => {
+  test("recovery replacement cannot mutate after credential lookup", async () => {
     const setupValue = setup();
-    const replacement = restartReplacementDiscovery({ providers: [] });
-    setupValue.dependencies.restartSignal = replacement.signal;
-    setupValue.dependencies.discoverOpenRouterProviders = replacement.discover;
+    const restart = new SessionRestartAbort();
+    setupValue.dependencies.restartSignal = () => restart.signal;
+    const readCredential =
+      setupValue.dependencies.providers.openrouter.readCredential;
+    setupValue.dependencies.providers.openrouter.readCredential = vi.fn(
+      (...parameters) => {
+        restart.abort("restart");
+        restart.restore();
+        return readCredential(...parameters);
+      },
+    );
 
     await expectRestartBlockedWithoutMutation(setupValue);
   });

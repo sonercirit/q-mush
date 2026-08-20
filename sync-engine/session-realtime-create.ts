@@ -19,6 +19,7 @@ import {
   requireJsonResponse,
   successfulCredentialAttempt,
 } from "./session-realtime-errors.ts";
+import { captureRestartSignal } from "./session-restart-gate.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 interface BalancedSessionCreationDependencies extends SessionCreationDependencies {
@@ -40,7 +41,9 @@ export async function createSessionWithCredentialPool(
 ): SessionRealtimeActionResult {
   const { dependencies, input, user, workspaceId } = options;
   const scopedInput = { ...input, workspaceId };
-  const restartSignal = dependencies.restartSignal();
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
   const restarting = (): boolean => restartSignal.aborted;
   if (restarting()) {
     throw new RealtimeCommandError("server_restarting");

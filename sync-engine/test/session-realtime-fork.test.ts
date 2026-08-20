@@ -7,6 +7,7 @@ import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
+import { SessionRestartAbort } from "../session-restart-abort.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -16,10 +17,7 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
-import {
-  restartCanceledDiscovery,
-  restartReplacementDiscovery,
-} from "./session-restart-gate-fixtures.ts";
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -200,23 +198,27 @@ describe("balanced session forks", () => {
   });
 });
 
-test("recovery replacement cannot fork after discovery", async () => {
-  const replacement = restartReplacementDiscovery(catalog());
-  const storeFork = vi.fn(function blockedFork() {
-    return FORKED_RESULT;
-  });
+test("recovery replacement cannot fork after credential candidates resolve", async () => {
+  const restart = new SessionRestartAbort();
+  const storeFork = vi.fn(() => FORKED_RESULT);
+  const pool = singleCredentialPool();
   const dependencies = forkDependencies(
-    replacement.discover,
+    () => Promise.resolve(catalog()),
     undefined,
     storeFork,
   );
-  dependencies.restartSignal = replacement.signal;
+  dependencies.modelCredentialPool = {
+    ...pool,
+    candidates: () => {
+      restart.abort("restart");
+      restart.restore();
+      return pool.candidates();
+    },
+  };
+  dependencies.restartSignal = () => restart.signal;
 
-  try {
-    await fork(dependencies);
-    throw new Error("Fork unexpectedly succeeded");
-  } catch (error) {
-    expect(error).toMatchObject({ code: "server_restarting" });
-  }
-  expect(storeFork).toHaveBeenCalledTimes(0);
+  await expect(fork(dependencies)).rejects.toMatchObject({
+    code: "server_restarting",
+  });
+  expect(storeFork).not.toHaveBeenCalled();
 });

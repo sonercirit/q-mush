@@ -4,6 +4,19 @@ import { createApiError } from "./http.ts";
 
 export type RestartSignalReader = () => AbortSignal;
 
+export interface CapturedRestartSignal {
+  readonly read: RestartSignalReader;
+  readonly signal: AbortSignal;
+}
+
+/** Captures the signal identity once at an operation boundary. */
+export function captureRestartSignal(
+  readSignal: RestartSignalReader,
+): CapturedRestartSignal {
+  const signal = readSignal();
+  return { read: () => signal, signal };
+}
+
 export function restartSignalIsAborted(
   readSignal: RestartSignalReader,
 ): boolean {

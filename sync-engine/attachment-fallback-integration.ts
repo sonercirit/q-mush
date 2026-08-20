@@ -12,6 +12,7 @@ import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-access.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
+import { captureRestartSignal } from "./session-restart-gate.ts";
 
 export function createAttachmentFallbackIntegration(options: {
   readonly database: AppDatabase;
@@ -35,7 +36,9 @@ export function createAttachmentFallbackIntegration(options: {
     requests: options.requests,
     store,
     validate: async (user, selection) => {
-      const restartSignal = options.restartSignal();
+      const { signal: restartSignal } = captureRestartSignal(
+        options.restartSignal,
+      );
       const credential = await options.providers[
         selection.provider
       ]?.readCredential(user.id, selection.credentialId, GLOBAL_WORKSPACE_ID);

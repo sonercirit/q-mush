@@ -16,6 +16,7 @@ import {
 } from "./session-provider-selection.ts";
 import { updateStoredSessionProvider } from "./session-provider-update-store.ts";
 import {
+  captureRestartSignal,
   throwIfServerRestarting,
   withRestartErrorTranslation,
 } from "./session-restart-gate.ts";
@@ -43,8 +44,8 @@ async function targetMetadata(
   userId: string,
   input: SessionProviderUpdateInput,
   restartSignal: AbortSignal,
+  capturedRestartSignal: () => AbortSignal,
 ) {
-  const capturedRestartSignal = () => restartSignal;
   let credential;
   try {
     credential = await readSessionCredential(dependencies.providers, userId, {
@@ -96,13 +97,15 @@ export async function applySessionProviderUpdate(
     throw new RealtimeCommandError("cache_warning_required");
   }
 
-  const restartSignal = dependencies.restartSignal();
+  const { read: capturedRestartSignal, signal: restartSignal } =
+    captureRestartSignal(dependencies.restartSignal);
   throwIfServerRestarting(restartSignal);
   const metadata = await targetMetadata(
     dependencies,
     userId,
     input,
     restartSignal,
+    capturedRestartSignal,
   );
   throwIfServerRestarting(restartSignal);
   const result = updateStoredSessionProvider(

@@ -15,30 +15,28 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 
-test("model discovery retains restart identity across credential resolution", async () => {
+async function expectModelDiscoveryFailure(options: {
+  readonly credentialId: string;
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly readCredential: () => Promise<
+    ReturnType<typeof createTestProviderCredential>
+  >;
+  readonly restart: SessionRestartAbort;
+}): Promise<void> {
   const database = createAuthenticatedTestDatabase();
-  const credentialId = "restart-credential-resolution";
-  addTestProviderCredential(database, credentialId);
-  const restart = new SessionRestartAbort();
+  addTestProviderCredential(database, options.credentialId);
   await expect(
     sessionAgentOptions({
       dependencies: {
         database,
-        discoverModels: (_provider, _credential, signal) => {
-          expect(signal?.aborted).toBe(true);
-          return Promise.reject(new Error("restart cancellation"));
-        },
+        discoverModels: options.discoverModels,
         listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-        readCredential: () => {
-          restart.abort("restart");
-          restart.restore();
-          return Promise.resolve(createTestProviderCredential(credentialId));
-        },
-        restartSignal: () => restart.signal,
+        readCredential: options.readCredential,
+        restartSignal: () => options.restart.signal,
       },
       input: {
         category: "models",
-        credentialId,
+        credentialId: options.credentialId,
         page: 1,
         provider: "openai",
       },
@@ -48,47 +46,39 @@ test("model discovery retains restart identity across credential resolution", as
     }),
   ).rejects.toThrow("restart cancellation");
   database.$client.close();
+}
+
+test("model discovery retains restart identity across credential resolution", async () => {
+  const credentialId = "restart-credential-resolution";
+  const restart = new SessionRestartAbort();
+  await expectModelDiscoveryFailure({
+    credentialId,
+    discoverModels: (_provider, _credential, signal) => {
+      expect(signal?.aborted).toBe(true);
+      return Promise.reject(new Error("restart cancellation"));
+    },
+    readCredential: () => {
+      restart.abort("restart");
+      restart.restore();
+      return Promise.resolve(createTestProviderCredential(credentialId));
+    },
+    restart,
+  });
 });
 
 test("model discovery classifies its captured restart signal after recovery", async () => {
-  const database = createAuthenticatedTestDatabase();
-  const credentialId = "restart-credential";
-  addTestProviderCredential(database, credentialId);
   const restart = new SessionRestartAbort();
-
-  await expect(
-    sessionAgentOptions({
-      dependencies: {
-        database,
-        discoverModels: () => {
-          restart.abort(new DOMException("restart", "AbortError"));
-          restart.restore();
-          return Promise.reject(new Error("restart cancellation"));
-        },
-        listRunnerOptions: () => ({ items: [], totalItems: 0 }),
-        readCredential: () =>
-          Promise.resolve({
-            accountId: null,
-            id: credentialId,
-            isDefault: false,
-            label: "Restart credential",
-            secret: "secret",
-            source: "api_key",
-          }),
-        restartSignal: () => restart.signal,
-      },
-      input: {
-        category: "models",
-        credentialId,
-        page: 1,
-        provider: "openai",
-      },
-      signal: new AbortController().signal,
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-    }),
-  ).rejects.toThrow("restart cancellation");
-  database.$client.close();
+  await expectModelDiscoveryFailure({
+    credentialId: "restart-credential",
+    discoverModels: () => {
+      restart.abort(new DOMException("restart", "AbortError"));
+      restart.restore();
+      return Promise.reject(new Error("restart cancellation"));
+    },
+    readCredential: () =>
+      Promise.resolve(createTestProviderCredential("restart-credential")),
+    restart,
+  });
 });
 
 import {

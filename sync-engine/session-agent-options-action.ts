@@ -22,6 +22,7 @@ import {
   type SessionOptionsSource,
 } from "./session-agent-options.ts";
 
+import { captureRestartSignal } from "./session-restart-gate.ts";
 const optionsPageOffset = (page: number): number =>
   (page - 1) * SESSION_OPTIONS_PAGE_SIZE;
 
@@ -100,7 +101,9 @@ async function modelOptions(
   ) {
     throw new Error("The model credential or provider is unavailable");
   }
-  const restartSignal = dependencies.restartSignal();
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
   const credentials =
     balanced && dependencies.modelCredentialPool !== undefined
       ? await dependencies.modelCredentialPool.representative(

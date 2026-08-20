@@ -1,4 +1,23 @@
 import { expect } from "vitest";
+import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
+import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import type { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
+import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createTestProviderCredential,
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
+import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
+
 import type { AppDatabase } from "../../shared/database.ts";
 import type {
   AgentSessionDetail,
@@ -68,26 +87,7 @@ export function expectedRestartHandoff(
   };
 }
 
-import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
-import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
-import type { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
-import {
-  createTestProviderCredential,
-  TEST_NOW,
-  TEST_USER_ID,
-} from "./authenticated-integration-test-helpers.ts";
-import { sessionAgentActionRuntimeDefaults } from "./session-agent-action-runtime-fixtures.ts";
-import { EMPTY_SESSION_REQUEST_MODEL_METADATA } from "./session-race-test-helpers.ts";
-import {
-  createStore,
-  createTestSession,
-} from "./session-store-test-fixtures.ts";
-
-export type LaunchRace = Extract<"restart" | "none" | "stale", string>;
+export type LaunchRace = "restart" | "none" | "stale";
 type LaunchCallback = (detail: AgentSessionDetail) => boolean;
 interface LaunchRaceRun {
   readonly fail: LaunchCallback;
@@ -103,27 +103,44 @@ export type AgentActionsTestSetup = SessionStoreTestSetup & {
 };
 
 function helperClock(): () => number {
-  const clock = { value: TEST_NOW };
-  return () => ++clock.value;
+  let now = TEST_NOW;
+  return () => (now += 1);
 }
 
-function helperLaunchRace(
-  ...parameters: [
-    setup: SessionStoreTestSetup,
-    race: LaunchRace,
-    now: () => number,
-  ]
+function expectLaunchTurnRotation(detail: AgentSessionDetail): void {
+  const turns = detail.turns ?? [];
+  const activeTurns = turns.filter(({ endedAt }) => endedAt === null);
+  expect(activeTurns).toHaveLength(1);
+  const active = activeTurns[0];
+  if (active === undefined)
+    throw new Error("The launched session has no active turn");
+  const previous = turns.at(-2);
+  if (previous !== undefined) {
+    expect(previous.endedAt).not.toBeNull();
+    expect(active.startedAt).toBeGreaterThan(previous.startedAt);
+    expect(previous.endedAt).toBeLessThanOrEqual(active.startedAt);
+  }
+}
+
+export function launchRace(
+  setup: SessionStoreTestSetup,
+  race: LaunchRace,
+  now: () => number,
 ): LaunchRaceRun {
-  const [setup, race, now] = parameters;
   const runtimes = new SessionRuntimes();
   const shouldDrain = race !== "none";
   let launched: AgentSessionDetail | undefined;
   return {
     fail: (detail) => {
       launched = detail;
+      expectLaunchTurnRotation(detail);
       if (race === "stale") {
         transitionTestSession(setup, detail, "failed", now);
-        setup.store.queue(TEST_USER_ID, detail.id, now());
+        const requeued = setup.store.queue(TEST_USER_ID, detail.id, now());
+        expect(requeued.status).toBe("queued");
+        if (requeued.status === "queued") {
+          expectLaunchTurnRotation(requeued.detail);
+        }
       }
       if (shouldDrain) {
         void runtimes.drain(
@@ -164,7 +181,7 @@ export function agentActionsSetup(
   const target = includeTarget ? createTestSession(setup.store) : undefined;
   if (target !== undefined) transitionTestSession(setup, target, "failed", now);
   const credential = createTestProviderCredential(parent.credentialId);
-  const launch = helperLaunchRace(setup, race, now);
+  const launch = launchRace(setup, race, now);
   const actions = new SessionAgentActions({
     abortSession: () => undefined,
     activeSession: () => false,

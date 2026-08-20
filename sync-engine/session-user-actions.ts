@@ -20,7 +20,10 @@ import {
   type PromptInput,
 } from "./session-input.ts";
 import { queueSessionForUser } from "./session-queue.ts";
-import { serverRestartingResponse } from "./session-restart-gate.ts";
+import {
+  captureRestartSignal,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 export interface SessionUserActionDependencies {
@@ -45,7 +48,9 @@ export async function createSessionForUser(
   user: AuthenticatedUser,
   workspaceId: string,
 ): Promise<Response> {
-  const restartSignal = dependencies.restartSignal();
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
   const input = await parseJsonRequest(request, readCreateSession);
   return input === undefined
     ? createApiError("invalid_request", 400)
