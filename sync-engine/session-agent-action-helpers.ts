@@ -148,6 +148,11 @@ export async function spawnAgentSession(options: {
   readonly signal?: AbortSignal;
   readonly userId: string;
 }): Promise<string> {
+  const restartSignal = options.dependencies.restartSignal();
+  const operationSignal =
+    options.signal === undefined
+      ? restartSignal
+      : AbortSignal.any([options.signal, restartSignal]);
   const parent = options.dependencies.store.get(
     options.userId,
     options.authority.sessionId,
@@ -168,15 +173,12 @@ export async function spawnAgentSession(options: {
     credential: ProviderCredentialAccess,
     workspaceId: string,
   ): Promise<Response> {
-    const restartSignal = options.dependencies.restartSignal();
     const metadata = await options.dependencies.discoverSessionMetadata(
       input,
       credential,
       options.userId,
       balanced,
-      options.signal === undefined
-        ? restartSignal
-        : AbortSignal.any([options.signal, restartSignal]),
+      operationSignal,
     );
     // Discovery settles even when the deadline fires mid-flight; never
     // create a child after the caller already reported timed-out.
@@ -205,7 +207,7 @@ export async function spawnAgentSession(options: {
       options.dependencies.notify(options.userId, child.id);
       return sessionLaunchResponse(child.id, status);
     };
-    if (restartSignalIsAborted(options.dependencies.restartSignal)) {
+    if (restartSignalIsAborted(() => restartSignal)) {
       return notifiedResponse("queued");
     }
     const launch = options.dependencies.launchSession(
@@ -243,7 +245,7 @@ export async function spawnAgentSession(options: {
     const credentials = await pool.candidates(
       options.userId,
       selection,
-      options.signal,
+      operationSignal,
     );
     if (credentials.length === 0) {
       return responseToolOutput(

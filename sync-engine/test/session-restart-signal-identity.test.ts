@@ -1,5 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { sessionAgentOptions } from "../session-agent-options-action.ts";
@@ -97,29 +98,45 @@ import {
 
 test("recovery replacement cannot create a child", async () => {
   const restart = new SessionRestartAbort();
+  const credential = createTestProviderCredential("spawn-restart-credential");
+  const launchSession = vi.fn(() => true);
+  const poolSetup = agentActionsSetup("none", false, {
+    launchSession,
+    restartSignal: () => restart.signal,
+  });
+  const poolDependencies = {
+    database: poolSetup.database,
+    readCredential: () => Promise.resolve(credential),
+  };
+  const pool = new ModelCredentialPool(
+    poolDependencies,
+    new CredentialPoolBalancer(),
+  );
+  vi.spyOn(pool, "candidates").mockImplementation(() => {
+    recoverFromRestart(restart, "restart");
+    return Promise.resolve([credential]);
+  });
   const setup = agentActionsSetup("none", false, {
-    discoverSessionMetadata: () => {
-      recoverFromRestart(restart, "restart");
-      return Promise.resolve({
-        contextWindow: null,
-        maxContextTokens: null,
-        maxOutputTokens: null,
-        providerPricing: null,
-        adaptiveThinking: false,
-      });
-    },
+    launchSession,
+    modelCredentialPool: pool,
     restartSignal: () => restart.signal,
   });
   const caller = new AbortController();
+  const spawn = {
+    ...spawnInput(setup, "blocked"),
+    credentialId: balancedCredentialId(setup.parent.provider),
+  };
   const output = await executeSessionAgentTool(
     setup.actions,
     "spawn_session",
-    spawnInput(setup, "blocked"),
+    spawn,
     caller.signal,
   );
   const result = parseToolOutput(output);
   expect(result).toEqual({ error: "server_restarting" });
   expect(spawnedSession(setup)).toBeUndefined();
+  expect(launchSession).not.toHaveBeenCalled();
+  poolSetup.database.$client.close();
   setup.database.$client.close();
 });
 
