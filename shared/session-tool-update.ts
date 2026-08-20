@@ -34,7 +34,7 @@ export const SESSION_TOOL_CACHE_WARNING =
   "This provider/model cannot assure cache continuity when tools change. Applying this update might drop the model/provider cache.";
 
 function identifier(value: unknown): string | undefined {
-  return readBoundedString(value, 200);
+  return readBoundedString(value, { maximumLength: 200 });
 }
 
 function updateBase(value: unknown): SessionToolSelection | undefined {

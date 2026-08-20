@@ -13,6 +13,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -88,18 +89,27 @@ import {
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
+import { activeSessionToolSettings } from "./session-turn-store.ts";
 export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+  readonly #toolSettings: (userId: string) => ToolSettings;
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    toolSettings: (userId: string) => ToolSettings,
+  ) {
     super(database, generateId);
     this.#resources = [database, generateId];
+    this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,
+      toolSettings: (_userId, sessionId, executionGeneration) =>
+        activeSessionToolSettings(database, sessionId, executionGeneration),
     });
   }
   get #database(): AppDatabase {
@@ -110,7 +120,7 @@ export class SessionStore extends SessionStoreRestarts {
     const generateId = this.#resources[1];
     const read = (userId: string, sessionId: string) =>
       this.get(userId, sessionId, workspaceId);
-    return { database, generateId, read };
+    return { database, generateId, read, toolSettings: this.#toolSettings };
   }
   #generateId(now: number): string {
     return this.#resources[1](now);
@@ -126,6 +136,13 @@ export class SessionStore extends SessionStoreRestarts {
   }
   questions(): AskQuestionsStore {
     return this.#questions;
+  }
+  toolSettings(sessionId: string, executionGeneration: number): ToolSettings {
+    return activeSessionToolSettings(
+      this.#database,
+      sessionId,
+      executionGeneration,
+    );
   }
   #readPendingQuestions(userId: string, sessionId: string) {
     return this.#questions.pending(userId, sessionId);
@@ -459,6 +476,7 @@ export class SessionStore extends SessionStoreRestarts {
         database: this.#database,
         generateId: this.#resources[1],
         read: (ownerId, id) => this.get(ownerId, id, workspaceId),
+        toolSettings: this.#toolSettings,
       },
       sessionId,
       userId,

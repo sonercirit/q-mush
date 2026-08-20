@@ -7,7 +7,7 @@ import type {
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import type { AgentModelFactory } from "../session-agent-models.ts";
 import type { CreateSessionInput } from "../session-input.ts";
 import {

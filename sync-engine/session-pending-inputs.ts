@@ -619,6 +619,7 @@ export function settleNormalSessionBoundary(options: {
           previousExecutionGeneration: options.generation,
           segment: session.currentSegment,
           sessionId: options.sessionId,
+          toolSettings: "inherit",
           userId: session.userId,
         })
       : undefined;

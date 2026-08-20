@@ -3,7 +3,10 @@ import { modelSupportsAttachmentModality } from "../shared/attachment-fallback.t
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
+import {
+  discoverModelOption,
+  type AgentModelDiscoverer,
+} from "./agent-model-discovery.ts";
 import { AttachmentFallbackApi } from "./attachment-fallback-api.ts";
 import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
@@ -38,11 +41,12 @@ export function createAttachmentFallbackIntegration(options: {
         return false;
       }
       try {
-        const catalog = await options.discoverModels(
+        const model = await discoverModelOption(
+          options.discoverModels,
           selection.provider,
           credential,
+          selection.model,
         );
-        const model = catalog.models.find(({ id }) => id === selection.model);
         if (
           model === undefined ||
           !modelSupportsAttachmentModality(

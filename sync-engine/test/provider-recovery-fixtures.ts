@@ -1,6 +1,7 @@
 import { expect, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
@@ -173,6 +174,7 @@ export function apiKeyModel(options: {
     model: "api-test-model",
     ...(options.onDelta === undefined ? {} : { onDelta: options.onDelta }),
     provider: "openai",
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     ...(options.sleep === undefined ? {} : { sleep: options.sleep }),
     webSocket: options.webSocket,
   });
@@ -190,6 +192,7 @@ function oauthModel(
     model: "gpt-5-codex",
     provider: "openai",
     sleep,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     webSocket,
   });
 }

@@ -1,4 +1,5 @@
 import { expect, test } from "vitest";
+import { CONFIGURED_TOOL_SETTINGS } from "../../shared/test/tool-settings-fixtures.ts";
 import {
   openAndReconnectRealtimeTestConnection,
   openRealtimeTestConnection,
@@ -23,6 +24,20 @@ function eventFixture(): RealtimeEventFixture {
   return { events, setup };
 }
 
+function openFixture(
+  setup: RealtimeClientTestSetup,
+): RealtimeClientTestSetup["sockets"][number] | undefined {
+  openRealtimeTestConnection(setup, "instance-1");
+  return setup.sockets[0];
+}
+
+function openedEventFixture(): RealtimeEventFixture & {
+  readonly socket: RealtimeClientTestSetup["sockets"][number] | undefined;
+} {
+  const fixture = eventFixture();
+  return { ...fixture, socket: openFixture(fixture.setup) };
+}
+
 function reconnectRecorder(setup: RealtimeClientTestSetup): () => number {
   let reconnects = 0;
   setup.connection.onReconnect(() => {
@@ -40,12 +55,17 @@ function assertReconnectCount(
   setup.connection.stop();
 }
 
-test("connects to the same-origin realtime WebSocket and decodes events", () => {
-  const { events, setup } = eventFixture();
-  const socket = setup.sockets[0];
+function expectedToolSettingsEvent() {
+  return {
+    settings: CONFIGURED_TOOL_SETTINGS,
+    type: "tool_settings" as const,
+  };
+}
 
-  socket?.open();
-  socket?.receive('{"instanceId":"instance-1","type":"ready"}');
+test("connects to the same-origin realtime WebSocket and decodes events", () => {
+  const fixture = openedEventFixture();
+  const { events, setup, socket } = fixture;
+
   socket?.receive('{"sessions":[],"type":"sessions"}');
   setup.requestFrames.shift()?.();
 
@@ -56,6 +76,18 @@ test("connects to the same-origin realtime WebSocket and decodes events", () => 
     { sessions: [], type: "sessions" },
   ]);
   setup.connection.stop();
+});
+
+test("delivers tool-settings updates immediately instead of frame-coalescing", () => {
+  const fixture = openedEventFixture();
+  const socket = fixture.socket;
+  socket?.receive(
+    '{"settings":{"executionLimitMinutes":7,"outputLimitCharacters":12345},"type":"tool_settings"}',
+  );
+
+  expect(fixture.events.at(-1)).toEqual(expectedToolSettingsEvent());
+  expect(fixture.setup.requestFrames).toHaveLength(0);
+  fixture.setup.connection.stop();
 });
 
 test.each([

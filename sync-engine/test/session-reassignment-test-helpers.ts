@@ -1,5 +1,6 @@
 import { expect } from "vitest";
 import { RUNNERS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import {
@@ -19,6 +20,7 @@ export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
   const store = new SessionStore(
     setup.database,
     () => ids.shift() ?? "unexpected-race-id",
+    () => DEFAULT_TOOL_SETTINGS,
   );
   createRunningTestSession(
     store,
