@@ -59,12 +59,19 @@ export class DevelopmentRestartLifecycle {
     try {
       await this.#options.sessions.drain(deadline);
     } catch (error) {
+      this.#pending = undefined;
+      // A final shutdown that started while this drain was in flight already
+      // stopped maintenance and closed the restart gate on purpose, so the
+      // abandoned development restart must not undo any of it.
+      if (this.#kind === "final") {
+        this.#options.drainFailed(error);
+        return;
+      }
       // The process keeps serving traffic, so every irreversible step the
       // drain took has to be undone before normal operation resumes.
       this.#options.sessions.restoreDevelopmentDrainRecovery();
       this.#options.startMaintenance();
       this.#kind = undefined;
-      this.#pending = undefined;
       this.#options.drainFailed(error);
       return;
     }

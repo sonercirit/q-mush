@@ -5,15 +5,22 @@ import { SESSION_MODELS_PATH } from "../../shared/routes.ts";
 import { DevelopmentRestartLifecycle } from "../../sync-engine/development-restart.ts";
 import {
   createAuthenticatedRequest,
-  TEST_NOW,
+  TEST_AUTHENTICATED_USER,
   TEST_USER_ID,
+  TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { startToolSessionSetup } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
+  createSessionRequest,
   CREDENTIAL_ID,
+  RUNNER_COMMAND_ID,
+  RUNNER_ID,
 } from "./session-integration-fixtures.ts";
-import { waitForSessionValue } from "./session-integration-helpers.ts";
+import {
+  waitForSessionIdStatus,
+  waitForSessionValue,
+} from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { testLivenessClock } from "./session-liveness-test-helpers.ts";
 // Leaves the session inside a runner tool call that never completes, so the
@@ -21,22 +28,41 @@ import { testLivenessClock } from "./session-liveness-test-helpers.ts";
 import {
   createRestartSessions,
   MultiSessionRestartModel,
+  nextCommandId,
 } from "./session-restart-step-resume-helpers.ts";
 
-const DRAIN_TIMER_FAILURE = "the restart drain timer failed";
+function uniqueCommandIds(): () => string {
+  const next = nextCommandId("restart-command");
+  let first = true;
+  return () => {
+    if (first) {
+      first = false;
+      return RUNNER_COMMAND_ID;
+    }
+    return next();
+  };
+}
 
-// Fails the first bounded-drain timer the production restart control arms.
-// By then SessionIntegrationApi.drain() has already aborted the restart
-// signal, disabled interrupted-session recovery and closed the server restart
-// gate, so the rejection leaves exactly the degraded state the surviving
-// process must repair.
-function failingDrainTimer(now: () => number) {
-  let failNext = true;
+const DRAIN_TIMER_FAILURE = "the restart drain timer failed";
+const FAILING_DRAIN_MS = 5_000;
+
+// Fails only the bounded-drain timer armed for the failing restart deadline,
+// so a timer some future code arms earlier through the same seam cannot
+// silently retarget this test. By the time it throws,
+// SessionIntegrationApi.drain() has already aborted the restart signal,
+// disabled interrupted-session recovery and closed the server restart gate, so
+// the rejection leaves exactly the degraded state the surviving process must
+// repair.
+function failingDrainTimer(
+  now: () => number,
+  delays: number[],
+  failingDelays: ReadonlySet<number>,
+) {
   return {
     now,
     setTimeout: (callback: () => void, delay: number) => {
-      if (failNext) {
-        failNext = false;
+      delays.push(delay);
+      if (failingDelays.has(delay)) {
         throw new Error(DRAIN_TIMER_FAILURE);
       }
       return globalThis.setTimeout(callback, delay);
@@ -44,37 +70,62 @@ function failingDrainTimer(now: () => number) {
   };
 }
 
-function waitForRunnerTool(
+async function waitForRunnerCommand(
   setup: ReturnType<typeof connectedSessionSetup>,
-): Promise<unknown> {
-  return waitForSessionValue(
-    () => setup.runnerCommands.filter(({ tool }) => tool === "bash").length,
-    (value) => value === 1,
+  tool: string,
+  sessionId?: string,
+  count = 1,
+) {
+  const matching = () =>
+    setup.runnerCommands.filter(
+      (command) =>
+        command.tool === tool &&
+        (sessionId === undefined || command.sessionId === sessionId),
+    );
+  await waitForSessionValue(
+    () => matching().length,
+    (value) => value === count,
   );
+  const command = matching()[count - 1];
+  if (command === undefined) {
+    throw new Error("The runner command is unavailable");
+  }
+  return command;
 }
 
-function restartSessionSetup(failDrainTimer: boolean) {
+function restartSessionSetup() {
   const clock = testLivenessClock(1_000, 100, true);
+  const delays: number[] = [];
+  const failingDelays = new Set([FAILING_DRAIN_MS]);
   const setup = connectedSessionSetup(
     new MultiSessionRestartModel(),
     "api_key",
     undefined,
     {
+      // The first command keeps the shared fixture ID the agent-file helper
+      // expects; later ones stay distinct so several sessions can run.
+      commandId: uniqueCommandIds(),
       liveness: clock.dependencies,
       now: clock.now,
-      ...(failDrainTimer
-        ? { restartTiming: failingDrainTimer(clock.now) }
-        : {}),
+      restartTiming: failingDrainTimer(clock.now, delays, failingDelays),
     },
   );
-  return { clock, setup };
+  return { clock, delays, failingDelays, setup };
+}
+
+// A busy session plus the lifecycle under test, wired to the same fixture.
+async function busyRestartLifecycle() {
+  const started = await busyRestartSetup();
+  return { ...started, ...restartLifecycle(started.setup) };
 }
 
 async function busyRestartSetup() {
-  const started = restartSessionSetup(true);
+  const started = restartSessionSetup();
   await startToolSessionSetup(started.setup);
-  await waitForRunnerTool(started.setup);
-  return started;
+  await waitForRunnerCommand(started.setup, "bash");
+  const running = started.setup.sessions.listForUser(TEST_USER_ID)[0];
+  if (running === undefined) throw new Error("The test session is unavailable");
+  return { ...started, running };
 }
 
 function restartLifecycle(
@@ -97,11 +148,69 @@ function restartLifecycle(
   };
 }
 
-function restartDeadline(clock: ReturnType<typeof testLivenessClock>) {
-  return new RestartDeadline(
-    clock.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
-    clock.now,
+function completeRestartCommand(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  command: Readonly<{ id: string; tool: string }>,
+): void {
+  expect(
+    setup.sessions.completeRunnerCommand(RUNNER_ID, command.id, {
+      output:
+        command.tool === "read_agent_file" ? "null" : "Durable tool output",
+      state: "completed",
+    }),
+  ).toBe(true);
+}
+
+// A second session taken all the way to idle, so a prompt sent while the
+// restart gate is closed can only queue.
+async function idleRestartSession(
+  setup: ReturnType<typeof connectedSessionSetup>,
+) {
+  await createRestartSessions(setup, 1);
+  const detail = setup.sessions.listForUser(TEST_USER_ID)[1];
+  if (detail === undefined) throw new Error("The idle session is unavailable");
+  const agentFile = await waitForRunnerCommand(
+    setup,
+    "read_agent_file",
+    detail.id,
   );
+  completeRestartCommand(setup, agentFile);
+  completeRestartCommand(
+    setup,
+    await waitForRunnerCommand(setup, "bash", detail.id),
+  );
+  await waitForSessionIdStatus(setup, detail.id, "idle");
+  return detail;
+}
+
+// Answers every runner command the recovered runs dispatch until they settle,
+// so nothing is still writing when the database closes.
+async function settleRestartWork(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  from: number,
+): Promise<void> {
+  let answered = from;
+  await waitForSessionValue(
+    () => {
+      for (const command of setup.runnerCommands.slice(answered)) {
+        answered += 1;
+        completeRestartCommand(setup, command);
+      }
+      return setup.sessions
+        .listForUser(TEST_USER_ID)
+        .every(({ status }) => status === "idle" || status === "failed");
+    },
+    (settled) => settled === true,
+  );
+  await setup.sessions.drainFinal();
+}
+
+function restartDeadline(
+  clock: ReturnType<typeof testLivenessClock>,
+  // The failing bound is the one the timer seam refuses to arm.
+  boundMs = DEVELOPMENT_RESTART_LIFECYCLE_MS,
+) {
+  return new RestartDeadline(clock.now() + boundMs, clock.now);
 }
 
 function modelsRequest() {
@@ -111,13 +220,13 @@ function modelsRequest() {
 }
 
 test("a rejected development restart leaves the engine fully operational", async () => {
-  const { clock, setup } = await busyRestartSetup();
-  const { events, lifecycle } = restartLifecycle(setup);
-  const running = setup.sessions.listForUser(TEST_USER_ID)[0];
-  if (running === undefined) throw new Error("The test session is unavailable");
+  const { clock, delays, events, lifecycle, running, setup } =
+    await busyRestartLifecycle();
 
-  await lifecycle.restart(restartDeadline(clock));
+  await lifecycle.restart(restartDeadline(clock, FAILING_DRAIN_MS));
 
+  // The production drain armed its bound from the supplied deadline.
+  expect(delays).toEqual([FAILING_DRAIN_MS]);
   expect(events.drainFailed.mock.calls).toMatchObject([
     [{ message: DRAIN_TIMER_FAILURE }],
   ]);
@@ -132,14 +241,16 @@ test("a rejected development restart leaves the engine fully operational", async
   const models = await setup.sessions.models(modelsRequest());
   expect(await models.json()).toMatchObject({ error: "provider_unavailable" });
 
-  // The drain marked the running session interrupted; recovery must restore
-  // it now that the drain failed instead of leaving it stranded.
-  clock.advance(1);
-  clock.scan();
-  const recovered = setup.sessions.detailForUser(TEST_USER_ID, running.id);
-  expect(recovered?.status).toBe("paused");
-  expect(recovered?.generation).toBe(running.generation + 1);
-  expect(recovered?.restartHandoff).toMatchObject({ requestedBy: "server" });
+  // The abandoned drain must not leave the session parked for a restart that
+  // never happened: it keeps running and finishes its work.
+  completeRestartCommand(
+    setup,
+    await waitForRunnerCommand(setup, "bash", running.id),
+  );
+  await waitForSessionIdStatus(setup, running.id, "idle");
+  expect(
+    setup.sessions.detailForUser(TEST_USER_ID, running.id)?.restartHandoff,
+  ).toBe(null);
 
   // A later restart request is still accepted; a repeat request escalates it
   // into a force-park so it settles.
@@ -152,30 +263,79 @@ test("a rejected development restart leaves the engine fully operational", async
   closeSessionTestDatabase(setup.database);
 });
 
-test("the development restart deadline reaches the production drain", async () => {
-  const { clock, setup } = restartSessionSetup(false);
-  const deadlines: number[] = [];
-  const lifecycle = new DevelopmentRestartLifecycle({
-    drainFailed: () => undefined,
-    drainReady: () => undefined,
-    drainSettled: () => undefined,
-    drainStarted: () => undefined,
-    sessions: {
-      drain: (deadline) => {
-        deadlines.push(deadline?.at ?? Number.NaN);
-        return setup.sessions.drain(deadline);
-      },
-      escalateDrain: () => setup.sessions.escalateDrain(),
-      restoreDevelopmentDrainRecovery: () => {
-        setup.sessions.restoreDevelopmentDrainRecovery();
-      },
-    },
-    startMaintenance: () => undefined,
-    stopMaintenance: () => undefined,
-  });
+test("a final shutdown during a rejected drain stays shut down", async () => {
+  const { clock, events, lifecycle, setup } = await busyRestartLifecycle();
 
-  await lifecycle.restart(new RestartDeadline(TEST_NOW + 5_000, clock.now));
+  const pending = lifecycle.restart(restartDeadline(clock, FAILING_DRAIN_MS));
+  // The supervisor's final shutdown request arrives while the drain is still
+  // in flight, so its rejection must not undo the shutdown.
+  expect(lifecycle.beginFinalShutdown()).toBe(true);
+  await pending;
 
-  expect(deadlines).toEqual([TEST_NOW + 5_000]);
+  expect(events.drainFailed).toHaveBeenCalledTimes(1);
+  expect(events.stopMaintenance).toHaveBeenCalledTimes(2);
+  expect(events.startMaintenance).not.toHaveBeenCalled();
+  expect(lifecycle.restarting).toBe(false);
+  expect(lifecycle.beginFinalShutdown()).toBe(false);
+
+  // The restart gate stayed closed, so the shutting-down process still
+  // refuses new sessions.
+  const refused = await setup.sessions.collection(createSessionRequest());
+  expect(refused.status).toBe(503);
+  expect(await refused.json()).toMatchObject({ error: "server_restarting" });
+  closeSessionTestDatabase(setup.database);
+});
+
+test("a rejected drain resumes sessions an earlier restart parked", async () => {
+  const { clock, failingDelays, running, setup } = await busyRestartSetup();
+  const first = restartLifecycle(setup);
+  const idle = await idleRestartSession(setup);
+
+  // A completed restart force-parks the busy session into a durable handoff.
+  const parking = first.lifecycle.restart(restartDeadline(clock));
+  await first.lifecycle.restart(restartDeadline(clock));
+  await parking;
+  expect(first.events.drainReady).toHaveBeenCalledTimes(1);
+  const parked = setup.sessions.detailForUser(TEST_USER_ID, running.id);
+  expect(parked?.status).toBe("paused");
+  expect(parked?.restartHandoff?.requestedBy).toBe("server");
+
+  // Prompts that arrive while the restart gate is closed only queue.
+  const queued = await setup.sessions.realtimeCommands.messageForUser(
+    TEST_AUTHENTICATED_USER,
+    idle.id,
+    { attachments: [], images: [], prompt: "Continue after the restart." },
+    TEST_WORKSPACE_ID,
+  );
+  expect(queued.status).toBe("queued");
+
+  // The supervisor never replaced the process, so a later restart's rejection
+  // has to hand the already-parked session back to recovery and launch the
+  // work queued while the gate was closed, instead of stranding both. The
+  // surviving control keeps the first deadline, so the clock is advanced until
+  // its remaining bound is the one the timer seam fails.
+  clock.advance(1);
+  failingDelays.add(DEVELOPMENT_RESTART_LIFECYCLE_MS - 1);
+  const { events, lifecycle } = restartLifecycle(setup);
+  const commandsBefore = setup.runnerCommands.length;
+  await lifecycle.restart(restartDeadline(clock));
+
+  expect(events.drainFailed).toHaveBeenCalledTimes(1);
+  await waitForSessionValue(
+    () =>
+      [running.id, idle.id].every(
+        (sessionId) =>
+          setup.sessions.detailForUser(TEST_USER_ID, sessionId)?.status ===
+          "running",
+      ),
+    (resumed) => resumed === true,
+  );
+  // Both runs reached the runner again rather than idling in place.
+  const dispatched = setup.runnerCommands.slice(commandsBefore);
+  expect(new Set(dispatched.map(({ sessionId }) => sessionId))).toEqual(
+    new Set([running.id, idle.id]),
+  );
+
+  await settleRestartWork(setup, commandsBefore);
   closeSessionTestDatabase(setup.database);
 });

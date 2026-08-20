@@ -50,14 +50,16 @@
   provider/auxiliary requests, report scoped active-tool counts, force-park
   stragglers only after durable handoffs, then bound cleanup/termination;
   repeats escalate immediately. `DevelopmentRestartLifecycle` owns it; a
-  rejected drain keeps serving, so it restores maintenance, shutdown state,
-  recovery, the restart gate, and the abort signal (`SessionRestartAbort`:
-  aborted controllers never reopen). Restart-chain failures are logged and
-  released so later triggers stay usable. Final shutdown cancels the supervisor
-  deadline, promotes runner handoffs to a server marker, then stays unbounded;
-  live markers are fenced from liveness recovery. Text handlers precompress
-  once, negotiating zstd, Brotli, gzip, and deflate; `/favicon.svg` revalidates
-  with an ETag.
+  rejected drain keeps serving, restoring maintenance, shutdown state, recovery,
+  and the abort signal (`SessionRestartAbort`: aborted controllers never
+  reopen), reopening the gate while clearing each session's abandoned server
+  restart request, then rerunning handoff recovery and the queued launcher. A
+  mid-drain final shutdown wins: the rejection only logs; chain failures release
+  so later triggers work. Final shutdown cancels the supervisor deadline,
+  promotes runner handoffs to a server marker, then stays unbounded; live
+  markers are fenced from liveness recovery. Text handlers precompress once,
+  negotiating zstd, Brotli, gzip, and deflate; `/favicon.svg` revalidates with
+  an ETag.
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.

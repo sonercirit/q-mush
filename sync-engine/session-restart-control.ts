@@ -80,8 +80,10 @@ export interface SessionRestartControl extends Pick<
   readonly pendingRunnerRestart: (runnerId: string) => string | undefined;
   readonly prepareServerShutdown: () => Promise<void>;
   /**
-   * Reopens the server restart gate after a failed development restart drain,
-   * so the surviving process accepts new sessions and queued work again.
+   * Reopens the server restart gate after a failed development restart drain
+   * and clears the server restart request from every still-running session, so
+   * neither new launches nor running work park for the abandoned restart.
+   * Resuming already-parked and queued sessions is the caller's job.
    */
   readonly restoreServerDrain: () => void;
   readonly recover: (

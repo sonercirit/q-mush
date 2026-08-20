@@ -4,7 +4,10 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
-import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
+import {
+  createAuthenticatedRequest,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   deferredSessionSetup,
   type DeferredAgentModel,
@@ -49,6 +52,17 @@ export function hasSessionStatus(
   expected: string,
 ): (value: unknown) => boolean {
   return (value) => isRecord(value) && value["status"] === expected;
+}
+
+export async function waitForSessionIdStatus(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  sessionId: string,
+  status: string,
+): Promise<void> {
+  await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, sessionId),
+    hasSessionStatus(status),
+  );
 }
 
 export async function waitForSessionStatus(

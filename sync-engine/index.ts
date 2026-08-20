@@ -272,7 +272,22 @@ function publishRestartProgress(): void {
   }
 }
 
-let progressTimer: ReturnType<typeof setInterval> | undefined;
+const restartProgressReporting = (() => {
+  let timer: ReturnType<typeof setInterval> | undefined;
+  return {
+    start: () => {
+      publishRestartProgress();
+      timer = setInterval(publishRestartProgress, RESTART_PROGRESS_INTERVAL_MS);
+      timer.unref();
+    },
+    stop: () => {
+      clearInterval(timer);
+      timer = undefined;
+      restartVisibleSessionIds.clear();
+    },
+  };
+})();
+
 const lifecycle = new DevelopmentRestartLifecycle({
   drainFailed: (error) => {
     console.warn(
@@ -283,19 +298,8 @@ const lifecycle = new DevelopmentRestartLifecycle({
     publishRestartProgress();
     process.send?.(DEVELOPMENT_RESTART_READY_MESSAGE);
   },
-  drainSettled: () => {
-    clearInterval(progressTimer);
-    progressTimer = undefined;
-    restartVisibleSessionIds.clear();
-  },
-  drainStarted: () => {
-    publishRestartProgress();
-    progressTimer = setInterval(
-      publishRestartProgress,
-      RESTART_PROGRESS_INTERVAL_MS,
-    );
-    progressTimer.unref();
-  },
+  drainSettled: restartProgressReporting.stop,
+  drainStarted: restartProgressReporting.start,
   sessions,
   startMaintenance,
   stopMaintenance,

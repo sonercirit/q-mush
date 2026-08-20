@@ -296,6 +296,17 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     this.resources.shutdownInterrupted.enableRecovery();
     this.resources.restart.restoreServerDrain();
     this.resources.restartController.restore();
+    // Sessions the abandoned drain already parked into durable handoffs, and
+    // work queued while the gate was closed, only resume when recovery and
+    // the queued launcher run again.
+    this.#resumeParkedAndQueued();
+  }
+
+  #resumeParkedAndQueued(runnerId?: string): void {
+    this.resources.restartCoordinator.recover(runnerId);
+    for (const userId of this.resources.store.queuedSessionOwnerIds()) {
+      this.resources.launchQueuedSessions(userId);
+    }
   }
 
   async prepareFinalShutdown(): Promise<void> {
@@ -444,11 +455,8 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerConnected(runnerId: string): void {
-    this.resources.restartCoordinator.recover(runnerId);
+    this.#resumeParkedAndQueued(runnerId);
     void recoverAnsweredQuestions(this.resources.questionActions, runnerId);
-    for (const userId of this.resources.store.queuedSessionOwnerIds()) {
-      this.resources.launchQueuedSessions(userId);
-    }
   }
 
   runnerDisconnected(runnerId: string): void {

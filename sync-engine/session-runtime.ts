@@ -495,7 +495,18 @@ export class SessionRuntimes {
 
   start(runnerId?: string): void {
     if (runnerId === undefined) {
+      const abandoned = this.#drainingServer;
       this.#drainingServer = undefined;
+      if (abandoned === undefined) return;
+      for (const runtime of this.#active.values()) {
+        if (
+          runtime.restartRequest?.requestedBy === "server" &&
+          runtime.restartRequest.restartId === abandoned.restartId
+        ) {
+          runtime.restartRequest = undefined;
+          runtime.restartRequestedAt = undefined;
+        }
+      }
       return;
     }
     this.#drainingRunners.delete(runnerId);
