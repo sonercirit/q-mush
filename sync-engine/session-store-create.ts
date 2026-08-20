@@ -278,6 +278,7 @@ export function createStoredSession(
       now,
       segment: 0,
       sessionId,
+      toolSettings: resources.toolSettings(input.userId),
       userId: input.userId,
     });
     const activeTurnId = activeSessionTurnId(transaction, sessionId);

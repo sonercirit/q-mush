@@ -2,7 +2,6 @@ import { RunnerDisconnectedError } from "../shared/runner-disconnected-error.ts"
 import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import type { SessionStore } from "./session-store.ts";
 
 export function writeRuntime(
   runtime: SessionAgentRuntimeDependencies,
@@ -123,13 +122,4 @@ export function throwIfRestartRequested(
 
 export function isRestartHandoffError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "RestartHandoff";
-}
-
-export function sessionConversation(
-  runtime: SessionAgentRuntimeDependencies,
-): ReturnType<SessionStore["conversation"]> {
-  return runtime.store.conversation(
-    runtime.detail.id,
-    runtime.detail.restartHandoff === null,
-  );
 }

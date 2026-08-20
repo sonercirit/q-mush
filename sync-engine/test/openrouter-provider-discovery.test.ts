@@ -2,6 +2,11 @@ import { describe, expect, test } from "vitest";
 import { discoverOpenRouterProviders } from "../../sync-engine/openrouter-provider-discovery.ts";
 import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import {
+  abortAndObserveCanceledReader,
+  neverReadingResponse,
+  stalledResponseReaderFixture,
+} from "./discovery-cancellation-fixtures.ts";
+import {
   discoverWithResponse,
   endpoint,
   endpointResponse,
@@ -166,18 +171,21 @@ describe("OpenRouter serving-provider discovery", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  test("preserves timeout errors from stalled response bodies", async () => {
-    const reader = {
-      read: () =>
-        new Promise<ReadableStreamReadResult<Uint8Array>>(() => undefined),
-      releaseLock: () => undefined,
-    };
-    const response = new Response("{}");
-    Object.defineProperty(response, "body", {
-      value: { getReader: () => reader },
-    });
+  test("releases stalled body cleanup after abort settlement", async () => {
+    const fixture = stalledResponseReaderFixture();
     const discover = discoverOpenRouterProviders.withOptions({
-      fetch: () => Promise.resolve(response),
+      fetch: () => Promise.resolve(fixture.response),
+    });
+    const { captured, controller } = fixture.start((_response, signal) =>
+      discover("owner-1", openRouterCredential(), "vendor/model", { signal }),
+    );
+
+    await abortAndObserveCanceledReader(fixture, captured, controller);
+  });
+
+  test("preserves timeout errors from stalled response bodies", async () => {
+    const discover = discoverOpenRouterProviders.withOptions({
+      fetch: () => Promise.resolve(neverReadingResponse()),
       timeoutMilliseconds: 5,
     });
 

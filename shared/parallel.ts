@@ -1,13 +1,10 @@
-import { Buffer } from "node:buffer";
-import type { RunnerCommandResult } from "./runner-command-broker.ts";
-import { aggregateToolStreamState } from "./tool-stream.ts";
-import { utf8Prefix } from "./utf8.ts";
+import {
+  aggregateToolStreamState,
+  type RunnerCommandResult,
+} from "./tool-stream.ts";
 import { abortSignalError } from "./validation.ts";
 
 const PARALLEL_CALL_CONCURRENCY = 4;
-const MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES = 50 * 1_024;
-const MAXIMUM_PARALLEL_OUTPUT_BYTES = 256 * 1_024;
-const PARALLEL_TRUNCATION_MARKER = "[parallel output truncated]";
 
 export type ParallelCallResult =
   | { readonly error: string; readonly recipient_name: string }
@@ -46,12 +43,6 @@ interface ParallelWorkerOptions<Input, Output> extends ParallelExecutor<
   readonly complete: () => void;
   readonly results: ({ readonly value: Output } | undefined)[];
   readonly state: ParallelExecutionState;
-}
-
-interface NormalizedParallelResult {
-  readonly field: "error" | "output";
-  readonly recipientName: string;
-  readonly value: string;
 }
 
 function parallelError(error: unknown): Error {
@@ -210,132 +201,10 @@ export async function mapWithParallelConcurrency<Input, Output>(
   return completedParallelResults(results);
 }
 
-function truncateParallelText(value: string, maximumBytes: number): string {
-  if (Buffer.byteLength(value, "utf8") <= maximumBytes) {
-    return value;
-  }
-
-  const suffix = `\n${PARALLEL_TRUNCATION_MARKER}`;
-  const prefixBytes = Math.max(
-    0,
-    maximumBytes - Buffer.byteLength(suffix, "utf8"),
-  );
-  const prefix = utf8Prefix(value, prefixBytes);
-  return prefix.length === 0
-    ? PARALLEL_TRUNCATION_MARKER
-    : `${prefix}${suffix}`;
-}
-
-function normalizeParallelResult(
-  result: ParallelCallResult,
-): NormalizedParallelResult {
-  const field = "error" in result ? "error" : "output";
-  const value = "error" in result ? result.error : result.output;
-  return {
-    field,
-    recipientName: result.recipient_name,
-    value: truncateParallelText(value, MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES),
-  };
-}
-
-function resultValue(
-  result: NormalizedParallelResult,
-  value: string,
-): ParallelCallResult {
-  return result.field === "output"
-    ? { output: value, recipient_name: result.recipientName }
-    : { error: value, recipient_name: result.recipientName };
-}
-
-function serializedResult(
-  result: NormalizedParallelResult,
-  value = result.value,
-): string {
-  return JSON.stringify(resultValue(result, value));
-}
-
-function serializedBytes(value: string): number {
-  return Buffer.byteLength(value, "utf8");
-}
-
-function markedPrefix(value: string, maximumPrefixBytes: number): string {
-  const prefix = utf8Prefix(value, maximumPrefixBytes);
-  return prefix.length === 0
-    ? PARALLEL_TRUNCATION_MARKER
-    : `${prefix}\n${PARALLEL_TRUNCATION_MARKER}`;
-}
-
-function fitSerializedResult(
-  result: NormalizedParallelResult,
-  maximumBytes: number,
-): string {
-  const complete = serializedResult(result);
-  if (serializedBytes(complete) <= maximumBytes) {
-    return complete;
-  }
-
-  let lower = 0;
-  let upper = Buffer.byteLength(result.value, "utf8");
-  let fitted = serializedResult(result, PARALLEL_TRUNCATION_MARKER);
-  while (lower <= upper) {
-    const middle = Math.floor((lower + upper) / 2);
-    const candidate = serializedResult(
-      result,
-      markedPrefix(result.value, middle),
-    );
-    if (serializedBytes(candidate) <= maximumBytes) {
-      fitted = candidate;
-      lower = middle + 1;
-    } else {
-      upper = middle - 1;
-    }
-  }
-  return fitted;
-}
-
-function metadataOverflowOutput(resultCount: number): string {
-  return JSON.stringify({
-    error: `All ${String(resultCount)} parallel calls ran, but their result metadata exceeded the bounded output size.`,
-    result_count: resultCount,
-  });
-}
-
-/** Bounds child and aggregate payloads while retaining every result when able. */
 export function boundedParallelOutput(
   results: readonly ParallelCallResult[],
 ): string {
-  const normalized = results.map(normalizeParallelResult);
-  const complete = JSON.stringify(results, null, 2);
-  if (serializedBytes(complete) <= MAXIMUM_PARALLEL_OUTPUT_BYTES) {
-    return complete;
-  }
-
-  const minimumParts = normalized.map((result) =>
-    serializedResult(result, PARALLEL_TRUNCATION_MARKER),
-  );
-  const minimumBytes =
-    results.length +
-    1 +
-    minimumParts.reduce((total, part) => total + serializedBytes(part), 0);
-  if (minimumBytes > MAXIMUM_PARALLEL_OUTPUT_BYTES) {
-    return metadataOverflowOutput(results.length);
-  }
-
-  let extraBytes = MAXIMUM_PARALLEL_OUTPUT_BYTES - minimumBytes;
-  const parts: string[] = [];
-  for (const [index, result] of normalized.entries()) {
-    const minimumPart = minimumParts[index];
-    if (minimumPart === undefined) {
-      throw new Error("Parallel result metadata was not generated");
-    }
-    const remainingResults = normalized.length - index;
-    const allowance =
-      serializedBytes(minimumPart) + Math.floor(extraBytes / remainingResults);
-    const part = fitSerializedResult(result, allowance);
-    extraBytes -= serializedBytes(part) - serializedBytes(minimumPart);
-    parts.push(part);
-  }
-  return `[${parts.join(",")}]`;
+  return JSON.stringify(results, null, 2);
 }
 
 function childText(
@@ -343,13 +212,9 @@ function childText(
   field: "error" | "output",
   value: string,
 ): ParallelCallResult {
-  const bounded = truncateParallelText(
-    value,
-    MAXIMUM_PARALLEL_CHILD_OUTPUT_BYTES,
-  );
   return field === "error"
-    ? { error: bounded, recipient_name: recipientName }
-    : { output: bounded, recipient_name: recipientName };
+    ? { error: value, recipient_name: recipientName }
+    : { output: value, recipient_name: recipientName };
 }
 
 export async function executeParallelCall(

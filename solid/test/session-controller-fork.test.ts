@@ -6,6 +6,7 @@ import type { SessionViewState } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import { selectedSessionViewState } from "./session-selected-state.ts";
 
 type ForkCommand = NonNullable<
   ConstructorParameters<typeof SessionController>[3]
@@ -22,12 +23,7 @@ function forkedSession() {
 function forkController(command: ForkCommand): SessionController {
   const state = initialSessionViewState();
   return new SessionController(
-    createReactiveState<SessionViewState>({
-      ...state,
-      detail: TEST_SESSION_DETAIL,
-      selectedId: TEST_SESSION_DETAIL.id,
-      sessions: [TEST_SESSION_DETAIL],
-    }),
+    createReactiveState<SessionViewState>(selectedSessionViewState(state)),
     undefined,
     null,
     { command },

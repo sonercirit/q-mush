@@ -22,8 +22,17 @@ const CONTAINER_WORKSPACE = "/workspace";
 const CONTAINER_IDENTIFIER_PATTERN = /^[A-Za-z\d][A-Za-z\d_.-]{0,199}$/u;
 type RunnerContainerRunOptions = Pick<
   RunnerProcessOptions,
-  "onOutput" | "signal" | "timeoutSeconds"
+  "onOutput" | "outputLimitCharacters" | "signal" | "timeoutSeconds"
 >;
+
+export interface RunnerContainerShellOptions extends Pick<
+  RunnerProcessOptions,
+  "outputLimitCharacters" | "signal"
+> {
+  readonly publish?: (
+    delta: Omit<RunnerCommandOutputDelta, "sequence">,
+  ) => void;
+}
 
 export type RunnerContainerRun = (
   executable: string,
@@ -101,9 +110,11 @@ function processOptions(
   signal: AbortSignal | undefined,
   timeoutSeconds?: number,
   onOutput?: (delta: Omit<RunnerCommandOutputDelta, "sequence">) => void,
+  outputLimitCharacters?: number,
 ): RunnerContainerRunOptions {
   return {
     ...(onOutput === undefined ? {} : { onOutput }),
+    ...(outputLimitCharacters === undefined ? {} : { outputLimitCharacters }),
     ...(signal === undefined ? {} : { signal }),
     ...(timeoutSeconds === undefined ? {} : { timeoutSeconds }),
   };
@@ -318,9 +329,9 @@ export class RunnerContainerManager {
     root: string,
     command: string,
     timeoutSeconds: number,
-    signal?: AbortSignal,
-    onOutput?: (delta: Omit<RunnerCommandOutputDelta, "sequence">) => void,
+    options: RunnerContainerShellOptions = {},
   ): Promise<string> {
+    const { outputLimitCharacters, publish, signal } = options;
     if (abortSignalIsAborted(signal)) {
       throw new Error("The runner command was stopped");
     }
@@ -342,7 +353,7 @@ export class RunnerContainerManager {
           "-lc",
           command,
         ],
-        processOptions(signal, timeoutSeconds, onOutput),
+        processOptions(signal, timeoutSeconds, publish, outputLimitCharacters),
       );
     } catch (error) {
       if (abortSignalIsAborted(signal)) {

@@ -13,6 +13,7 @@ import type {
   RestartTimer,
 } from "./session-restart-timers.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
+import type { ToolSettingsStore } from "./tool-settings-store.ts";
 
 interface SessionLivenessOptions {
   /** Internal test-only escape hatch for deterministic sub-floor timers. */
@@ -46,6 +47,7 @@ export interface SessionDependencies {
   readonly randomId?: IdGenerator;
   readonly realtime?: RealtimeHub;
   readonly restartTiming?: Partial<SessionRestartTimingOptions>;
+  readonly toolSettings?: Pick<ToolSettingsStore, "read">;
   readonly workspaces?: SessionWorkspaceReader;
 }
 

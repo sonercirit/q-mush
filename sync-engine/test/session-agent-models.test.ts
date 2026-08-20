@@ -3,6 +3,7 @@ import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -109,6 +110,7 @@ function sessionModelOptions(
     id: () => "stream-id",
     isCurrent: () => true,
     realtime: undefined,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     userId: "user-1",
     ...overrides,
   };
@@ -171,6 +173,7 @@ describe("session agent models", () => {
       prompt: null,
       provider: "openrouter",
       providerPricing: null,
+      toolSettings: DEFAULT_TOOL_SETTINGS,
     });
 
     expect(selections[0]).toMatchObject({
@@ -242,8 +245,16 @@ describe("session agent models", () => {
 
     expect(selections).toHaveLength(2);
     expect(selections.map(({ systemPrompt }) => systemPrompt)).toEqual([
-      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
-      createAgentSystemPrompt(null, TEST_SESSION_DETAIL.executionEnvironment),
+      createAgentSystemPrompt(
+        null,
+        TEST_SESSION_DETAIL.executionEnvironment,
+        DEFAULT_TOOL_SETTINGS,
+      ),
+      createAgentSystemPrompt(
+        null,
+        TEST_SESSION_DETAIL.executionEnvironment,
+        DEFAULT_TOOL_SETTINGS,
+      ),
     ]);
     const streamed = [
       compactionRequest("stream-2"),

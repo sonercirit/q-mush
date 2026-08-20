@@ -1,10 +1,8 @@
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { isProviderId } from "../shared/provider-id.ts";
 import { readIdentifier } from "../shared/validation.ts";
-import {
-  safeAgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "./agent-model-discovery.ts";
+import { safeAgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { CredentialDiscoveryRequestOptions } from "./session-credential-discovery-options.ts";

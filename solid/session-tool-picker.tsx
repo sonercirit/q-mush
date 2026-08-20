@@ -1,11 +1,13 @@
 import {
   createEffect,
+  createMemo,
   createSignal,
   For,
   onCleanup,
   Show,
   type JSX,
 } from "solid-js";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
   AGENT_SESSION_TOOL_OPTIONS,
@@ -13,6 +15,7 @@ import {
   type AgentSessionToolName,
   type AgentSessionToolOption,
 } from "../shared/agent-tools.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ToolParameterDetails } from "./tool-parameter-details.tsx";
 
 const CLASSIFICATION_LABELS = {
@@ -56,6 +59,7 @@ export function SessionToolPicker(props: {
   readonly disabled: boolean;
   readonly onChange: (tools: readonly AgentSessionToolName[]) => void;
   readonly onExpandedChange?: (expanded: boolean) => void;
+  readonly settings?: ToolSettings | undefined;
   readonly tools: readonly AgentSessionToolName[];
 }): JSX.Element {
   const [expanded, setExpanded] = createSignal(false);
@@ -140,12 +144,29 @@ export function SessionToolPicker(props: {
         : props.tools.filter((name) => !names.includes(name)),
     );
   };
-  const sessionOptions = AGENT_SESSION_TOOL_OPTIONS.filter(({ name }) =>
-    SESSION_AGENT_TOOL_NAMES.includes(name),
+  const configuredOptions = createMemo<readonly AgentSessionToolOption[]>(
+    () => {
+      const settings = props.settings;
+      if (settings === undefined) return AGENT_SESSION_TOOL_OPTIONS;
+      const definitions = new Map(
+        selectedAgentTools(AGENT_SESSION_TOOL_NAMES, settings).map(
+          ({ function: definition }) => [definition.name, definition],
+        ),
+      );
+      return AGENT_SESSION_TOOL_OPTIONS.map((option) => ({
+        ...option,
+        definition: definitions.get(option.name) ?? option.definition,
+      }));
+    },
   );
-  const otherOptions = AGENT_SESSION_TOOL_OPTIONS.filter(
-    ({ name }) => !SESSION_AGENT_TOOL_NAMES.includes(name),
-  );
+  const sessionOptions = () =>
+    configuredOptions().filter(({ name }) =>
+      SESSION_AGENT_TOOL_NAMES.includes(name),
+    );
+  const otherOptions = () =>
+    configuredOptions().filter(
+      ({ name }) => !SESSION_AGENT_TOOL_NAMES.includes(name),
+    );
   const optionControl = (option: AgentSessionToolOption): JSX.Element => (
     <div class="relative min-w-0 rounded-xl border border-white/10 bg-slate-900 p-3 text-sm text-slate-300">
       <div class="flex min-w-0 items-start gap-2">
@@ -224,7 +245,7 @@ export function SessionToolPicker(props: {
             authoritative schema.
           </p>
           <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-            <For each={otherOptions}>{optionControl}</For>
+            <For each={otherOptions()}>{optionControl}</For>
           </div>
           <section class="mt-4 min-w-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3 md:col-span-2">
             <label class="flex items-center gap-3 text-sm font-semibold text-slate-200">
@@ -246,7 +267,7 @@ export function SessionToolPicker(props: {
               Toggle all tools for creating and controlling agent sessions.
             </p>
             <div class="mt-3 grid min-w-0 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-              <For each={sessionOptions}>{optionControl}</For>
+              <For each={sessionOptions()}>{optionControl}</For>
             </div>
           </section>
         </div>

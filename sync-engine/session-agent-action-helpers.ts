@@ -5,6 +5,7 @@ import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import { abortSignalError } from "../shared/validation.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
@@ -144,6 +145,7 @@ export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
+  readonly signal?: AbortSignal;
   readonly userId: string;
 }): Promise<string> {
   const parent = options.dependencies.store.get(
@@ -171,8 +173,18 @@ export async function spawnAgentSession(options: {
       credential,
       options.userId,
       balanced,
-      options.dependencies.restartSignal(),
+      options.signal === undefined
+        ? options.dependencies.restartSignal()
+        : AbortSignal.any([
+            options.signal,
+            options.dependencies.restartSignal(),
+          ]),
     );
+    // Discovery settles even when the deadline fires mid-flight; never
+    // create a child after the caller already reported timed-out.
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
     if (restartSignalIsAborted(options.dependencies.restartSignal)) {
       return serverRestartingResponse();
     }
@@ -230,7 +242,11 @@ export async function spawnAgentSession(options: {
     return notifiedResponse("spawned");
   }
   if (pool !== undefined && balanced) {
-    const credentials = await pool.candidates(options.userId, selection);
+    const credentials = await pool.candidates(
+      options.userId,
+      selection,
+      options.signal,
+    );
     if (credentials.length === 0) {
       return responseToolOutput(
         createJsonResponse({ error: "credential_unavailable" }, 409),

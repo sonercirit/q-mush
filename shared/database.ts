@@ -20,6 +20,7 @@ import {
   runners,
   runnerWorkspaces,
   sessions,
+  toolSettings,
   users,
   workspaces,
 } from "./database/schema.ts";
@@ -43,6 +44,7 @@ const databaseSchema = {
   runners,
   runnerWorkspaces,
   sessions,
+  toolSettings,
   users,
   workspaces,
 };

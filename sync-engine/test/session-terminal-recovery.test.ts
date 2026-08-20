@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import type { AgentRecordedMessage } from "../../shared/agent-loop.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import type { AgentSessionUsageUpdate } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -34,7 +35,11 @@ function terminalMessage(): AgentRecordedMessage {
 }
 
 function recreate(setup: ReturnType<typeof runningCompactionStore>) {
-  return new SessionStore(setup.database, () => "terminal-recovery-message");
+  return new SessionStore(
+    setup.database,
+    () => "terminal-recovery-message",
+    () => DEFAULT_TOOL_SETTINGS,
+  );
 }
 
 function recreateCommitted(
@@ -132,7 +137,11 @@ test("interrupted terminal child recovery preserves a pending spawn callback", (
     TERMINAL_USAGE,
   );
 
-  const recreated = new SessionStore(setup.database);
+  const recreated = new SessionStore(
+    setup.database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+  );
   const pending = recreated.failInterrupted(TEST_NOW + 5);
   const settled = recreated.get(TEST_USER_ID, child.id);
   expect(settled).toMatchObject({

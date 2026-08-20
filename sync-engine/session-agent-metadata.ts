@@ -1,6 +1,6 @@
-import { optionalAbortSignal } from "../shared/abort-signal.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { optionalSignal } from "../shared/validation.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SpawnSessionToolInput } from "./session-agent-tools.ts";
@@ -34,7 +34,7 @@ export async function discoverSessionAgentMetadata(
     input,
     ownerId,
     rejectCredentialErrors,
-    ...optionalAbortSignal(signal),
+    ...optionalSignal(signal),
   });
   if ("error" in metadata) {
     throw new Error(

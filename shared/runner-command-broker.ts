@@ -3,10 +3,6 @@ import { countRestartProgressTools } from "./restart-progress-tools.ts";
 import type { RestartProgressTool } from "./restart-progress.ts";
 import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
 import {
-  type DispatchRunnerToolCommand,
-  type RunnerToolCommand,
-} from "./runner-command-model.ts";
-import {
   abortRunnerCommand,
   ignoreRunnerCommandCleanupError,
   matchingRunnerCommands,
@@ -17,35 +13,34 @@ import {
   RunnerCommandSurvivalState,
   type RunnerCommandSurvivalOptions,
 } from "./runner-command-survival.ts";
+import {
+  type DispatchRunnerToolCommand,
+  type RunnerCommandOutputDelta,
+  type RunnerCommandStream,
+  type RunnerCommandTransport,
+  type RunnerToolCommand,
+} from "./runner-command.ts";
 import { RunnerDisconnectedError } from "./runner-disconnected-error.ts";
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "./tool-stream.ts";
-
-export type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "./tool-stream.ts";
+import type { RunnerCommandResult } from "./tool-stream.ts";
+import { abortSignalError, errorFromUnknown } from "./validation.ts";
 
 export {
   failedRunnerCommandResult,
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
-  RUNNER_TOOL_OUTPUT_SPILL_COMMAND,
-  RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT,
   type DispatchRunnerToolCommand,
   type RunnerCommandArguments,
   type RunnerExecutionEnvironment,
   type RunnerToolCommand,
-} from "./runner-command-model.ts";
+} from "./runner-command.ts";
+export type {
+  RunnerCommandOutputDelta,
+  RunnerCommandResult,
+} from "./tool-stream.ts";
 
-interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
-  readonly cancel?: (runnerId: string, commandId: string) => void;
-  readonly commandId?: () => string;
-  readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
-}
+interface RunnerCommandBrokerOptions
+  extends RunnerCommandSurvivalOptions, RunnerCommandTransport {}
 
 interface RejectedCommand {
   readonly command: RunnerToolCommand;
@@ -79,20 +74,18 @@ export class RunnerCommandBroker {
   dispatch(
     input: DispatchRunnerToolCommand,
     signal?: AbortSignal,
-    stream?: (delta: RunnerCommandOutputDelta) => void,
+    stream?: RunnerCommandStream,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
       return Promise.reject(
-        abortRunnerCommand("The agent session was stopped"),
+        abortSignalError(signal, "The agent session was stopped"),
       );
     }
     let initiallyAuthorized: boolean;
     try {
       initiallyAuthorized = input.authorize?.() !== false;
     } catch (error) {
-      return Promise.reject(
-        error instanceof Error ? error : new Error(String(error)),
-      );
+      return Promise.reject(errorFromUnknown(error));
     }
     if (!initiallyAuthorized) {
       return Promise.reject(
@@ -111,7 +104,13 @@ export class RunnerCommandBroker {
     const command: RunnerToolCommand = {
       arguments: input.arguments,
       executionEnvironment: input.executionEnvironment,
+      ...(input.executionLimitSeconds === undefined
+        ? {}
+        : { executionLimitSeconds: input.executionLimitSeconds }),
       id,
+      ...(input.outputLimitCharacters === undefined
+        ? {}
+        : { outputLimitCharacters: input.outputLimitCharacters }),
       sessionId: input.sessionId,
       tool: input.tool,
       workingDirectory: input.workingDirectory,
@@ -122,7 +121,12 @@ export class RunnerCommandBroker {
       if (!added) {
         return;
       }
-      this.#reject(id, abortRunnerCommand("The agent session was stopped"));
+      this.#reject(
+        id,
+        signal === undefined
+          ? abortRunnerCommand("The agent session was stopped")
+          : abortSignalError(signal, "The agent session was stopped"),
+      );
     };
     return new Promise<RunnerCommandResult>((resolve, reject) => {
       const pending: PendingRunnerCommand = {
@@ -194,10 +198,7 @@ export class RunnerCommandBroker {
   }
 
   #rejectUnknown(commandId: string, error: unknown): void {
-    this.#reject(
-      commandId,
-      error instanceof Error ? error : new Error(String(error)),
-    );
+    this.#reject(commandId, errorFromUnknown(error));
   }
 
   #requireAuthorization(pending: PendingRunnerCommand): boolean {

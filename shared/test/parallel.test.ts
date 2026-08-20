@@ -26,10 +26,6 @@ function gates(count: number) {
   return Array.from({ length: count }, () => deferred());
 }
 
-function outputIsBounded(output: string): void {
-  expect(Buffer.byteLength(output, "utf8")).toBeLessThan(262_145);
-}
-
 test("maps a very large input through only four ordered workers", async () => {
   const itemCount = 25_000;
   const firstWave = gates(4);
@@ -96,7 +92,7 @@ test("cancellation rejects before non-cooperative workers settle", async () => {
   expect(started).toBe(4);
 });
 
-test("bounds each completed child before scheduling the next call", async () => {
+test("preserves each completed child for the shared final output bound", async () => {
   const firstOutput = "x".repeat(60 * 1_024);
   const pending = gates(4);
   let firstResult: unknown;
@@ -114,9 +110,7 @@ test("bounds each completed child before scheduling the next call", async () => 
       }
       if (index === 4) {
         expect(firstResult).toMatchObject({ recipient_name: "read" });
-        expect(JSON.stringify(firstResult)).toContain(
-          "[parallel output truncated]",
-        );
+        expect(JSON.stringify(firstResult)).toContain(firstOutput);
       }
       return result;
     },
@@ -128,10 +122,10 @@ test("bounds each completed child before scheduling the next call", async () => 
     await Promise.resolve();
   }
   const results = await running;
-  expect(JSON.stringify(results[0])).toContain("[parallel output truncated]");
+  expect(JSON.stringify(results[0])).toContain(firstOutput);
 });
 
-test("bounded output handles high result counts without materializing them", () => {
+test("serializes high result counts without an independent byte budget", () => {
   const resultCount = 25_000;
   const output = boundedParallelOutput(
     Array.from({ length: resultCount }, () => ({
@@ -141,10 +135,5 @@ test("bounded output handles high result counts without materializing them", () 
   );
   const parsed: unknown = JSON.parse(output);
 
-  outputIsBounded(output);
-  expect(parsed).toEqual({
-    error:
-      "All 25000 parallel calls ran, but their result metadata exceeded the bounded output size.",
-    result_count: resultCount,
-  });
+  expect(Array.isArray(parsed) ? parsed : []).toHaveLength(resultCount);
 });

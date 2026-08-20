@@ -6,9 +6,18 @@ import {
 } from "./ask-questions-tool.ts";
 import { PAGE_FETCH_TOOL_DEFINITION } from "./page-fetch.ts";
 import { MODEL_PROVIDER_IDS } from "./provider-id.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "./tool-limits.ts";
 
 const NUMBER_PARAMETER = { type: "number" } as const;
 const STRING_PARAMETER = { type: "string" } as const;
+const WHOLE_SECONDS = {
+  maximum: toolExecutionLimitSeconds(DEFAULT_TOOL_SETTINGS),
+  minimum: 1,
+  type: "integer",
+} as const;
 const BOOLEAN_PARAMETER = { type: "boolean" } as const;
 const STRING_ARRAY_PARAMETER = {
   items: STRING_PARAMETER,
@@ -48,11 +57,11 @@ const FILE_PATH_PARAMETER = {
 const BASE_AGENT_TOOLS = [
   toolDefinition({
     description:
-      "Read up to 2,000 lines or 50KB from a UTF-8 text file per call, including q-mush-attachment links supplied in messages. Use offset and limit to continue reading the same file.",
+      "Read UTF-8 text from a file, including q-mush-attachment links supplied in messages. Omit limit to read as many complete lines as fit the Unicode output budget; set limit for explicit positional pagination. Use offset to continue.",
     name: "read",
     properties: {
       limit: {
-        description: "Maximum number of lines to read",
+        description: "Explicit maximum number of lines to read",
         type: "number",
       },
       offset: {
@@ -79,7 +88,7 @@ const BASE_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Execute a bash command from the workspace directory. Returns bounded stdout, stderr, and the exit status. A positive timeout in seconds is required.",
+      "Execute a bash command from the workspace directory. Returns stdout, stderr, and the exit status.",
     name: "bash",
     properties: {
       command: {
@@ -87,10 +96,8 @@ const BASE_AGENT_TOOLS = [
         type: "string",
       },
       timeout: {
-        description:
-          "Required positive timeout in seconds; no default or configured maximum is applied",
-        minimum: 1,
-        type: "number",
+        ...WHOLE_SECONDS,
+        description: "Required timeout in seconds",
       },
     },
     required: ["command", "timeout"],
@@ -152,10 +159,8 @@ const SESSION_AGENT_TOOLS = [
     name: "sleep",
     properties: {
       durationSeconds: {
-        description: "Duration to sleep in seconds (1-3,600)",
-        maximum: 3_600,
-        minimum: 1,
-        type: "integer",
+        ...WHOLE_SECONDS,
+        description: "Duration to sleep in seconds",
       },
     },
     required: ["durationSeconds"],
@@ -230,7 +235,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "Browse directories on an owned online runner. Use the returned canonical path as workingDirectory for reassign_session; start at ~ and navigate explicitly rather than guessing a path.",
+      "Browse directories on an owned online runner. Use the returned canonical path as workingDirectory for reassign_session; start at ~ and navigate explicitly.",
     name: "browse_runner_directories",
     properties: {
       path: {
@@ -252,7 +257,7 @@ const SESSION_AGENT_TOOLS = [
   }),
   toolDefinition({
     description:
-      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 26). Search is case-insensitive across title, status, model, provider, and working directory.",
+      "List sessions with pagination (page defaults to 1; pageSize defaults to 20, max 26). Search spans title, status, model, provider, and working directory.",
     name: "list_sessions",
     properties: {
       page: {
@@ -411,7 +416,7 @@ const SESSION_AGENT_TOOLS = [
   }),
 ] as const;
 
-const PARALLEL_TOOL = toolDefinition({
+export const PARALLEL_TOOL = toolDefinition({
   description:
     "Run multiple independent tool or skill calls with bounded concurrency. The number of accepted calls has no application-defined maximum, but only a small worker pool runs simultaneously. Do not use this when one call depends on another call's result.",
   name: "parallel",
@@ -558,63 +563,9 @@ export function readAgentSessionToolNames(
   return selected;
 }
 
-function selectedParallelTool(
-  selectedTools: readonly AgentToolDefinition[],
-): AgentToolDefinition {
-  return {
-    ...PARALLEL_TOOL,
-    function: {
-      ...PARALLEL_TOOL.function,
-      parameters: {
-        ...PARALLEL_TOOL.function.parameters,
-        properties: {
-          ...PARALLEL_TOOL.function.parameters.properties,
-          tool_uses: {
-            ...PARALLEL_TOOL.function.parameters.properties.tool_uses,
-            items: {
-              ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items,
-              properties: {
-                ...PARALLEL_TOOL.function.parameters.properties.tool_uses.items
-                  .properties,
-                recipient_name: {
-                  ...PARALLEL_TOOL.function.parameters.properties.tool_uses
-                    .items.properties.recipient_name,
-                  enum: selectedTools
-                    .map(({ function: definition }) => definition.name)
-                    .filter(
-                      (name) =>
-                        name !== PARALLEL_TOOL.function.name &&
-                        name !== ASK_QUESTIONS_TOOL_NAME &&
-                        name !== "sleep",
-                    ),
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-  };
-}
-
-export function selectedAgentTools(
-  names: readonly AgentSessionToolName[],
-): readonly AgentToolDefinition[] {
-  const isSelected = (name: AgentSessionToolName): boolean =>
-    names.includes(name);
-  const selectedTools = AGENT_TOOLS.filter(({ function: definition }) =>
-    isSelected(definition.name),
-  );
-  return selectedTools.map((tool) =>
-    tool.function.name === PARALLEL_TOOL.function.name
-      ? selectedParallelTool(selectedTools)
-      : tool,
-  );
-}
-
 export { type BaseAgentToolName };
 
-type RunnerAgentToolName =
+export type RunnerAgentToolName =
   | BaseAgentToolName
   | typeof PAGE_FETCH_TOOL_DEFINITION.function.name
   | typeof PARALLEL_TOOL.function.name;

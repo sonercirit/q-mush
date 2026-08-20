@@ -227,6 +227,7 @@ export class ShutdownInterruptedSessionStore {
           previousExecutionGeneration: session.executionGeneration,
           segment,
           sessionId: session.id,
+          toolSettings: "inherit",
           userId: session.userId,
         });
         appendUnknownRestartToolResults({

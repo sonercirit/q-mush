@@ -4,7 +4,7 @@ import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { SessionForkInput } from "../../shared/session-fork.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
 import {

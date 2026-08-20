@@ -8,7 +8,7 @@ import {
   executeParallelResultCall,
   mapWithParallelConcurrency,
 } from "../shared/parallel.ts";
-import type { RunnerCommandResult } from "../shared/runner-command-broker.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 
 import { isAskQuestionsToolName } from "./ask-questions-pause.ts";
 import type { BraveSearchExecutor } from "./brave-search.ts";
@@ -30,7 +30,7 @@ type AgentSkillArgumentParameters = Readonly<{
   readonly callId: string | undefined;
   readonly signal: AbortSignal | undefined;
 }>;
-export type AgentSkillExecutor = (
+type AgentSkillExecutor = (
   ...parameters: AgentSkillParameters
 ) => Promise<RunnerCommandResult | string>;
 

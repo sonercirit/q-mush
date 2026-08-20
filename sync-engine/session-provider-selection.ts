@@ -1,7 +1,4 @@
-import {
-  abortSignalIsAborted,
-  optionalAbortSignal,
-} from "../shared/abort-signal.ts";
+import { abortSignalIsAborted } from "../shared/abort-signal.ts";
 import {
   readOpenRouterProviderRouting,
   type OpenRouterProviderCatalog,
@@ -15,8 +12,10 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { optionalSignal } from "../shared/validation.ts";
+import { isCredentialRejectionError } from "./agent-model-discovery-fetch.ts";
 import {
-  isCredentialRejectionError,
+  discoverModelOption,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
@@ -27,11 +26,7 @@ import type {
   SessionCredentialMetadataUpdate,
   SessionCredentialReassignmentSnapshot,
 } from "./session-credential-reassignment-store.ts";
-import {
-  discoverCredentialModels,
-  selectDiscoveredModel,
-  type SessionModelDiscoveryDependencies,
-} from "./session-model-discovery-dependencies.ts";
+import { type SessionModelDiscoveryDependencies } from "./session-model-discovery-dependencies.ts";
 import { readIdentifier } from "./session-request-helpers.ts";
 import { requestSearchSelection } from "./session-search-selection.ts";
 
@@ -116,7 +111,7 @@ export async function openRouterProvidersForUser(
         options.user.id,
         credential,
         model,
-        optionalAbortSignal(options.signal),
+        optionalSignal(options.signal),
       );
       throwIfAgentAborted(options.signal);
       const response = createJsonResponse(catalog);
@@ -295,7 +290,7 @@ export function sessionMetadataFromDependencies(
     discoverProviders: options.dependencies.discoverOpenRouterProviders,
     input: options.input,
     ownerId: options.ownerId,
-    ...optionalAbortSignal(options.signal),
+    ...optionalSignal(options.signal),
     ...optionalCredentialRejection(options.rejectCredentialErrors),
   });
 }
@@ -305,6 +300,11 @@ function credentialFailure(
   error: unknown,
   fallback: SessionMetadataResult,
 ): SessionMetadataResult {
+  // Cancellation is not missing metadata: a deadline or session stop must
+  // propagate so callers do not proceed to create work after timing out.
+  if (options.signal?.aborted === true) {
+    throw error;
+  }
   if (options.rejectCredentialErrors === true) {
     if (isCredentialRejectionError(error)) throw error;
     throw new RealtimeCommandError("provider_unavailable");
@@ -333,7 +333,7 @@ export async function sessionMetadata(
         input.model,
         {
           force: true,
-          ...optionalAbortSignal(options.signal),
+          ...optionalSignal(options.signal),
         },
       );
       const selected = selectedProvider(catalog, input.openRouterProviderTag);
@@ -354,13 +354,13 @@ export async function sessionMetadata(
   }
 
   try {
-    const catalog = await discoverCredentialModels(
+    const model = await discoverModelOption(
       options.discoverModels,
       input.provider,
       credential,
+      input.model,
       options.signal,
     );
-    const model = selectDiscoveredModel(catalog, input.model);
     return {
       adaptiveThinking: model?.adaptiveThinking ?? null,
       maxContextTokens: model?.contextWindow ?? null,

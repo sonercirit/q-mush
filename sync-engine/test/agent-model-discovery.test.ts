@@ -6,14 +6,22 @@ import type {
 } from "../../shared/provider-credential-store.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
 import {
-  discoverAgentModelsWithFetch,
   isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
-} from "../../sync-engine/agent-model-discovery.ts";
+} from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
+import {
+  abortAndObserveCanceledReader,
+  stalledResponseReaderFixture,
+} from "./discovery-cancellation-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
+
+function deferredSignal() {
+  return Promise.withResolvers<undefined>();
+}
 
 class RequestCapture {
   request?: Request;
@@ -48,14 +56,23 @@ async function capturedDiscovery(
   return { catalog: discovered, request: capture.request };
 }
 
-function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
+function openAiDiscovery(
+  response: Response,
+  signal?: AbortSignal,
+): Promise<AgentModelCatalog> {
   return discoverAgentModelsWithFetch(
     "openai",
     credential("api_key", "sk-openai-secret"),
-    () =>
-      Promise.resolve(
-        new Response(body, { headers: { "content-type": "application/json" } }),
-      ),
+    () => Promise.resolve(response),
+    signal,
+  );
+}
+
+function rejectedDiscovery(body: BodyInit): Promise<AgentModelCatalog> {
+  return openAiDiscovery(
+    new Response(body, {
+      headers: { "content-type": "application/json" },
+    }),
   );
 }
 
@@ -234,6 +251,40 @@ describe("agent model discovery", () => {
     );
     expect(request.url).toBe("https://models.example.test/openai/v1/models");
     expectBearer(request, "generic-secret");
+  });
+
+  test("aborts and cancels a stalled discovery response body", async () => {
+    const controller = new AbortController();
+    const canceled = deferredSignal();
+    const body = new ReadableStream<Uint8Array>({
+      cancel: () => {
+        canceled.resolve(undefined);
+      },
+      pull: () => {
+        // Intentionally stall after the response headers arrive.
+      },
+    });
+    const pending = discoverAgentModelsWithFetch(
+      "openai",
+      credential("api_key", "sk-openai-secret"),
+      () => Promise.resolve(new Response(body)),
+      controller.signal,
+    );
+    const captured = pending.catch((error: unknown) => error);
+    const reason = new DOMException("Deadline reached", "AbortError");
+
+    await Promise.resolve();
+    controller.abort(reason);
+
+    await expect(captured).resolves.toBe(reason);
+    await expect(canceled.promise).resolves.toBeUndefined();
+  });
+
+  test("settles abort promptly while body cancellation finishes later", async () => {
+    const fixture = stalledResponseReaderFixture();
+    const { captured, controller } = fixture.start(openAiDiscovery);
+
+    await abortAndObserveCanceledReader(fixture, captured, controller);
   });
 
   test("aborts an oversized streamed catalog before fully buffering it", async () => {

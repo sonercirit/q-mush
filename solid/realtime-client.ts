@@ -542,6 +542,7 @@ export class RealtimeConnection {
     }
     if (
       event.type === "health" ||
+      event.type === "tool_settings" ||
       event.type === "development_restart_progress"
     ) {
       this.#listener(event);

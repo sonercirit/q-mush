@@ -13,6 +13,7 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import {
   createFallbackModel,
   type AgentModelFactory,
@@ -52,6 +53,7 @@ export async function explainAttachment(
     readonly restartRequested?: () => boolean;
     readonly prompt: string | null;
     readonly resources: AttachmentFallbackRuntimeResources;
+    readonly toolSettings: ToolSettings;
     readonly userId: string;
     readonly workspaceId: string;
   },
@@ -118,6 +120,7 @@ export async function explainAttachment(
     prompt: options.prompt,
     provider: selectedProvider,
     providerPricing: selectedPricing,
+    toolSettings: options.toolSettings,
   });
   let step;
   try {

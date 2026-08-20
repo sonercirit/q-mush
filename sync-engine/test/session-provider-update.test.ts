@@ -5,6 +5,7 @@ import {
   agentSessions,
   agentSessionTurns,
 } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
 import { SessionStore } from "../session-store.ts";
 import {
@@ -51,7 +52,8 @@ function setup(userContextTokenCap?: number) {
   addSessionTestRunner(database, "provider-update-machine", "runner-1");
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
-  const store = new SessionStore(database);
+  const readSettings = () => DEFAULT_TOOL_SETTINGS;
+  const store = new SessionStore(database, undefined, readSettings);
   const created = createProviderUpdateSession(store, userContextTokenCap);
   if (created.status !== "created") throw new Error("Fixture failed");
   const cancelSessionGeneration = vi.fn<

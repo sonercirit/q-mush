@@ -44,6 +44,7 @@ import { SessionController } from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
+import { ToolSettingsController } from "./tool-settings-controller.ts";
 import { WorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
 
@@ -288,6 +289,7 @@ function App(): JSX.Element {
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = new PromptController();
   const runners = new RunnerController();
+  const toolSettings = new ToolSettingsController();
   const realtime = new RealtimeConnection((event) => {
     switch (event.type) {
       case "health":
@@ -298,6 +300,9 @@ function App(): JSX.Element {
         break;
       case "runners":
         runners.applyRealtime(event.runners);
+        break;
+      case "tool_settings":
+        toolSettings.apply(event.settings);
         break;
       case "sessions":
         agentSessions.applyRealtime(event.sessions);
@@ -386,6 +391,7 @@ function App(): JSX.Element {
     workspaces.reset();
     prompts.reset();
     runners.reset();
+    toolSettings.reset();
     for (const controller of providerControllers) {
       controller.reset();
     }
@@ -400,7 +406,11 @@ function App(): JSX.Element {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
       setSession(loaded);
       if (loaded.user !== null) {
-        await Promise.all([prompts.load(), workspaces.load()]);
+        await Promise.all([
+          prompts.load(),
+          toolSettings.load(),
+          workspaces.load(),
+        ]);
       }
     } catch {
       resetWorkspaceConnections();
@@ -524,6 +534,7 @@ function App(): JSX.Element {
                           openRouter={openRouter}
                           prompts={prompts}
                           runners={runners}
+                          toolSettings={toolSettings}
                           user={user()}
                           workspaces={workspaces}
                         />

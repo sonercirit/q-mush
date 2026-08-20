@@ -2,10 +2,8 @@ import { describe, expect, test } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import {
-  AgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "../../sync-engine/agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { type AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import {
   createAuthenticatedRequest,
   TEST_AUTHENTICATED_USER,

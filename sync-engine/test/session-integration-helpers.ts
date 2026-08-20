@@ -3,6 +3,10 @@ import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import {
   createAuthenticatedRequest,
@@ -90,6 +94,15 @@ export function expectedRunnerCommand(
     id: RUNNER_COMMAND_ID,
     sessionId: SESSION_ID,
     workingDirectory: "/work/project",
+    ...(command.tool === "list_directories" ||
+    command.tool === RUNNER_AGENT_FILE_COMMAND
+      ? {}
+      : {
+          executionLimitSeconds: toolExecutionLimitSeconds(
+            DEFAULT_TOOL_SETTINGS,
+          ),
+          outputLimitCharacters: DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+        }),
     ...command,
   };
 }

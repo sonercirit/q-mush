@@ -1,9 +1,9 @@
 import type { RunnerCommandDelivery } from "./runner-command-delivery.ts";
-import type { RunnerToolCommand } from "./runner-command-model.ts";
 import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "./tool-stream.ts";
+  RunnerCommandStream,
+  RunnerToolCommand,
+} from "./runner-command.ts";
+import type { RunnerCommandResult } from "./tool-stream.ts";
 
 export interface PendingRunnerCommand {
   readonly abort: (() => void) | undefined;
@@ -15,7 +15,7 @@ export interface PendingRunnerCommand {
   readonly resolve: (result: RunnerCommandResult) => void;
   readonly runnerId: string;
   readonly signal: AbortSignal | undefined;
-  readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
+  readonly stream: RunnerCommandStream | undefined;
   nextSequence: number;
   phase: "in_flight" | "queued";
   queuedAfterDisconnect: boolean;

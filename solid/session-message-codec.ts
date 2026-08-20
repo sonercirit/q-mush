@@ -17,6 +17,7 @@ export interface SessionMessageFields extends SessionContentFields {
   readonly tokenUsage?: AgentTokenUsage;
   readonly toolCallId: string | null;
   readonly toolName: string | null;
+  readonly turnId?: string | null;
 }
 
 export function readSessionContentFields(
@@ -49,15 +50,19 @@ export function readSessionMessageFields(
   const tokenUsage = readTokenUsage(value["tokenUsage"]);
   const toolCallId = readNullableString(value["toolCallId"]);
   const toolName = readNullableString(value["toolName"]);
+  const rawTurnId = value["turnId"];
+  const turnId = readNullableString(rawTurnId ?? null);
   return contentFields !== undefined &&
     tokenUsage !== undefined &&
     toolCallId !== undefined &&
-    toolName !== undefined
+    toolName !== undefined &&
+    turnId !== undefined
     ? {
         ...contentFields,
         ...(tokenUsage === null ? {} : { tokenUsage }),
         toolCallId,
         toolName,
+        ...(rawTurnId === undefined ? {} : { turnId }),
       }
     : undefined;
 }

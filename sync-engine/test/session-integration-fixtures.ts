@@ -17,10 +17,8 @@ import {
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import {
-  AgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "../../sync-engine/agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import type { AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
 import type { OpenRouterProviderDiscoverer } from "../../sync-engine/openrouter-provider-discovery.ts";
@@ -69,6 +67,7 @@ interface ConnectedSessionOptions {
   readonly now?: () => number;
   readonly providerDiscovery?: OpenRouterProviderDiscoverer;
   readonly restartTiming?: SessionDependencies["restartTiming"];
+  readonly toolSettings?: SessionDependencies["toolSettings"];
   readonly onChange?: (userId: string, sessionId: string) => void;
   readonly onCredentialRead?: () => void;
   readonly readCredential?: (
@@ -387,6 +386,9 @@ export function connectedSessionSetup(
       ...(options.restartTiming === undefined
         ? {}
         : { restartTiming: options.restartTiming }),
+      ...(options.toolSettings === undefined
+        ? {}
+        : { toolSettings: options.toolSettings }),
       workspaces: new WorkspaceStore(database),
     },
   );
