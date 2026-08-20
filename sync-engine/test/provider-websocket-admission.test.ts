@@ -1,7 +1,9 @@
 import { expect, test } from "vitest";
 import {
+  acknowledgeProviderSocket,
   apiKeyModel,
   complete,
+  completeProviderSocket,
   FakeProviderSockets,
   replaceProviderSocket,
   requireProviderSocket,
@@ -9,23 +11,31 @@ import {
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
-test("adopts an ID observed after unidentified admission", async () => {
+test("does not adopt a retained ID after unidentified admission", async () => {
   const setup = new FakeProviderSockets();
   const model = apiKeyModel({ webSocket: setup.create });
-  const pending = complete(model);
+  const first = complete(model);
   const socket = requireProviderSocket(setup, 0);
   socket.open();
+  acknowledgeProviderSocket(socket, "retained");
+  completeProviderSocket(socket, "retained");
+  expectDoneStep(await first);
+
+  const second = complete(model);
   socket.receive({ type: "response.created" });
   socket.receive({
-    delta: "Done.",
-    response_id: "identified-later",
+    delta: "Stale.",
+    response_id: "retained",
     type: "response.output_text.delta",
   });
   socket.receive({
-    response: { id: "identified-later", output: [] },
-    type: "response.completed",
+    response_id: "current",
+    sequence_number: 1,
+    type: "response.output_text.delta",
+    delta: "Done.",
   });
-  expectDoneStep(await pending);
+  completeProviderSocket(socket, "current");
+  expectDoneStep(await second);
   socket.close();
 });
 

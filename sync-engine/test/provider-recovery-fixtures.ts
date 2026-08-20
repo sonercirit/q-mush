@@ -172,6 +172,16 @@ export function acknowledgeProviderSocket(
   socket.receive({ response: { id: responseId }, type: "response.created" });
 }
 
+export function completeProviderSocket(
+  socket: FakeProviderSocket,
+  responseId: string,
+): void {
+  socket.receive({
+    ...COMPLETED_EVENT,
+    response: { ...COMPLETED_EVENT.response, id: responseId },
+  });
+}
+
 export function expireProviderSocket(
   socket: FakeProviderSocket,
   code: string,

@@ -15,7 +15,7 @@
 - No reward hacking: don't weaken tests, special-case checks, or claim unrun
   checks. Fix defects on sight; if a fix is harmful, codify why in a test.
 - Record new decisions, gotchas, and lessons here in the same change. A repeated
-  repetition means a rule is missing. If evidence overturns a finding, fix its
+  instruction means a rule is missing. If evidence overturns a finding, fix its
   code and stale records in that change; act, don't ask.
 - Keep workflows local-first: narrow checks per change, broad suites once
   captured, then rerun narrow failures. Never commit secrets or artifacts.
@@ -30,7 +30,7 @@
   absolute script paths, so keep its path bare; it pins headless and
   `PWDEBUG=0`. Playwright 1.62.1/Vitest 4.1.10 stay pinned: probes couple to
   Playwright's `<launching>` output and Vitest launch behavior.
-- `bun run check` runs every static check,; `bun run format` / `lint:fix` write
+- `bun run check` runs every static check; `bun run format` / `lint:fix` write
   fixes.
 - CI (`.github/workflows/checks.yml`): tests, static checks, build, and
   whitespace on Bun 1.3.14, frozen lockfile.
@@ -281,11 +281,11 @@
   replace the socket once per step, then use bounded retries, replaying only the
   unpersisted step. Local send is admission: bound until correlated
   `response.created`; discard unknown, pre-creation, mismatched-ID frames.
-  Retain IDs for the socket's 60-minute life, not an arbitrary cap. Acknowledged
-  work is unbound. Diagnostics are fenced; watchdog failure aborts without
-  replaying tools. Other WebSocket/accepted-HTTP interruptions or provider
-  errors retry before persistence; replays reset partial UI deltas and exhausted
-  WebSockets fall back to HTTP. Permanent errors and aborts do not retry;
+  Retain IDs for the socket's 60-minute life. After ID-less admission, skip
+  retained IDs until an unretained ID arrives. Acknowledged work is unbound.
+  Fenced watchdog failures abort without replaying tools. Other interruptions
+  and provider errors retry before persistence; replays reset partial UI, and
+  exhausted WebSockets use HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX
   session; stop/timeout signals only its group. Agent launches and runner

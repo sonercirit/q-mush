@@ -251,8 +251,8 @@ export class ProviderWebSocketSession {
             }
             // response.created is the canonical correlation event. Servers
             // that omit it can still correlate the request with an identified
-            // non-terminal event; an unfamiliar terminal frame alone may be a
-            // stale response from the reused connection and is discarded.
+            // non-terminal event; only an unidentified unfamiliar terminal
+            // frame is discarded as potentially stale from the reused socket.
             currentResponseId = eventResponseId;
             requestActive = true;
             options.onRequestState?.("active");
@@ -260,6 +260,9 @@ export class ProviderWebSocketSession {
             eventResponseId !== undefined &&
             currentResponseId === undefined
           ) {
+            if (priorResponseIds.has(eventResponseId)) {
+              return;
+            }
             currentResponseId = eventResponseId;
           } else if (
             eventResponseId !== undefined &&
