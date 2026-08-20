@@ -439,6 +439,7 @@ export function SessionTranscript(props: {
     message: AgentSessionMessage,
     liveToolStreams: readonly ToolStreamEntry[],
   ): ToolSettings =>
+    // Stream rows may not have a persisted, ended turn yet; current settings win.
     liveToolStreams.length > 0 || isStreamedMessage(message)
       ? transcriptToolSettings()
       : (turnToolSettings().get(message.turnId ?? "") ?? DEFAULT_TOOL_SETTINGS);
@@ -485,35 +486,40 @@ export function SessionTranscript(props: {
   const renderStreamedMessage: StreamedMessageRenderer = (
     message,
     liveToolStreams,
-  ) => (
-    <>
-      <Show when={transcriptMessageIsVisible(message(), props.filters)}>
-        <TranscriptMessage
-          callArguments={() => counts().toolCallArguments}
-          filters={props.filters}
-          liveToolStreams={liveToolStreams()}
-          message={message()}
-          settings={() => messageToolSettings(message(), liveToolStreams())}
-          nestedScrollKey={
-            messageNestedScrollKeys().byMessageId.get(message().id) ??
-            message().id
-          }
-          onForkMessage={props.onFork}
-          streamEntries={toolStreamsByCallId}
-        />
-      </Show>
-      <Show when={stepTiming().completedTimings.get(message().id)}>
-        {(timing) => (
-          <TranscriptStepTiming
-            endedAt={timing().endedAt}
-            previousInputTokens={timing().previousInputTokens}
-            startedAt={timing().startedAt}
-            tokenUsage={timing().tokenUsage}
+  ) => {
+    const settings = createMemo(() =>
+      messageToolSettings(message(), liveToolStreams()),
+    );
+    return (
+      <>
+        <Show when={transcriptMessageIsVisible(message(), props.filters)}>
+          <TranscriptMessage
+            callArguments={() => counts().toolCallArguments}
+            filters={props.filters}
+            liveToolStreams={liveToolStreams()}
+            message={message()}
+            settings={settings}
+            nestedScrollKey={
+              messageNestedScrollKeys().byMessageId.get(message().id) ??
+              message().id
+            }
+            onForkMessage={props.onFork}
+            streamEntries={toolStreamsByCallId}
           />
-        )}
-      </Show>
-    </>
-  );
+        </Show>
+        <Show when={stepTiming().completedTimings.get(message().id)}>
+          {(timing) => (
+            <TranscriptStepTiming
+              endedAt={timing().endedAt}
+              previousInputTokens={timing().previousInputTokens}
+              startedAt={timing().startedAt}
+              tokenUsage={timing().tokenUsage}
+            />
+          )}
+        </Show>
+      </>
+    );
+  };
   const renderMessage = (message: AgentSessionMessage): JSX.Element =>
     renderStreamedMessage(
       () => message,

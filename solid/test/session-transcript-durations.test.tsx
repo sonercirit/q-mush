@@ -332,7 +332,7 @@ const renderLatestConfiguredSleep = (
   );
 };
 
-test("uses the latest configured limit for streamed sleep messages without a live stream", () => {
+test("uses the latest configured limit for inline streamed messages without a live tool stream", () => {
   const html = renderLatestConfiguredSleep("stream:assistant", []);
 
   expect(html).toContain("Duration: 2h");
