@@ -83,6 +83,7 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
+  // Unbounded is safe: reconnect/close clears IDs, and a socket lives 60 minutes.
   readonly #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
   #socketGeneration = 0;

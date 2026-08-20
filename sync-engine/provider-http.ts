@@ -152,9 +152,7 @@ export async function completeProviderHttp(
   });
   let streamed = false;
   const retryAttempt = async (): Promise<AgentModelStep> => {
-    options.onRequestState?.("admission");
     const response = await fetchModelRequestAttempt(options.fetch, request);
-    options.onRequestState?.("active");
     try {
       return await readAcceptedResponse(response, {
         ...options,

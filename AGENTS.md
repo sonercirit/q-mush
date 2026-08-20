@@ -23,7 +23,7 @@
 ## Setup, Commands
 
 - Install/run: `bun install`; `bun run sync-engine/index.ts`
-- Develop: `bun run dev` (+ `dev:restart`, `dev:watch`); `bun run build`
+- Develop/build: `bun run dev` (+ `dev:restart`, `dev:watch`) / `build`
 - Migrations: `bun run db:generate` / `db:migrate`
 - Test: `bun run test` (Vitest DOM/server + Chromium) / `test:watch`;
   `test:browser` runs Chromium. Bun 1.3.14's `--no-orphans` fails for `./` or
@@ -144,14 +144,13 @@
   be the user's default across providers. Shared behavior:
   `provider-credentials.ts`, `connected-account-oauth.ts`, the
   `solid/provider-*` client modules.
-- Measure cache hits against the cacheable prefix (total input dilutes with
-  fresh tool output); persistent shortfalls are bugs, lone misses noise — writes
-  land late and 128-token blocks hide small growth. Codex sockets stay open per
-  run (cache-neutral), reconnect on failure, close at run end. UI rates divide
-  by summed input minus the final request (summary) or the prior step's input
-  (per step), clamped at 100%, counting only fully reported steps. OpenAI/Codex
-  requests carry the session ID as `prompt_cache_key` and the Codex `session_id`
-  header (cache routing); that surface rejects
+- Measure cache hits against the cacheable prefix; total input dilutes with
+  fresh tool output. Persistent shortfalls are bugs, lone misses noise. Codex
+  sockets stay open per run, reconnect on failure, and close at run end. UI
+  rates divide by summed input minus the final request (summary) or the prior
+  step's input (per step), clamped at 100%, counting only fully reported steps.
+  OpenAI/Codex requests carry the session ID as `prompt_cache_key` and the Codex
+  `session_id` header (cache routing); that surface rejects
   `prompt_cache_breakpoint`/`prompt_cache_retention`. OpenRouter and
   Anthropic-format requests mark one-hour `cache_control` breakpoints on the
   system prompt, transcript tail, and Anthropic tool definitions
@@ -279,12 +278,12 @@
   it. WebSocket Mode expires after 60 minutes; canonical
   `websocket_connection_limit_reached` and observed underscore-free variant
   replace the socket once per step, then use bounded retries, replaying only the
-  unpersisted step. Local send is admission: bound until correlated
-  `response.created`; discard unknown, pre-creation, mismatched-ID frames.
-  Retain IDs for the socket's 60-minute life. After ID-less admission, skip
-  retained IDs until an unretained ID arrives. Acknowledged work is unbound.
-  Fenced watchdog failures abort without replaying tools. Other interruptions
-  and provider errors retry before persistence; replays reset partial UI, and
+  unpersisted step. WebSocket send enters bounded admission until correlated
+  `response.created`; HTTP header waits stay unbounded. Discard unknown,
+  pre-creation, and mismatched-ID frames. Retain IDs for each socket's 60-minute
+  life; after ID-less admission, skip retained IDs until a new ID. Fenced
+  watchdog failures abort without replaying tools. Other interruptions and
+  provider errors retry before persistence; replays reset partial UI, and
   exhausted WebSockets use HTTP. Permanent errors and aborts do not retry;
   terminal failures persist as non-replayed `error` messages.
 - Shell commands require a positive timeout; on macOS/Linux each gets a POSIX

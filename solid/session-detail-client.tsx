@@ -338,6 +338,7 @@ function sessionListRowMatches(
       (rightSession.pendingQuestions === null) &&
     leftSession.provider === rightSession.provider &&
     leftSession.reasoningEffort === rightSession.reasoningEffort &&
+    // Rows render only the component; include `since` here if they display it.
     leftSession.runtimePending?.component ===
       rightSession.runtimePending?.component &&
     leftSession.runnerRequired === rightSession.runnerRequired &&

@@ -1,5 +1,4 @@
 import { expect, test } from "vitest";
-import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
@@ -20,103 +19,19 @@ import {
   retryingSocket,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
-class InstrumentedAbortController extends AbortController {
-  abortListenerCount = 0;
-  constructor() {
-    super();
-    const signal = this.signal;
-    const add = signal.addEventListener.bind(signal);
-    const remove = signal.removeEventListener.bind(signal);
-    signal.addEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount += 1;
-      add(type, listener, options);
-    };
-    signal.removeEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount -= 1;
-      remove(type, listener, options);
-    };
-  }
-}
-function completeWithSignal(
-  model: ChatCompletionsAgentModel,
-  signal: AbortSignal,
-) {
-  return model.complete([{ content: "Hello", role: "user" }], signal);
-}
-function instrumentedProviderRequest() {
-  const controller = new InstrumentedAbortController();
-  const sockets = new FakeProviderSockets();
-  const model = apiKeyModel({ webSocket: sockets.create });
-  const pending = completeWithSignal(model, controller.signal);
-  const socket = requireProviderSocket(sockets, 0);
-  socket.open();
-  return { controller, pending, socket };
-}
-function lifecycleModel(states: ("active" | "admission")[]) {
-  const sockets = new FakeProviderSockets();
-  return {
-    model: apiKeyModel({
-      onRequestState: (state) => states.push(state),
-      webSocket: sockets.create,
-    }),
-    sockets,
-  };
-}
-function beginLifecycleRequest(states: ("active" | "admission")[]) {
-  const { model, sockets } = lifecycleModel(states);
-  const pending = complete(model);
-  const socket = requireProviderSocket(sockets, 0);
-  socket.open();
-  expectRequestStates(states, "admission");
-  return { model, pending, socket };
-}
-function responseEvent(
-  type: "response.completed" | "response.created",
-  id: string,
-) {
-  return {
-    response:
-      type === "response.created"
-        ? { id }
-        : { ...COMPLETED_EVENT.response, id },
-    type,
-  };
-}
-function completeResponse(socket: FakeProviderSocket, id: string): void {
-  socket.receive(responseEvent("response.completed", id));
-}
-async function expectRequestPending(pending: Promise<unknown>): Promise<void> {
-  let settled = false;
-  const observeSettlement = (): void => {
-    settled = true;
-  };
-  void pending.then(observeSettlement, observeSettlement);
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(settled).toBe(false);
-}
-function expectRequestStates(
-  states: readonly ("active" | "admission")[],
-  ...expected: ("active" | "admission")[]
-): void {
-  expect(states).toEqual(expected);
-}
-async function expectAbortWithoutHttp(
-  model: ChatCompletionsAgentModel,
-  controller: AbortController,
-  interrupt: () => void,
-): Promise<void> {
-  const pending = completeWithSignal(model, controller.signal);
-  interrupt();
-  expect(await captureRejection(pending)).toMatchObject({ name: "AbortError" });
-}
+import {
+  beginLifecycleRequest,
+  completeResponse,
+  completeWithSignal,
+  expectAbortWithoutHttp,
+  expectRequestPending,
+  expectRequestStates,
+  InstrumentedAbortController,
+  instrumentedProviderRequest,
+  lifecycleModel,
+  responseEvent,
+} from "./provider-websocket-lifecycle-fixtures.ts";
+
 test("prefers Responses WebSocket for API keys", async () => {
   const sockets: FakeProviderSocket[] = [];
   const model = apiKeyModel({
@@ -144,6 +59,7 @@ test("prefers Responses WebSocket for API keys", async () => {
   socket?.receive(COMPLETED_EVENT);
   expectDoneStep(await pending);
 });
+
 test("accepts terminal-only responses on a fresh socket", async () => {
   const sockets = new FakeProviderSockets();
   const pending = complete(apiKeyModel({ webSocket: sockets.create }));
@@ -174,6 +90,7 @@ test("bounds admission through unknown frames", async () => {
   completeResponse(request.socket, "current");
   expectDoneStep(await request.pending);
 });
+
 test("removes abort listener after success", async () => {
   const { controller, pending, socket } = instrumentedProviderRequest();
   expect(controller.abortListenerCount).toBe(1);
@@ -182,6 +99,7 @@ test("removes abort listener after success", async () => {
   await pending;
   expect(controller.abortListenerCount).toBe(0);
 });
+
 test("removes abort listener after abort", async () => {
   const { controller, pending, socket } = instrumentedProviderRequest();
   controller.abort();
@@ -191,6 +109,7 @@ test("removes abort listener after abort", async () => {
   expect(controller.abortListenerCount).toBe(0);
   expectProviderSocketReleased(socket);
 });
+
 test("cleans up when send throws", async () => {
   const controller = new InstrumentedAbortController();
   const socket = new FakeProviderSocket();
@@ -203,9 +122,11 @@ test("cleans up when send throws", async () => {
   expect(socket.listenerCount("open")).toBe(0);
   expect(controller.abortListenerCount).toBe(0);
 });
+
 test("correlates deltas on a reused socket", async () => {
   const states: ("active" | "admission")[] = [];
-  const { model, pending: first, socket } = beginLifecycleRequest(states);
+  const request = beginLifecycleRequest(states);
+  const { model, pending: first, socket } = request;
   acknowledgeProviderSocket(socket, "response-1");
   expectRequestStates(states, "admission", "active");
   completeResponse(socket, "response-1");
@@ -244,10 +165,11 @@ test("correlates deltas on a reused socket", async () => {
 });
 
 test("keeps a defensive-copy fence while the newest socket wins a concurrent reset", async () => {
-  const states: ("active" | "admission")[] = [],
-    { model, sockets } = lifecycleModel(states);
-  const first = complete(model),
-    old = requireProviderSocket(sockets, 0);
+  const observed: ("active" | "admission")[] = [];
+  const lifecycle = lifecycleModel(observed);
+  const { model, sockets } = lifecycle;
+  const first = complete(model);
+  const old = requireProviderSocket(sockets, 0);
   old.open();
   acknowledgeProviderSocket(old, "old");
   completeResponse(old, "old");
@@ -259,9 +181,9 @@ test("keeps a defensive-copy fence while the newest socket wins a concurrent res
     completeResponse(old, id);
     await pending;
   }
-  const reused = complete(model),
-    fresh = complete(model),
-    next = requireProviderSocket(sockets, 1);
+  const reused = complete(model);
+  const fresh = complete(model);
+  const next = requireProviderSocket(sockets, 1);
   next.open();
   old.receive({
     delta: "Stale",
@@ -311,6 +233,7 @@ test("reuses a socket and reconnects after idle close", async () => {
   model.close();
   expect(reconnected?.readyState).toBe(WebSocket.CLOSED);
 });
+
 test("does not start an HTTP fallback after a WebSocket abort", async () => {
   const controller = new AbortController();
   let socket: FakeProviderSocket | undefined;
@@ -325,6 +248,7 @@ test("does not start an HTTP fallback after a WebSocket abort", async () => {
     controller.abort();
   });
 });
+
 test("aborts immediately during WebSocket retry backoff", async () => {
   const controller = new AbortController();
   const sockets = new FakeProviderSockets();
@@ -371,11 +295,13 @@ test.each([
     expect(deltas).toEqual([providerDelta("Partial"), providerDelta("", true)]);
   },
 );
+
 interface ExpiryAttemptsOptions {
   readonly count: number;
   readonly retryAfterSeconds?: number;
   readonly sockets: FakeProviderSockets;
 }
+
 async function expireAttempts(options: ExpiryAttemptsOptions): Promise<void> {
   for (let attempt = 0; attempt < options.count; attempt += 1) {
     await options.sockets.waitForAttempt(attempt);
@@ -388,12 +314,14 @@ async function expireAttempts(options: ExpiryAttemptsOptions): Promise<void> {
     );
   }
 }
+
 async function recoverAfterExpiries(
   options: ExpiryAttemptsOptions,
 ): Promise<void> {
   await expireAttempts(options);
   await replaceProviderSocket(options.sockets, options.count);
 }
+
 async function expectRecoveredSocket(options: {
   readonly delays: number[];
   readonly pending: ReturnType<typeof complete>;
@@ -415,11 +343,13 @@ test("reconnects immediately after a transient failure then socket expiry", asyn
   await expectRecoveredSocket({ delays, pending, sockets });
   expect(expired.closeCode).toBe(1011);
 });
+
 test("ignores retry-after when a repeated socket expiry uses bounded backoff", async () => {
   const { delays, pending, sockets } = retryingSocket();
   await recoverAfterExpiries({ count: 2, retryAfterSeconds: 60, sockets });
   await expectRecoveredSocket({ delays, pending, sockets });
 });
+
 test("keeps ordinary retry capacity after an immediate expiry reconnect", async () => {
   const retry = retryingSocket();
   const { delays, pending } = retry;
@@ -433,6 +363,7 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
   expectDoneStep(await pending);
   expect(delays).toEqual([1_000]);
 });
+
 test("bounds repeated connection-limit reconnects", async () => {
   const setup: { delays: number[]; sockets: FakeProviderSockets } = {
     delays: [],
@@ -449,6 +380,7 @@ test("bounds repeated connection-limit reconnects", async () => {
   expect(setup.sockets.created).toHaveLength(5);
   expect((await pending).content).toBe("Done.");
 });
+
 test("retries partial output after a socket error without stale deltas", async () => {
   const { delays, deltas, pending, sockets } = retryingSocket();
   const partialSocket = sockets.created[0];
@@ -482,6 +414,7 @@ test("retries partial output after a socket error without stale deltas", async (
   expect(deltas).toStrictEqual(expectedDeltas);
   expect(delays).toEqual([1_000]);
 });
+
 test("retries transient failures and clears partial output", async () => {
   const retry = retryingSocket();
   const { delays, deltas, pending, sockets } = retry;
@@ -509,6 +442,7 @@ test("retries transient failures and clears partial output", async () => {
     deltas: [providerDelta("Partial"), providerDelta("", true)],
   });
 });
+
 test("passes through permanent failures", async () => {
   const sockets = new FakeProviderSockets();
   const model = apiKeyModel({
@@ -538,6 +472,7 @@ test("passes through permanent failures", async () => {
   );
   expect(sockets.created).toHaveLength(1);
 });
+
 test("falls back after bounded transient failures", () =>
   expectBoundedHttpFallback({
     failAttempt: (socket, index) => {

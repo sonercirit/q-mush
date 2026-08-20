@@ -151,7 +151,7 @@ function resetDeltas(
 }
 
 describe("provider HTTP step recovery", () => {
-  test("tracks admission through headers on every retry", async () => {
+  test("leaves a long HTTP header wait outside bounded admission", async () => {
     const states: string[] = [];
     let releaseFirst: (() => void) | undefined;
     const firstHeaders = new Promise<void>((resolve) => {
@@ -174,10 +174,10 @@ describe("provider HTTP step recovery", () => {
 
     const completion = model.complete(USER_MESSAGE);
     await Promise.resolve();
-    expect(states).toEqual(["admission"]);
+    expect(states).toEqual([]);
     releaseFirst?.();
     await completion;
-    expect(states).toEqual(["admission", "active", "admission", "active"]);
+    expect(states).toEqual([]);
   });
 
   test("resets a partial step and persists only the recovered tool call", async () => {
