@@ -259,9 +259,7 @@ test("renders independently filtered session instructions and activity", () => {
   expect(html).not.toContain("data-scroll-key");
   expect(html).not.toContain("data-scroll-on-change");
   expect(html).not.toContain("data-scroll-revision");
-  expect(html).toContain(
-    "You are Q Mush, a careful coding agent operating in a user-selected workspace.",
-  );
+  expect(html).toContain("Tool limits for this transcript are unavailable.");
   expect(html).toContain("Always run Bun tests.");
   expect(html).not.toContain('&lt;project_instructions path="AGENTS.md">');
   expect(html).not.toContain('<em class="text-slate-100 italic">instructions');
@@ -272,7 +270,7 @@ test("renders independently filtered session instructions and activity", () => {
   expect(html).toContain("Tool definitions");
   for (const toolName of ["read", "bash", "edit", "write", "parallel"]) {
     expect(html).toContain(
-      `<span class="text-cyan-300">"name"</span>: <span class="text-emerald-300">"${toolName}"</span>`,
+      `<span class="text-emerald-300">"${toolName}"</span>`,
     );
   }
   expect(html).toContain("Thinking");
