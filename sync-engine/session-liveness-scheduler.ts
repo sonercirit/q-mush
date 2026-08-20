@@ -1,10 +1,10 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionDependencies } from "./session-dependencies.ts";
-import type { SessionLivenessCleanupOptions } from "./session-liveness-options.ts";
 import {
   DEFAULT_SESSION_LIVENESS_GRACE_MS,
   SessionLivenessWatchdog,
@@ -16,7 +16,7 @@ import type { SessionStore } from "./session-store.ts";
 const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
 const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;
 
-interface SessionLivenessSchedulerOptions extends SessionLivenessCleanupOptions {
+interface SessionLivenessSchedulerOptions {
   readonly actions: Pick<
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"
@@ -24,6 +24,7 @@ interface SessionLivenessSchedulerOptions extends SessionLivenessCleanupOptions 
   /** Runs after each liveness scan on the same cadence and stop lifecycle. */
   readonly afterScan?: () => void;
   readonly broker: RunnerCommandBroker;
+  readonly cleanup: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly database: AppDatabase;
   readonly dependencies: SessionDependencies;
   readonly notify: SessionNotification;

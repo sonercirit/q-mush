@@ -78,7 +78,7 @@ export class SessionLauncher {
         ): void => {
           // Repeated provider admission reports refresh watchdog liveness and
           // intentionally publish each bounded retry to realtime clients.
-          if (pendingComponent(component) !== "updated") {
+          if (!pendingComponent(component)) {
             return;
           }
           try {

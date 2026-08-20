@@ -40,7 +40,7 @@ interface SessionRuntimeContext extends SessionRestartRequester {
   readonly controller: AbortController;
   readonly pendingComponent: (
     component: SessionRuntimePendingComponent,
-  ) => "fenced" | "unchanged" | "updated";
+  ) => boolean;
   readonly settled: (clearDurable: () => Promise<void> | void) => void;
 }
 
@@ -272,14 +272,14 @@ export class SessionRuntimes {
           controller,
           pendingComponent: (component) => {
             if (this.#active.get(sessionId) !== runtime) {
-              return "fenced";
+              return false;
             }
             const unchanged = runtime.pending.component === component;
             if (unchanged && component !== "provider_admission") {
-              return "unchanged";
+              return false;
             }
             runtime.pending = { component, since: this.#now() };
-            return "updated";
+            return true;
           },
           restartRequest: (persist) => {
             if (persist !== undefined) {

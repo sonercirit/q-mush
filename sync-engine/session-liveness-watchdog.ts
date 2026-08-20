@@ -1,9 +1,9 @@
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
-import type { SessionLivenessCleanupOptions } from "./session-liveness-options.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import {
@@ -20,7 +20,8 @@ const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
 export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 
-interface SessionLivenessWatchdogOptions extends SessionLivenessCleanupOptions {
+interface SessionLivenessWatchdogOptions {
+  readonly cleanup: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly actions: Pick<
     SessionAgentActions,
     "finished" | "reportAll" | "stopChildren"

@@ -130,16 +130,19 @@ test("a running session shows and ticks its current step duration", () => {
 test("a running session identifies its pending runtime component", () => {
   const { container, controller, queued } = mountQueuedSession(30_000);
 
+  const pendingSince = Date.now();
   controller.applyDetail({
     ...queued,
-    activeStartedAt: Date.now(),
-    runtimePending: { component: "provider_admission", since: Date.now() },
+    activeStartedAt: pendingSince,
+    runtimePending: { component: "provider_admission", since: pendingSince },
     status: "running",
     updatedAt: queued.updatedAt + 1,
   });
 
   expect(pendingComponentText(container)).toBe("Pending: provider admission");
-  expect(container.textContent).not.toContain(String(Date.now()));
+  expect(container.textContent).not.toContain(
+    new Date(pendingSince).toISOString(),
+  );
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {

@@ -54,8 +54,8 @@
 - `solid/pages.tsx` renders both server page shells via Solid's SSR runtime;
   `sync-engine/pages.ts` loads it with Vite's SSR runner. The browser app mounts
   from `solid/client.tsx`; routes live in `shared/routes.ts`.
-- `sync-engine/auth.ts` implements Google OpenID Connect (authorization code
-- PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
+- `sync-engine/auth.ts` implements Google OpenID Connect (authorization code -
+  PKCE) with HttpOnly state/verifier cookies, fetching the basic profile and
   discarding provider tokens. `sync-engine/auth-store.ts` uses Drizzle/Bun
   SQLite to upsert users and persist seven-day sessions. Primary keys are
   UUIDv7; Google subjects and session cookie tokens are separate unique fields;
@@ -85,12 +85,12 @@
 - Browser messages sort by time then ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` byte-bounds transcript messages,
   assistant calls, the system prompt, tool definitions.
-- `sync-engine/sessions.ts` and `session-store.ts` persist sessions. User
-  messages take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input.
-  Sessions record active time, cost, token usage, and context limit; reported
-  charges win. Auto-compaction defaults on at 95%; truncation enters only its
-  immediate compactor context, including persisted manual/idle compaction, so
-  partial output stays unfinished without marking a retry. Idle sessions compact
+- `sync-engine/sessions.ts` and `session-store.ts` persist sessions. Messages
+  take eight 10 MB PNG/JPEG/GIF/WebP images as multimodal input. Sessions record
+  active time, cost, token usage, and context limit; reported charges win.
+  Auto-compaction defaults on at 95%; truncation enters only its immediate
+  compactor context, including persisted manual/idle compaction, so partial
+  output stays unfinished without marking a retry. Idle sessions compact
   manually or, opted in, at 30 idle minutes; compaction soft-deletes messages
   into a replayable handoff; replays say deliver drafts, don't re-verify. The
   composer stays mounted across statuses, explaining unavailable actions,
@@ -103,10 +103,10 @@
 
 `runner/runner-workspace.ts` owns canonical workspace and tool path resolution.
 Tool, skill, model, and effort choices persist per session; pickers use
-canonical schemas. Bounded `read_session` spans transcript categories and
+canonical schemas. `read_session` byte-bounds transcript categories and
 definitions; `get_session_options` pages spawn choices. Grouped tools manage
 non-blocking owned children, report final messages, resume idle parents;
-`parallel` takes 2+ calls on four ordered workers, bounds output, propagates
+`parallel` uses four ordered workers, bounds output, and propagates
 cancellation. `solid/session-transcript.tsx` renders prompts, tool definitions,
 raw details, Markdown, code/JSON, diffs, and contextual results, preserving user
 line breaks; session lists page by ten. Live sessions use
@@ -119,18 +119,21 @@ bottom-pinned transcripts follow live output. `agent-model-discovery.ts` queries
 metadata, signal-cancelable; `shared/agent-configuration.ts` owns catalog
 types/validation. New sessions take the default online runner (else the first)
 and credential, first discovered model, last directory, top reported effort.
-`solid/custom-select.tsx` shares search normalization, paginates past ten items,
-owns accessible keyboard/focus. Focus mode its rail overlays on desktop, becomes
-a drawer, collapses on selection, closing with Escape first.
-`shared/agent-prompt.ts` builds the model system prompt and transcript display;
-reasoning summaries persist as `thinking` messages omitted from replay. Session
-and transcript rows sit in `agent_sessions` and `agent_messages`;
+Unknown modalities mean no attachment support; choices show provider and Q Mush
+modalities. `solid/custom-select.tsx` shares search normalization, paginates
+past ten items, owns accessible keyboard/focus. Focus mode fills the app
+viewport (not browser Fullscreen), keeping drafts and scroll; its rail overlays
+on desktop, becomes a drawer, collapses on selection, and closes with Escape
+first. `shared/agent-prompt.ts` builds the model system prompt and transcript
+display; reasoning summaries persist as `thinking` messages omitted from replay.
+Session and transcript rows sit in `agent_sessions` and `agent_messages`;
 `step_started_at` sets per model step, clears with `activeStartedAt` (live Step
-timer); interrupted processes mark active sessions fail for resumption; rebuilds
-add interrupted tool errors. Replays reset partial UI deltas; terminal failures
-persist as non-replayed errors. While running, server-derived `runtimePending`
-is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
-`provider_admission`; the codec rejects it otherwise and the UI displays it.
+timer); interrupted processes mark active sessions failed for resumption;
+rebuilds add interrupted tool errors. Replays reset partial UI deltas; terminal
+failures persist as non-replayed errors. While running, server-derived
+`runtimePending` is `startup`, `runner_command`, `engine_tool`,
+`provider_request`, or `provider_admission`; the codec rejects it otherwise and
+the UI displays it.
 
 - `openai.ts`, `openrouter.ts`, and `generic-provider.ts` implement model
   connections. Generic providers store a normalized base URL, optional key, and
@@ -196,8 +199,6 @@ is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
   (`bun.lock`, `drizzle/` excepted), tests only under `test`, no app HTML
   outside `test`/`fixtures`.
 
-## Decisions and Gotchas
-
 - Port 12345 (`PORT` overrides).
 - Google login reads `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and optional
   `GOOGLE_REDIRECT_URI`; the two appear together; register the callback
@@ -241,15 +242,15 @@ is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
   a disposable per-session Arch container (default `archlinux:latest`) with
   network and default capabilities, so pacman works; only the workspace mounts.
   `read` pages its source. The directory picker browses beyond workspaces with
-  runner permissions and bounded directory-only results. Stopping a session
-  aborts its model request and cancels runner commands, ending an active shell.
-  OpenAI API-key and OAuth requests prefer Responses WebSockets, falling back to
-  HTTP streaming; OpenRouter and generic endpoints stream chat completions,
-  Anthropic-format endpoints Messages events. OpenAI OAuth refreshes its token
-  bundle before expiry. Session creation needs an explicit model ID. Catalogs:
-  OpenAI `/v1/models`, OpenRouter `/api/v1/models/user`, ChatGPT Codex
-  `/models`, or the generic `/models`; Anthropic-format catalogs read
-  `display_name`, `max_input_tokens`, `max_tokens`, and the `capabilities` tree
+  runner permissions. Stopping a session aborts model requests and runner
+  commands, ending active shells. OpenAI API-key and OAuth requests prefer
+  Responses WebSockets, falling back to HTTP streaming; OpenRouter and generic
+  endpoints stream chat completions, Anthropic-format endpoints Messages events.
+  OpenAI OAuth refreshes its token bundle before expiry. Session creation needs
+  an explicit model ID. Catalogs: OpenAI `/v1/models`, OpenRouter
+  `/api/v1/models/user`, ChatGPT Codex `/models`, or the generic `/models`;
+  Anthropic-format catalogs read `display_name`, `max_input_tokens`,
+  `max_tokens`, and the `capabilities` tree
   (`agent-model-discovery-anthropic.ts`: effort and adaptive-thinking support
   are independent; modalities come only from `image_input`/`pdf_input` leaves),
   page via `has_more`/`last_id` at `limit=1000` with stale-cursor and page-count
@@ -268,19 +269,18 @@ is `startup`, `runner_command`, `engine_tool`, `provider_request`, or
   plus a signature while thinking tokens bill. The local proxy tolerates
   tool-loop replay without signed thinking blocks; strict endpoints may not.
   Streamed reasoning deltas group by `output_index` and `summary_index`;
-  separate summary parts with paragraphs since completed responses may omit
-  them. Frozen clocks may collapse admission transitions; production cannot. The
-  first identified non-terminal `response.*` admits servers omitting
-  `response.created`. WebSocket Mode expires after 60 minutes; either observed
-  limit error replaces the socket once per step, then retries replay it.
-  WebSocket sends have bounded admission until `response.created`; HTTP header
-  waits do not. Discard unknown, pre-creation, mismatched-ID, and retained-ID
-  frames/errors. On a reused socket, an uncorrelated pre-admission error retries
-  fresh unless permanent, which surfaces; after admission, including ID-less
-  admission, an unidentified error retires the reused socket and retries fresh.
-  Provider ID size/rate is unbounded; use a 16 MiB fence budget, then retire
-  (never evict). IDs are ~53 bytes. ID-less admission skips retained IDs until a
-  new ID; completion retires the socket. Concurrency closes superseded sockets.
+  separate summary parts with paragraphs. Frozen clocks may collapse admission
+  transitions; production cannot. The first identified non-terminal `response.*`
+  admits servers omitting `response.created`. WebSocket Mode expires after 60
+  minutes; either observed limit error replaces the socket once per step, then
+  retries replay it. WebSocket sends have bounded admission until
+  `response.created`; HTTP header waits do not. Discard unknown, pre-creation,
+  mismatched-ID, and retained-ID frames/errors. On a reused socket, an
+  uncorrelated pre-admission error retries fresh unless permanent, which
+  surfaces; after admission, including ID-less admission, an unidentified error
+  retires the reused socket and retries fresh. Provider IDs are unbounded; use a
+  16 MiB fence, then retire. ID-less admission skips retained IDs until a new
+  ID; completion retires the socket. Concurrency closes superseded sockets.
   Fenced watchdog failures abort. Requests unacknowledged through the
   five-minute liveness grace fail without retry but remain resumable via
   `continue`. Other provider errors retry before persistence; exhausted sockets
