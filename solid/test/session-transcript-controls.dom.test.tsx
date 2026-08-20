@@ -3,6 +3,7 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import {
   applyTranscriptDelta,
   DOM_TEST_DISPOSALS,
@@ -219,7 +220,7 @@ test("the composer stays mounted and retains focus through a busy transition", (
     "Running. Follow up starts the next turn; Steer is injected at the next step boundary, after the current model call and its tools settle.",
   );
 
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: "Live output",
     sessionId: running.id,
     thinking: "",

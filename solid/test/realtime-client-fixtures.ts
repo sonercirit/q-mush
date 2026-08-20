@@ -1,6 +1,7 @@
 export class RealtimeTestSocket extends EventTarget {
   #closed = false;
   #opened = false;
+  throwAfter: number | undefined;
   readonly sent: string[] = [];
   readonly url: string | undefined;
 
@@ -38,6 +39,9 @@ export class RealtimeTestSocket extends EventTarget {
   }
 
   send(message: string): void {
+    const shouldFail =
+      this.throwAfter !== undefined && this.sent.length >= this.throwAfter;
+    if (shouldFail) throw new Error("realtime fixture send failure");
     this.sent.push(message);
   }
 }

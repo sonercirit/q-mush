@@ -19,6 +19,7 @@ import {
 import { SessionTranscript } from "../session-transcript.tsx";
 import type { SessionCommandTransport } from "../session-transport.ts";
 import { mountTestView, queryTestElement } from "./dom-test-helpers.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import { runningSessionDetail } from "./transcript-ordering-fixtures.ts";
 
@@ -236,7 +237,7 @@ export function applyTranscriptDelta(
   content: string,
   thinking = "",
 ): void {
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content,
     sessionId,
     thinking,
