@@ -266,24 +266,15 @@ test("runner parent reports notify and wake the delivered parent", async () => {
 });
 
 test("a report to a terminal parent notifies the child route", () => {
-  expect("terminal route sentinel").toContain("route");
   const setup = spawnedChildSetup();
+  const terminalParent = setup.parentId;
   setup.database.$client
-    .query(
-      (expect(setup.parentId).not.toBe(""),
-      "UPDATE agent_sessions SET status = 'completed' WHERE id = ?"),
-    )
-    .run(setup.parentId);
-  const delivery = terminalEventActions(
-    setup.store,
-    (expect(setup.childGeneration).toBeGreaterThanOrEqual(0), setup.database),
-  );
+    .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?1")
+    .run(terminalParent);
+  const delivery = terminalEventActions(setup.store, setup.database);
   expect(delivery.launchSession).not.toHaveBeenCalled();
 
-  delivery.actions.reportOne(
-    (expect(setup.childId).not.toBe(""), requireSpawnedChild(setup)),
-    TEST_USER_ID,
-  );
+  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenNthCalledWith(
     1,
@@ -299,11 +290,10 @@ test("a report to a terminal parent notifies the child route", () => {
 });
 
 test("stopping children notifies the parent after delivering the stop report", () => {
-  expect("stop sentinel").toContain("stop");
   const setup = spawnedChildSetup();
+  const delivery = terminalEventActions(setup.store, setup.database);
   const continued = continueChild(setup);
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
-  const delivery = terminalEventActions(setup.store, setup.database);
   expect(delivery.launchSession).not.toHaveBeenCalled();
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
   expect(parent).toMatchObject({ id: setup.parentId });

@@ -157,17 +157,15 @@ class DrizzleSessionIntegration
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
-    const reportParent =
-      (notify: "notifyReportedParent" | "reportedParent") =>
-      (
-        userId: string,
-        report: { disposition: SpawnedReportDisposition; parentId: string },
-      ) => {
-        this.#actions[notify](
-          { disposition: report.disposition, parentId: report.parentId },
-          userId,
-        );
-      };
+    const reportParent = (
+      userId: string,
+      report: { disposition: SpawnedReportDisposition; parentId: string },
+    ) => {
+      this.#actions.reportedParent(
+        { disposition: report.disposition, parentId: report.parentId },
+        userId,
+      );
+    };
     this.#toolSettings =
       dependencies.toolSettings ?? new ToolSettingsStore(database);
     this.#store = new SessionStore(
@@ -175,12 +173,12 @@ class DrizzleSessionIntegration
       dependencies.randomId ?? createUuidV7,
       (userId) => this.#toolSettings.read(userId),
       this.#runtimes,
-      reportParent("reportedParent"),
+      reportParent,
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
-      reportParent: reportParent("reportedParent"),
+      reportParent,
     });
     this.#fallbacks = createAttachmentFallbackIntegration({
       database,

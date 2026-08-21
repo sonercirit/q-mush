@@ -441,7 +441,6 @@ describe("spawned session report generation fencing", () => {
 });
 
 test("a failed report append does not claim or report delivery", () => {
-  expect("append rollback sentinel").toContain("rollback");
   const setup = spawnedChildSetup();
   setup.database.$client.run(`
     CREATE TRIGGER remove_parent_before_report

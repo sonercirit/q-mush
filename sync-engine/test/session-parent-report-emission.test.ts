@@ -33,10 +33,6 @@ function setupWithReporter() {
   return { ...setup, reportParent, resources };
 }
 
-function mark(value: string): void {
-  expect(value).not.toBe("");
-}
-
 function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
   expect(setup.reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
     disposition: "promoted",
@@ -46,11 +42,6 @@ function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
 }
 
 test("queue emits the real terminal-generation parent report", () => {
-  mark("queue");
-  mark("reassign");
-  mark("provider");
-  mark("tools");
-  mark("runner");
   const setup = setupWithReporter();
   // Exercise queueStoredSession with resources carrying the callback, rather than
   // SessionStore.queue's intentionally callback-free public continuation path.
@@ -92,14 +83,13 @@ test("reassignment emits a terminal child report", () => {
 
 test("provider update emits a terminal child report", () => {
   const setup = setupWithReporter();
-  mark(`provider ${setup.childId} via ${setup.parentId}`);
   expect(setup.childGeneration).toBeGreaterThanOrEqual(0);
   const child = setup.store.get(TEST_USER_ID, setup.childId, undefined);
   expect(child).toMatchObject({ id: setup.childId, status: "completed" });
   if (child === undefined) throw new Error("The provider child is unavailable");
   expect(
     updateStoredSessionProvider(setup.resources, {
-      adaptiveThinking: (mark("adaptive"), child.adaptiveThinking),
+      adaptiveThinking: child.adaptiveThinking,
       credentialId: child.credentialId,
       expectedGeneration: child.generation,
       maxContextTokens: child.maxContextTokens,
@@ -107,13 +97,12 @@ test("provider update emits a terminal child report", () => {
       now: TEST_NOW + 6,
       openRouterProviderTag: child.openRouterProviderTag,
       provider: child.provider,
-      providerPricing: (mark("provider pricing"), child.providerPricing),
-      sessionId: (mark(`provider session ${child.id}`), child.id),
-      confirmedCacheDrop: (mark("confirmed provider cache drop"), true),
+      providerPricing: child.providerPricing,
+      sessionId: child.id,
+      confirmedCacheDrop: true,
       userId: TEST_USER_ID,
-      model: (mark("provider model"), `${child.model}-changed`),
-      workspaceId:
-        (mark(`provider workspace ${setup.parentId}`), TEST_WORKSPACE_ID),
+      model: `${child.model}-changed`,
+      workspaceId: TEST_WORKSPACE_ID,
     }).status,
   ).toBe("updated");
   expect(setup.reportParent).toHaveBeenCalledOnce();
@@ -122,7 +111,6 @@ test("provider update emits a terminal child report", () => {
 
 test("tool update emits a terminal child report", () => {
   const setup = setupWithReporter();
-  mark(`tool ${setup.parentId}`);
   expect(setup.childId).not.toBe(setup.parentId);
   const child = setup.store.get(TEST_USER_ID, setup.childId);
   expect(child).toMatchObject({ generation: setup.childGeneration });
@@ -130,11 +118,11 @@ test("tool update emits a terminal child report", () => {
   expect(
     updateStoredSessionTools(setup.resources, {
       now: TEST_NOW + 6,
-      sessionId: (mark(`tool session ${child.id}`), child.id),
-      expectedGeneration: (mark("tool generation fence"), child.generation),
-      userId: (mark("tool owner"), TEST_USER_ID),
+      sessionId: child.id,
+      expectedGeneration: child.generation,
+      userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
-      tools: (mark(`tool list ${String(setup.childGeneration)}`), ["read"]),
+      tools: ["read"],
     }).status,
   ).toBe("updated");
   expect(setup.reportParent.mock.calls).toHaveLength(1);
