@@ -117,11 +117,11 @@ test("provider update emits a terminal child report", () => {
   expectReported(setup);
 });
 
-function updateTools(
-  setup: ReturnType<typeof setupWithReporter>,
-  child: ReturnType<typeof setupWithTerminalChild>["child"],
-): ReturnType<typeof updateStoredSessionTools> {
-  return updateStoredSessionTools(setup.resources, {
+function expectToolUpdateReported(
+  terminal: ReturnType<typeof setupWithTerminalChild>,
+): void {
+  const { child, setup } = terminal;
+  const result = updateStoredSessionTools(setup.resources, {
     now: TEST_NOW + 6,
     sessionId: child.id,
     expectedGeneration: child.generation,
@@ -129,19 +129,12 @@ function updateTools(
     workspaceId: TEST_WORKSPACE_ID,
     tools: ["read"],
   });
-}
-
-function expectToolUpdateReported(
-  setup: ReturnType<typeof setupWithReporter>,
-  child: ReturnType<typeof setupWithTerminalChild>["child"],
-): void {
-  expect(updateTools(setup, child).status).toBe("updated");
+  expect(result.status).toBe("updated");
   expectReported(setup);
 }
 
 test("tool update emits a terminal child report", () => {
-  const { child, setup } = setupWithTerminalChild();
-  expectToolUpdateReported(setup, child);
+  expectToolUpdateReported(setupWithTerminalChild());
 });
 
 test("tool update preserves an idle child's final parent report", () => {
@@ -152,7 +145,7 @@ test("tool update preserves an idle child's final parent report", () => {
     .where(eq(agentSessions.id, child.id))
     .run();
 
-  expectToolUpdateReported(setup, child);
+  expectToolUpdateReported({ child, setup });
 });
 
 test("runner removal emits a terminal child report", () => {
