@@ -230,19 +230,19 @@ confirmed working directory are chosen. Reassignment does not resume work.
 The runner executes file tools and bare-metal shells with the runner process's
 local account permissions. In bare-metal sessions file tools accept any path
 that account can access, resolving relative paths against the selected
-workspace; shell commands are intentionally full commands rooted in that
-directory. Container sessions confine file tools to the mounted workspace;
-shells run as container root with network. Rootful container root is host root
-over the mount and can leave dangerous root-owned files, so trust container
-sessions like the workspace; rootless Podman maps files to the runner account.
-The default `archlinux:latest` image is amd64-only; unless the runtime runs
-amd64 (native or configured emulation) set `Q_MUSH_CONTAINER_IMAGE`
-(`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). The authenticated
-directory browser inspects runner-account-readable locations and returns their
-canonical location, parent, and up to 500 entries. Only use runners and
-credentials you trust with the project; the agent file goes to the model as
-project instructions. Provider secrets stay on the Q Mush server: the browser
-and runner work protocol never receive them.
+workspace; shell commands are full commands rooted in that directory. Container
+sessions confine file tools to the mounted workspace; shells run as container
+root with network. Rootful container root is host root over the mount and can
+leave dangerous root-owned files, so trust container sessions like the
+workspace; rootless Podman maps files to the runner account. The default
+`archlinux:latest` image is amd64-only; unless the runtime runs amd64 (native or
+configured emulation) set `Q_MUSH_CONTAINER_IMAGE` (`Q_MUSH_CONTAINER_RUNTIME`
+selects docker or podman). The authenticated directory browser inspects
+runner-account-readable locations and returns their canonical location, parent,
+and up to 500 child directories. Only use runners and credentials you trust with
+the project; the agent file goes to the model as project instructions. Provider
+secrets stay on the Q Mush server: the browser and runner work protocol never
+receive them.
 
 OpenAI API keys and connected accounts prefer the streaming Responses WebSocket
 and fall back to HTTP streaming when that transport is unavailable. OpenRouter
