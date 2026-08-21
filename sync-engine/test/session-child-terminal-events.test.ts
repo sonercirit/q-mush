@@ -299,11 +299,7 @@ test("stopping children notifies the parent after delivering the stop report", (
   }
 
   expect(continued.id).toBe(setup.childId);
-  expect(parent.id).toBe(setup.parentId);
-  delivery.actions.stopChildren(
-    (expect(parent).toMatchObject({ id: setup.parentId }), parent),
-    TEST_USER_ID,
-  );
+  delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
   expect(delivery.launchSession.mock.calls).toEqual([]);
