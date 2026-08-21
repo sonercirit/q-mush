@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
@@ -190,10 +190,10 @@ describe("spawned session report generation fencing", () => {
   test("re-queries after a full batch is rejected by reportability filtering", () => {
     const setup = spawnedChildSetup();
     const child = setup.database
-      .select()
+      .select(getTableColumns(agentSessions))
       .from(agentSessions)
-      .where(eq(agentSessions.id, setup.childId))
-      .get();
+      .all()
+      .find(({ id }) => id === setup.childId);
     if (child === undefined) {
       throw new Error("The spawned-session fixture row was unavailable");
     }
