@@ -117,18 +117,23 @@ test("provider update emits a terminal child report", () => {
   expectReported(setup);
 });
 
+function updateTools(
+  setup: ReturnType<typeof setupWithReporter>,
+  child: ReturnType<typeof setupWithTerminalChild>["child"],
+): ReturnType<typeof updateStoredSessionTools> {
+  return updateStoredSessionTools(setup.resources, {
+    now: TEST_NOW + 6,
+    sessionId: child.id,
+    expectedGeneration: child.generation,
+    userId: TEST_USER_ID,
+    workspaceId: TEST_WORKSPACE_ID,
+    tools: ["read"],
+  });
+}
+
 test("tool update emits a terminal child report", () => {
   const { child, setup } = setupWithTerminalChild();
-  expect(
-    updateStoredSessionTools(setup.resources, {
-      now: TEST_NOW + 6,
-      sessionId: child.id,
-      expectedGeneration: child.generation,
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-      tools: ["read"],
-    }).status,
-  ).toBe("updated");
+  expect(updateTools(setup, child).status).toBe("updated");
   expect(setup.reportParent.mock.calls).toHaveLength(1);
   expectReported(setup);
 });
@@ -141,16 +146,7 @@ test("tool update preserves an idle child's final parent report", () => {
     .where(eq(agentSessions.id, child.id))
     .run();
 
-  expect(
-    updateStoredSessionTools(setup.resources, {
-      now: TEST_NOW + 6,
-      sessionId: child.id,
-      expectedGeneration: child.generation,
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-      tools: ["read"],
-    }).status,
-  ).toBe("updated");
+  expect(updateTools(setup, child).status).toBe("updated");
   expectReported(setup);
 });
 
