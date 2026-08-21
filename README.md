@@ -237,9 +237,9 @@ root over the mount and can leave dangerous root-owned files, so trust container
 sessions like the workspace; rootless Podman maps files to the runner account.
 The default `archlinux:latest` image is amd64-only; unless the runtime runs
 amd64 (native or configured emulation) set `Q_MUSH_CONTAINER_IMAGE`
-(`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). The directory browser
-returns the canonical location, parent, and up to 500 readable child
-directories. Only use runners and credentials you trust with the project; the
+(`Q_MUSH_CONTAINER_RUNTIME` selects docker or podman). The authenticated
+directory browser inspects locations readable by the runner account and returns
+the canonical location, parent, and up to 500 readable child directories. Only use runners and credentials you trust with the project; the
 agent file goes to the model as project instructions. Provider secrets remain on
 the Q Mush server: the browser and runner work protocol never receive them.
 

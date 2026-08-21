@@ -170,6 +170,18 @@ export function spawnedRunningChildSetup(prompt: string) {
       child.generation,
     ),
   ).toBe(true);
+  setup.store.commitRuntimeTerminal(
+    child.id,
+    [terminalRecordedMessage(prompt)],
+    TEST_NOW + 4,
+    child.generation,
+    null,
+  );
+  setup.database.$client
+    .query(
+      "UPDATE agent_sessions SET status = 'running', active_started_at = ? WHERE id = ?",
+    )
+    .run(TEST_NOW + 5, child.id);
   return linkedChildResult(setup, parent, child);
 }
 

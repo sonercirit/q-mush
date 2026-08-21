@@ -43,13 +43,15 @@ function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
 function terminalEventActions(
   store: SessionStore,
   database: ConstructorParameters<typeof SessionStore>[0],
+  cleanupSession = vi.fn(),
 ) {
   const launchSession = vi.fn(() => true);
   const notify = vi.fn();
-  const actions = new SessionAgentActions(
-    terminalEventActionSetup({ database, store }, launchSession, notify),
-  );
-  return { actions, launchSession, notify };
+  const actions = new SessionAgentActions({
+    ...terminalEventActionSetup({ database, store }, launchSession, notify),
+    cleanupSession,
+  });
+  return { actions, cleanupSession, launchSession, notify };
 }
 
 function reportCount(store: SessionStore, parentId: string): number {
@@ -367,6 +369,9 @@ test("stopping children notifies the parent after delivering the stop report", (
   delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.cleanupSession).toHaveBeenCalledWith(
+    expect.objectContaining({ id: setup.childId }),
+  );
   expect(delivery.launchSession.mock.calls).toEqual([]);
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   closeSpawnedChildSetup(setup);
@@ -461,10 +466,6 @@ test("an idle generation lacking its final assistant response stays unreported",
   setup.database.$client
     .query("DELETE FROM agent_messages WHERE session_id = ? AND role = ?")
     .run(child.id, "assistant");
-  setup.database.$client.run(
-    "UPDATE agent_sessions SET execution_generation = execution_generation + 1 WHERE id = ?",
-    [setup.childId],
-  );
   forceObservedIdleSettlement(setup);
   const eventActions = terminalEventActions(setup.store, setup.database);
   expectAttemptFilteredFromParentReports(setup, eventActions.actions);
@@ -474,12 +475,15 @@ test("a tool-calling idle response remains an unfinished attempt", () => {
   const setup = spawnedRunningChildSetup("assistant called a tool");
   const child = requireSpawnedChild(setup);
   setup.database.$client
-    .query("UPDATE agent_messages SET tool_calls = ? WHERE session_id = ?")
+    .query(
+      "UPDATE agent_messages SET tool_calls = ? WHERE session_id = ? AND role = ?",
+    )
     .run(
       JSON.stringify([
         { arguments: "{}", id: "unfinished-call", name: "read" },
       ]),
       child.id,
+      "assistant",
     );
   forceObservedIdleSettlement(setup);
   const { actions } = terminalEventActions(setup.store, setup.database);

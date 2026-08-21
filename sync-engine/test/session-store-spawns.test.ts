@@ -187,50 +187,29 @@ describe("spawned session report generation fencing", () => {
     setup.database.$client.close();
   });
 
-  test("skips over more than a batch of callbacks blocked by runner-required parents", () => {
+  test("re-queries after a full batch is rejected by reportability filtering", () => {
     const setup = spawnedChildSetup();
-    const fixtureRows = setup.database
+    const child = setup.database
       .select()
       .from(agentSessions)
-      .where(inArray(agentSessions.id, [setup.parentId, setup.childId]))
-      .all();
-    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
-    const child = fixtureRows.find(({ id }) => id === setup.childId);
-    if (parent === undefined || child === undefined) {
-      throw new Error("The spawned-session fixture rows were unavailable");
+      .where(eq(agentSessions.id, setup.childId))
+      .get();
+    if (child === undefined) {
+      throw new Error("The spawned-session fixture row was unavailable");
     }
-    setup.database.$client
-      .query("UPDATE agent_sessions SET runner_required = 1 WHERE id = ?")
-      .run(setup.parentId);
-    for (let index = 0; index < 100; index += 1) {
-      setup.database
-        .insert(agentSessions)
-        .values({
-          ...child,
-          id: `blocked-child-${String(index).padStart(3, "0")}`,
-        })
-        .run();
-    }
-    const deliverableParentId = "deliverable-parent";
-    const deliverableChildIds = ["deliverable-child-a", "deliverable-child-b"];
     setup.database
       .insert(agentSessions)
-      .values({ ...parent, id: deliverableParentId, runnerRequired: false })
+      .values({
+        ...child,
+        createdAt: new Date(child.createdAt.getTime() - 1),
+        id: "idle-child-without-final-response",
+        status: "idle",
+      })
       .run();
-    for (const id of deliverableChildIds) {
-      setup.database
-        .insert(agentSessions)
-        .values({
-          ...child,
-          id,
-          parentSessionId: deliverableParentId,
-        })
-        .run();
-    }
 
     expect(
       setup.store.pendingSpawnedSessions(1).map(({ detail }) => detail.id),
-    ).toEqual([deliverableChildIds[0]]);
+    ).toEqual([setup.childId]);
     closeSetup(setup);
   });
 
