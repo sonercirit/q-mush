@@ -10,7 +10,7 @@ import type {
   RunnerDirectoryRequest,
 } from "./session-request-helpers.ts";
 
-export type SessionRunnerOptionsLookup = (
+type SessionRunnerOptionsLookup = (
   userId: string,
   request: SessionRunnerPageRequest,
 ) => {
