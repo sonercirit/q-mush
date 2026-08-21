@@ -47,11 +47,29 @@ function terminalEventActions(
 ) {
   const launchSession = vi.fn(() => true);
   const notify = vi.fn();
+  const dependencies = terminalEventActionSetup(
+    { database, store },
+    launchSession,
+    notify,
+  );
+  const abortSession = vi.fn();
+  const cancelSessionCommands = vi.spyOn(
+    dependencies.broker,
+    "cancelSessionCommands",
+  );
   const actions = new SessionAgentActions({
-    ...terminalEventActionSetup({ database, store }, launchSession, notify),
+    ...dependencies,
+    abortSession,
     cleanupSession,
   });
-  return { actions, cleanupSession, launchSession, notify };
+  return {
+    abortSession,
+    actions,
+    cancelSessionCommands,
+    cleanupSession,
+    launchSession,
+    notify,
+  };
 }
 
 function reportCount(store: SessionStore, parentId: string): number {
@@ -378,6 +396,8 @@ test("stopping children notifies the parent after delivering the stop report", (
   delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.abortSession).toHaveBeenCalledWith(setup.childId);
+  expect(delivery.cancelSessionCommands).toHaveBeenCalledWith(setup.childId);
   expect(delivery.cleanupSession).toHaveBeenCalledWith(
     expect.objectContaining({ id: setup.childId }),
   );

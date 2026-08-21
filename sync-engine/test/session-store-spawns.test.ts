@@ -189,14 +189,31 @@ describe("spawned session report generation fencing", () => {
 
   test("bounds and advances re-query pages after reportability filtering", () => {
     const setup = spawnedChildSetup();
-    const child = setup.database
+    const fixtureRows = setup.database
       .select(getTableColumns(agentSessions))
       .from(agentSessions)
-      .all()
-      .find(({ id }) => id === setup.childId);
-    if (child === undefined) {
-      throw new Error("The spawned-session fixture row was unavailable");
+      .all();
+    const child = fixtureRows.find(({ id }) => id === setup.childId);
+    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
+    if (child === undefined || parent === undefined) {
+      throw new Error("The spawned-session fixture rows were unavailable");
     }
+    const blockedParentId = "runner-required-parent";
+    setup.database
+      .insert(agentSessions)
+      .values({ ...parent, id: blockedParentId, runnerRequired: true })
+      .run();
+    setup.database
+      .insert(agentSessions)
+      .values(
+        Array.from({ length: 6 }, (_, index) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() - 20 + index),
+          id: `runner-required-child-${String(index)}`,
+          parentSessionId: blockedParentId,
+        })),
+      )
+      .run();
     setup.database
       .insert(agentSessions)
       .values(

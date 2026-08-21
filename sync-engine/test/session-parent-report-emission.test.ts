@@ -133,6 +133,27 @@ test("tool update emits a terminal child report", () => {
   expectReported(setup);
 });
 
+test("tool update preserves an idle child's final parent report", () => {
+  const { child, setup } = setupWithTerminalChild();
+  setup.database
+    .update(agentSessions)
+    .set({ status: "idle" })
+    .where(eq(agentSessions.id, child.id))
+    .run();
+
+  expect(
+    updateStoredSessionTools(setup.resources, {
+      now: TEST_NOW + 6,
+      sessionId: child.id,
+      expectedGeneration: child.generation,
+      userId: TEST_USER_ID,
+      workspaceId: TEST_WORKSPACE_ID,
+      tools: ["read"],
+    }).status,
+  ).toBe("updated");
+  expectReported(setup);
+});
+
 test("runner removal emits a terminal child report", () => {
   const setup = setupWithReporter();
   const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
