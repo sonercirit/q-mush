@@ -1,9 +1,18 @@
 import { describe, expect, test, vi } from "vitest";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
 import { executeSessionSleepTool } from "../session-sleep-tool.ts";
 import {
   notifySessionSteeringInput,
   waitForSessionSteeringInput,
 } from "../session-steering-wakeup.ts";
+import { expectNoTimers } from "./timer-test-helpers.ts";
+
+const DEFAULT_EXECUTION_LIMIT_SECONDS = toolExecutionLimitSeconds(
+  DEFAULT_TOOL_SETTINGS,
+);
 
 async function advance(milliseconds: number): Promise<void> {
   await vi.advanceTimersByTimeAsync(milliseconds);
@@ -36,11 +45,22 @@ function startSleep(
     signal,
     options.pending ?? inactiveSteering,
     (waitSignal) => waitForSessionSteeringInput(sessionId, waitSignal),
+    Date.now,
+    DEFAULT_TOOL_SETTINGS,
   );
 }
 
-function expectNoTimers(): void {
-  expect(vi.getTimerCount()).toBe(0);
+function invalidSleep(
+  arguments_: Readonly<Record<string, unknown>>,
+): Promise<string> {
+  return executeSessionSleepTool(
+    arguments_,
+    new AbortController().signal,
+    inactiveSteering,
+    () => Promise.resolve(),
+    Date.now,
+    DEFAULT_TOOL_SETTINGS,
+  );
 }
 
 function elapsedMilliseconds(output: string): number {
@@ -93,9 +113,17 @@ describe("session sleep tool", () => {
     });
   });
 
+  test("completes a maximum-duration sleep inside the global tool limit", async () => {
+    await withFakeTimers(async () => {
+      const maximum = startSleep(DEFAULT_EXECUTION_LIMIT_SECONDS, "maximum");
+      await vi.runAllTimersAsync();
+
+      await expect(maximum).resolves.toMatch(/Slept for the full duration/);
+      expectNoTimers();
+    });
+  });
+
   test("rejects invalid and unreasonably long durations", async () => {
-    const signal = new AbortController().signal;
-    const wait = () => Promise.resolve();
     for (const durationSeconds of [
       undefined,
       0,
@@ -103,32 +131,17 @@ describe("session sleep tool", () => {
       Number.NaN,
       Number.POSITIVE_INFINITY,
       1.5,
-      3_601,
+      DEFAULT_EXECUTION_LIMIT_SECONDS + 1,
     ]) {
-      await expect(
-        executeSessionSleepTool(
-          { durationSeconds },
-          signal,
-          inactiveSteering,
-          wait,
-        ),
-      ).rejects.toThrow("durationSeconds");
+      await expect(invalidSleep({ durationSeconds })).rejects.toThrow(
+        "durationSeconds",
+      );
     }
+    await expect(invalidSleep({ durationMs: 1_000 })).rejects.toThrow(
+      "durationSeconds",
+    );
     await expect(
-      executeSessionSleepTool(
-        { durationMs: 1_000 },
-        signal,
-        inactiveSteering,
-        wait,
-      ),
-    ).rejects.toThrow("durationSeconds");
-    await expect(
-      executeSessionSleepTool(
-        { durationSeconds: 1, extra: true },
-        signal,
-        inactiveSteering,
-        wait,
-      ),
+      invalidSleep({ durationSeconds: 1, extra: true }),
     ).rejects.toThrow("arguments");
   });
 

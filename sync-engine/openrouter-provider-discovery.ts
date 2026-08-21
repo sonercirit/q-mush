@@ -7,6 +7,7 @@ import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
   abortSignalError,
+  executeWithAbortSignal,
   readBoundedString,
   readBoundedTrimmedString,
   readFiniteNumber,
@@ -14,6 +15,7 @@ import {
   requireRecord,
 } from "../shared/validation.ts";
 import { agentProviderRequestHeaders } from "./agent-model.ts";
+import { cancelableResponseReader } from "./cancelable-response-reader.ts";
 import { ProviderCredentialRejectionError } from "./provider-error.ts";
 
 const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
@@ -87,7 +89,7 @@ function finitePrice(value: unknown): string | number | undefined {
     const price = readFiniteNumber(value);
     return price !== undefined && price >= 0 ? price : undefined;
   }
-  const stringPrice = readBoundedString(value, 100);
+  const stringPrice = readBoundedString(value, { maximumLength: 100 });
   if (stringPrice === undefined) {
     return undefined;
   }
@@ -166,34 +168,6 @@ function parseCatalog(value: unknown): OpenRouterProviderCatalog {
   };
 }
 
-async function abortable<Value>(
-  signal: AbortSignal,
-  operation: () => Promise<Value>,
-): Promise<Value> {
-  if (signal.aborted) {
-    throw abortSignalError(signal, "The operation was aborted");
-  }
-  return await new Promise<Value>((resolve, reject) => {
-    const aborted = (): void => {
-      reject(abortSignalError(signal, "The operation was aborted"));
-    };
-    signal.addEventListener("abort", aborted, { once: true });
-    let pending: Promise<Value>;
-    try {
-      pending = operation();
-    } catch (error) {
-      signal.removeEventListener("abort", aborted);
-      reject(
-        error instanceof Error ? error : new Error("The operation failed"),
-      );
-      return;
-    }
-    void pending.then(resolve, reject).finally(() => {
-      signal.removeEventListener("abort", aborted);
-    });
-  });
-}
-
 async function responseBody(
   response: Response,
   signal: AbortSignal,
@@ -202,16 +176,21 @@ async function responseBody(
   if (reader === undefined) {
     return new Uint8Array();
   }
+  const responseReader = cancelableResponseReader(reader);
   const bytes = new Uint8Array(MAXIMUM_RESPONSE_BYTES);
   let length = 0;
   try {
     for (;;) {
-      const part = await abortable(signal, () => reader.read());
+      const part = await executeWithAbortSignal(
+        signal,
+        responseReader.options("The operation was aborted"),
+        () => reader.read(),
+      );
       if (part.done) {
         return bytes.subarray(0, length);
       }
       if (length + part.value.byteLength > MAXIMUM_RESPONSE_BYTES) {
-        void reader.cancel().catch(() => undefined);
+        await responseReader.cancel();
         throw new Error(
           "The OpenRouter serving-provider response was too large",
         );
@@ -220,7 +199,7 @@ async function responseBody(
       length += part.value.byteLength;
     }
   } finally {
-    reader.releaseLock();
+    responseReader.release(signal);
   }
 }
 
@@ -375,7 +354,11 @@ function createOpenRouterProviderDiscoverer(
           signal: abort.signal,
         },
       );
-      const response = await abortable(abort.signal, () => fetch(request));
+      const response = await executeWithAbortSignal(
+        abort.signal,
+        { abortMessage: "The operation was aborted" },
+        () => fetch(request),
+      );
       const catalog = parseCatalog(await responseJson(response, abort.signal));
       const cachedAt = now();
       cacheCatalog(

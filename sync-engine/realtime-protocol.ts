@@ -1,9 +1,11 @@
 import { parseJsonRecord } from "../shared/json-record.ts";
+import { MAXIMUM_RUNNER_RESULT_OUTPUT_CHARACTERS } from "../shared/realtime-limits.ts";
 import type { RunnerCommandResult } from "../shared/runner-command-broker.ts";
 import type {
   RunnerActivationReceipt,
   RunnerConnectMetadata,
 } from "../shared/runner-realtime-protocol.ts";
+import { unicodeCharacterCount } from "../shared/tool-output-limits.ts";
 import {
   isRunnerCommandOutputDelta,
   isRunnerCommandResult,
@@ -26,7 +28,10 @@ export type RunnerClientMessage =
       readonly commandId: string;
       readonly type: "result";
     })
-  | { readonly restartId: string; readonly type: "restart" }
+  | {
+      readonly restartId: string;
+      readonly type: "restart" | "restart_escalate";
+    }
   | { readonly type: "heartbeat" };
 
 export interface RunnerConnectMessage extends RunnerConnectMetadata {
@@ -62,7 +67,7 @@ function readActivationReceipt(
   if (value === undefined) {
     return undefined;
   }
-  const receipt = readBoundedString(value, 200);
+  const receipt = readBoundedString(value, { maximumLength: 200 });
   if (receipt === undefined) {
     throw new Error("The runner connection message was invalid");
   }
@@ -154,7 +159,7 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
     return { type: "heartbeat" };
   }
 
-  if (value["type"] === "restart") {
+  if (value["type"] === "restart" || value["type"] === "restart_escalate") {
     const restartId = value["restartId"];
     if (
       Object.keys(value).length !== 2 ||
@@ -164,7 +169,7 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
     ) {
       throw new Error("The runner WebSocket message was invalid");
     }
-    return { restartId, type: "restart" };
+    return { restartId, type: value["type"] };
   }
 
   const commandId = value["commandId"];
@@ -199,7 +204,9 @@ export function readRunnerClientMessage(message: string): RunnerClientMessage {
   if (
     value["type"] !== "result" ||
     Object.keys(value).length !== 4 ||
-    !isRunnerCommandResult(result)
+    !isRunnerCommandResult(result) ||
+    unicodeCharacterCount(result.output) >
+      MAXIMUM_RUNNER_RESULT_OUTPUT_CHARACTERS + 1
   ) {
     throw new Error("The runner WebSocket message was invalid");
   }

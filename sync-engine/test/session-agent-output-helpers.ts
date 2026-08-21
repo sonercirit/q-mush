@@ -1,4 +1,18 @@
 import { isRecord } from "../../shared/auth-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { boundSessionToolOutput } from "../session-tool-output.ts";
+
+export function boundedStructuredToolOutput(
+  output: string,
+  maximum: number,
+  toolName: string,
+): string {
+  return boundSessionToolOutput(
+    { output, state: "completed" },
+    { ...DEFAULT_TOOL_SETTINGS, outputLimitCharacters: maximum },
+    toolName,
+  ).output;
+}
 
 export function jsonRecord(value: string): Readonly<Record<string, unknown>> {
   const parsed: unknown = JSON.parse(value);
@@ -33,11 +47,21 @@ export function testString(value: unknown): string {
   return value;
 }
 
-export function testNumber(value: unknown): number {
-  if (typeof value !== "number") {
-    throw new TypeError("Expected a number");
+export function recordContentsContaining(
+  value: unknown,
+  expected: string,
+): readonly Readonly<Record<string, unknown>>[] {
+  if (!Array.isArray(value)) return [];
+  const candidates: unknown[] = value;
+  const matching: Readonly<Record<string, unknown>>[] = [];
+  for (const candidate of candidates) {
+    if (!isRecord(candidate)) continue;
+    const content = candidate["content"];
+    if (typeof content === "string" && content.includes(expected)) {
+      matching.push(candidate);
+    }
   }
-  return value;
+  return matching;
 }
 
 export function recordContentsContaining(

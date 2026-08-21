@@ -59,6 +59,7 @@ export const TEST_SESSION_DETAIL: AgentSessionDetail = {
   providerPricing: null,
   reasoningEffort: null,
   restartHandoff: null,
+  runtimePending: null,
   runnerId: "runner-1",
   runnerRequired: false,
   status: "idle",

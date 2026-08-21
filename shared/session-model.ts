@@ -10,6 +10,7 @@ import type { RunnerExecutionEnvironment } from "./runner-command-broker.ts";
 import type { SessionPendingInputContent } from "./session-pending-input.ts";
 import type { SessionRunStepTiming } from "./session-timing.ts";
 import type { AgentTokenUsageSummary } from "./session-token-usage.ts";
+import type { ToolSettings } from "./tool-limits.ts";
 
 export const AGENT_SESSION_STATUSES = [
   "queued",
@@ -89,6 +90,18 @@ export interface AgentSessionMessage extends AttachmentContentFields {
   readonly turnId?: string | null;
 }
 
+export type SessionRuntimePendingComponent =
+  | "engine_tool"
+  | "provider_admission"
+  | "provider_request"
+  | "runner_command"
+  | "startup";
+
+export interface SessionRuntimePending {
+  readonly component: SessionRuntimePendingComponent;
+  readonly since: number;
+}
+
 export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly adaptiveThinking: boolean | null;
   readonly agentFilePath: string | null;
@@ -115,6 +128,7 @@ export interface AgentSessionSummary extends SessionRunStepTiming<number> {
   readonly pendingQuestions: PendingAskQuestions | null;
   readonly reasoningEffort: AgentReasoningEffort | null;
   readonly restartHandoff: RestartHandoff | null;
+  readonly runtimePending: SessionRuntimePending | null;
   readonly runnerId: string;
   readonly runnerRequired: boolean;
   readonly status: AgentSessionStatus;
@@ -131,6 +145,7 @@ export interface AgentSessionTurn {
   readonly executionGeneration: number;
   readonly id: string;
   readonly startedAt: number;
+  readonly toolSettings: ToolSettings;
 }
 
 export interface AgentSessionDetail extends AgentSessionSummary {

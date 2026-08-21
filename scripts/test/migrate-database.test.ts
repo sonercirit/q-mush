@@ -313,16 +313,28 @@ test("session migration preserves transcripts with foreign keys", async () => {
     ],
   );
   const upgradedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
-  const migratedSessions = upgradedDatabase.select().from(agentSessions).all();
-  expect(migratedSessions).toHaveLength(1);
-  expect(migratedSessions[0]).toMatchObject({
-    id: sessionId,
-    parentExecutionGeneration: null,
-    parentReportedGeneration: -1,
-    parentSessionId: null,
-    runnerRequired: false,
-    tools: CURRENT_AGENT_SESSION_TOOLS,
-  });
+  expect(
+    upgradedDatabase
+      .select({
+        id: agentSessions.id,
+        runnerRequired: agentSessions.runnerRequired,
+        tools: agentSessions.tools,
+        parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+        parentReportedGeneration: agentSessions.parentReportedGeneration,
+        parentSessionId: agentSessions.parentSessionId,
+      })
+      .from(agentSessions)
+      .all(),
+  ).toEqual([
+    {
+      id: sessionId,
+      parentExecutionGeneration: null,
+      parentReportedGeneration: -1,
+      parentSessionId: null,
+      runnerRequired: false,
+      tools: CURRENT_AGENT_SESSION_TOOLS,
+    },
+  ]);
   expect(
     upgradedDatabase
       .select({

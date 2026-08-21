@@ -1,6 +1,5 @@
 import { sql } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
-import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { contextTokenCapValidationError } from "../shared/session-context-limit.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
@@ -8,13 +7,18 @@ import {
   sessionProviderSelectionMatches,
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
 import {
   sessionTimingUpdate,
   workspaceSessionCondition,
 } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
-import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
+import {
+  emitReportedParent,
+  readUpdatedSessionDetail,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 export type SessionProviderUpdateStoreResult = Readonly<{
   detail?: AgentSessionDetail;
   error?: string;
@@ -26,21 +30,19 @@ export type SessionProviderUpdateStoreResult = Readonly<{
     | "updated";
 }>;
 
-type ReadProviderUpdateSession = (
-  identity: readonly [userId: string, sessionId: string, workspaceId: string],
-) => AgentSessionDetail | undefined;
-
 export function updateStoredSessionProvider(
-  database: AppDatabase,
-  read: ReadProviderUpdateSession,
+  resources: SessionStoreWriteResources,
   input: SessionProviderUpdateInput &
     SessionRequestModelMetadata & {
       readonly now: number;
       readonly userId: string;
     },
 ): SessionProviderUpdateStoreResult {
-  const identity = [input.userId, input.sessionId, input.workspaceId] as const;
-  const existing = read(identity);
+  const existing = resources.read(
+    input.userId,
+    input.sessionId,
+    input.workspaceId,
+  );
   if (existing === undefined) return { status: "not_found" };
   if (sessionProviderSelectionMatches(existing, input)) {
     return { detail: existing, status: "unchanged" };
@@ -66,7 +68,6 @@ export function updateStoredSessionProvider(
   const values = {
     currentContextTokens: 0,
     currentSegment: sql<number>`${agentSessions.currentSegment} + 1`,
-    executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
     maxContextTokens: input.maxContextTokens,
     maxOutputTokens: input.maxOutputTokens,
     adaptiveThinking: input.adaptiveThinking,
@@ -82,23 +83,34 @@ export function updateStoredSessionProvider(
   const timing = active
     ? { status: "idle" as const, ...sessionTimingUpdate(existing, input.now) }
     : {};
-  const condition = workspaceSessionCondition(input, input.expectedGeneration);
-  const generation = input.expectedGeneration;
-  const changed = database.transaction((transaction) =>
-    updateSessionAndEndGenerationTurn({
-      condition,
+  const condition = workspaceSessionCondition(
+    { ...input },
+    input.expectedGeneration,
+  );
+  const generationChange = {
+    condition,
+    database: resources.database,
+    generateId: resources.generateId,
+    mode: "administrative" as const,
+    now: input.now,
+    sessionId: input.sessionId,
+    values: { ...values, ...timing },
+  };
+  const changed = resources.database.transaction((transaction) =>
+    advanceStoredSessionGeneration({
+      ...generationChange,
       database: transaction,
-      generation,
-      now: input.now,
-      sessionId: input.sessionId,
-      values: { ...values, ...timing },
     }),
   );
-  if (!changed) return { status: "conflict" };
+  if (changed === undefined) return { status: "conflict" };
+  emitReportedParent(resources, input.userId, changed.reportedParent);
 
-  const detail = read(identity);
-  if (detail === undefined) {
-    throw new Error("Provider update committed but the session disappeared");
-  }
+  const detail = readUpdatedSessionDetail(
+    resources,
+    input.userId,
+    input.sessionId,
+    input.workspaceId,
+    "Provider update committed but the session disappeared",
+  );
   return { detail, status: "updated" };
 }

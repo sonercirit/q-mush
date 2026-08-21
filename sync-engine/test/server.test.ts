@@ -27,6 +27,7 @@ import {
   RUNNERS_PATH,
   SESSION_MODELS_PATH,
   SESSIONS_PATH,
+  TOOL_SETTINGS_PATH,
 } from "../../shared/routes.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import type { BraveSearchSkill } from "../../sync-engine/brave-search.ts";
@@ -40,6 +41,7 @@ import type { RunnerExecutableProvider } from "../../sync-engine/runner-executab
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createRequestHandler } from "../../sync-engine/server.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
+import { createToolSettingsIntegration } from "../../sync-engine/tool-settings.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { createWorkspaceIntegration } from "../../sync-engine/workspaces.ts";
 import {
@@ -131,18 +133,27 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
       workspaces,
     },
   );
-  const integrations = [googleAuth, openAi, openRouter, braveSearch] as const;
+  const integrations = {
+    braveSearch,
+    generic,
+    googleAuth,
+    openAi,
+    openRouter,
+    prompts: createPromptIntegration(googleAuth, integrationDependencies),
+    runnerExecutables,
+    runners,
+    sessions,
+    toolSettings: createToolSettingsIntegration(
+      googleAuth,
+      integrationDependencies,
+    ),
+    workspaces,
+  };
   return createRequestHandler(
     clientJavaScript,
     stylesheet,
     pages,
-    ...integrations,
-    runners,
-    sessions,
-    createPromptIntegration(googleAuth, integrationDependencies),
-    workspaces,
-    runnerExecutables,
-    generic,
+    integrations,
   );
 }
 
@@ -208,6 +219,18 @@ async function expectAsset(
   expect(response.headers.get("content-type")).toBe(contentType);
   expect(body).toBe(expectedBody);
   return response;
+}
+
+async function expectProtectedApiAndOutsidePath(
+  requests: readonly Promise<Response>[],
+  outsidePath: string,
+): Promise<void> {
+  const [responses, outside] = await Promise.all([
+    Promise.all(requests),
+    sendRequest(outsidePath),
+  ]);
+  expectResponseStatuses(responses, 401);
+  expect(outside.status).toBe(404);
 }
 
 describe("page server", () => {
@@ -401,6 +424,16 @@ describe("page server", () => {
     expectResponseStatuses(responses, 401);
   });
 
+  test("protects global tool settings routing", async () => {
+    await expectProtectedApiAndOutsidePath(
+      [
+        sendRequest(TOOL_SETTINGS_PATH),
+        sendRequest(TOOL_SETTINGS_PATH, undefined, "PUT"),
+      ],
+      "/tool-settings",
+    );
+  });
+
   test("protects agent session routes", async () => {
     const responses = await Promise.all([
       sendRequest(SESSIONS_PATH),
@@ -494,10 +527,8 @@ describe("page server", () => {
           "DELETE",
         ),
       ]);
-      const outsideApiResponse = await sendRequest(provider.outsidePath);
-
       expectResponseStatuses(responses, 401);
-      expect(outsideApiResponse.status).toBe(404);
+      expect((await sendRequest(provider.outsidePath)).status).toBe(404);
     });
   }
 

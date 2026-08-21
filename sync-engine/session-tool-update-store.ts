@@ -1,27 +1,22 @@
-import { sql } from "drizzle-orm";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
-import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import {
   sessionTimingUpdate,
   workspaceSessionCondition,
 } from "./session-store-persistence.ts";
-import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
+import {
+  emitReportedParent,
+  readUpdatedSessionDetail,
+  type SessionStoreWriteResources,
+} from "./session-store-resources.ts";
 
 export type SessionToolUpdateStoreResult =
   | { readonly detail: AgentSessionDetail; readonly status: "updated" }
   | { readonly status: "conflict" | "not_found" };
 
-export interface SessionToolUpdateStoreOptions {
-  readonly database: AppDatabase;
-  readonly read: (
-    userId: string,
-    sessionId: string,
-    workspaceId: string,
-  ) => AgentSessionDetail | undefined;
-}
+export type SessionToolUpdateStoreOptions = SessionStoreWriteResources;
 
 /** The tool JSON and generation fence change in the same SQLite statement. */
 export function updateStoredSessionTools(
@@ -35,11 +30,8 @@ export function updateStoredSessionTools(
     readonly workspaceId: string;
   },
 ): SessionToolUpdateStoreResult {
-  const existing = options.read(
-    input.userId,
-    input.sessionId,
-    input.workspaceId,
-  );
+  const { sessionId, userId, workspaceId } = input;
+  const existing = options.read(userId, sessionId, workspaceId);
   if (existing === undefined) {
     return { status: "not_found" };
   }
@@ -49,10 +41,11 @@ export function updateStoredSessionTools(
     existing.status === "running" ||
     existing.status === "paused";
   const changed = options.database.transaction((transaction) =>
-    updateSessionAndEndGenerationTurn({
+    advanceStoredSessionGeneration({
       condition: workspaceSessionCondition(input, input.expectedGeneration),
       database: transaction,
-      generation: input.expectedGeneration,
+      generateId: options.generateId,
+      mode: "administrative",
       now: input.now,
       sessionId: input.sessionId,
       values: {
@@ -62,7 +55,6 @@ export function updateStoredSessionTools(
               ...sessionTimingUpdate(existing, input.now),
             }
           : {}),
-        executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
         interruptedHandoff: null,
         restartHandoff: null,
         tools: JSON.stringify(input.tools),
@@ -71,12 +63,16 @@ export function updateStoredSessionTools(
     }),
   );
 
-  if (!changed) {
+  if (changed === undefined) {
     return { status: "conflict" };
   }
-  const detail = options.read(input.userId, input.sessionId, input.workspaceId);
-  if (detail === undefined) {
-    throw new Error("The updated agent session could not be read");
-  }
+  emitReportedParent(options, input.userId, changed.reportedParent);
+  const detail = readUpdatedSessionDetail(
+    options,
+    input.userId,
+    input.sessionId,
+    input.workspaceId,
+    "The updated agent session could not be read",
+  );
   return { detail, status: "updated" };
 }

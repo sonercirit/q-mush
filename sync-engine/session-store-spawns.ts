@@ -3,21 +3,19 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { appendSystemFollowUp } from "./session-pending-inputs.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionStatus,
+} from "../shared/session-model.ts";
+import { appendSystemPendingInput } from "./session-pending-inputs.ts";
+import { spawnedSessionCanReport } from "./session-spawn-report.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
-import {
-  appendSystemStoredMessage,
-  storedUserMessageValues,
-} from "./session-store-values.ts";
 
-function parentIsTerminal(
-  status: (typeof REPORTABLE_PARENT_STATUSES)[number],
-): boolean {
+function parentIsTerminal(status: AgentSessionStatus): boolean {
   return status === "completed" || status === "failed" || status === "stopped";
 }
 
@@ -161,11 +159,21 @@ export function pendingSpawnedSessions(
     )
     .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
     .$dynamic();
-  const rows = limit === undefined ? query.all() : query.limit(limit).all();
-  return rows.flatMap(({ id, userId }) => {
-    const detail = read(userId, id);
-    return detail === undefined ? [] : [{ detail, userId }];
-  });
+  const pending: PendingSpawnedSession[] = [];
+  let offset = 0;
+  for (;;) {
+    const rows =
+      limit === undefined ? query.all() : query.limit(limit).offset(offset).all();
+    for (const { id, userId } of rows) {
+      const detail = read(userId, id);
+      if (detail !== undefined && spawnedSessionCanReport(detail)) {
+        pending.push({ detail, userId });
+        if (limit !== undefined && pending.length === limit) return pending;
+      }
+    }
+    if (limit === undefined || rows.length < limit) return pending;
+    offset += rows.length;
+  }
 }
 
 export function spawnedSessionLink(
@@ -179,6 +187,8 @@ export function spawnedSessionLink(
       parentGeneration: agentSessions.parentExecutionGeneration,
       parentId: agentSessions.parentSessionId,
       reportedGeneration: agentSessions.parentReportedGeneration,
+      runnerRequired: agentSessions.runnerRequired,
+      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(ownedActiveSessionCondition(userId, sessionId))
@@ -186,7 +196,11 @@ export function spawnedSessionLink(
   if (
     stored?.parentId == null ||
     stored.parentGeneration === null ||
-    stored.reportedGeneration >= stored.generation
+    (!stored.runnerRequired &&
+      stored.reportedGeneration >= stored.generation) ||
+    (stored.runnerRequired &&
+      REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
+      stored.reportedGeneration >= stored.generation)
   ) {
     return undefined;
   }
@@ -268,31 +282,13 @@ function callbackDisposition(
   ) {
     return undefined;
   }
-  switch (parent.status) {
-    case "running":
-      if (
-        !appendSystemFollowUp({
-          ...reportMessageOptions(options, database),
-          clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-          content: options.content,
-          kind: "steer",
-        })
-      ) {
-        return undefined;
-      }
-      break;
-    case "completed":
-    case "failed":
-    case "idle":
-    case "paused":
-    case "queued":
-    case "stopped":
-      appendSystemStoredMessage({
-        ...reportMessageOptions(options, database),
-        message: storedUserMessageValues(options.content),
-      });
-      break;
-  }
+  const appended = appendSystemPendingInput({
+    ...reportMessageOptions(options, database),
+    clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+    content: options.content,
+    kind: parent.status === "running" ? "steer" : "follow_up",
+  });
+  if (!appended) return undefined;
 
   const terminal = parentIsTerminal(parent.status);
   database

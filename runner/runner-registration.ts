@@ -12,6 +12,7 @@ import {
 import {
   addRunnerSocketFailureListeners,
   parseSocketJsonRecord,
+  RunnerRegistrationRejectedError,
 } from "./runner-socket.ts";
 import type { RunnerStartupConnection } from "./runner-update.ts";
 
@@ -73,6 +74,8 @@ interface RegistrationState {
 
 interface RegistrationContext {
   readonly installOperationalHandlers: () => void;
+  readonly onOperational:
+    ((restartId: string | undefined) => boolean) | undefined;
   readonly onVersion: ((version: string) => void) | undefined;
   readonly send: (message: string) => boolean;
   readonly settle: (error?: RunnerConnectionError) => void;
@@ -267,16 +270,31 @@ function receiveRegistrationMessage(
         invalidRegistration(context);
         return;
       }
+      if (
+        context.onOperational?.(context.startupConnection.restartId) === false
+      ) {
+        context.settle(
+          new RunnerConnectionError(
+            "The runner restart settlement was invalid",
+          ),
+        );
+        return;
+      }
       context.settle();
     }
   }
+}
+
+export interface RunnerRegistrationHandlers {
+  readonly onOperational?: (restartId: string | undefined) => boolean;
+  readonly onVersion?: (version: string) => void;
 }
 
 export function completeRunnerRegistration(
   socket: RunnerRegistrationSocket,
   startupConnection: RunnerStartupConnection,
   installOperationalHandlers: () => void,
-  onVersion?: (version: string) => void,
+  handlers: RunnerRegistrationHandlers = {},
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const state: RegistrationState = {
@@ -308,7 +326,8 @@ export function completeRunnerRegistration(
     };
     const context: RegistrationContext = {
       installOperationalHandlers,
-      onVersion,
+      onOperational: handlers.onOperational,
+      onVersion: handlers.onVersion,
       send,
       settle,
       startupConnection,
@@ -322,6 +341,7 @@ export function completeRunnerRegistration(
       ) {
         const message = parseRunnerRegistrationMessage(event.data);
         if (message?.["type"] === "registration_rejected") {
+          settle(new RunnerRegistrationRejectedError());
           return;
         }
         if (message === undefined) {

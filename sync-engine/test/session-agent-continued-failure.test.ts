@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import {
   TEST_NOW,
@@ -49,7 +50,7 @@ function actionsForFailedLaunch(setup: ReturnType<typeof spawnedChildSetup>) {
     setup.parentId,
     TEST_USER_ID,
     setup.parentGeneration,
-    new AbortController().signal,
+    DEFAULT_TOOL_SETTINGS,
   );
   return { actions, notify };
 }
@@ -62,22 +63,25 @@ test("immediate spawn launch failure reports the created child before returning"
   if (parent === undefined) throw new Error("The parent is unavailable");
 
   await expect(
-    actions.spawnSession({
-      agentFilePath: null,
-      autoCompact: true,
-      credentialId: parent.credentialId,
-      idleCompact: false,
-      executionEnvironment: parent.executionEnvironment,
-      images: [],
-      model: parent.model,
-      openRouterProviderTag: null,
-      prompt: "Fail immediately after creation",
-      provider: parent.provider,
-      reasoningEffort: null,
-      runnerId: parent.runnerId,
-      tools: [],
-      workingDirectory: parent.workingDirectory,
-    }),
+    actions.spawnSession(
+      {
+        agentFilePath: null,
+        autoCompact: true,
+        credentialId: parent.credentialId,
+        idleCompact: false,
+        executionEnvironment: parent.executionEnvironment,
+        images: [],
+        model: parent.model,
+        openRouterProviderTag: null,
+        prompt: "Fail immediately after creation",
+        provider: parent.provider,
+        reasoningEffort: null,
+        runnerId: parent.runnerId,
+        tools: [],
+        workingDirectory: parent.workingDirectory,
+      },
+      new AbortController().signal,
+    ),
   ).rejects.toThrow("could not be launched");
   const [child] = spawnedSessionsExcluding(setup.store, [
     setup.parentId,
@@ -93,9 +97,9 @@ test("failed continued generations are reported synchronously when launch fails"
   const firstGeneration = setup.childGeneration;
   const { actions, notify } = actionsForFailedLaunch(setup);
 
-  await expect(actions.continueSession(setup.childId)).resolves.toContain(
-    "session_launch_failed",
-  );
+  await expect(
+    actions.continueSession(setup.childId, new AbortController().signal),
+  ).resolves.toContain("session_launch_failed");
   expect(setup.store.get(TEST_USER_ID, setup.childId)).toMatchObject({
     generation: firstGeneration + 1,
     status: "failed",

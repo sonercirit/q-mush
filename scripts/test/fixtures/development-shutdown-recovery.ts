@@ -6,12 +6,17 @@ import {
   users,
   workspaces,
 } from "../../../shared/database/schema.ts";
-import { FINAL_SHUTDOWN_PREPARED_MESSAGE } from "../../../shared/development-shutdown.ts";
+import {
+  FINAL_SHUTDOWN_PREPARED_MESSAGE,
+  FINAL_SHUTDOWN_REQUEST_MESSAGE,
+} from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../../shared/tool-limits.ts";
 import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
 import { SessionStore } from "../../../sync-engine/session-store.ts";
 
+const emptyRuntimes = { pending: (): undefined => undefined };
 const now = Date.now();
 const [databasePath, statePath, mode] = process.argv.slice(2);
 if (
@@ -89,6 +94,8 @@ if (mode === "start" || mode === "start-no-ack") {
   const store = new SessionStore(
     database,
     (timestamp) => generatedIds.shift() ?? createUuidV7(timestamp),
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   // Split from the create literal to break a jscpd clone against the
   // session-store hardening helpers; keep the shape if editing.
@@ -133,15 +140,20 @@ if (mode === "start" || mode === "start-no-ack") {
     });
     return new Promise(() => undefined);
   });
-  process.on("SIGTERM", () => {
+  const prepareShutdown = (): void => {
     void Bun.sleep(150)
       .then(() => runtimes.mark({ kind: "server" }, "bounded-final-shutdown"))
       .then(() => {
+        interrupted.enableRecovery();
         if (mode === "start") {
           process.send?.(FINAL_SHUTDOWN_PREPARED_MESSAGE);
         }
       });
+  };
+  process.on("message", (message) => {
+    if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) prepareShutdown();
   });
+  process.on("SIGTERM", prepareShutdown);
   await Bun.write(statePath, JSON.stringify({ sessionId, userId }));
   setInterval(() => undefined, 1_000);
 } else {
@@ -159,7 +171,8 @@ if (mode === "start" || mode === "start-no-ack") {
   const interrupted = shutdownStore();
   interrupted.failInvalid(now);
   interrupted.restore(now);
-  const store = new SessionStore(database);
+  const settings = () => DEFAULT_TOOL_SETTINGS;
+  const store = new SessionStore(database, undefined, settings, emptyRuntimes);
   store.failInterrupted(now + 1);
   const detail = store.get(state.userId, state.sessionId);
   if (detail === undefined) {

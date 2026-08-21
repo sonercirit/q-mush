@@ -135,6 +135,7 @@ export async function startManualSessionCompactionForUserId(
         ...(dependencies.parentAuthority === undefined
           ? {}
           : { parent: dependencies.parentAuthority }),
+        deferSystemPendingInputs: true,
         targetGeneration: existing.generation,
       },
       dependencies.workspaceId,

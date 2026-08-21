@@ -1,14 +1,12 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
-import type {
-  ProviderCredentialAccess,
-  ProviderId,
-} from "../shared/provider-credential-store.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import { abortSignalError } from "../shared/validation.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createJsonResponse } from "./http.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
@@ -18,6 +16,10 @@ import {
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
+import {
+  restartSignalIsAborted,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -29,13 +31,10 @@ type SessionAgentCredentialSelection = Pick<
 export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
-  readonly discoverModels: (
-    provider: ProviderId,
-    credential: ProviderCredentialAccess,
-  ) => Promise<AgentModelCatalog>;
+  readonly discoverModels: AgentModelDiscoverer;
   readonly store: SessionStore;
   readonly now: () => number;
-  readonly draining: () => boolean;
+  readonly restartSignal: () => AbortSignal;
   readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
@@ -48,6 +47,7 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
+    signal?: AbortSignal,
   ) => Promise<SessionRequestModelMetadata>;
   readonly readCredential: (
     userId: string,
@@ -145,9 +145,26 @@ export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
+  readonly signal?: AbortSignal;
   readonly terminal: (detail: AgentSessionDetail) => void;
   readonly userId: string;
 }): Promise<string> {
+  const restartSignal = options.dependencies.restartSignal();
+  const operationSignal =
+    options.signal === undefined
+      ? restartSignal
+      : AbortSignal.any([options.signal, restartSignal]);
+  const cancellationResponse = (): Response | undefined => {
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
+    return restartSignal.aborted ? serverRestartingResponse() : undefined;
+  };
+  const translateCancellation = (error: unknown): Response => {
+    const response = cancellationResponse();
+    if (response !== undefined) return response;
+    throw error;
+  };
   const parent = options.dependencies.store.get(
     options.userId,
     options.authority.sessionId,
@@ -168,12 +185,22 @@ export async function spawnAgentSession(options: {
     credential: ProviderCredentialAccess,
     workspaceId: string,
   ): Promise<Response> {
-    const metadata = await options.dependencies.discoverSessionMetadata(
-      input,
-      credential,
-      options.userId,
-      balanced,
-    );
+    let metadata: SessionRequestModelMetadata;
+    try {
+      metadata = await options.dependencies.discoverSessionMetadata(
+        input,
+        credential,
+        options.userId,
+        balanced,
+        operationSignal,
+      );
+    } catch (error) {
+      return translateCancellation(error);
+    }
+    // Discovery settles even when the deadline fires mid-flight; never
+    // create a child after the caller already reported timed-out.
+    const cancellation = cancellationResponse();
+    if (cancellation !== undefined) return cancellation;
     const created = options.dependencies.store.create(
       {
         ...input,
@@ -193,7 +220,7 @@ export async function spawnAgentSession(options: {
       options.dependencies.notify(options.userId, child.id);
       return sessionLaunchResponse(child.id, status);
     };
-    if (options.dependencies.draining()) {
+    if (restartSignalIsAborted(() => restartSignal)) {
       return notifiedResponse("queued");
     }
     const launch = options.dependencies.launchSession(
@@ -223,8 +250,22 @@ export async function spawnAgentSession(options: {
     }
     return notifiedResponse("spawned");
   }
+  // Avoid credential reads during maintenance; pool candidates also enforce
+  // this signal, while the direct-credential path falls back to enqueue.
+  if (restartSignal.aborted) {
+    return responseToolOutput(serverRestartingResponse());
+  }
   if (pool !== undefined && balanced) {
-    const credentials = await pool.candidates(options.userId, selection);
+    let credentials: readonly ProviderCredentialAccess[];
+    try {
+      credentials = await pool.candidates(
+        options.userId,
+        selection,
+        operationSignal,
+      );
+    } catch (error) {
+      return responseToolOutput(translateCancellation(error));
+    }
     if (credentials.length === 0) {
       return responseToolOutput(
         createJsonResponse({ error: "credential_unavailable" }, 409),

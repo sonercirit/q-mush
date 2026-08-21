@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
-import { testAskQuestionsInput } from "./ask-questions-test-fixtures.ts";
 import {
   TEST_FOREIGN_USER_ID,
   TEST_NOW,
@@ -19,11 +19,13 @@ import {
   expectNoPendingSpawnedSessions,
   requireSpawnedChild,
   spawnedChildSetup,
-  spawnedRunningChildSetup,
   terminalRecordedMessage,
   transitionSpawnedChild,
 } from "./session-store-spawn-test-helpers.ts";
-import { testSessionInput } from "./session-store-test-fixtures.ts";
+import {
+  emptyRuntimes,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 function parentReports(
   store: SessionStore,
@@ -52,90 +54,6 @@ function reportCount(store: SessionStore, parentId: string): number {
   return parentReports(store, parentId).filter((content) =>
     content.startsWith("Spawned session "),
   ).length;
-}
-
-function reportPendingTwice(
-  actions: SessionAgentActions,
-  store: SessionStore,
-): void {
-  actions.reportAll(store.pendingSpawnedSessions());
-  actions.reportAll(store.pendingSpawnedSessions());
-}
-
-function setChildStatus(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  status: "completed" | "failed" | "idle" | "paused" | "stopped",
-): void {
-  setup.database.$client
-    .query("UPDATE agent_sessions SET status = ? WHERE id = ?")
-    .run(status, setup.childId);
-}
-
-function forceObservedIdleSettlement(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  status: "idle" | "paused" = "idle",
-): void {
-  // Reproduce the production settlement defect: a linked generation has a
-  // durable final assistant response but remains continuable/idle.
-  setChildStatus(setup, status);
-}
-
-function deliverIdleAttempt(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  eventActions: ReturnType<typeof terminalEventActions>,
-): void {
-  forceObservedIdleSettlement(setup);
-  reportPendingTwice(eventActions.actions, setup.store);
-}
-
-function joinedParentReports(
-  setup: ReturnType<typeof spawnedChildSetup>,
-): string {
-  return parentReports(setup.store, setup.parentId).join("\n");
-}
-
-function expectReportTotals(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  notify: ReturnType<typeof vi.fn>,
-  total: number,
-): void {
-  expect(reportCount(setup.store, setup.parentId)).toBe(total);
-  expect(notify).toHaveBeenCalledTimes(total);
-}
-
-function reportAllPending(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  actions: SessionAgentActions,
-): void {
-  actions.reportAll(setup.store.pendingSpawnedSessions());
-}
-
-function expectNoParentReport(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  pending: number,
-): void {
-  expect(joinedParentReports(setup)).not.toContain("Spawned session ");
-  expect(setup.store.pendingSpawnedSessions()).toHaveLength(pending);
-}
-
-function expectUnreportedAttempt(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  actions: SessionAgentActions,
-  pending: number,
-): void {
-  reportAllPending(setup, actions);
-  expectNoParentReport(setup, pending);
-  closeSpawnedChildSetup(setup);
-}
-
-function expectIdleWithoutFinalIsUnreported(
-  prepare: (setup: ReturnType<typeof spawnedChildSetup>) => void,
-): void {
-  const setup = spawnedChildSetup();
-  prepare(setup);
-  forceObservedIdleSettlement(setup);
-  const { actions } = terminalEventActions(setup.store, setup.database);
-  expectUnreportedAttempt(setup, actions, 1);
 }
 
 function completeSibling(
@@ -242,6 +160,8 @@ test("durable generation events survive recreation, compaction, and duplicate sc
   const recreated = new SessionStore(
     setup.database,
     () => "recreated-child-event-message",
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const { actions, launchSession, notify } = terminalEventActions(
     recreated,
@@ -269,7 +189,7 @@ test("durable generation events survive recreation, compaction, and duplicate sc
   closeSpawnedChildSetup(setup);
 });
 
-test("idle parents persist sibling events and surface them on next resume", () => {
+test("idle parents persist sibling events and surface them on next resume", async () => {
   const setup = spawnedChildSetup();
   const siblingId = completeSibling(setup, "Sibling terminal result");
   expect(
@@ -290,6 +210,7 @@ test("idle parents persist sibling events and surface them on next resume", () =
     TEST_USER_ID,
     setup.parentId,
     TEST_NOW + 10,
+    { content: "Continue with my request", images: [] },
   );
   expect(resumed.status).toBe("queued");
   expect(
@@ -299,22 +220,100 @@ test("idle parents persist sibling events and surface them on next resume", () =
         )
       : [],
   ).toHaveLength(2);
+  expect(
+    resumed.status === "queued"
+      ? resumed.detail.messages.some(
+          ({ content, role }) =>
+            role === "user" && content === "Continue with my request",
+        )
+      : false,
+  ).toBe(true);
 
   const reports = parentReports(setup.store, setup.parentId);
-  const joinedReports = reports.join("\n");
   expect(reportCount(setup.store, setup.parentId)).toBe(2);
-  expect(joinedReports).toContain(setup.childId);
-  expect(joinedReports).toContain(siblingId);
+  expect(reports.join("\n")).toContain(setup.childId);
+  expect(reports.join("\n")).toContain(siblingId);
   expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe("queued");
+  await Promise.resolve();
   closeSpawnedChildSetup(setup);
 });
 
-test.each(["completed", "failed", "idle", "stopped"] as const)(
-  "settled %s attempts persist an authorized parent event",
+test("runner parent reports notify and wake the delivered parent", async () => {
+  const setup = spawnedChildSetup();
+  setup.database.$client
+    .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
+    .run(setup.parentId);
+  const delivery = terminalEventActions(setup.store, setup.database);
+
+  delivery.actions.reportedParent(
+    { disposition: "delivered", parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
+  await vi.waitFor(() => {
+    expect(delivery.launchSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: setup.parentId }),
+      TEST_USER_ID,
+    );
+  });
+  closeSpawnedChildSetup(setup);
+});
+
+test("a report to a terminal parent notifies the child route", () => {
+  const setup = spawnedChildSetup();
+  const terminalParent = setup.parentId;
+  setup.database.$client
+    .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?1")
+    .run(terminalParent);
+  const delivery = terminalEventActions(setup.store, setup.database);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+
+  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+
+  expect(delivery.notify).toHaveBeenNthCalledWith(
+    1,
+    TEST_USER_ID,
+    setup.childId,
+  );
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  expect(delivery.notify).not.toHaveBeenCalledWith(
+    TEST_USER_ID,
+    setup.parentId,
+  );
+  closeSpawnedChildSetup(setup);
+});
+
+test("stopping children notifies the parent after delivering the stop report", () => {
+  const setup = spawnedChildSetup();
+  const delivery = terminalEventActions(setup.store, setup.database);
+  const continued = continueChild(setup);
+  transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+  expect(parent).toMatchObject({ id: setup.parentId });
+  if (parent === undefined) {
+    throw new Error("Stopped child parent unavailable");
+  }
+
+  expect(continued.id).toBe(setup.childId);
+  delivery.actions.stopChildren(parent, TEST_USER_ID);
+
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.launchSession.mock.calls).toEqual([]);
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
+  closeSpawnedChildSetup(setup);
+});
+
+test.each(["completed", "failed", "stopped"] as const)(
+  "terminal %s attempts persist an authorized parent event",
   (status) => {
     const setup = spawnedChildSetup();
-    setChildStatus(setup, status);
+    setup.database.$client
+      .query("UPDATE agent_sessions SET status = ? WHERE id = ?")
+      .run(status, setup.childId);
 
     const detail = requireSpawnedChild(setup);
     const { actions, notify } = terminalEventActions(
@@ -323,11 +322,11 @@ test.each(["completed", "failed", "idle", "stopped"] as const)(
     );
     actions.reportOne(detail, TEST_USER_ID);
 
-    const parentEvent = parentReports(setup.store, setup.parentId).find(
-      (content) => content.includes(setup.childId),
+    const reports = parentReports(setup.store, setup.parentId);
+    expect(reports).toContainEqual(
+      expect.stringContaining(`Spawned session ${status}`),
     );
-    expect(parentEvent).toContain(`Spawned session ${status}`);
-    expect(parentEvent).toContain(`"status": "${status}"`);
+    expect(reports).toContainEqual(expect.stringContaining(setup.childId));
     expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
     expectNoPendingSpawnedSessions(setup);
     closeSpawnedChildSetup(setup);
@@ -355,78 +354,5 @@ test("foreign owners cannot discover or claim a child event", () => {
   expect(parentReports(setup.store, setup.parentId)).not.toContain(
     "foreign event",
   );
-  closeSpawnedChildSetup(setup);
-});
-
-test("continued idle child attempts each deliver exactly once", () => {
-  const setup = spawnedChildSetup();
-  const eventActions = terminalEventActions(setup.store, setup.database);
-  deliverIdleAttempt(setup, eventActions);
-
-  expectReportTotals(setup, eventActions.notify, 1);
-  expect(joinedParentReports(setup)).toContain('"status": "idle"');
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
-
-  setChildStatus(setup, "completed");
-  const replayStore = new SessionStore(
-    setup.database,
-    () => "idle-event-replay-message",
-  );
-  const replay = terminalEventActions(replayStore, setup.database);
-  replay.actions.reportAll(replayStore.pendingSpawnedSessions());
-  expect(replay.notify).not.toHaveBeenCalled();
-  expectReportTotals(setup, eventActions.notify, 1);
-
-  const continued = continueChild(setup);
-  completeSpawnedChildGeneration(
-    setup,
-    continued.generation,
-    "later idle final",
-    TEST_NOW + 7,
-  );
-  deliverIdleAttempt(setup, eventActions);
-
-  expectReportTotals(setup, eventActions.notify, 2);
-  expect(joinedParentReports(setup)).toContain("later idle final");
-  closeSpawnedChildSetup(setup);
-});
-
-test("idle child attempts without a final assistant response are not final", () => {
-  expectIdleWithoutFinalIsUnreported((setup) => {
-    setup.database.$client.run(
-      "DELETE FROM agent_messages WHERE session_id = ? AND role = 'assistant'",
-      [setup.childId],
-    );
-    setup.database.$client.run(
-      "UPDATE agent_sessions SET execution_generation = execution_generation + 1 WHERE id = ?",
-      [setup.childId],
-    );
-  });
-});
-
-test("child attempts paused for question input are not final", () => {
-  const setup = spawnedRunningChildSetup(
-    "Ask before choosing an implementation",
-  );
-  const child = requireSpawnedChild(setup);
-  const pending = setup.store
-    .questions()
-    .create(
-      TEST_USER_ID,
-      child.id,
-      child.generation,
-      "call-question",
-      testAskQuestionsInput(),
-      TEST_NOW + 4,
-    );
-  const paused = setup.store.get(TEST_USER_ID, child.id);
-  const { actions } = terminalEventActions(setup.store, setup.database);
-  reportAllPending(setup, actions);
-
-  expect(paused).toMatchObject({
-    pendingQuestions: { id: pending.id },
-    status: "paused",
-  });
-  expectNoParentReport(setup, 0);
   closeSpawnedChildSetup(setup);
 });

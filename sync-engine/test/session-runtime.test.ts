@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import {
   SessionRuntimes,
   type RestartRequest,
@@ -36,6 +37,28 @@ function deferredRuntime(
     },
     launched,
     request: () => request?.(),
+  };
+}
+
+function pendingRuntime(runtimes: SessionRuntimes, generation: number) {
+  let finish: (() => void) | undefined;
+  let pending:
+    ((component: SessionRuntimePendingComponent) => void) | undefined;
+  const launched = runtimes.launch(
+    "session-1",
+    "runner-1",
+    generation,
+    ({ pendingComponent }) => {
+      pending = pendingComponent;
+      return deferredPromise((resolve) => {
+        finish = resolve;
+      });
+    },
+  );
+  return {
+    finish: () => finish?.(),
+    launched,
+    pending: (value: SessionRuntimePendingComponent) => pending?.(value),
   };
 }
 
@@ -117,6 +140,55 @@ function restoreRunnerGate(
 }
 
 describe("session runtimes", () => {
+  test("tracks pending components with a shared clock and generation fencing", async () => {
+    let now = 101;
+    const runtimes = new SessionRuntimes(() => now);
+    const runtime = pendingRuntime(runtimes, 4);
+    expect(runtime.launched).toBe(true);
+
+    runtime.pending("provider_admission");
+    expect(runtimes.pending("session-1", 4)).toEqual({
+      component: "provider_admission",
+      since: 101,
+    });
+    expect(runtimes.pending("session-1", 3)).toBeUndefined();
+
+    now = 202;
+    runtime.pending("provider_request");
+    expect(runtimes.pending("session-1", 4)).toEqual({
+      component: "provider_request",
+      since: 202,
+    });
+    runtime.finish();
+    await runtimes.settled("session-1");
+    expect(runtimes.pending("session-1", 4)).toBeUndefined();
+  });
+
+  test("fences stale callbacks and aborts after generation replacement", async () => {
+    const runtimes = new SessionRuntimes();
+    const stale = pendingRuntime(runtimes, 1);
+    expect(stale.launched).toBe(true);
+    stale.finish();
+    await runtimes.settled("session-1");
+
+    const replacement = Promise.withResolvers<undefined>();
+    let replacementSignal: AbortSignal | undefined;
+    expect(
+      runtimes.launch("session-1", "runner-1", 2, ({ controller }) => {
+        replacementSignal = controller.signal;
+        return replacement.promise;
+      }),
+    ).toBe(true);
+    stale.pending("provider_request");
+
+    expect(runtimes.pending("session-1", 2)).toMatchObject({
+      component: "startup",
+    });
+    expect(runtimes.abortForGeneration("session-1", 1)).toBe(false);
+    expect(replacementSignal).toMatchObject({ aborted: false });
+    replacement.resolve();
+  });
+
   test("rejects duplicate launches without replacing the active runtime", async () => {
     const runtimes = new SessionRuntimes();
     const first = deferredRuntime(runtimes, "session-1", "runner-1");

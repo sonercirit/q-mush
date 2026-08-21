@@ -54,6 +54,14 @@ type RunnerRemovedListener = (
 
 type RunnerRemovingListener = (userId: string, runnerId: string) => void;
 
+type RunnerParentReportListener = (
+  userId: string,
+  report: Readonly<{
+    disposition: "deferred" | "delivered" | "promoted" | "terminal";
+    parentId: string;
+  }>,
+) => void;
+
 interface RunnerRemovalListeners {
   readonly removed: RunnerRemovedListener;
   readonly removing: RunnerRemovingListener;
@@ -128,6 +136,7 @@ export interface RunnerIntegration
     query: RunnerOptionQuery,
     workspaceId?: string,
   ): RunnerPage;
+  onParentReport(listener: RunnerParentReportListener): void;
   onRemoved(listener: RunnerRemovedListener): void;
   onRemoving(listener: RunnerRemovingListener): void;
   onlineForUser(userId: string, workspaceId?: string): readonly RunnerSummary[];
@@ -208,6 +217,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
   readonly #auth: GoogleAuth;
   readonly #now: () => number;
   readonly #removalListeners = new Set<RunnerRemovalListeners>();
+  readonly #parentReportListeners = new Set<RunnerParentReportListener>();
   readonly #randomToken: () => string;
   readonly #runnerIsAvailable: SessionRunnerAvailability;
   readonly #store: RunnerStore;
@@ -228,6 +238,11 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         dependencies.database ?? createDatabase(":memory:"),
         dependencies.randomId ?? createUuidV7,
         dependencies.generateActivationId ?? createUuidV7,
+        (userId, report) => {
+          for (const listener of this.#parentReportListeners) {
+            listener(userId, report);
+          }
+        },
       );
     this.#runnerIsAvailable = runnerAvailabilityAt(this.#store, this.#now);
   }
@@ -297,6 +312,10 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       query.search,
       workspaceId,
     );
+  }
+
+  onParentReport(listener: RunnerParentReportListener): void {
+    this.#parentReportListeners.add(listener);
   }
 
   onRemoved(listener: RunnerRemovedListener): void {

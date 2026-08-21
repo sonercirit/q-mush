@@ -40,6 +40,14 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
+function recordArray(
+  record: Record<string, unknown>,
+  key: string,
+): readonly unknown[] {
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
+
 function parentSessionRequests(
   requests: readonly AgentConversationMessage[][],
 ): readonly AgentConversationMessage[][] {
@@ -274,12 +282,19 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
     readParent,
     (value) =>
       isRecord(value) &&
-      recordContentsContaining(value["messages"], "Spawned session completed")
-        .length === 2,
+      recordContentsContaining(
+        value["pendingInputs"],
+        "Spawned session completed",
+      ).length === 1,
   );
   expect(parentSessionRequests(model.requests)).toHaveLength(3);
-  const parentReports = isRecord(parentWithSecondReport)
-    ? parentWithSecondReport["messages"]
+  const parentReports: readonly unknown[] | undefined = isRecord(
+    parentWithSecondReport,
+  )
+    ? [
+        ...recordArray(parentWithSecondReport, "messages"),
+        ...recordArray(parentWithSecondReport, "pendingInputs"),
+      ]
     : undefined;
   expect(Array.isArray(parentReports)).toBe(true);
   const completedReports = recordContentsContaining(

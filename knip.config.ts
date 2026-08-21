@@ -34,10 +34,12 @@ function createErrorRules(
 const knipConfig = {
   entry: [
     "knip.production.config.ts",
+    "vitest.browser.config.ts",
     "**/test/**/*.test.{ts,tsx}!",
     "scripts/test/fixtures/*.{ts,tsx}!",
   ],
   include: includedIssueTypes,
+  ignoreIssues: { "vitest.browser.config.ts": ["exports"] },
   includeEntryExports: true,
   ignoreDependencies: ["tailwindcss"],
   project: [

@@ -1,5 +1,4 @@
 import type { ProviderCredentialSource } from "../shared/provider-credential-store.ts";
-import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   sessionToolsMatch,
@@ -8,7 +7,7 @@ import {
   type SessionToolUpdatePreviewInput,
 } from "../shared/session-tool-update.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
-import type { SessionRuntimes } from "./session-runtime.ts";
+import type { SessionGenerationInterruptionDependencies } from "./session-generation-interruption.ts";
 import { sessionToolCachePreview } from "./session-tool-cache-policy.ts";
 import {
   updateStoredSessionTools,
@@ -22,14 +21,11 @@ export class SessionToolUpdateError extends RealtimeCommandError {
   }
 }
 
-export interface SessionToolUpdateDependencies {
-  readonly broker: Pick<RunnerCommandBroker, "cancelSessionGeneration">;
-  readonly now: () => number;
+export interface SessionToolUpdateDependencies extends SessionGenerationInterruptionDependencies {
   readonly readCredentialSource: (
     userId: string,
     detail: AgentSessionDetail,
   ) => Promise<ProviderCredentialSource | undefined>;
-  readonly runtimes: Pick<SessionRuntimes, "abortForGeneration">;
   readonly store: SessionToolUpdateStoreOptions;
 }
 

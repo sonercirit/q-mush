@@ -2,13 +2,12 @@ import { describe, expect, test } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
-import {
-  AgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "../../sync-engine/agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { type AgentModelDiscoverer } from "../../sync-engine/agent-model-discovery.ts";
 import {
   createAuthenticatedRequest,
   TEST_AUTHENTICATED_USER,
+  TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { TEST_COMPACTION_HANDOFF_INSTRUCTION } from "./compaction-test-fixtures.ts";
@@ -27,11 +26,13 @@ import {
   sessionDetail,
   startSessionAndCompleteAgentFile,
   waitForSessionStatus,
+  waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import {
   closeSessionTestDatabase,
   expectJsonResponse,
 } from "./session-launch-race-helpers.ts";
+import { escalateAndCloseDrain } from "./session-restart-test-helpers.ts";
 
 function contextCapCreationRequest(): Request {
   return createSessionRequest(
@@ -158,6 +159,57 @@ describe("session models and compaction", () => {
       message: "Model discovery failed with status 503",
     });
     setup.database.$client.close();
+  });
+
+  test("reports server_restarting across production HTTP and realtime gates", async () => {
+    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    await setup.sessions.drain();
+
+    const modelsResponse = await setup.sessions.models(
+      createAuthenticatedRequest(
+        `${SESSION_MODELS_PATH}?provider=openai&credentialId=${CREDENTIAL_ID}`,
+      ),
+    );
+    await expectJsonResponse(modelsResponse, 503, {
+      error: "server_restarting",
+    });
+    await expect(
+      setup.sessions.realtimeCommands.modelsForUser({
+        credentialId: CREDENTIAL_ID,
+        provider: "openai",
+        user: TEST_AUTHENTICATED_USER,
+        workspaceId: TEST_WORKSPACE_ID,
+      }),
+    ).rejects.toMatchObject({ code: "server_restarting" });
+
+    const createResponse = await setup.sessions.collection(
+      createSessionRequest(),
+    );
+    await expectJsonResponse(createResponse, 503, {
+      error: "server_restarting",
+    });
+    expect(setup.sessions.listForUser(TEST_USER_ID)).toEqual([]);
+    closeSessionTestDatabase(setup.database);
+  });
+
+  test("scopes restart progress to the authenticated workspace", async () => {
+    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const response = await setup.sessions.collection(createSessionRequest());
+    expect(response.ok).toBe(true);
+
+    const drain = setup.sessions.drain();
+    await waitForSessionValue(
+      setup.sessions.drainProgress.bind(setup.sessions),
+      (progress) => Array.isArray(progress) && progress.length === 1,
+    );
+
+    expect(
+      setup.sessions.drainProgress(TEST_USER_ID, TEST_WORKSPACE_ID),
+    ).toHaveLength(1);
+    expect(
+      setup.sessions.drainProgress(TEST_USER_ID, GLOBAL_WORKSPACE_ID),
+    ).toEqual([]);
+    await escalateAndCloseDrain(setup, drain);
   });
 
   test("rejects caps above the discovered model limit during creation", async () => {
