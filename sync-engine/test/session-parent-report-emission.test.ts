@@ -86,69 +86,60 @@ function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
   closeSessionStoreTestSetup(setup);
 }
 
-test("queue emits the real terminal-generation parent report", () => {
-  const setup = setupWithReporter();
+type ChildSetup = ReturnType<typeof setupWithTerminalChild>;
+
+function testReportedGenerationVariants(
+  name: string,
+  exercise: (terminal: ChildSetup, variant: "terminal" | "idle final") => void,
+): void {
+  test.each([
+    ["terminal", setupWithTerminalChild],
+    ["idle final", setupWithIdleFinalChild],
+  ] as const)(
+    `${name} preserves a %s child parent report`,
+    (variant, setup) => {
+      const terminal = setup();
+      exercise(terminal, variant);
+      expectReported(terminal.setup);
+    },
+  );
+}
+
+function expectStatus(
+  result: { status: string },
+  expected: "queued" | "reassigned" | "updated",
+): void {
+  expect(result.status).toBe(expected);
+}
+
+testReportedGenerationVariants("queue", ({ child, setup }) => {
   // Exercise queueStoredSession with resources carrying the callback, rather than
   // SessionStore.queue's intentionally callback-free public continuation path.
-  expect(
-    queueStoredSession({
-      now: TEST_NOW + 6,
-      resources: setup.resources,
-      sessionId: setup.childId,
-      userId: TEST_USER_ID,
-    }).status,
-  ).toBe("queued");
-  expectReported(setup);
-});
-
-test("queue preserves an idle child's final parent report", () => {
-  const { child, setup } = setupWithIdleFinalChild();
-  expect(
+  expectStatus(
     queueStoredSession({
       now: TEST_NOW + 6,
       resources: setup.resources,
       sessionId: child.id,
       userId: TEST_USER_ID,
-    }).status,
-  ).toBe("queued");
-  expectReported(setup);
+    }),
+    "queued",
+  );
 });
 
-test("reassignment emits a terminal child report", () => {
-  const setup = setupWithReporter();
-  const replacement = "018bcfe5-6800-7000-8000-000000000099";
+testReportedGenerationVariants("reassignment", ({ child, setup }, variant) => {
+  const replacement =
+    variant === "terminal"
+      ? "018bcfe5-6800-7000-8000-000000000099"
+      : "018bcfe5-6800-7000-8000-000000000098";
   addReplacementRunner(setup.database, replacement);
   const changed = setup.database
     .update(agentSessions)
     .set({ runnerRequired: true, workingDirectory: "/reassigning" })
-    .where(eq(agentSessions.id, setup.childId))
+    .where(eq(agentSessions.id, child.id))
     .returning({ id: agentSessions.id })
     .get();
-  expect(changed.id).toBe(setup.childId);
-  expect(
-    reassignStoredSession({
-      now: TEST_NOW + 6,
-      read: (userId, id) => setup.store.get(userId, id),
-      resources: setup.resources,
-      runnerId: replacement,
-      sessionId: setup.childId,
-      userId: TEST_USER_ID,
-      workingDirectory: "/tmp",
-    }).status,
-  ).toBe("reassigned");
-  expectReported(setup);
-});
-
-test("reassignment preserves an idle child's final parent report", () => {
-  const { child, setup } = setupWithIdleFinalChild();
-  const replacement = "018bcfe5-6800-7000-8000-000000000098";
-  addReplacementRunner(setup.database, replacement);
-  setup.database
-    .update(agentSessions)
-    .set({ runnerRequired: true, workingDirectory: "/reassigning" })
-    .where(eq(agentSessions.id, child.id))
-    .run();
-  expect(
+  expect(changed.id).toBe(child.id);
+  expectStatus(
     reassignStoredSession({
       now: TEST_NOW + 6,
       read: (userId, id) => setup.store.get(userId, id),
@@ -157,64 +148,43 @@ test("reassignment preserves an idle child's final parent report", () => {
       sessionId: child.id,
       userId: TEST_USER_ID,
       workingDirectory: "/tmp",
-    }).status,
-  ).toBe("reassigned");
-  expectReported(setup);
+    }),
+    "reassigned",
+  );
 });
 
-test("provider update emits a terminal child report", () => {
-  const { child, setup } = setupWithTerminalChild();
-  expect(
-    updateStoredSessionProvider(setup.resources, {
-      adaptiveThinking: child.adaptiveThinking,
-      credentialId: child.credentialId,
-      expectedGeneration: child.generation,
-      maxContextTokens: child.maxContextTokens,
-      maxOutputTokens: child.maxOutputTokens,
-      now: TEST_NOW + 6,
-      openRouterProviderTag: child.openRouterProviderTag,
-      provider: child.provider,
-      providerPricing: child.providerPricing,
-      sessionId: child.id,
-      confirmedCacheDrop: true,
-      userId: TEST_USER_ID,
-      model: `${child.model}-changed`,
-      workspaceId: TEST_WORKSPACE_ID,
-    }).status,
-  ).toBe("updated");
-  expect(setup.reportParent).toHaveBeenCalledOnce();
-  expectReported(setup);
-});
-
-test("provider update preserves an idle child's final parent report", () => {
-  const { child, setup } = setupWithIdleFinalChild();
-  expect(
-    updateStoredSessionProvider(setup.resources, {
-      adaptiveThinking: child.adaptiveThinking,
-      confirmedCacheDrop: true,
-      credentialId: child.credentialId,
-      expectedGeneration: child.generation,
-      maxContextTokens: child.maxContextTokens,
-      maxOutputTokens: child.maxOutputTokens,
-      model: `${child.model}-idle-change`,
-      now: TEST_NOW + 6,
-      openRouterProviderTag: child.openRouterProviderTag,
-      provider: child.provider,
-      providerPricing: child.providerPricing,
-      sessionId: child.id,
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-    }).status,
-  ).toBe("updated");
-  expectReported(setup);
-});
+testReportedGenerationVariants(
+  "provider update",
+  ({ child, setup }, variant) => {
+    expectStatus(
+      updateStoredSessionProvider(setup.resources, {
+        adaptiveThinking: child.adaptiveThinking,
+        confirmedCacheDrop: true,
+        credentialId: child.credentialId,
+        expectedGeneration: child.generation,
+        maxContextTokens: child.maxContextTokens,
+        maxOutputTokens: child.maxOutputTokens,
+        model: `${child.model}-${variant}-change`,
+        now: TEST_NOW + 6,
+        openRouterProviderTag: child.openRouterProviderTag,
+        provider: child.provider,
+        providerPricing: child.providerPricing,
+        sessionId: child.id,
+        userId: TEST_USER_ID,
+        workspaceId: TEST_WORKSPACE_ID,
+      }),
+      "updated",
+    );
+  },
+);
 
 function expectToolUpdateReported(
-  terminal: ReturnType<typeof setupWithTerminalChild>,
+  terminal: ChildSetup,
+  now = TEST_NOW + 6,
 ): void {
   const { child, setup } = terminal;
   const result = updateStoredSessionTools(setup.resources, {
-    now: TEST_NOW + 6,
+    now,
     sessionId: child.id,
     expectedGeneration: child.generation,
     userId: TEST_USER_ID,
@@ -222,19 +192,13 @@ function expectToolUpdateReported(
     tools: ["read"],
   });
   expect(result.status).toBe("updated");
-  expectReported(setup);
 }
 
-test("tool update emits a terminal child report", () => {
-  expectToolUpdateReported(setupWithTerminalChild());
+testReportedGenerationVariants("tool update", (terminal) => {
+  expectToolUpdateReported(terminal);
 });
 
-test("tool update preserves an idle child's final parent report", () => {
-  expectToolUpdateReported(setupWithIdleFinalChild());
-});
-
-test("runner removal preserves an idle child's final parent report", () => {
-  const { setup } = setupWithIdleFinalChild();
+testReportedGenerationVariants("runner removal", ({ setup }) => {
   const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
   if (runnerId === undefined)
     throw new Error("The child runner is unavailable");
@@ -246,32 +210,40 @@ test("runner removal preserves an idle child's final parent report", () => {
       setup.reportParent,
     ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
-  expectReported(setup);
 });
 
-test("restart pause preserves an idle-final generation report", () => {
-  const { child, setup } = setupWithIdleFinalChild();
-  expect(
-    updateStoredSessionTools(setup.resources, {
-      expectedGeneration: child.generation,
-      now: TEST_NOW + 5,
-      sessionId: child.id,
-      tools: ["read"],
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-    }).status,
-  ).toBe("updated");
-  const advancedChild = { ...child, generation: child.generation + 1 };
-  makeChildGenerationTurnActive({ child: advancedChild, setup });
+function setupAdvancedRunningChild(): ChildSetup {
+  const terminal = setupWithIdleFinalChild();
+  expectToolUpdateReported(terminal, TEST_NOW + 5);
+  const { child, setup } = terminal;
+  makeChildGenerationTurnActive({
+    child: { ...child, generation: child.generation + 1 },
+    setup,
+  });
   setup.database
     .update(agentSessions)
     .set({ activeStartedAt: new Date(TEST_NOW + 5), status: "running" })
     .where(eq(agentSessions.id, child.id))
     .run();
+  return terminal;
+}
+
+function expectPendingParentReport(
+  setup: ReturnType<typeof setupWithReporter>,
+): void {
+  expect(
+    activeDurableSystemPendingInputs(setup.database, setup.parentId),
+  ).toHaveLength(1);
+  closeSessionStoreTestSetup(setup);
+}
+
+test("restart pause preserves an idle-final generation report", () => {
+  const { child, setup } = setupAdvancedRunningChild();
   const restart = new RestartHandoffStore({
     database: setup.database,
     generateId: setup.generateId,
-    read: (userId, id) => setup.store.get(userId, id),
+    read: (userId, sessionId) =>
+      setup.store.get(userId, sessionId, TEST_WORKSPACE_ID),
   });
   expect(
     restart.pauseRunning(
@@ -282,31 +254,11 @@ test("restart pause preserves an idle-final generation report", () => {
       TEST_NOW + 6,
     ),
   ).toBe(true);
-  expect(
-    activeDurableSystemPendingInputs(setup.database, setup.parentId),
-  ).toHaveLength(1);
-  closeSessionStoreTestSetup(setup);
+  expectPendingParentReport(setup);
 });
 
 test("shutdown recovery preserves an idle-final generation report", () => {
-  const { child, setup } = setupWithIdleFinalChild();
-  expect(
-    updateStoredSessionTools(setup.resources, {
-      expectedGeneration: child.generation,
-      now: TEST_NOW + 5,
-      sessionId: child.id,
-      tools: ["read"],
-      userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
-    }).status,
-  ).toBe("updated");
-  const advancedChild = { ...child, generation: child.generation + 1 };
-  makeChildGenerationTurnActive({ child: advancedChild, setup });
-  setup.database
-    .update(agentSessions)
-    .set({ activeStartedAt: new Date(TEST_NOW + 5), status: "running" })
-    .where(eq(agentSessions.id, child.id))
-    .run();
+  const { child, setup } = setupAdvancedRunningChild();
   const interrupted = new ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: setup.generateId,
@@ -321,10 +273,7 @@ test("shutdown recovery preserves an idle-final generation report", () => {
     ),
   ).toBe(true);
   interrupted.restore(TEST_NOW + 7);
-  expect(
-    activeDurableSystemPendingInputs(setup.database, setup.parentId),
-  ).toHaveLength(1);
-  closeSessionStoreTestSetup(setup);
+  expectPendingParentReport(setup);
 });
 
 test("administrative advance distinguishes pending question ownership and state", () => {
@@ -355,34 +304,8 @@ test("administrative advance distinguishes pending question ownership and state"
         userId: TEST_USER_ID,
       })
       .run();
-    expect(
-      updateStoredSessionTools(setup.resources, {
-        expectedGeneration: child.generation,
-        now: TEST_NOW + 6,
-        sessionId: child.id,
-        tools: ["read"],
-        userId: TEST_USER_ID,
-        workspaceId: TEST_WORKSPACE_ID,
-      }).status,
-    ).toBe("updated");
+    expectToolUpdateReported({ child, setup });
     expect(setup.reportParent).toHaveBeenCalledTimes(scenario.reports);
     closeSessionStoreTestSetup(setup);
   }
-});
-
-test("runner removal emits a terminal child report", () => {
-  const setup = setupWithReporter();
-  const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
-  if (runnerId === undefined) {
-    throw new Error("The child runner is unavailable");
-  }
-  expect(
-    new RunnerStore(
-      setup.database,
-      setup.generateId,
-      undefined,
-      setup.reportParent,
-    ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
-  ).toBe(true);
-  expectReported(setup);
 });
