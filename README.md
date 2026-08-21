@@ -218,7 +218,7 @@ transparently continues the active session from that summary. Automatic and
 manual compaction model calls count toward cumulative cost. It can be turned
 off, and a ready session can be compacted manually without continuing it.
 **Ready** is continuable `idle`; each spawned final response reports once.
-**Completed** is terminal child success; waiting for answers and idle attempts
+**Completed** marks terminal success; waiting for answers and idle attempts
 without a final response are non-final. Transcripts/status survive reloads;
 ready, stopped, or failed sessions accept follow-up instructions. When an
 assigned runner is removed, the session shows **Choose runner** instead of

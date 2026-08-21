@@ -1,2 +1,0 @@
-ALTER TABLE `agent_sessions` ADD `parent_reported_generation` integer DEFAULT -1 NOT NULL;--> statement-breakpoint
-CREATE INDEX `agent_sessions_parent_report_index` ON `agent_sessions` (`status`,`parent_session_id`,`parent_execution_generation`,`parent_reported_generation`);

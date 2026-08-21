@@ -212,23 +212,25 @@ describe("spawned session report generation fencing", () => {
         .run();
     }
     const deliverableParentId = "deliverable-parent";
-    const deliverableChildId = "deliverable-child";
+    const deliverableChildIds = ["deliverable-child-a", "deliverable-child-b"];
     setup.database
       .insert(agentSessions)
       .values({ ...parent, id: deliverableParentId, runnerRequired: false })
       .run();
-    setup.database
-      .insert(agentSessions)
-      .values({
-        ...child,
-        id: deliverableChildId,
-        parentSessionId: deliverableParentId,
-      })
-      .run();
+    for (const id of deliverableChildIds) {
+      setup.database
+        .insert(agentSessions)
+        .values({
+          ...child,
+          id,
+          parentSessionId: deliverableParentId,
+        })
+        .run();
+    }
 
     expect(
-      setup.store.pendingSpawnedSessions(100).map(({ detail }) => detail.id),
-    ).toContain(deliverableChildId);
+      setup.store.pendingSpawnedSessions(1).map(({ detail }) => detail.id),
+    ).toEqual([deliverableChildIds[0]]);
     closeSetup(setup);
   });
 

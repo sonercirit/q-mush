@@ -122,24 +122,14 @@ function expectNoParentReport(
   expect(setup.store.pendingSpawnedSessions()).toHaveLength(pending);
 }
 
-function expectUnreportedAttempt(
+function expectAttemptFilteredFromParentReports(
   setup: ReturnType<typeof spawnedChildSetup>,
   actions: SessionAgentActions,
-  pending: number,
 ): void {
   reportAllPending(setup, actions);
-  expectNoParentReport(setup, pending);
+  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  expect(reportCount(setup.store, setup.parentId)).toBe(0);
   closeSpawnedChildSetup(setup);
-}
-
-function expectIdleWithoutFinalIsUnreported(
-  prepare: (setup: ReturnType<typeof spawnedChildSetup>) => void,
-): void {
-  const setup = spawnedChildSetup();
-  prepare(setup);
-  forceObservedIdleSettlement(setup);
-  const { actions } = terminalEventActions(setup.store, setup.database);
-  expectUnreportedAttempt(setup, actions, 0);
 }
 
 function completeSibling(
@@ -316,6 +306,72 @@ test("idle parents persist sibling events and surface them on next resume", () =
   closeSpawnedChildSetup(setup);
 });
 
+test("runner parent reports notify and wake the delivered parent", async () => {
+  const setup = spawnedChildSetup();
+  setup.database.$client
+    .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
+    .run(setup.parentId);
+  const delivery = terminalEventActions(setup.store, setup.database);
+
+  delivery.actions.reportedParent(
+    { disposition: "delivered", parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
+  await vi.waitFor(() => {
+    expect(delivery.launchSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: setup.parentId }),
+      TEST_USER_ID,
+    );
+  });
+  closeSpawnedChildSetup(setup);
+});
+
+test("a report to a terminal parent notifies the child route", () => {
+  const setup = spawnedChildSetup();
+  const terminalParent = setup.parentId;
+  setup.database.$client
+    .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?1")
+    .run(terminalParent);
+  const delivery = terminalEventActions(setup.store, setup.database);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+
+  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+
+  expect(delivery.notify).toHaveBeenNthCalledWith(
+    1,
+    TEST_USER_ID,
+    setup.childId,
+  );
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  expect(delivery.notify).not.toHaveBeenCalledWith(
+    TEST_USER_ID,
+    setup.parentId,
+  );
+  closeSpawnedChildSetup(setup);
+});
+
+test("stopping children notifies the parent after delivering the stop report", () => {
+  const setup = spawnedChildSetup();
+  const delivery = terminalEventActions(setup.store, setup.database);
+  const continued = continueChild(setup);
+  transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+  expect(parent).toMatchObject({ id: setup.parentId });
+  if (parent === undefined) throw new Error("Stopped child parent unavailable");
+
+  expect(continued.id).toBe(setup.childId);
+  delivery.actions.stopChildren(parent, TEST_USER_ID);
+
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.launchSession.mock.calls).toEqual([]);
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
+  closeSpawnedChildSetup(setup);
+});
+
 test.each(["completed", "failed", "idle", "stopped"] as const)(
   "settled %s attempts persist an authorized parent event",
   (status) => {
@@ -399,20 +455,38 @@ test("continued idle child attempts each deliver exactly once", () => {
   closeSpawnedChildSetup(setup);
 });
 
-test("idle child attempts without a final assistant response are not final", () => {
-  expectIdleWithoutFinalIsUnreported((setup) => {
-    setup.database.$client.run(
-      "DELETE FROM agent_messages WHERE session_id = ? AND role = 'assistant'",
-      [setup.childId],
-    );
-    setup.database.$client.run(
-      "UPDATE agent_sessions SET execution_generation = execution_generation + 1 WHERE id = ?",
-      [setup.childId],
-    );
-  });
+test("an idle generation lacking its final assistant response stays unreported", () => {
+  const setup = spawnedRunningChildSetup("final response removed");
+  const child = requireSpawnedChild(setup);
+  setup.database.$client
+    .query("DELETE FROM agent_messages WHERE session_id = ? AND role = ?")
+    .run(child.id, "assistant");
+  setup.database.$client.run(
+    "UPDATE agent_sessions SET execution_generation = execution_generation + 1 WHERE id = ?",
+    [setup.childId],
+  );
+  forceObservedIdleSettlement(setup);
+  const eventActions = terminalEventActions(setup.store, setup.database);
+  expectAttemptFilteredFromParentReports(setup, eventActions.actions);
 });
 
-test("child attempts paused for question input are not final", () => {
+test("a tool-calling idle response remains an unfinished attempt", () => {
+  const setup = spawnedRunningChildSetup("assistant called a tool");
+  const child = requireSpawnedChild(setup);
+  setup.database.$client
+    .query("UPDATE agent_messages SET tool_calls = ? WHERE session_id = ?")
+    .run(
+      JSON.stringify([
+        { arguments: "{}", id: "unfinished-call", name: "read" },
+      ]),
+      child.id,
+    );
+  forceObservedIdleSettlement(setup);
+  const { actions } = terminalEventActions(setup.store, setup.database);
+  expectAttemptFilteredFromParentReports(setup, actions);
+});
+
+test("idle child attempts waiting for question input are not final", () => {
   const setup = spawnedRunningChildSetup(
     "Ask before choosing an implementation",
   );
@@ -427,13 +501,14 @@ test("child attempts paused for question input are not final", () => {
       testAskQuestionsInput(),
       TEST_NOW + 4,
     );
-  const paused = setup.store.get(TEST_USER_ID, child.id);
+  setChildStatus(setup, "idle");
+  const idle = setup.store.get(TEST_USER_ID, child.id);
   const { actions } = terminalEventActions(setup.store, setup.database);
   reportAllPending(setup, actions);
 
-  expect(paused).toMatchObject({
+  expect(idle).toMatchObject({
     pendingQuestions: { id: pending.id },
-    status: "paused",
+    status: "idle",
   });
   expectNoParentReport(setup, 0);
   closeSpawnedChildSetup(setup);
