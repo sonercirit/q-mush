@@ -288,8 +288,17 @@ test("idle parents persist sibling events and surface them on next resume", () =
     TEST_USER_ID,
     setup.parentId,
     TEST_NOW + 10,
+    { content: "Continue with my request", images: [] },
   );
   expect(resumed.status).toBe("queued");
+  expect(
+    resumed.status === "queued"
+      ? resumed.detail.messages.some(
+          ({ content, role }) =>
+            role === "user" && content === "Continue with my request",
+        )
+      : false,
+  ).toBe(true);
   expect(
     resumed.status === "queued"
       ? resumed.detail.messages.filter(({ content }) =>

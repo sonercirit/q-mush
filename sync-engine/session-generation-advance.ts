@@ -100,6 +100,8 @@ function reportTerminalGeneration(
     parentId === null ||
     parentGeneration === null ||
     state.parentReportedGeneration >= state.executionGeneration ||
+    // Idle is a settled boundary, not a generation-advance terminal. Its final
+    // response is delivered by the pending callback scan after settlement.
     (state.status !== "completed" &&
       state.status !== "failed" &&
       state.status !== "stopped")

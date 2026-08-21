@@ -187,7 +187,7 @@ describe("spawned session report generation fencing", () => {
     setup.database.$client.close();
   });
 
-  test("re-queries after a full batch is rejected by reportability filtering", () => {
+  test("bounds and advances re-query pages after reportability filtering", () => {
     const setup = spawnedChildSetup();
     const child = setup.database
       .select(getTableColumns(agentSessions))
@@ -199,17 +199,25 @@ describe("spawned session report generation fencing", () => {
     }
     setup.database
       .insert(agentSessions)
-      .values({
-        ...child,
-        createdAt: new Date(child.createdAt.getTime() - 1),
-        id: "idle-child-without-final-response",
-        status: "idle",
-      })
+      .values(
+        (
+          [
+            ["idle-child-without-final-response", -1, "idle"],
+            ["second-reportable-child", 1, child.status],
+            ["third-reportable-child", 2, child.status],
+          ] as const
+        ).map(([id, timeOffset, status]) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() + timeOffset),
+          id,
+          status,
+        })),
+      )
       .run();
 
     expect(
-      setup.store.pendingSpawnedSessions(1).map(({ detail }) => detail.id),
-    ).toEqual([setup.childId]);
+      setup.store.pendingSpawnedSessions(2).map(({ detail }) => detail.id),
+    ).toEqual([setup.childId, "second-reportable-child"]);
     closeSetup(setup);
   });
 
