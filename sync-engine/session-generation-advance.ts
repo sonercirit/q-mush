@@ -134,7 +134,7 @@ function reportTerminalGeneration(
     parentId,
   );
   if (report === undefined) {
-    return { status: "blocked" };
+    return { status: "ready" };
   }
   const disposition = appendSpawnedSessionReportInTransaction(
     options.database,
