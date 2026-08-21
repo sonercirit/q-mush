@@ -714,7 +714,6 @@
           "notNull": true,
           "autoincrement": false,
           "default": 20000
-
         }
       },
       "indexes": {

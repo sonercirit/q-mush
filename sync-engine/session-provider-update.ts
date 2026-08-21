@@ -102,15 +102,12 @@ export async function applySessionProviderUpdate(
     capturedRestartSignal,
   );
   throwIfServerRestarting(restartSignal);
-  const result = updateStoredSessionProvider(
-    dependencies.store.resources,
-    {
-      ...input,
-      ...metadata,
-      now: dependencies.now(),
-      userId,
-    },
-  );
+  const result = updateStoredSessionProvider(dependencies.store.resources, {
+    ...input,
+    ...metadata,
+    now: dependencies.now(),
+    userId,
+  });
   const detail = result.detail;
   if (result.status === "invalid_context_token_cap") {
     throw new RealtimeCommandError(

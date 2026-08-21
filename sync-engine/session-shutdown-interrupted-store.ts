@@ -207,7 +207,6 @@ export class ShutdownInterruptedSessionStore {
             ...sessionTimingUpdate(session, now),
             ...updatedAuditFields(SYSTEM_ID, now),
           },
-
         });
         if (advanced === undefined) return;
         const handoff = {

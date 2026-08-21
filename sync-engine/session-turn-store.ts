@@ -282,5 +282,4 @@ export function readSessionTurns(
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
     .map(summarizeStoredTurn);
-
 }

@@ -144,7 +144,6 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
-
 - Detailed provider/model protocol architecture and operational rules live in
   `PROVIDER_PROTOCOLS.md`; read it before changing provider discovery, requests,
   streaming, caching, retries, or model capability handling.

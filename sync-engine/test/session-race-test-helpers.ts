@@ -15,8 +15,8 @@ export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
   providerPricing: null,
 } as const;
 
-export function sessionAgentActionDefaults() {
-  const runtimeDefaults = sessionAgentActionRuntimeDefaults()
+function sessionAgentActionDefaults() {
+  const runtimeDefaults = sessionAgentActionRuntimeDefaults();
   return {
     broker: new RunnerCommandBroker(),
     cleanupSession: () => undefined,

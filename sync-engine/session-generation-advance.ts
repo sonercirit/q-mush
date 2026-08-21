@@ -3,6 +3,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionStatus } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { readStoredSessionGenerationTranscript } from "./session-generation-transcript.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import { spawnedSessionReport } from "./session-spawn-report.ts";
@@ -60,6 +61,7 @@ interface SessionGenerationAdvanceOptions {
   readonly now: number;
   readonly sessionId: string;
   readonly startTurn?: StartGenerationTurn;
+  readonly toolSettings?: ToolSettings;
   readonly values: StoredSessionUpdate;
 }
 
@@ -217,6 +219,7 @@ export function advanceStoredSessionGeneration(
       ...(options.startTurn.startedAt === undefined
         ? {}
         : { startedAt: options.startTurn.startedAt }),
+      toolSettings: options.toolSettings ?? "inherit",
       userId: state.userId,
     });
   }

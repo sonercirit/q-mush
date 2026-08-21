@@ -1,4 +1,5 @@
 import { expect, test, vi } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
 import {
@@ -21,7 +22,10 @@ import {
   terminalRecordedMessage,
   transitionSpawnedChild,
 } from "./session-store-spawn-test-helpers.ts";
-import { testSessionInput } from "./session-store-test-fixtures.ts";
+import {
+  emptyRuntimes,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 function parentReports(
   store: SessionStore,
@@ -156,6 +160,8 @@ test("durable generation events survive recreation, compaction, and duplicate sc
   const recreated = new SessionStore(
     setup.database,
     () => "recreated-child-event-message",
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const { actions, launchSession, notify } = terminalEventActions(
     recreated,

@@ -4,6 +4,7 @@ import {
   TEST_SESSION_DETAIL,
   testSessionMessage,
 } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { spawnedSessionReport } from "../session-spawn-report.ts";
 
 function reportWithStatus(
@@ -202,11 +203,13 @@ describe("spawned session reports", () => {
             executionGeneration: 0,
             id: "turn-0",
             startedAt: 0,
+            toolSettings: DEFAULT_TOOL_SETTINGS,
           },
           {
             boundaryMessageId: null,
             executionGeneration: 1,
             ...turn,
+            toolSettings: DEFAULT_TOOL_SETTINGS,
           },
         ],
       },

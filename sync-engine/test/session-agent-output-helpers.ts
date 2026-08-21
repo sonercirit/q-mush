@@ -47,13 +47,6 @@ export function testString(value: unknown): string {
   return value;
 }
 
-export function testNumber(value: unknown): number {
-  if (typeof value !== "number") {
-    throw new TypeError("Expected a number");
-  }
-  return value;
-}
-
 export function recordContentsContaining(
   value: unknown,
   expected: string,

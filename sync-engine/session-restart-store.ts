@@ -26,10 +26,7 @@ import {
   updateStoredSessions,
 } from "./session-store-persistence.ts";
 import type { InterruptedStoredSession } from "./session-store-reassignment.ts";
-import {
-  emitReportedParent,
-  type SessionStoreWriteResources,
-} from "./session-store-resources.ts";
+import { type SessionStoreWriteResources } from "./session-store-resources.ts";
 import {
   errorMessageValues,
   insertStoredMessage,
@@ -69,7 +66,7 @@ export type RestartHandoffSettlement =
 
 type RestartHandoffStoreOptions = Pick<
   SessionStoreWriteResources,
-  "database" | "generateId" | "read"
+  "database" | "generateId" | "read" | "reportParent"
 > & {
   readonly interruptUnknownTools?: (
     database: Pick<AppDatabase, "insert" | "select" | "update">,
@@ -266,7 +263,6 @@ export class RestartHandoffStore {
     };
   }
 
-
   #pause(options: PauseRestartHandoff, from: "queued" | "running"): boolean {
     const condition = restartSessionCondition({
       generation: options.authority.generation,
@@ -323,7 +319,9 @@ export class RestartHandoffStore {
       };
     });
     if (result === false) return false;
-    emitReportedParent(this.#options, result.userId, result.reportedParent);
+    if (result.reportedParent !== undefined) {
+      this.#options.reportParent?.(result.userId, result.reportedParent);
+    }
     return true;
   }
 

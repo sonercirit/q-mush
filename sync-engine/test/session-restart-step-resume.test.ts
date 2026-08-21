@@ -6,10 +6,7 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
-import {
-  TEST_AUTHENTICATED_USER,
-  TEST_USER_ID,
-} from "./authenticated-integration-test-helpers.ts";
+import { TEST_AUTHENTICATED_USER } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
   childSessionId,

@@ -104,7 +104,6 @@ function callbackDependencies(
     database: setup.database,
     discoverModels: () => unexpectedOperation("model discovery"),
     discoverSessionMetadata: () => unexpectedOperation("metadata discovery"),
-    draining: () => false,
     launchSession: () => false,
     notify: () => {
       throw new Error("Unexpected notification");
@@ -112,6 +111,7 @@ function callbackDependencies(
     now: () => TEST_NOW + 5,
     pendingRestart: () => undefined,
     readCredential: () => Promise.resolve(undefined),
+    restartSignal: () => new AbortController().signal,
     runnerIsAvailable: () => true,
     store: setup.store,
     withCredential: () => unexpectedOperation("credential access"),

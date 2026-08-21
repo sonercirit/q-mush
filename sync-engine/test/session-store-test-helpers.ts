@@ -65,6 +65,7 @@ export function testStoreReadResources(
   return {
     database,
     generateId: () => crypto.randomUUID(),
+    toolSettings: () => DEFAULT_TOOL_SETTINGS,
     read: (userId: string, sessionId: string, workspaceId?: string) =>
       store.get(userId, sessionId, workspaceId),
   };
