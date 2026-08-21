@@ -108,26 +108,30 @@ Memory.
   resolution. Tool, skill, model, and effort choices persist per session;
   pickers use schemas. `read_session` spans transcript categories and
   definitions with positional record pagination; `get_session_options` pages
-  spawn choices. Grouped tools manage non-blocking owned children; a generation
-  ledger delivers one terminal event per attempt. Routes survive compaction;
-  only attempts report, administrative fences settle identity without
-  duplicates, and callback persistence/claiming are atomic. `callback_pending`
-  blocks another attempt; idle parents retain events until resumed. Delivery
-  callbacks notify the parent and wake it when runnable, including restart and
-  shutdown-recovery generation advances. `parallel` uses four ordered workers
-  for 2+ calls and propagates cancellation. `session-transcript.tsx` renders
-  prompts, definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
-  diffs/results, preserving user line breaks; lists page by ten. Live streams
-  use four-key preparation frames; batches patch once, compacting the oldest or
-  protected candidate pre-eviction. `sync_tools` fan-out, pending buffers, keyed
-  snapshots stay bounded (`realtime-stream-buffer-limits.ts`); reconnects dedupe
-  resyncs. Mutation/stop freezes model/tool UI; settlement rebases streams.
-  Disconnect drops unrendered fragments, resyncs paused tools. Every eviction
-  requests snapshots: an undelivered terminal can't clear a running row.
-  Barriers and 100/session, 1,000/user caps block stale revival and key reuse.
-  Epochs stay monotonic while updates/barriers are queued; releasing the last
-  barrier reclaims its epoch once updates drain. Terminal cleanup can't reset
-  epochs with later barriers. Resets replace model state; state events coalesce
+  spawn choices. Parent-report tests must exercise the shared emitter and pin
+  every administrative caller; generation tests must distinguish attempt
+  advances (successor reportable) from administrative advances (successor
+  non-reportable), or duplicate/lost delivery mutations can survive. Grouped
+  tools manage non-blocking owned children; a generation ledger delivers one
+  terminal event per attempt. Routes survive compaction; only attempts report,
+  administrative fences settle identity without duplicates, and callback
+  persistence/claiming are atomic. `callback_pending` blocks another attempt;
+  idle parents retain events until resumed. Delivery callbacks notify the parent
+  and wake it when runnable, including restart and shutdown-recovery generation
+  advances. `parallel` uses four ordered workers for 2+ calls and propagates
+  cancellation. `session-transcript.tsx` renders prompts, definitions
+  (`session-tool-definitions.tsx`), Markdown, code/JSON, diffs/results,
+  preserving user line breaks; lists page by ten. Live streams use four-key
+  preparation frames; batches patch once, compacting the oldest or protected
+  candidate pre-eviction. `sync_tools` fan-out, pending buffers, keyed snapshots
+  stay bounded (`realtime-stream-buffer-limits.ts`); reconnects dedupe resyncs.
+  Mutation/stop freezes model/tool UI; settlement rebases streams. Disconnect
+  drops unrendered fragments, resyncs paused tools. Every eviction requests
+  snapshots: an undelivered terminal can't clear a running row. Barriers and
+  100/session, 1,000/user caps block stale revival and key reuse. Epochs stay
+  monotonic while updates/barriers are queued; releasing the last barrier
+  reclaims its epoch once updates drain. Terminal cleanup can't reset epochs
+  with later barriers. Resets replace model state; state events coalesce
   one/frame; ready, health, commands, and user-scoped tool-setting updates apply
   immediately; no-op snapshots suppress notices. Solid preserves focus/scroll;
   detail disables document anchoring, and only bottom-pinned transcripts follow

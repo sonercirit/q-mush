@@ -54,6 +54,24 @@ function updateGeneration(
   updateSession(setup, id, { executionGeneration: generation + 1 });
 }
 
+function advanceChildGeneration(
+  setup: SpawnedChildReference,
+  mode: "administrative" | "attempt",
+  now: number,
+) {
+  return setup.database.transaction((transaction) =>
+    advanceStoredSessionGeneration({
+      condition: eq(agentSessions.id, setup.childId),
+      database: transaction,
+      generateId: () => crypto.randomUUID(),
+      mode,
+      now,
+      sessionId: setup.childId,
+      values: { status: "idle" },
+    }),
+  );
+}
+
 function expectReportDisposition(
   setup: SpawnedChildReference,
   claimed: boolean,
@@ -214,20 +232,33 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 
+  test("administrative and attempt advances fence opposite report generations", () => {
+    for (const mode of ["administrative", "attempt"] as const) {
+      const setup = spawnedChildSetup();
+      expectReportClaimed(setup);
+      const before = setup.childGeneration;
+
+      expect(advanceChildGeneration(setup, mode, TEST_NOW + 6)).toBeDefined();
+      const row = setup.database
+        .select({ reported: agentSessions.parentReportedGeneration })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, setup.childId))
+        .get();
+      expect(row?.reported).toBe(
+        mode === "administrative" ? before + 1 : before,
+      );
+      closeSetup(setup);
+    }
+  });
+
   test("refuses an administrative advance until a blocked terminal report is delivered", () => {
     const setup = spawnedChildSetup();
     setRunnerRequired(setup, setup.parentId, true);
 
-    const advanced = setup.database.transaction((transaction) =>
-      advanceStoredSessionGeneration({
-        condition: eq(agentSessions.id, setup.childId),
-        database: transaction,
-        generateId: () => crypto.randomUUID(),
-        mode: "administrative",
-        now: TEST_NOW + 5,
-        sessionId: setup.childId,
-        values: { status: "idle" },
-      }),
+    const advanced = advanceChildGeneration(
+      setup,
+      "administrative",
+      TEST_NOW + 5,
     );
     expect(advanced).toBeUndefined();
     expect(childSummary(setup)).toMatchObject({
