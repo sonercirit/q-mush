@@ -201,6 +201,7 @@ export function spawnedSessionLink(
     (!stored.runnerRequired &&
       stored.reportedGeneration >= stored.generation) ||
     (stored.runnerRequired &&
+      stored.status !== "idle" &&
       REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
       stored.reportedGeneration >= stored.generation)
   ) {
