@@ -265,7 +265,6 @@ export function readSessionTurns(
 ): readonly AgentSessionTurn[] {
   return database
     .select(STORED_SESSION_TURN_SELECTION)
-
     .from(agentSessionTurns)
     .where(
       and(

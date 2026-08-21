@@ -239,6 +239,29 @@ test("idle parents persist sibling events and surface them on next resume", asyn
   closeSpawnedChildSetup(setup);
 });
 
+test("runner parent reports notify and wake the delivered parent", async () => {
+  const setup = spawnedChildSetup();
+  setup.database.$client
+    .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
+    .run(setup.parentId);
+  const delivery = terminalEventActions(setup.store, setup.database);
+
+  delivery.actions.reportedParent(
+    { disposition: "delivered", parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+
+  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
+  await vi.waitFor(() => {
+    expect(delivery.launchSession).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: setup.parentId }),
+      TEST_USER_ID,
+    );
+  });
+  closeSpawnedChildSetup(setup);
+});
+
 test.each(["completed", "failed", "stopped"] as const)(
   "terminal %s attempts persist an authorized parent event",
   (status) => {
