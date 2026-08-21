@@ -75,7 +75,7 @@ test("reassignment emits a terminal child report", () => {
     .where(eq(agentSessions.id, setup.childId))
     .returning({ id: agentSessions.id })
     .get();
-  expect(changed?.id).toBe(setup.childId);
+  expect(changed.id).toBe(setup.childId);
   expect(
     reassignStoredSession({
       now: TEST_NOW + 6,
@@ -109,7 +109,6 @@ test("provider update emits a terminal child report", () => {
       provider: child.provider,
       providerPricing: child.providerPricing,
       sessionId: child.id,
-      tools: (mark("selected read tool"), ["read"]),
       userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
     }).status,
@@ -127,6 +126,7 @@ test("tool update emits a terminal child report", () => {
       expectedGeneration: (mark("tool generation"), child.generation),
       now: TEST_NOW + 6,
       sessionId: child.id,
+      tools: (mark("selected read tool"), ["read"]),
       userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
     }).status,
