@@ -33,6 +33,18 @@ function setupWithReporter() {
   return { ...setup, reportParent, resources };
 }
 
+function setupWithTerminalChild() {
+  const setup = setupWithReporter();
+  const child = setup.store.get(TEST_USER_ID, setup.childId);
+  if (child === undefined) throw new Error("The terminal child is unavailable");
+  expect(child).toMatchObject({
+    generation: setup.childGeneration,
+    id: setup.childId,
+    status: "completed",
+  });
+  return { child, setup };
+}
+
 function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
   expect(setup.reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
     disposition: "promoted",
@@ -82,11 +94,7 @@ test("reassignment emits a terminal child report", () => {
 });
 
 test("provider update emits a terminal child report", () => {
-  const setup = setupWithReporter();
-  expect(setup.childGeneration).toBeGreaterThanOrEqual(0);
-  const child = setup.store.get(TEST_USER_ID, setup.childId, undefined);
-  expect(child).toMatchObject({ id: setup.childId, status: "completed" });
-  if (child === undefined) throw new Error("The provider child is unavailable");
+  const { child, setup } = setupWithTerminalChild();
   expect(
     updateStoredSessionProvider(setup.resources, {
       adaptiveThinking: child.adaptiveThinking,
@@ -110,11 +118,7 @@ test("provider update emits a terminal child report", () => {
 });
 
 test("tool update emits a terminal child report", () => {
-  const setup = setupWithReporter();
-  expect(setup.childId).not.toBe(setup.parentId);
-  const child = setup.store.get(TEST_USER_ID, setup.childId);
-  expect(child).toMatchObject({ generation: setup.childGeneration });
-  if (child === undefined) throw new Error("The tool child is unavailable");
+  const { child, setup } = setupWithTerminalChild();
   expect(
     updateStoredSessionTools(setup.resources, {
       now: TEST_NOW + 6,

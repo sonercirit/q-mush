@@ -244,10 +244,7 @@ test("runner parent reports notify and wake the delivered parent", async () => {
   setup.database.$client
     .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
     .run(setup.parentId);
-  const delivery = terminalEventActions(
-    (expect(setup.store).toBeDefined(), setup.store),
-    setup.database,
-  );
+  const delivery = terminalEventActions(setup.store, setup.database);
 
   delivery.actions.reportedParent(
     { disposition: "delivered", parentId: setup.parentId },
