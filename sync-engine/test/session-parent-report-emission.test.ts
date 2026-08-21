@@ -1,118 +1,142 @@
-import { readFileSync } from "node:fs";
+/* jscpd:ignore-start */
+import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
-import { createDatabase } from "../../shared/database.ts";
-import { RestartHandoffStore } from "../session-restart-store.ts";
-import { ShutdownInterruptedSessionStore } from "../session-shutdown-interrupted-store.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { RunnerStore } from "../runner-store.ts";
+import { updateStoredSessionProvider } from "../session-provider-update-store.ts";
+import { queueStoredSession } from "../session-store-queue.ts";
+import { reassignStoredSession } from "../session-store-reassignment.ts";
+import type { SessionStoreWriteResources } from "../session-store-resources.ts";
+import { updateStoredSessionTools } from "../session-tool-update-store.ts";
 import {
-  emitReportedParent,
-  type SessionStoreWriteResources,
-} from "../session-store-resources.ts";
+  TEST_NOW,
+  TEST_USER_ID,
+  TEST_WORKSPACE_ID,
+} from "./authenticated-integration-test-helpers.ts";
+import {
+  addReplacementRunner,
+  closeSessionStoreTestSetup,
+} from "./session-store-reassignment-helpers.ts";
+import { spawnedChildSetup } from "./session-store-spawn-test-helpers.ts";
 
-const report = { disposition: "delivered" as const, parentId: "parent" };
-const interruptedMarker = Object.assign(
-  { executionGeneration: 1, restartId: "restart" },
-  { operation: "agent", pendingInput: [], requestedBy: "server" },
-);
-vi.mock("../session-generation-advance.ts", () => ({
-  advanceStoredSessionGeneration: () => ({
-    generation: 2,
-    reportedParent: report,
-    userId: "user",
-  }),
-}));
-vi.mock("../session-store-persistence.ts", () => ({
-  activeSessionCondition: () => undefined,
-  readActiveSessionTiming: () => ({ activeDurationMs: 0, activeStartedAt: 1 }),
-  readStoredSessionSnapshots: () => [
-    {
-      executionGeneration: 1,
-      id: "child",
-      interruptedHandoff: JSON.stringify(interruptedMarker),
-      restartHandoff: null,
-      status: "running",
-      userId: "user",
-    },
-  ],
-  sessionGenerationCondition: () => undefined,
-  sessionTimingUpdate: () => ({}),
-  storedParentExecutionGeneration: () => null,
-  storedSessionCondition: () => undefined,
-  updateStoredSessions: () => true,
-}));
-vi.mock("../session-turn-store.ts", () => ({
-  activeSessionTurnId: () => undefined,
-}));
-vi.mock("../session-store-read.ts", () => ({
-  appendUnknownRestartToolResults: () => undefined,
-}));
-
-test("shared parent-report delivery invokes its live-parent callback", () => {
+function setupWithReporter() {
+  const setup = spawnedChildSetup();
   const reportParent = vi.fn();
-  emitReportedParent(
-    { reportParent } satisfies Pick<SessionStoreWriteResources, "reportParent">,
-    "user",
-    report,
-  );
-  expect(reportParent).toHaveBeenCalledWith("user", report);
-});
-
-const sharedDeliveryCallers = [
-  [
-    "session-store-queue.ts",
-    "emitReportedParent(resources, userId, status.report);",
-  ],
-  [
-    "session-store-reassignment.ts",
-    "emitReportedParent(options.resources, options.userId, status.reportedParent);",
-  ],
-  [
-    "session-provider-update-store.ts",
-    "emitReportedParent(resources, input.userId, changed.reportedParent);",
-  ],
-  [
-    "session-tool-update-store.ts",
-    "emitReportedParent(options, input.userId, changed.reportedParent);",
-  ],
-  ["runner-store.ts", "emitReportedParent(this.#context, ownerId, report);"],
-] as const;
-
-test.each(sharedDeliveryCallers)(
-  "%s hands an advanced terminal report to the shared emitter",
-  (file, delivery) => {
-    const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
-    expect(source).toContain(delivery);
-  },
-);
-
-test("restart pause emits its generation advance parent report", () => {
-  const reportParent = vi.fn();
-  const store = new RestartHandoffStore({
-    database: createDatabase(":memory:"),
-    generateId: () => "message",
-    read: () => undefined,
+  const resources: SessionStoreWriteResources = {
+    database: setup.database,
+    generateId: setup.generateId,
+    read: (userId, sessionId, workspaceId) =>
+      setup.store.get(userId, sessionId, workspaceId),
     reportParent,
-  });
+    toolSettings: () => DEFAULT_TOOL_SETTINGS,
+  };
+  return { ...setup, reportParent, resources };
+}
 
+function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
+  expect(setup.reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
+    disposition: "promoted",
+    parentId: setup.parentId,
+  });
+  closeSessionStoreTestSetup(setup);
+}
+
+test("queue emits the real terminal-generation parent report", () => {
+  const setup = setupWithReporter();
+  // Exercise queueStoredSession with resources carrying the callback, rather than
+  // SessionStore.queue's intentionally callback-free public continuation path.
   expect(
-    store.pauseRunning(
-      { generation: 1, sessionId: "child" },
-      "server",
-      "restart",
-      "agent",
-      2,
-    ),
+    queueStoredSession({
+      now: TEST_NOW + 6,
+      resources: setup.resources,
+      sessionId: setup.childId,
+      userId: TEST_USER_ID,
+    }).status,
+  ).toBe("queued");
+  expectReported(setup);
+});
+
+test("reassignment emits a terminal child report", () => {
+  const setup = setupWithReporter();
+  const replacement = "018bcfe5-6800-7000-8000-000000000099";
+  addReplacementRunner(setup.database, replacement);
+  setup.database
+    .update(agentSessions)
+    .set({ runnerRequired: true })
+    .where(eq(agentSessions.id, setup.childId))
+    .run();
+  expect(
+    reassignStoredSession({
+      now: TEST_NOW + 6,
+      read: (userId, id) => setup.store.get(userId, id),
+      resources: setup.resources,
+      runnerId: replacement,
+      sessionId: setup.childId,
+      userId: TEST_USER_ID,
+      workingDirectory: "/tmp",
+    }).status,
+  ).toBe("reassigned");
+  expectReported(setup);
+});
+
+test("provider update emits a terminal child report", () => {
+  const setup = setupWithReporter();
+  const child = setup.store.get(TEST_USER_ID, setup.childId);
+  if (child === undefined) throw new Error("The child is unavailable");
+  expect(
+    updateStoredSessionProvider(setup.resources, {
+      adaptiveThinking: child.adaptiveThinking,
+      confirmedCacheDrop: true,
+      credentialId: child.credentialId,
+      expectedGeneration: child.generation,
+      maxContextTokens: child.maxContextTokens,
+      maxOutputTokens: child.maxOutputTokens,
+      model: `${child.model}-changed`,
+      now: TEST_NOW + 6,
+      openRouterProviderTag: child.openRouterProviderTag,
+      provider: child.provider,
+      providerPricing: child.providerPricing,
+      sessionId: child.id,
+      userId: TEST_USER_ID,
+      workspaceId: TEST_WORKSPACE_ID,
+    }).status,
+  ).toBe("updated");
+  expectReported(setup);
+});
+
+test("tool update emits a terminal child report", () => {
+  const setup = setupWithReporter();
+  const child = setup.store.get(TEST_USER_ID, setup.childId);
+  if (child === undefined) throw new Error("The child is unavailable");
+  expect(
+    updateStoredSessionTools(setup.resources, {
+      expectedGeneration: child.generation,
+      now: TEST_NOW + 6,
+      sessionId: child.id,
+      tools: ["read"],
+      userId: TEST_USER_ID,
+      workspaceId: TEST_WORKSPACE_ID,
+    }).status,
+  ).toBe("updated");
+  expectReported(setup);
+});
+
+test("runner removal emits a terminal child report", () => {
+  const setup = setupWithReporter();
+  const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
+  if (runnerId === undefined) {
+    throw new Error("The child runner is unavailable");
+  }
+  expect(
+    new RunnerStore(
+      setup.database,
+      setup.generateId,
+      undefined,
+      setup.reportParent,
+    ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
-  expect(reportParent).toHaveBeenCalledWith("user", report);
+  expectReported(setup);
 });
 
-test("shutdown restoration emits its generation advance parent report", () => {
-  const reportParent = vi.fn();
-  const store = new ShutdownInterruptedSessionStore({
-    database: createDatabase(":memory:"),
-    generateId: () => "message",
-    reportParent,
-  });
-
-  store.restore(2);
-  expect(reportParent).toHaveBeenCalledWith("user", report);
-});
+/* jscpd:ignore-end */

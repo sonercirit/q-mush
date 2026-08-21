@@ -215,7 +215,10 @@ export class SessionAgentActions {
       userId,
     );
     if (reported !== undefined) {
-      this.#dependencies.notify(userId, reported.parentId);
+      this.#dependencies.notify(
+        userId,
+        reported.disposition === "terminal" ? detail.id : reported.parentId,
+      );
     }
     return reported;
   }

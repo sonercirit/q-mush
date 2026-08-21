@@ -439,3 +439,28 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 });
+
+/* jscpd:ignore-start */
+test("a failed report append does not claim or report delivery", () => {
+  const setup = spawnedChildSetup();
+  setup.database.$client.run(`
+    CREATE TRIGGER remove_parent_before_report
+    AFTER UPDATE OF parent_reported_generation ON agent_sessions
+    WHEN NEW.id = '${setup.childId}'
+    BEGIN
+      UPDATE agent_sessions SET is_deleted = 1 WHERE id = '${setup.parentId}';
+    END;
+  `);
+
+  expect(report(setup)).toBeUndefined();
+  expect(
+    setup.database
+      .select({ generation: agentSessions.parentReportedGeneration })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, setup.childId))
+      .get()?.generation,
+  ).toBe(0);
+  closeSetup(setup);
+});
+
+/* jscpd:ignore-end */
