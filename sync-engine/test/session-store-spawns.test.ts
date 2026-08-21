@@ -1,4 +1,4 @@
-import { eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
@@ -459,7 +459,12 @@ test("a failed report append does not claim or report delivery", () => {
         generation: sql<number>`${agentSessions.parentReportedGeneration} + 0`,
       })
       .from(agentSessions)
-      .where(eq(agentSessions.id, setup.childId))
+      .where(
+        and(
+          eq(agentSessions.id, setup.childId),
+          eq(agentSessions.userId, TEST_USER_ID),
+        ),
+      )
       .get()?.generation,
   ).toBe(0);
   closeSetup(setup);

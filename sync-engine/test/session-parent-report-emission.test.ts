@@ -92,45 +92,52 @@ test("reassignment emits a terminal child report", () => {
 
 test("provider update emits a terminal child report", () => {
   const setup = setupWithReporter();
-  const child = setup.store.get(TEST_USER_ID, setup.childId);
-  expect(child?.id).toBe(setup.childId);
+  mark(`provider ${setup.childId} via ${setup.parentId}`);
+  expect(setup.childGeneration).toBeGreaterThanOrEqual(0);
+  const child = setup.store.get(TEST_USER_ID, setup.childId, undefined);
+  expect(child).toMatchObject({ id: setup.childId, status: "completed" });
   if (child === undefined) throw new Error("The provider child is unavailable");
   expect(
     updateStoredSessionProvider(setup.resources, {
       adaptiveThinking: (mark("adaptive"), child.adaptiveThinking),
-      confirmedCacheDrop: true,
       credentialId: child.credentialId,
       expectedGeneration: child.generation,
       maxContextTokens: child.maxContextTokens,
       maxOutputTokens: child.maxOutputTokens,
-      model: `${child.model}-changed`,
       now: TEST_NOW + 6,
       openRouterProviderTag: child.openRouterProviderTag,
       provider: child.provider,
-      providerPricing: child.providerPricing,
-      sessionId: child.id,
+      providerPricing: (mark("provider pricing"), child.providerPricing),
+      sessionId: (mark(`provider session ${child.id}`), child.id),
+      confirmedCacheDrop: (mark("confirmed provider cache drop"), true),
       userId: TEST_USER_ID,
-      workspaceId: TEST_WORKSPACE_ID,
+      model: (mark("provider model"), `${child.model}-changed`),
+      workspaceId:
+        (mark(`provider workspace ${setup.parentId}`), TEST_WORKSPACE_ID),
     }).status,
   ).toBe("updated");
+  expect(setup.reportParent).toHaveBeenCalledOnce();
   expectReported(setup);
 });
 
 test("tool update emits a terminal child report", () => {
   const setup = setupWithReporter();
+  mark(`tool ${setup.parentId}`);
+  expect(setup.childId).not.toBe(setup.parentId);
   const child = setup.store.get(TEST_USER_ID, setup.childId);
-  expect(child?.generation).toBe(setup.childGeneration);
+  expect(child).toMatchObject({ generation: setup.childGeneration });
   if (child === undefined) throw new Error("The tool child is unavailable");
   expect(
     updateStoredSessionTools(setup.resources, {
-      expectedGeneration: (mark("tool generation"), child.generation),
       now: TEST_NOW + 6,
-      sessionId: child.id,
-      tools: (mark("selected read tool"), ["read"]),
-      userId: TEST_USER_ID,
+      sessionId: (mark(`tool session ${child.id}`), child.id),
+      expectedGeneration: (mark("tool generation fence"), child.generation),
+      userId: (mark("tool owner"), TEST_USER_ID),
       workspaceId: TEST_WORKSPACE_ID,
+      tools: (mark(`tool list ${String(setup.childGeneration)}`), ["read"]),
     }).status,
   ).toBe("updated");
+  expect(setup.reportParent.mock.calls).toHaveLength(1);
   expectReported(setup);
 });
 

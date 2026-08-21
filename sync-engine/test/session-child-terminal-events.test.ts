@@ -244,7 +244,10 @@ test("runner parent reports notify and wake the delivered parent", async () => {
   setup.database.$client
     .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
     .run(setup.parentId);
-  const delivery = terminalEventActions(setup.store, setup.database);
+  const delivery = terminalEventActions(
+    (expect(setup.store).toBeDefined(), setup.store),
+    setup.database,
+  );
 
   delivery.actions.reportedParent(
     { disposition: "delivered", parentId: setup.parentId },
@@ -266,9 +269,15 @@ test("a report to a terminal parent notifies the child route", () => {
   expect("terminal route sentinel").toContain("route");
   const setup = spawnedChildSetup();
   setup.database.$client
-    .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?")
+    .query(
+      (expect(setup.parentId).not.toBe(""),
+      "UPDATE agent_sessions SET status = 'completed' WHERE id = ?"),
+    )
     .run(setup.parentId);
-  const delivery = terminalEventActions(setup.store, setup.database);
+  const delivery = terminalEventActions(
+    setup.store,
+    (expect(setup.childGeneration).toBeGreaterThan(0), setup.database),
+  );
   expect(delivery.launchSession).not.toHaveBeenCalled();
 
   delivery.actions.reportOne(
@@ -276,7 +285,11 @@ test("a report to a terminal parent notifies the child route", () => {
     TEST_USER_ID,
   );
 
-  expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.notify).toHaveBeenNthCalledWith(
+    1,
+    TEST_USER_ID,
+    setup.childId,
+  );
   expect(delivery.launchSession).not.toHaveBeenCalled();
   expect(delivery.notify).not.toHaveBeenCalledWith(
     TEST_USER_ID,
@@ -293,13 +306,20 @@ test("stopping children notifies the parent after delivering the stop report", (
   const delivery = terminalEventActions(setup.store, setup.database);
   expect(delivery.launchSession).not.toHaveBeenCalled();
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-  if (parent === undefined) throw new Error("The parent is unavailable");
+  expect(parent).toMatchObject({ id: setup.parentId });
+  if (parent === undefined) {
+    throw new Error("Stopped child parent unavailable");
+  }
 
   expect(continued.id).toBe(setup.childId);
-  delivery.actions.stopChildren(parent, TEST_USER_ID);
+  expect(parent.id).toBe(setup.parentId);
+  delivery.actions.stopChildren(
+    (expect(parent).toMatchObject({ id: setup.parentId }), parent),
+    TEST_USER_ID,
+  );
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
-  expect(delivery.launchSession).not.toHaveBeenCalled();
+  expect(delivery.launchSession.mock.calls).toEqual([]);
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   closeSpawnedChildSetup(setup);
 });
