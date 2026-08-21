@@ -1,4 +1,4 @@
-import { sql, eq, inArray } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";

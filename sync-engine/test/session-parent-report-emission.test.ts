@@ -69,11 +69,13 @@ test("reassignment emits a terminal child report", () => {
   const setup = setupWithReporter();
   const replacement = "018bcfe5-6800-7000-8000-000000000099";
   addReplacementRunner(setup.database, replacement);
-  setup.database
+  const changed = setup.database
     .update(agentSessions)
-    .set({ runnerRequired: true })
+    .set({ runnerRequired: true, workingDirectory: "/reassigning" })
     .where(eq(agentSessions.id, setup.childId))
-    .run();
+    .returning({ id: agentSessions.id })
+    .get();
+  expect(changed?.id).toBe(setup.childId);
   expect(
     reassignStoredSession({
       now: TEST_NOW + 6,
@@ -91,7 +93,8 @@ test("reassignment emits a terminal child report", () => {
 test("provider update emits a terminal child report", () => {
   const setup = setupWithReporter();
   const child = setup.store.get(TEST_USER_ID, setup.childId);
-  if (child === undefined) throw new Error("The child is unavailable");
+  expect(child?.id).toBe(setup.childId);
+  if (child === undefined) throw new Error("The provider child is unavailable");
   expect(
     updateStoredSessionProvider(setup.resources, {
       adaptiveThinking: (mark("adaptive"), child.adaptiveThinking),
@@ -106,6 +109,7 @@ test("provider update emits a terminal child report", () => {
       provider: child.provider,
       providerPricing: child.providerPricing,
       sessionId: child.id,
+      tools: (mark("selected read tool"), ["read"]),
       userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
     }).status,
@@ -116,13 +120,13 @@ test("provider update emits a terminal child report", () => {
 test("tool update emits a terminal child report", () => {
   const setup = setupWithReporter();
   const child = setup.store.get(TEST_USER_ID, setup.childId);
-  if (child === undefined) throw new Error("The child is unavailable");
+  expect(child?.generation).toBe(setup.childGeneration);
+  if (child === undefined) throw new Error("The tool child is unavailable");
   expect(
     updateStoredSessionTools(setup.resources, {
       expectedGeneration: (mark("tool generation"), child.generation),
       now: TEST_NOW + 6,
       sessionId: child.id,
-      tools: ["read"],
       userId: TEST_USER_ID,
       workspaceId: TEST_WORKSPACE_ID,
     }).status,

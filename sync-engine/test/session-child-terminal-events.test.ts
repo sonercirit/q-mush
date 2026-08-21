@@ -269,6 +269,7 @@ test("a report to a terminal parent notifies the child route", () => {
     .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?")
     .run(setup.parentId);
   const delivery = terminalEventActions(setup.store, setup.database);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
 
   delivery.actions.reportOne(
     (expect(setup.childId).not.toBe(""), requireSpawnedChild(setup)),
@@ -276,6 +277,7 @@ test("a report to a terminal parent notifies the child route", () => {
   );
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
   expect(delivery.notify).not.toHaveBeenCalledWith(
     TEST_USER_ID,
     setup.parentId,
@@ -289,6 +291,7 @@ test("stopping children notifies the parent after delivering the stop report", (
   const continued = continueChild(setup);
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
   const delivery = terminalEventActions(setup.store, setup.database);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
   if (parent === undefined) throw new Error("The parent is unavailable");
 
@@ -296,6 +299,7 @@ test("stopping children notifies the parent after delivering the stop report", (
   delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
+  expect(delivery.launchSession).not.toHaveBeenCalled();
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   closeSpawnedChildSetup(setup);
 });
