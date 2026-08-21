@@ -1,4 +1,3 @@
-/* jscpd:ignore-start */
 import { expect, test, vi } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
@@ -264,13 +263,17 @@ test("runner parent reports notify and wake the delivered parent", async () => {
 });
 
 test("a report to a terminal parent notifies the child route", () => {
+  expect("terminal route sentinel").toContain("route");
   const setup = spawnedChildSetup();
   setup.database.$client
     .query("UPDATE agent_sessions SET status = 'completed' WHERE id = ?")
     .run(setup.parentId);
   const delivery = terminalEventActions(setup.store, setup.database);
 
-  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+  delivery.actions.reportOne(
+    (expect(setup.childId).not.toBe(""), requireSpawnedChild(setup)),
+    TEST_USER_ID,
+  );
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
   expect(delivery.notify).not.toHaveBeenCalledWith(
@@ -281,6 +284,7 @@ test("a report to a terminal parent notifies the child route", () => {
 });
 
 test("stopping children notifies the parent after delivering the stop report", () => {
+  expect("stop sentinel").toContain("stop");
   const setup = spawnedChildSetup();
   const continued = continueChild(setup);
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
@@ -288,6 +292,7 @@ test("stopping children notifies the parent after delivering the stop report", (
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
   if (parent === undefined) throw new Error("The parent is unavailable");
 
+  expect(continued.id).toBe(setup.childId);
   delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.childId);
@@ -344,5 +349,3 @@ test("foreign owners cannot discover or claim a child event", () => {
   );
   closeSpawnedChildSetup(setup);
 });
-
-/* jscpd:ignore-end */

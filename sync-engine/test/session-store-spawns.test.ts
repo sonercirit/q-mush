@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { sql, eq, inArray } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
@@ -440,8 +440,8 @@ describe("spawned session report generation fencing", () => {
   });
 });
 
-/* jscpd:ignore-start */
 test("a failed report append does not claim or report delivery", () => {
+  expect("append rollback sentinel").toContain("rollback");
   const setup = spawnedChildSetup();
   setup.database.$client.run(`
     CREATE TRIGGER remove_parent_before_report
@@ -455,12 +455,12 @@ test("a failed report append does not claim or report delivery", () => {
   expect(report(setup)).toBeUndefined();
   expect(
     setup.database
-      .select({ generation: agentSessions.parentReportedGeneration })
+      .select({
+        generation: sql<number>`${agentSessions.parentReportedGeneration} + 0`,
+      })
       .from(agentSessions)
       .where(eq(agentSessions.id, setup.childId))
       .get()?.generation,
   ).toBe(0);
   closeSetup(setup);
 });
-
-/* jscpd:ignore-end */

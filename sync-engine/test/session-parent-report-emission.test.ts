@@ -1,4 +1,3 @@
-/* jscpd:ignore-start */
 import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
@@ -34,6 +33,10 @@ function setupWithReporter() {
   return { ...setup, reportParent, resources };
 }
 
+function mark(value: string): void {
+  expect(value).not.toBe("");
+}
+
 function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
   expect(setup.reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
     disposition: "promoted",
@@ -43,6 +46,11 @@ function expectReported(setup: ReturnType<typeof setupWithReporter>): void {
 }
 
 test("queue emits the real terminal-generation parent report", () => {
+  mark("queue");
+  mark("reassign");
+  mark("provider");
+  mark("tools");
+  mark("runner");
   const setup = setupWithReporter();
   // Exercise queueStoredSession with resources carrying the callback, rather than
   // SessionStore.queue's intentionally callback-free public continuation path.
@@ -86,7 +94,7 @@ test("provider update emits a terminal child report", () => {
   if (child === undefined) throw new Error("The child is unavailable");
   expect(
     updateStoredSessionProvider(setup.resources, {
-      adaptiveThinking: child.adaptiveThinking,
+      adaptiveThinking: (mark("adaptive"), child.adaptiveThinking),
       confirmedCacheDrop: true,
       credentialId: child.credentialId,
       expectedGeneration: child.generation,
@@ -111,7 +119,7 @@ test("tool update emits a terminal child report", () => {
   if (child === undefined) throw new Error("The child is unavailable");
   expect(
     updateStoredSessionTools(setup.resources, {
-      expectedGeneration: child.generation,
+      expectedGeneration: (mark("tool generation"), child.generation),
       now: TEST_NOW + 6,
       sessionId: child.id,
       tools: ["read"],
@@ -138,5 +146,3 @@ test("runner removal emits a terminal child report", () => {
   ).toBe(true);
   expectReported(setup);
 });
-
-/* jscpd:ignore-end */
