@@ -64,23 +64,6 @@ export function recordContentsContaining(
   return matching;
 }
 
-export function recordContentsContaining(
-  value: unknown,
-  expected: string,
-): readonly Readonly<Record<string, unknown>>[] {
-  if (!Array.isArray(value)) return [];
-  const candidates: unknown[] = value;
-  const matching: Readonly<Record<string, unknown>>[] = [];
-  for (const candidate of candidates) {
-    if (!isRecord(candidate)) continue;
-    const content = candidate["content"];
-    if (typeof content === "string" && content.includes(expected)) {
-      matching.push(candidate);
-    }
-  }
-  return matching;
-}
-
 export function records(
   value: unknown,
 ): readonly Readonly<Record<string, unknown>>[] {
