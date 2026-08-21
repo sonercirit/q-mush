@@ -163,7 +163,9 @@ export function pendingSpawnedSessions(
   let offset = 0;
   for (;;) {
     const rows =
-      limit === undefined ? query.all() : query.limit(limit).offset(offset).all();
+      limit === undefined
+        ? query.all()
+        : query.limit(limit).offset(offset).all();
     for (const { id, userId } of rows) {
       const detail = read(userId, id);
       if (detail !== undefined && spawnedSessionCanReport(detail)) {

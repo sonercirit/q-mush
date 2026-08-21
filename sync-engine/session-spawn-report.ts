@@ -13,8 +13,9 @@ export interface ParentSessionReport {
 
 type SpawnedSessionReportDetail = Pick<
   AgentSessionDetail,
-  "generation" | "id" | "messages" | "pendingQuestions" | "status" | "turns"
->;
+  "generation" | "id" | "messages" | "status" | "turns"
+> &
+  Partial<Pick<AgentSessionDetail, "pendingQuestions">>;
 
 function currentGenerationMessages(
   completed: SpawnedSessionReportDetail,
