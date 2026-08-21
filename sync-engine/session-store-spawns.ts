@@ -1,39 +1,21 @@
-import { and, asc, eq, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { appendSystemFollowUp } from "./session-pending-inputs.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionStatus,
+} from "../shared/session-model.ts";
+import { appendSystemPendingInput } from "./session-pending-inputs.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
   storedSessionCondition,
   updateStoredSessions,
 } from "./session-store-persistence.ts";
-import {
-  appendSystemStoredMessage,
-  storedSystemMessageValues,
-  storedUserMessageValues,
-} from "./session-store-values.ts";
 
-type TerminalParentStatus = "completed" | "failed" | "idle" | "stopped";
-
-const TERMINAL_PARENT_CALLBACK_NOTE =
-  "Completion callback was not delivered because the parent session was already terminal";
-
-function terminalParentCallbackNote(status: TerminalParentStatus): string {
-  return `${TERMINAL_PARENT_CALLBACK_NOTE} (${status}).`;
-}
-
-function parentIsTerminal(
-  status: (typeof REPORTABLE_PARENT_STATUSES)[number],
-): status is TerminalParentStatus {
-  return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "idle" ||
-    status === "stopped"
-  );
+function parentIsTerminal(status: AgentSessionStatus): boolean {
+  return status === "completed" || status === "failed" || status === "stopped";
 }
 
 const REPORTABLE_PARENT_STATUSES = [
@@ -46,7 +28,8 @@ const REPORTABLE_PARENT_STATUSES = [
   "stopped",
 ] as const;
 
-export type SpawnedReportDisposition = "delivered" | "promoted" | "terminal";
+export type SpawnedReportDisposition =
+  "deferred" | "delivered" | "promoted" | "terminal";
 
 export interface SpawnedSessionLink {
   readonly parentGeneration: number;
@@ -165,6 +148,7 @@ export function pendingSpawnedSessions(
         }),
         isNotNull(agentSessions.parentSessionId),
         isNotNull(agentSessions.parentExecutionGeneration),
+        sql`${agentSessions.parentReportedGeneration} < ${agentSessions.executionGeneration}`,
       ),
     )
     .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
@@ -183,13 +167,25 @@ export function spawnedSessionLink(
 ): SpawnedSessionLink | undefined {
   const stored = database
     .select({
+      generation: agentSessions.executionGeneration,
       parentGeneration: agentSessions.parentExecutionGeneration,
       parentId: agentSessions.parentSessionId,
+      reportedGeneration: agentSessions.parentReportedGeneration,
+      runnerRequired: agentSessions.runnerRequired,
+      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(ownedActiveSessionCondition(userId, sessionId))
     .get();
-  if (stored?.parentId == null || stored.parentGeneration === null) {
+  if (
+    stored?.parentId == null ||
+    stored.parentGeneration === null ||
+    (!stored.runnerRequired &&
+      stored.reportedGeneration >= stored.generation) ||
+    (stored.runnerRequired &&
+      REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
+      stored.reportedGeneration >= stored.generation)
+  ) {
     return undefined;
   }
   return {
@@ -206,13 +202,12 @@ function reportMessageOptions(
     userId: string;
   }>,
   database: Pick<AppDatabase, "insert" | "select" | "update">,
-  sessionId = options.parentId,
 ) {
   return {
     database,
     generateId: options.generateId,
     now: options.now,
-    sessionId,
+    sessionId: options.parentId,
     userId: options.userId,
   };
 }
@@ -262,49 +257,24 @@ function callbackDisposition(
     }),
     eq(agentSessions.parentSessionId, options.parentId),
     eq(agentSessions.parentExecutionGeneration, options.parentGeneration),
+    sql`${agentSessions.parentReportedGeneration} < ${options.childGeneration}`,
   );
   if (
     !updateStoredSessions(database, childCondition, {
-      parentExecutionGeneration: null,
+      parentReportedGeneration: options.childGeneration,
     })
   ) {
     return undefined;
   }
-  switch (parent.status) {
-    case "running":
-      if (
-        !appendSystemFollowUp({
-          ...reportMessageOptions(options, database),
-          clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
-          content: options.content,
-          kind: "steer",
-        })
-      ) {
-        return undefined;
-      }
-      break;
-    case "completed":
-    case "failed":
-    case "idle":
-    case "stopped":
-      appendSystemStoredMessage({
-        ...reportMessageOptions(options, database, options.childId),
-        message: storedSystemMessageValues(
-          terminalParentCallbackNote(parent.status),
-        ),
-      });
-      break;
-    case "paused":
-    case "queued":
-      appendSystemStoredMessage({
-        ...reportMessageOptions(options, database),
-        message: storedUserMessageValues(options.content),
-      });
-      break;
-  }
+  const appended = appendSystemPendingInput({
+    ...reportMessageOptions(options, database),
+    clientRequestId: `spawn:${options.childId}:${String(options.childGeneration)}`,
+    content: options.content,
+    kind: parent.status === "running" ? "steer" : "follow_up",
+  });
+  if (!appended) return undefined;
 
   const terminal = parentIsTerminal(parent.status);
-  const reportedSessionId = terminal ? options.childId : options.parentId;
   database
     .update(agentSessions)
     .set({
@@ -313,12 +283,13 @@ function callbackDisposition(
     })
     .where(
       storedSessionCondition({
-        id: reportedSessionId,
+        id: options.parentId,
         userId: options.userId,
       }),
     )
     .run();
   if (terminal) return "terminal";
+  if (parent.status === "idle") return "deferred";
   return parent.status === "running" ? "promoted" : "delivered";
 }
 

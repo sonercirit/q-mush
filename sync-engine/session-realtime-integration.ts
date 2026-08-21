@@ -487,9 +487,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
 
   #providerUpdateStoreAccess() {
     return {
-      database: this.#dependencies.database,
-      read: (identity: readonly [string, string, string]) =>
-        this.#dependencies.store.get(...identity),
+      resources: this.#dependencies.store.writeResources(),
     };
   }
 
@@ -567,11 +565,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       ...this.#dependencies.toolUpdates,
       readCredentialSource: async (userId, detail) =>
         (await this.#credential(userId, detail)).source,
-      store: {
-        database: this.#dependencies.database,
-        read: (userId, sessionId, workspaceId) =>
-          this.#dependencies.store.get(userId, sessionId, workspaceId),
-      },
+      store: this.#dependencies.store.writeResources(),
     };
   }
 

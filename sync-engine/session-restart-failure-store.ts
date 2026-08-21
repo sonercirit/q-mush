@@ -6,7 +6,10 @@ import {
   errorMessageValues,
   insertStoredMessage,
 } from "./session-store-values.ts";
-import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
+import {
+  activeSessionTurnId,
+  updateSessionAndEndGenerationTurn,
+} from "./session-turn-store.ts";
 
 export interface RestartFailureTarget extends SessionSystemWriteTarget {
   readonly condition: Parameters<
@@ -30,6 +33,7 @@ export function settleSessionFailure(
   if (timing === undefined) {
     return false;
   }
+  const turnId = activeSessionTurnId(options.database, options.sessionId);
   if (
     !updateSessionAndEndGenerationTurn({
       condition: options.condition,
@@ -42,12 +46,16 @@ export function settleSessionFailure(
   ) {
     return false;
   }
-  insertStoredMessage(options.database, errorMessageValues(error), {
-    actorId: SYSTEM_ID,
-    id: options.generateId(options.now),
-    now: options.now,
-    sessionId: options.sessionId,
-    userId: options.userId,
-  });
+  insertStoredMessage(
+    options.database,
+    { ...errorMessageValues(error), turnId },
+    {
+      actorId: SYSTEM_ID,
+      id: options.generateId(options.now),
+      now: options.now,
+      sessionId: options.sessionId,
+      userId: options.userId,
+    },
+  );
   return true;
 }

@@ -388,7 +388,7 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       expect(parseToolOutput(output)).toEqual({ error: expected.error });
     } else {
       expect(output).toEqual({
-        output: "Error: The agent session was stopped",
+        output: "Error: The child session could not be launched",
         state: "failed",
       });
     }
@@ -397,13 +397,17 @@ function launchRaceTests(expected: LaunchRaceExpectation): void {
       setup.launch,
       expected.race,
       "agent",
-      "queued",
+      expected.race === "none" ? "failed" : "queued",
     );
     if (expected.race === "none") {
       expect(child.messages).toEqual([
         expect.objectContaining({
           content: "Delegate through the production spawn path",
           role: "user",
+        }),
+        expect.objectContaining({
+          content: "Session failed: the child session could not be launched",
+          role: "error",
         }),
       ]);
     }

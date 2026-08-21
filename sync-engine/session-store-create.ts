@@ -13,6 +13,7 @@ import { runnerReadySessionCondition } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   insertStoredMessage,
   recordedMessageValues,
@@ -178,6 +179,7 @@ function storedSessionValues(
     model: input.model,
     openRouterProviderTag: input.openRouterProviderTag,
     parentExecutionGeneration: options.parentExecutionGeneration,
+    parentReportedGeneration: -1,
     parentSessionId: options.parentSessionId,
     provider: input.provider,
     providerCredentialId: input.credentialId,
@@ -231,18 +233,15 @@ export function createStoredSession(
       parentGeneration !== undefined &&
       input.parentUserInitiated === true
     ) {
-      const parent = transaction
-        .select({ generation: agentSessions.executionGeneration })
-        .from(agentSessions)
-        .where(
-          runnerReadySessionCondition({
-            id: parentSessionId,
-            userId: input.userId,
-            workspaceId: input.workspaceId,
-          }),
-        )
-        .get();
-      if (parent?.generation !== parentGeneration) {
+      const parentGenerationAtCreation = readStoredSessionGeneration({
+        condition: runnerReadySessionCondition({
+          id: parentSessionId,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+        }),
+        database: transaction,
+      });
+      if (parentGenerationAtCreation !== parentGeneration) {
         return "parent_stale" as const;
       }
     }

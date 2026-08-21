@@ -1,8 +1,6 @@
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import { type SessionAgentToolName } from "../shared/agent-tools.ts";
-import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type { RunnerSummary } from "../shared/runner-model.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import { throwIfSignalAborted } from "../shared/validation.ts";
@@ -12,23 +10,16 @@ import {
   responseToolOutput,
   sessionCanResume,
   spawnAgentSession,
-  type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import type { SessionAgentActionsDependencies } from "./session-agent-actions-dependencies.ts";
 import {
   compactSessionForAgent,
   steerSessionForAgent,
   type CompactionSelection,
-  type SessionControlActionDependencies,
 } from "./session-agent-control.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
-import {
-  sessionAgentOptions,
-  type SessionRunnerPageRequest,
-} from "./session-agent-options-action.ts";
-import type {
-  GetSessionOptionsToolInput,
-  SessionOptionsSource,
-} from "./session-agent-options.ts";
+import { sessionAgentOptions } from "./session-agent-options-action.ts";
+import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
 import {
   readSessionOutput,
   type ReadSessionToolInput,
@@ -46,41 +37,12 @@ import {
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
-import type {
-  RunnerDirectoryBrowseResult,
-  RunnerDirectoryRequest,
-} from "./session-request-helpers.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
 function runnerUnavailableOutput(): string {
   return sessionToolOutput({ error: "runner_unavailable" });
-}
-
-type RunnerPageRequest = SessionRunnerPageRequest;
-
-interface SessionAgentActionsDependencies
-  extends SessionAgentActionDependencies, SessionControlActionDependencies {
-  readonly abortSession: (sessionId: string) => void;
-  readonly activeSession: (sessionId: string) => boolean;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSessionCommands">;
-  readonly cleanupSession: (detail: AgentSessionDetail) => void;
-  readonly browseDirectories: (
-    request: RunnerDirectoryRequest,
-    signal: AbortSignal,
-  ) => Promise<RunnerDirectoryBrowseResult>;
-  readonly listOnlineRunners: (
-    userId: string,
-    workspaceId?: string,
-  ) => readonly RunnerSummary[];
-  readonly listRunnerOptions: (
-    userId: string,
-    request: RunnerPageRequest,
-  ) => {
-    readonly items: SessionOptionsSource["runners"];
-    readonly totalItems: number;
-  };
 }
 
 export class SessionAgentActions {
@@ -289,6 +251,11 @@ export class SessionAgentActions {
 
   reportOne(detail: AgentSessionDetail, userId: string): void {
     this.#wakeReport(this.#reportAndNotify(detail, userId), userId);
+  }
+
+  reportedParent(report: SpawnedSessionCompletion, userId: string): void {
+    this.#dependencies.notify(userId, report.parentId);
+    this.#wakeReport(report, userId);
   }
 
   stopSession(sessionId: string, detail?: AgentSessionDetail): void {
@@ -513,13 +480,16 @@ export class SessionAgentActions {
           ) {
             return createJsonResponse({ error: "server_restarting" }, 503);
           }
-          this.#dependencies.store.transitionRuntime(
+          this.#dependencies.store.settleRuntimeFailure(
             queued.detail.id,
-            "failed",
+            "Session failed: the child session could not be launched",
             this.#dependencies.now(),
             queued.detail.generation,
           );
+          const failed =
+            this.#dependencies.store.get(userId, sessionId) ?? queued.detail;
           this.#dependencies.notify(userId, sessionId);
+          this.reportOne(failed, userId);
           return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
         return this.#queuedResponse(userId, sessionId);
@@ -598,6 +568,9 @@ export class SessionAgentActions {
       dependencies: this.#dependencies,
       input,
       signal,
+      terminal: (detail) => {
+        this.reportOne(detail, userId);
+      },
       userId,
     });
   }

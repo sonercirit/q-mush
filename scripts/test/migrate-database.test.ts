@@ -130,12 +130,6 @@ function createMigrationJournal(
   }
 }
 
-async function applyInitialMigration(database: Database): Promise<void> {
-  const initialMigration = MIGRATIONS[0];
-  await applyMigrationFile(database, initialMigration.file);
-  createMigrationJournal(database, [initialMigration]);
-}
-
 async function createLegacyDatabase(
   directoryPrefix: string,
   file: string,
@@ -323,10 +317,11 @@ test("session migration preserves transcripts with foreign keys", async () => {
     upgradedDatabase
       .select({
         id: agentSessions.id,
-        parentExecutionGeneration: agentSessions.parentExecutionGeneration,
-        parentSessionId: agentSessions.parentSessionId,
         runnerRequired: agentSessions.runnerRequired,
         tools: agentSessions.tools,
+        parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+        parentReportedGeneration: agentSessions.parentReportedGeneration,
+        parentSessionId: agentSessions.parentSessionId,
       })
       .from(agentSessions)
       .all(),
@@ -334,6 +329,7 @@ test("session migration preserves transcripts with foreign keys", async () => {
     {
       id: sessionId,
       parentExecutionGeneration: null,
+      parentReportedGeneration: -1,
       parentSessionId: null,
       runnerRequired: false,
       tools: CURRENT_AGENT_SESSION_TOOLS,
@@ -564,10 +560,10 @@ test("preserves existing OpenRouter credentials", async () => {
 });
 
 test("preserves records from the initial schema", async () => {
-  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-upgrade-test-"));
-  const databasePath = join(temporaryDirectory, "legacy.sqlite");
-  const legacyDatabase = new Database(databasePath, { create: true });
-  await applyInitialMigration(legacyDatabase);
+  const { database: legacyDatabase, path: databasePath } =
+    await createLegacyDatabase("q-mush-upgrade-test-", "legacy.sqlite", [
+      MIGRATIONS[0],
+    ]);
 
   const legacyExpiry = 1_800_000_000_000;
   legacyDatabase.run(

@@ -71,6 +71,7 @@ import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
+import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { SessionStore } from "./session-store.ts";
 import {
   compactSessionForUser,
@@ -156,6 +157,15 @@ class DrizzleSessionIntegration
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
+    const reportParent = (
+      userId: string,
+      report: { disposition: SpawnedReportDisposition; parentId: string },
+    ) => {
+      this.#actions.reportedParent(
+        { disposition: report.disposition, parentId: report.parentId },
+        userId,
+      );
+    };
     this.#toolSettings =
       dependencies.toolSettings ?? new ToolSettingsStore(database);
     this.#store = new SessionStore(
@@ -163,6 +173,7 @@ class DrizzleSessionIntegration
       dependencies.randomId ?? createUuidV7,
       (userId) => this.#toolSettings.read(userId),
       this.#runtimes,
+      reportParent,
     );
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
@@ -290,6 +301,9 @@ class DrizzleSessionIntegration
       restart: this.#restart,
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
+    });
+    this.#runners.onParentReport((userId, report) => {
+      this.#actions.reportedParent(report, userId);
     });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);

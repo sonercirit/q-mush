@@ -1,3 +1,4 @@
+import type { AppDatabase } from "../../shared/database.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -55,4 +56,17 @@ export function createSessionStoreTestSetup() {
     SESSION_ID,
   );
   return setup;
+}
+
+export function testStoreReadResources(
+  database: AppDatabase,
+  store: SessionStore,
+) {
+  return {
+    database,
+    generateId: () => crypto.randomUUID(),
+    toolSettings: () => DEFAULT_TOOL_SETTINGS,
+    read: (userId: string, sessionId: string, workspaceId?: string) =>
+      store.get(userId, sessionId, workspaceId),
+  };
 }

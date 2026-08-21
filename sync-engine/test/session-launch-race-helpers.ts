@@ -33,6 +33,12 @@ export function closeSessionTestDatabase(database: AppDatabase): void {
   database.$client.close();
 }
 
+export function closeSessionStoreTestSetup(
+  setup: Pick<SessionStoreTestSetup, "database">,
+): void {
+  closeSessionTestDatabase(setup.database);
+}
+
 export async function expectJsonResponse(
   response: Response,
   status: number,

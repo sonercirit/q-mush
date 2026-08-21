@@ -22,7 +22,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import {
   EMPTY_SESSION_REQUEST_MODEL_METADATA,
-  sessionAgentActionDefaults,
+  inactiveSessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
@@ -207,9 +207,7 @@ test("broker cancellation reaches a directory request", async () => {
 
 function actionDefaults() {
   return {
-    ...sessionAgentActionDefaults(),
-    abortSession: () => undefined,
-    activeSession: () => false,
+    ...inactiveSessionAgentActionDefaults(),
     notify: () => undefined,
   };
 }

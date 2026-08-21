@@ -16,6 +16,7 @@ import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts"
 
 async function failedChildReport(content: string): Promise<{
   readonly child: string;
+  readonly report: string;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
 }> {
   const model = scriptedModel([
@@ -36,22 +37,30 @@ async function failedChildReport(content: string): Promise<{
   await waitForTerminalParentNote(setup.sessions, childId);
   return {
     child: JSON.stringify(setup.sessions.detailForUser(TEST_USER_ID, childId)),
+    report: JSON.stringify(
+      setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    ),
     setup,
   };
 }
 
-function expectFailedChild(child: string, expectedContent: string): void {
+function expectFailedChild(
+  child: string,
+  report: string,
+  expectedContent: string,
+): void {
   expect(child).toContain(expectedContent);
-  expect(child).toContain("already terminal");
+  expect(report).toContain(expectedContent);
+  expect(report).toContain('\\"status\\": \\"failed\\"');
 }
 
 describe("failed spawned session reports", () => {
   test("includes the child's last assistant message", async () => {
-    const { child, setup } = await failedChildReport(
+    const { child, report, setup } = await failedChildReport(
       "The child made partial progress.",
     );
 
-    expectFailedChild(child, "The child made partial progress.");
+    expectFailedChild(child, report, "The child made partial progress.");
     expect(
       setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
     ).toMatchObject({ generation: 0, status: "idle" });
@@ -59,9 +68,9 @@ describe("failed spawned session reports", () => {
   });
 
   test("includes an explicit reason when the child has no assistant content", async () => {
-    const { child, setup } = await failedChildReport("");
+    const { child, report, setup } = await failedChildReport("");
 
-    expectFailedChild(child, "The scripted model ran out of steps");
+    expectFailedChild(child, report, "The scripted model ran out of steps");
     closeSessionTestDatabase(setup.database);
   });
 });

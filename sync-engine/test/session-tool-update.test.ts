@@ -17,6 +17,7 @@ import {
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
+import { testStoreReadResources } from "./session-store-test-helpers.ts";
 
 function setup() {
   const database = createAuthenticatedTestDatabase();
@@ -52,11 +53,7 @@ function setup() {
     now: () => 2,
     readCredentialSource: () => Promise.resolve("oauth" as const),
     runtimes: { abortForGeneration },
-    store: {
-      database,
-      read: (userId: string, sessionId: string, workspaceId: string) =>
-        store.get(userId, sessionId, workspaceId),
-    },
+    store: testStoreReadResources(database, store),
   };
   return {
     abortForGeneration,

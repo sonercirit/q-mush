@@ -20,6 +20,7 @@ import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
+import { testStoreReadResources } from "./session-store-test-helpers.ts";
 
 function createProviderUpdateSession(
   store: SessionStore,
@@ -105,9 +106,7 @@ function setup(userContextTokenCap?: number) {
     restartSignal: () => new AbortController().signal,
     runtimes: { abortForGeneration },
     store: {
-      database,
-      read: (identity: readonly [string, string, string]) =>
-        store.get(...identity),
+      resources: testStoreReadResources(database, store),
     },
   };
   const input = {

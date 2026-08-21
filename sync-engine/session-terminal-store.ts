@@ -9,10 +9,7 @@ import {
   type RestartHandoff,
 } from "../shared/session-model.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
-import {
-  activePendingInput,
-  promotePendingInput,
-} from "./session-pending-inputs.ts";
+import { promotePendingInput } from "./session-pending-inputs.ts";
 import { canonicalRestartHandoff } from "./session-restart-store.ts";
 import {
   runningCondition,
@@ -23,6 +20,7 @@ import {
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import { activeNonSystemPendingInput } from "./session-system-pending-inputs.ts";
 import {
   endGenerationSessionTurn,
   rotateSessionTurn,
@@ -72,7 +70,7 @@ export function settleTerminalRuntime(
   }
   const pending =
     status !== "failed" && sessionId !== undefined
-      ? activePendingInput(database, sessionId)
+      ? activeNonSystemPendingInput(database, sessionId)
       : undefined;
   const successorTurnId =
     pending !== undefined && sessionId !== undefined

@@ -24,8 +24,8 @@ import {
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
+  inactiveSessionAgentActionDefaults,
   promiseGate,
-  sessionAgentActionDefaults,
   type PromiseGate,
 } from "./session-race-test-helpers.ts";
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
@@ -84,18 +84,6 @@ function transition(
   expect(
     store.transitionRuntime(session.id, status, now, session.generation),
   ).toBe(true);
-}
-
-function commonActionDependencies() {
-  return {
-    ...sessionAgentActionDefaults(),
-    abortSession: vi.fn(),
-    activeSession: () => false,
-    browseDirectories: () =>
-      Promise.resolve({ status: "runner_unavailable" as const }),
-    cleanupSession: () => undefined,
-    listOnlineRunners: () => [],
-  };
 }
 
 function authoritySetup(options: {
@@ -165,7 +153,7 @@ function authoritySetup(options: {
   const notify = vi.fn();
   const runtimes = new SessionRuntimes();
   const actions = new SessionAgentActions({
-    ...commonActionDependencies(),
+    ...inactiveSessionAgentActionDefaults(),
     compactSession: startManualSessionCompactionForUserId,
     database,
     discoverSessionMetadata: async () => {

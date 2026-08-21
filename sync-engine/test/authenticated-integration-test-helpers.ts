@@ -110,6 +110,16 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
       "ALTER TABLE agent_sessions ADD COLUMN agent_file_path text",
     );
   }
+  if (
+    !sessionColumns.some(({ name }) => name === "parent_reported_generation")
+  ) {
+    database.$client.run(
+      "ALTER TABLE agent_sessions ADD COLUMN parent_reported_generation integer NOT NULL DEFAULT -1",
+    );
+  }
+  database.$client.run(
+    "CREATE INDEX IF NOT EXISTS agent_sessions_parent_report_index ON agent_sessions(status, parent_session_id, parent_execution_generation, parent_reported_generation)",
+  );
   if (!sessionColumns.some(({ name }) => name === "workspace_id")) {
     database.$client.run(
       "ALTER TABLE agent_sessions ADD COLUMN workspace_id text REFERENCES workspaces(id) ON DELETE restrict",

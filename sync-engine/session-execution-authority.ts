@@ -14,6 +14,7 @@ export interface SessionExecutionAuthority {
 }
 
 export interface SessionQueueAuthorization {
+  readonly deferSystemPendingInputs?: boolean;
   readonly parent?: SessionExecutionAuthority;
   readonly targetGeneration?: number;
 }

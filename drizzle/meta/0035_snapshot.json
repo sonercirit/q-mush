@@ -1,9 +1,8 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b34fa591-78ab-465d-83f3-b5098862d576",
-
-  "prevId": "69c85fbc-571d-4940-b858-b130557c9298",
+  "id": "a4388ee3-7fd6-4c74-8f79-1bbd32d8b637",
+  "prevId": "b34fa591-78ab-465d-83f3-b5098862d576",
   "tables": {
     "agent_messages": {
       "name": "agent_messages",
@@ -768,7 +767,6 @@
           "name": "agent_session_turns_tool_output_range_check",
           "value": "\"agent_session_turns\".\"tool_output_limit_characters\" >= 2000 AND \"agent_session_turns\".\"tool_output_limit_characters\" <= 22369409"
         },
-
         "agent_session_turns_end_check": {
           "name": "agent_session_turns_end_check",
           "value": "\"agent_session_turns\".\"ended_at\" IS NULL OR \"agent_session_turns\".\"ended_at\" >= \"agent_session_turns\".\"started_at\""
@@ -849,7 +847,14 @@
           "notNull": false,
           "autoincrement": false
         },
-
+        "parent_reported_generation": {
+          "name": "parent_reported_generation",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": -1
+        },
         "runner_id": {
           "name": "runner_id",
           "type": "text",
@@ -1092,7 +1097,16 @@
           "columns": ["user_id", "workspace_id", "is_deleted", "updated_at"],
           "isUnique": false
         },
-
+        "agent_sessions_parent_report_index": {
+          "name": "agent_sessions_parent_report_index",
+          "columns": [
+            "status",
+            "parent_session_id",
+            "parent_execution_generation",
+            "parent_reported_generation"
+          ],
+          "isUnique": false
+        },
         "agent_sessions_runner_status_index": {
           "name": "agent_sessions_runner_status_index",
           "columns": ["runner_id", "status"],
@@ -2531,7 +2545,6 @@
         }
       }
     },
-
     "users": {
       "name": "users",
       "columns": {
