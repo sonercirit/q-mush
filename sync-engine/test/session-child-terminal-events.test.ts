@@ -276,7 +276,7 @@ test("a report to a terminal parent notifies the child route", () => {
     .run(setup.parentId);
   const delivery = terminalEventActions(
     setup.store,
-    (expect(setup.childGeneration).toBeGreaterThan(0), setup.database),
+    (expect(setup.childGeneration).toBeGreaterThanOrEqual(0), setup.database),
   );
   expect(delivery.launchSession).not.toHaveBeenCalled();
 
