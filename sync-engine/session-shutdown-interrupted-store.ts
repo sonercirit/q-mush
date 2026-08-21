@@ -7,10 +7,7 @@ import type {
   RestartHandoff,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
-import {
-  advanceStoredSessionGeneration,
-  type SessionGenerationAdvanceResult,
-} from "./session-generation-advance.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import {
   canonicalRestartHandoff,
   parseRestartHandoff,
@@ -28,10 +25,6 @@ import { appendUnknownRestartToolResults } from "./session-store-read.ts";
 interface ShutdownInterruptedSessionStoreOptions {
   readonly database: AppDatabase;
   readonly generateId: (now: number) => string;
-  readonly reportParent?: (
-    userId: string,
-    report: NonNullable<SessionGenerationAdvanceResult["reportedParent"]>,
-  ) => void;
 }
 
 function shutdownHandoff(
@@ -192,7 +185,7 @@ export class ShutdownInterruptedSessionStore {
         continue;
       }
       const { marker, raw } = marked;
-      const restored = this.#options.database.transaction((transaction) => {
+      this.#options.database.transaction((transaction) => {
         const advanced = advanceStoredSessionGeneration({
           condition: this.#exactCondition(session, raw),
           database: transaction,
@@ -234,14 +227,7 @@ export class ShutdownInterruptedSessionStore {
           now,
           sessionId: session.id,
         });
-        return {
-          reportedParent: advanced.reportedParent,
-          restored: true as const,
-        };
       });
-      if (restored?.reportedParent !== undefined) {
-        this.#options.reportParent?.(session.userId, restored.reportedParent);
-      }
     }
   }
 }

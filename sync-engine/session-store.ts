@@ -106,7 +106,7 @@ export class SessionStore extends SessionStoreRestarts {
     runtimes: Pick<SessionRuntimes, "pending">,
     reportParent?: SessionStoreWriteResources["reportParent"],
   ) {
-    super(database, generateId, reportParent);
+    super(database, generateId);
     this.#resources = [database, generateId];
     this.#reportParent = reportParent;
     this.#toolSettings = toolSettings;

@@ -178,7 +178,6 @@ class DrizzleSessionIntegration
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
-      reportParent,
     });
     this.#fallbacks = createAttachmentFallbackIntegration({
       database,

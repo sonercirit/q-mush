@@ -5,7 +5,6 @@ import {
   RestartHandoffStore,
   type RestartHandoffIdentity,
 } from "./session-restart-store.ts";
-import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { SessionStoreRuntime } from "./session-store-runtime.ts";
 
 type RestartToolDatabase = Pick<AppDatabase, "insert" | "select" | "update">;
@@ -13,16 +12,11 @@ type RestartToolDatabase = Pick<AppDatabase, "insert" | "select" | "update">;
 export abstract class SessionStoreRestarts extends SessionStoreRuntime {
   readonly #restartHandoffs: RestartHandoffStore;
 
-  constructor(
-    database: AppDatabase,
-    generateId: IdGenerator,
-    reportParent?: SessionStoreWriteResources["reportParent"],
-  ) {
+  constructor(database: AppDatabase, generateId: IdGenerator) {
     super();
     this.#restartHandoffs = new RestartHandoffStore({
       database,
       generateId,
-      ...(reportParent === undefined ? {} : { reportParent }),
       interruptUnknownTools: (transaction, sessionId, now) => {
         this.appendUnknownRestartToolResults(transaction, sessionId, now);
       },

@@ -66,7 +66,7 @@ export type RestartHandoffSettlement =
 
 type RestartHandoffStoreOptions = Pick<
   SessionStoreWriteResources,
-  "database" | "generateId" | "read" | "reportParent"
+  "database" | "generateId" | "read"
 > & {
   readonly interruptUnknownTools?: (
     database: Pick<AppDatabase, "insert" | "select" | "update">,
@@ -313,16 +313,9 @@ export class RestartHandoffStore {
           options.now,
         );
       }
-      return {
-        reportedParent: advanced.reportedParent,
-        userId: advanced.userId,
-      };
+      return true;
     });
-    if (result === false) return false;
-    if (result.reportedParent !== undefined) {
-      this.#options.reportParent?.(result.userId, result.reportedParent);
-    }
-    return true;
+    return result;
   }
 
   pauseQueued(...arguments_: RestartPauseArguments): boolean {
