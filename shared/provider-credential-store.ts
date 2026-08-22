@@ -306,7 +306,7 @@ export class ProviderCredentialStore {
     const fingerprint = fingerprintCredential(
       details.baseUrl === undefined
         ? value
-        : `${details.baseUrl}\n${fingerprinted}`,
+        : `${details.baseUrl}\n${value}`,
     );
     const existing = this.#database
       .select({
