@@ -63,6 +63,15 @@ function thinkingOnlyAssistant(replay: typeof SIGNED_REPLAY) {
   };
 }
 
+function replayTextAssistant() {
+  return {
+    content: "Reading.",
+    providerReplay: replayWithoutClientTool(),
+    role: "assistant" as const,
+    toolCalls: [],
+  };
+}
+
 function thinkingOnlyReplay() {
   return {
     ...SIGNED_REPLAY,
@@ -273,16 +282,20 @@ describe("anthropic-format generic provider", () => {
       thinkingOnlyAssistant(replay),
       { content: "Middle", role: "user" },
       { content: "Last", role: "user" },
-      thinkingOnlyAssistant(replay),
+      replayTextAssistant(),
     ];
     const messages = await replayOnlyMessages(history);
 
     expect(messages).toEqual([
-      cachedTextMessage("user", "First"),
+      { content: [{ text: "First", type: "text" }], role: "user" },
       { content: replay.blocks, role: "assistant" },
       {
         content: [
-          { text: "Middle", type: "text" },
+          {
+            cache_control: TEST_PROMPT_CACHE_CONTROL,
+            text: "Middle",
+            type: "text",
+          },
           {
             cache_control: TEST_PROMPT_CACHE_CONTROL,
             text: "Last",
@@ -291,7 +304,7 @@ describe("anthropic-format generic provider", () => {
         ],
         role: "user",
       },
-      { content: replay.blocks, role: "assistant" },
+      { content: replayWithoutClientTool().blocks, role: "assistant" },
     ]);
   });
 
