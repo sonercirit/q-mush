@@ -279,11 +279,10 @@ export async function spawnAgentSession(options: {
   if (balanced && dependencies.modelCredentialPool !== undefined) {
     let credentials: readonly ProviderCredentialAccess[];
     try {
-      credentials =
-        (await dependencies.modelCredentialPool?.candidates(
-          userId,
-          selection,
-        )) ?? [];
+      credentials = await dependencies.modelCredentialPool.candidates(
+        userId,
+        selection,
+      );
     } catch {
       return fail("credential_unavailable");
     }
