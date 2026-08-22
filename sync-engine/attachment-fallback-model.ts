@@ -20,6 +20,7 @@ import {
   type AgentModelFactory,
 } from "./session-agent-models.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
+import { createOpenAiSessionCredentialRefresher } from "./session-openai-credential-refresh.ts";
 
 export interface AttachmentExplanation {
   readonly content: string;
@@ -54,6 +55,7 @@ export async function explainAttachment(
     readonly onStepStart?: () => void;
     readonly restartRequested?: () => boolean;
     readonly prompt: string | null;
+    readonly refreshCredential?: AgentModelRequestOptions["refreshCredential"];
     readonly resources: AttachmentFallbackRuntimeResources;
     readonly toolSettings: ToolSettings;
     readonly userId: string;
@@ -111,6 +113,15 @@ export async function explainAttachment(
     selection === undefined
       ? options.currentProviderPricing
       : selectedModel.pricing;
+  const refreshCredential =
+    selection === undefined
+      ? options.refreshCredential
+      : createOpenAiSessionCredentialRefresher({
+          credential,
+          readCredential: options.resources.readCredential,
+          selection: { ...selection, workspaceId: options.workspaceId },
+          userId: options.userId,
+        });
   throwIfAttachmentRestartRequested(options.restartRequested);
   const model = createFallbackModel(options.factory, {
     adaptiveThinking: selectedModel.adaptiveThinking,
@@ -123,6 +134,7 @@ export async function explainAttachment(
     prompt: options.prompt,
     provider: selectedProvider,
     providerPricing: selectedPricing,
+    refreshCredential,
     toolSettings: options.toolSettings,
   });
   let step;

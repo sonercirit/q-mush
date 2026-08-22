@@ -12,17 +12,13 @@ import {
 import { AGENT_ATTACHMENT_MODALITIES } from "../agent-attachments.ts";
 import { AGENT_REASONING_EFFORTS } from "../agent-configuration.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../agent-tools.ts";
-import { PROVIDER_API_FORMATS } from "../provider-id.ts";
 import {
   AGENT_SESSION_MESSAGE_ROLES,
   AGENT_SESSION_STATUSES,
 } from "../session-model.ts";
 import { auditColumns } from "./audit-columns.ts";
-import {
-  connectionColumns,
-  credentialProviderColumn,
-  providerColumn,
-} from "./provider-columns.ts";
+import { identityAndCredentialTables } from "./identity-schema.ts";
+import { connectionColumns, providerColumn } from "./provider-columns.ts";
 import {
   activeDefaultIndex,
   ownedAuditColumns,
@@ -33,96 +29,22 @@ import {
 import { agentSessionTables } from "./session-operation-schema.ts";
 import { createToolSettingsTable } from "./tool-settings-schema.ts";
 export { auditColumns } from "./audit-columns.ts";
-export const users = sqliteTable("users", {
-  id: text("id").primaryKey(),
-  googleSubject: text("google_subject").notNull().unique(),
-  email: text("email").notNull(),
-  name: text("name").notNull(),
-  picture: text("picture"),
-  ...auditColumns(),
-});
+
+export const { prompts, providerCredentials, users, workspaces } =
+  identityAndCredentialTables();
+
 function userIdColumn() {
   return ownedForeignKey("user_id", () => users.id);
 }
-const userAudit = () => ownedAuditColumns(() => users.id);
+
+const userOwnedAuditColumns = () => ownedAuditColumns(() => users.id);
 export const toolSettings = createToolSettingsTable(() => users.id);
-const workspaceDefaultIndex = activeDefaultIndex(
-  "workspaces_user_default_unique",
-);
 const runnerDefault = activeDefaultIndex("runners_user_default_unique");
-export const workspaces = sqliteTable(
-  "workspaces",
-  {
-    id: text("id").primaryKey(),
-    userId: userIdColumn(),
-    name: text("name").notNull(),
-    isDefault: connectionColumns().isDefault,
-    ...auditColumns(),
-  },
-  (table) => [
-    index("workspaces_user_deletion_index").on(table.userId, table.isDeleted),
-    uniqueIndex("workspaces_user_active_name_unique")
-      .on(table.userId, table.name)
-      .where(sql`NOT ${table.isDeleted}`),
-    workspaceDefaultIndex(table),
-  ],
-);
+
 function workspaceIdColumn() {
   return ownedForeignKey("workspace_id", () => workspaces.id);
 }
-export const prompts = sqliteTable(
-  "prompts",
-  {
-    ...userAudit(),
-    name: text("name").notNull(),
-    normalizedName: text("normalized_name").notNull(),
-    body: text("body").notNull(),
-    revision: integer("revision").notNull().default(1),
-  },
-  (table) => [
-    index("prompts_user_deletion_update_index").on(
-      table.userId,
-      table.isDeleted,
-      table.updatedAt,
-    ),
-    uniqueIndex("prompts_user_normalized_name_active_unique")
-      .on(table.userId, table.normalizedName)
-      .where(sql`NOT ${table.isDeleted}`),
-    check("prompts_revision_positive_check", sql`${table.revision} > 0`),
-  ],
-);
-export const providerCredentials = sqliteTable(
-  "provider_credentials",
-  {
-    ...userAudit(),
-    provider: credentialProviderColumn(),
-    providerAccountId: text("provider_account_id"),
-    baseUrl: text("base_url"),
-    apiFormat: text("api_format", { enum: PROVIDER_API_FORMATS }),
-    label: text("label").notNull(),
-    source: text("source", { enum: ["oauth", "api_key"] }).notNull(),
-    encryptedCredential: text("encrypted_credential").notNull(),
-    credentialFingerprint: text("credential_fingerprint").notNull(),
-    ...connectionColumns(),
-  },
-  (table) => [
-    index("provider_credentials_user_provider_deletion_index").on(
-      table.userId,
-      table.provider,
-      table.isDeleted,
-    ),
-    uniqueIndex("provider_credentials_user_provider_fingerprint_unique").on(
-      table.userId,
-      table.provider,
-      table.credentialFingerprint,
-    ),
-    uniqueIndex("provider_credentials_user_model_default_unique")
-      .on(table.userId)
-      .where(
-        sql`${table.provider} IN ('openai', 'openrouter', 'generic') AND ${table.isDefault} AND NOT ${table.isDeleted}`,
-      ),
-  ],
-);
+
 function providerCredentialIdColumn() {
   return ownedForeignKey(
     "provider_credential_id",
@@ -143,7 +65,7 @@ function threshold() {
 export const providerQuotaSettings = sqliteTable(
   "provider_quota_settings",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     autoResetThresholdPercent: threshold(),
   },
@@ -162,7 +84,7 @@ export const providerQuotaSettings = sqliteTable(
 export const providerQuotaResetReceipts = sqliteTable(
   "provider_quota_reset_receipts",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     clientRequestId: text("client_request_id").notNull(),
     outcome: text("outcome", {
@@ -196,7 +118,7 @@ function activeConnectionIndex(
 export const providerCredentialWorkspaces = sqliteTable(
   "provider_credential_workspaces",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     providerCredentialId: providerCredentialIdColumn(),
     workspaceId: workspaceIdColumn(),
   },
@@ -216,7 +138,7 @@ export const providerCredentialWorkspaces = sqliteTable(
 export const attachmentFallbacks = sqliteTable(
   "attachment_fallbacks",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     modality: text("modality", { enum: AGENT_ATTACHMENT_MODALITIES }).notNull(),
     providerCredentialId: providerCredentialIdColumn(),
     provider: providerColumn(),
@@ -236,7 +158,7 @@ export const attachmentFallbacks = sqliteTable(
 export const runners = sqliteTable(
   "runners",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     name: text("name"),
     machineFingerprint: text("machine_fingerprint"),
     platform: text("platform"),
@@ -322,7 +244,7 @@ export const runners = sqliteTable(
 export const runnerWorkspaces = sqliteTable(
   "runner_workspaces",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     runnerId: ownedForeignKey("runner_id", () => runners.id),
     workspaceId: workspaceIdColumn(),
   },
@@ -342,7 +264,7 @@ export const runnerWorkspaces = sqliteTable(
 export const agentSessions = sqliteTable(
   "agent_sessions",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     workspaceId: workspaceIdColumn(),
     parentSessionId: text("parent_session_id"),
     parentExecutionGeneration: integer("parent_execution_generation"),
@@ -446,7 +368,7 @@ export const { agentSessionOperations, agentSessionTurns } = agentSessionTables(
 export const agentPendingInputs = sqliteTable(
   "agent_pending_inputs",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
     clientRequestId: text("client_request_id").notNull(),
     kind: text("kind", { enum: ["follow_up", "steer"] }).notNull(),
@@ -473,7 +395,7 @@ export const agentPendingInputs = sqliteTable(
 export const agentQuestionRequests = sqliteTable(
   "agent_question_requests",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
     toolCallId: text("tool_call_id").notNull(),
     executionGeneration: integer("execution_generation").notNull(),
@@ -506,7 +428,7 @@ export const agentQuestionRequests = sqliteTable(
 export const agentMessages = sqliteTable(
   "agent_messages",
   {
-    ...userAudit(),
+    ...userOwnedAuditColumns(),
     sessionId: agentSessionIdColumn(),
     turnId: text("turn_id").references(() => agentSessionTurns.id, {
       onDelete: "restrict",

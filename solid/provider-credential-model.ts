@@ -11,6 +11,7 @@ export interface ProviderCredential extends ScopedConnectionSummary {
   readonly apiFormat?: "anthropic" | "openai";
   readonly baseUrl?: string;
   readonly label: string;
+  readonly requiresReauthentication?: boolean;
   readonly source: "api_key" | "oauth";
 }
 
@@ -77,8 +78,18 @@ function readCredential(
   const label = value["label"];
   const isDefault = value["isDefault"];
   const isGlobal = value["isGlobal"];
+  const requiresReauthentication = value["requiresReauthentication"];
   const source = value["source"];
   const workspaceIds = value["workspaceIds"];
+
+  if (
+    requiresReauthentication !== undefined &&
+    typeof requiresReauthentication !== "boolean"
+  ) {
+    throw new Error(
+      `The server returned an invalid ${providerName} credential`,
+    );
+  }
 
   if (
     (accountId !== null && typeof accountId !== "string") ||
@@ -106,6 +117,9 @@ function readCredential(
     isDefault,
     ...(isGlobal === undefined ? {} : { isGlobal }),
     label,
+    ...(requiresReauthentication === undefined
+      ? {}
+      : { requiresReauthentication }),
     source,
     ...(workspaceIds === undefined ? {} : { workspaceIds }),
   };

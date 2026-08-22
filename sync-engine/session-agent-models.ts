@@ -63,6 +63,7 @@ export function createFallbackModel(
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
+    readonly refreshCredential?: AgentModelFactoryOptions["refreshCredential"];
     readonly toolSettings: ToolSettings;
   },
 ): AgentModel {
@@ -77,6 +78,9 @@ export function createFallbackModel(
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
+    ...(selection.refreshCredential === undefined
+      ? {}
+      : { refreshCredential: selection.refreshCredential }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
@@ -93,6 +97,7 @@ function modelOptions(
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
   onRequestState?: AgentModelFactoryOptions["onRequestState"],
+  refreshCredential?: AgentModelFactoryOptions["refreshCredential"],
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
@@ -110,6 +115,7 @@ function modelOptions(
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
     ...(onRequestState === undefined ? {} : { onRequestState }),
+    ...(refreshCredential === undefined ? {} : { refreshCredential }),
     promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
@@ -121,19 +127,20 @@ function modelOptions(
 }
 
 export function createSessionAgentModels(options: {
-  readonly agentFile: AgentFile | null;
-  readonly credential: ProviderCredentialAccess;
-  readonly detail: AgentSessionDetail;
-  readonly factory: AgentModelFactory;
+  readonly refreshCredential?: AgentModelRequestOptions["refreshCredential"];
   readonly id?: () => string;
+  readonly agentFile: AgentFile | null;
+  readonly detail: AgentSessionDetail;
+  readonly credential: ProviderCredentialAccess;
+  readonly factory: AgentModelFactory;
   readonly isCurrent: () => boolean;
   readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
-  readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
-  readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
+  readonly streamId?: string;
   readonly toolSettings: ToolSettings;
   readonly userId: string;
+  readonly onStepStart?: () => void;
 }): SessionAgentModels {
   const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
@@ -220,6 +227,7 @@ export function createSessionAgentModels(options: {
         onDelta,
         onStepStart,
         options.onRequestState,
+        options.refreshCredential,
       ),
     );
   return {

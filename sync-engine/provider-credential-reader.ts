@@ -1,9 +1,19 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 
-export type ProviderCredentialRead = (
+export interface ProviderCredentialRefreshRequest {
+  readonly force?: boolean;
+  readonly rejectedSecret?: string;
+}
+
+export type ProviderCredentialReadArguments = [
   userId: string,
   credentialId: string,
   workspaceId?: string,
+  refresh?: ProviderCredentialRefreshRequest,
+];
+
+export type ProviderCredentialRead = (
+  ...arguments_: ProviderCredentialReadArguments
 ) => Promise<ProviderCredentialAccess | undefined>;
 
 export interface ProviderCredentialReader {

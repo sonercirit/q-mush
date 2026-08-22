@@ -165,6 +165,11 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
+- OAuth credential reconnects update the existing record only after returned and
+  stored account IDs match; unverifiable OpenRouter accounts fail closed.
+  Terminal OpenAI refresh rejection marks the credential re-login-required,
+  excludes it from balanced pools, and directs the UI to reconnect. API-key
+  credentials bypass OAuth recovery.
 - Detailed provider/model protocol architecture and operational rules live in
   `PROVIDER_PROTOCOLS.md`; read it before changing provider discovery, requests,
   streaming, caching, retries, or model capability handling.

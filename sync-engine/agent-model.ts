@@ -18,8 +18,6 @@ import {
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import type { ToolSettings } from "../shared/tool-limits.ts";
-import { optionalSignal } from "../shared/validation.ts";
 import {
   completionMessages,
   completionSignal,
@@ -28,6 +26,7 @@ import {
 } from "./agent-completion.ts";
 import {
   usesAnthropicFormat,
+  type AgentCredentialRefresher,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
 } from "./agent-model-options.ts";
@@ -41,6 +40,7 @@ import {
   isOfficialAnthropicEndpoint,
 } from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
+import { recoverOpenAiOAuthUnauthorized } from "./openai-unauthorized-recovery.ts";
 import { completeProviderHttp } from "./provider-http.ts";
 import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
@@ -224,7 +224,7 @@ function defaultWebSocket(
 
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
-  readonly #credential: AgentProviderCredential;
+  #credential: AgentProviderCredential;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
   readonly #maxOutputTokens: number | null;
@@ -236,9 +236,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #promptCacheKey: string | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
+  readonly #refreshCredential: AgentCredentialRefresher | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
-  readonly #toolSettings: ToolSettings;
   readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
@@ -262,13 +262,13 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#promptCacheKey = options.promptCacheKey;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
+    this.#refreshCredential = options.refreshCredential;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
-    this.#toolSettings = options.toolSettings;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
     this.#tools = selectedAgentTools(
       this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
-      this.#toolSettings,
+      options.toolSettings,
     );
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
@@ -281,7 +281,36 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#webSocketSession.close();
   };
 
+  #resetOutput(): void {
+    this.#onDelta?.({ content: "", reset: true, thinking: "" });
+  }
+
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
+    try {
+      return await this.#completeWithCurrentCredential(...parameters);
+    } catch (error) {
+      return recoverOpenAiOAuthUnauthorized({
+        complete: () => this.#completeWithCurrentCredential(...parameters),
+        currentCredential: this.#credential,
+        error,
+        provider: this.#provider,
+        refreshCredential: this.#refreshCredential,
+        replaceCredential: (credential) => {
+          this.#credential = credential;
+        },
+        resetOutput: () => {
+          this.#resetOutput();
+        },
+        resetTransport: () => {
+          this.#webSocketSession.close();
+        },
+      });
+    }
+  }
+
+  async #completeWithCurrentCredential(
+    ...parameters: CompletionArguments
+  ): Promise<AgentModelStep> {
     if (this.#provider !== "openai") {
       this.#onRequestState?.("active");
       return this.#completeHttp(...parameters);
@@ -294,8 +323,6 @@ export class ChatCompletionsAgentModel implements AgentModel {
     if (parameters[1]?.aborted === true) {
       throw new DOMException("The model request was aborted", "AbortError");
     }
-    // WebSocket admission no longer applies once fallback owns the request;
-    // HTTP headers and streams may remain healthy beyond the admission grace.
     this.#onRequestState?.("active");
     return this.#completeHttp(...parameters);
   }
@@ -311,7 +338,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       throw error;
     }
     if (error.started) {
-      this.#onDelta?.({ content: "", reset: true, thinking: "" });
+      this.#resetOutput();
     }
   }
 
@@ -402,7 +429,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     return {
       ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
       onRequestState: this.#onRequestState ?? (() => undefined),
-      ...optionalSignal(signal),
+      ...(signal === undefined ? {} : { signal }),
     };
   }
 

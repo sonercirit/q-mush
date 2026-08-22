@@ -3,6 +3,7 @@ import type { ProviderCredentialDetails } from "../shared/provider-credential-st
 import { APP_PATH } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
+  createApiError,
   createCookie,
   createMethodNotAllowedResponse,
   createRedirect,
@@ -46,6 +47,7 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly exchangeCredential: (
     request: CredentialExchangeRequest,
   ) => Promise<ConnectedAccountCredential>;
+  readonly credentialCookie: string;
   readonly flowCookies: FlowCookies;
   readonly redirectUri?: string;
   readonly resultParameter: string;
@@ -106,13 +108,30 @@ export class ConnectedAccountOAuth {
       secure,
     );
 
-    const requestedWorkspaceId = new URL(request.url).searchParams.get(
-      "workspaceId",
-    );
+    const requestUrl = new URL(request.url);
+    const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId");
     const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
     if (!this.#validWorkspaceScope(workspaceId, user.id)) {
-      return new Response("Invalid workspace scope", { status: 409 });
+      return createApiError("invalid_workspace_scope", 409);
     }
+    const requestedCredentialId = requestUrl.searchParams.get("credentialId");
+    if (
+      requestedCredentialId !== null &&
+      this.#credentials.readCredentialMetadata(
+        user.id,
+        requestedCredentialId,
+        workspaceId,
+      )?.requiresReauthentication !== true
+    ) {
+      return createApiError("invalid_credential", 409);
+    }
+    const credentialCookie = createFlowCookie(
+      this.#configuration.credentialCookie,
+      requestedCredentialId ?? "",
+      this.#configuration.flowCookies.path,
+      secure,
+    );
+
     const workspaceCookie = createFlowCookie(
       this.#configuration.workspaceCookie,
       workspaceId,
@@ -124,6 +143,7 @@ export class ConnectedAccountOAuth {
       ...cookies,
       userCookie,
       workspaceCookie,
+      credentialCookie,
     ]);
   }
 
@@ -145,19 +165,12 @@ export class ConnectedAccountOAuth {
     const secure = usesSecureCookies(redirectUri);
     const clearedCookies = [
       ...clearPkceCookies(this.#configuration.flowCookies, secure),
-      createCookie(
+      ...[
         this.#configuration.userCookie,
-        "",
-        0,
-        this.#configuration.flowCookies.path,
-        secure,
-      ),
-      createCookie(
+        this.#configuration.credentialCookie,
         this.#configuration.workspaceCookie,
-        "",
-        0,
-        this.#configuration.flowCookies.path,
-        secure,
+      ].map((name) =>
+        createCookie(name, "", 0, this.#configuration.flowCookies.path, secure),
       ),
     ];
     const callback = readOAuthCallback(
@@ -181,6 +194,10 @@ export class ConnectedAccountOAuth {
       request,
       this.#configuration.workspaceCookie,
     );
+    const credentialId = readCookie(
+      request,
+      this.#configuration.credentialCookie,
+    );
     if (
       flowUserId === undefined ||
       !valuesMatch(flowUserId, user.id) ||
@@ -195,21 +212,57 @@ export class ConnectedAccountOAuth {
         redirectUri,
         verifier: callback.verifier,
       });
-      this.#credentials.addConnectedAccount(
-        user,
-        credential.secret,
-        credential.details,
-        [workspaceId],
-      );
+      const isNewCredential =
+        credentialId === undefined || credentialId.length === 0;
+      const reconnecting = isNewCredential
+        ? undefined
+        : this.#credentials.readCredentialMetadata(
+            user.id,
+            credentialId,
+            workspaceId,
+          );
+      if (isNewCredential) {
+        this.#credentials.addConnectedAccount(
+          user,
+          credential.secret,
+          credential.details,
+          [workspaceId],
+        );
+      } else if (
+        reconnecting?.requiresReauthentication !== true ||
+        reconnecting.accountId !== credential.details.accountId ||
+        !this.#credentials.reconnectCredential(
+          user.id,
+          credentialId,
+          credential.secret,
+          this.#runtime.now(),
+          credential.details,
+        )
+      ) {
+        return this.#appRedirect(request, "wrong_account", clearedCookies);
+      }
       return this.#appRedirect(request, "connected", clearedCookies);
-    } catch {
-      return this.#appRedirect(request, "failed", clearedCookies);
+    } catch (error) {
+      return this.#appRedirect(
+        request,
+        error instanceof Error &&
+          error.message.includes("UNIQUE constraint failed")
+          ? "credential_conflict"
+          : "failed",
+        clearedCookies,
+      );
     }
   }
 
   #appRedirect(
     request: Request,
-    result: "connected" | "denied" | "failed" | "invalid_state",
+    result:
+      | "connected"
+      | "credential_conflict"
+      | "denied"
+      | "failed"
+      | "invalid_state"
+      | "wrong_account",
     cookies: readonly string[],
   ): Response {
     return redirectToApp(

@@ -340,6 +340,7 @@ export function credentialSummaries<T>(credentials: readonly T[]): {
     credentials: credentials.map((credential) => ({
       ...credential,
       isGlobal: true,
+      requiresReauthentication: false,
       workspaceIds: [],
     })),
   };
