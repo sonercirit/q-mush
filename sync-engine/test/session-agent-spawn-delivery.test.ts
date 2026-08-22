@@ -129,8 +129,28 @@ test("delivers and runs an idle parent after its generation advances", async () 
   expect(childStatus(completedChild)).toBe(true);
 
   await waitForTerminalParentNote(setup.sessions, childId);
-  expect(setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID)).toMatchObject({
-    generation: 1,
+  const deliveryCommand = await latestCommandFor(
+    setup,
+    SESSION_ID,
+    interveningCommand.id,
+  );
+  completeRunnerCommand(setup, deliveryCommand);
+  await waitForSessionContent(
+    setup,
+    "The advanced parent received the child report.",
+  );
+  const resumedParent = await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    (value): value is NonNullable<typeof value> =>
+      typeof value === "object" &&
+      value !== null &&
+      "generation" in value &&
+      value.generation === 2 &&
+      "status" in value &&
+      value.status === "idle",
+  );
+  expect(resumedParent).toMatchObject({
+    generation: 2,
     status: "idle",
   });
   closeSessionTestDatabase(setup.database);
