@@ -273,6 +273,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #maxOutputTokens: number | null;
   readonly #model: string;
   readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly #onRequestState: AgentModelRequestOptions["onRequestState"];
   readonly #onStepStart: () => void;
   readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
   readonly #promptCacheKey: string | undefined;
@@ -298,6 +299,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
     this.#model = options.model;
     this.#onDelta = options.onDelta;
+    this.#onRequestState = options.onRequestState;
     this.#onStepStart = options.onStepStart ?? (() => undefined);
     this.#openRouterProviderRouting =
       options.openRouterProviderRouting ??
@@ -330,6 +332,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
     if (this.#provider !== "openai") {
+      this.#onRequestState?.("active");
       return this.#completeHttp(...parameters);
     }
 
@@ -340,6 +343,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     if (parameters[1]?.aborted === true) {
       throw new DOMException("The model request was aborted", "AbortError");
     }
+    this.#onRequestState?.("active");
     return this.#completeHttp(...parameters);
   }
 
@@ -443,10 +447,12 @@ export class ChatCompletionsAgentModel implements AgentModel {
 
   #webSocketOptions(signal: AbortSignal | undefined): {
     onDelta?: (delta: ProviderTextDelta) => void;
+    onRequestState: NonNullable<AgentModelRequestOptions["onRequestState"]>;
     signal?: AbortSignal;
   } {
     return {
       ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
+      onRequestState: this.#onRequestState ?? (() => undefined),
       ...(signal === undefined ? {} : { signal }),
     };
   }
