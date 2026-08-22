@@ -13,10 +13,12 @@ import {
   continueChild,
   deferredReportSetup,
   deliverDeferredReport,
+  expectConsumedReports,
   expectDurableReport,
   expectParentWake,
   idleParent,
-  reportCount,
+  idleParentDeliverySetup,
+  requireParent,
   setChildStatus,
   terminalEventActions,
 } from "./session-terminal-event-test-helpers.ts";
@@ -27,14 +29,12 @@ test("stopping a child wakes a runnable idle parent and consumes its report", as
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
   idleParent(setup);
   const delivery = terminalEventActions(setup.store, setup.database);
-  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-  if (parent === undefined) throw new Error("Stopped child parent unavailable");
+  const parent = requireParent(setup);
 
   delivery.actions.stopChildren(parent, TEST_USER_ID);
 
   await expectParentWake(setup, delivery);
-  expect(reportCount(setup.store, setup.parentId)).toBe(2);
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  expectConsumedReports(setup, 2);
 });
 
 test("stopping children notifies the parent after delivering the stop report", () => {
@@ -43,9 +43,8 @@ test("stopping children notifies the parent after delivering the stop report", (
   const continued = continueChild(setup);
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
   expect(delivery.launchSession).not.toHaveBeenCalled();
-  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+  const parent = requireParent(setup);
   expect(parent).toMatchObject({ id: setup.parentId });
-  if (parent === undefined) throw new Error("Stopped child parent unavailable");
 
   expect(continued.id).toBe(setup.childId);
   delivery.actions.stopChildren(parent, TEST_USER_ID);
@@ -60,21 +59,20 @@ test("stopping children notifies the parent after delivering the stop report", (
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
 });
 
+type DeferredParentContext = ReturnType<typeof deferredReportSetup>;
+
 type DeferredParentCase = {
-  arrange: (context: ReturnType<typeof deferredReportSetup>) => unknown;
-  assertParent: (
-    context: ReturnType<typeof deferredReportSetup>,
-    arranged: unknown,
-  ) => void;
+  arrange: (context: DeferredParentContext) => unknown;
+  assertParent: (context: DeferredParentContext, arranged: unknown) => void;
   name: string;
   overrides?: Parameters<typeof deferredReportSetup>[0];
 };
 
 const deferredParentCases: DeferredParentCase[] = [
   ...(["paused", "stopped", "failed"] as const).map((status) => ({
-    arrange: ({ setup }) =>
+    arrange: ({ setup }: DeferredParentContext) =>
       setChildStatus({ ...setup, childId: setup.parentId }, status),
-    assertParent: ({ setup }) => {
+    assertParent: ({ setup }: DeferredParentContext) => {
       expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe(
         status,
       );
@@ -87,8 +85,8 @@ const deferredParentCases: DeferredParentCase[] = [
       ["unavailable runner", { runnerIsAvailable: () => false }],
     ] as const
   ).map(([state, overrides]) => ({
-    arrange: ({ setup }) => idleParent(setup),
-    assertParent: ({ setup }) => {
+    arrange: ({ setup }: DeferredParentContext) => idleParent(setup),
+    assertParent: ({ setup }: DeferredParentContext) => {
       expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
         generation: setup.parentGeneration,
         status: "idle",
@@ -162,9 +160,7 @@ test.each(deferredParentCases)(
 );
 
 test("a manual resume racing the deferred wake consumes one report in one attempt", async () => {
-  const setup = spawnedChildSetup();
-  idleParent(setup);
-  const delivery = terminalEventActions(setup.store, setup.database);
+  const { delivery, setup } = idleParentDeliverySetup();
   delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
 
   delivery.actions.reportedParent(
@@ -182,6 +178,5 @@ test("a manual resume racing the deferred wake consumes one report in one attemp
 
   expect(["busy", "queued"]).toContain(manual.status);
   expect(delivery.launchSession.mock.calls.length).toBeLessThanOrEqual(1);
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  expectConsumedReports(setup, 1);
 });

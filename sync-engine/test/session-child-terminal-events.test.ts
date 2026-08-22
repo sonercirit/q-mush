@@ -25,8 +25,9 @@ import {
 } from "./session-store-test-fixtures.ts";
 import {
   continueChild,
+  expectConsumedReports,
   expectParentWake,
-  idleParent,
+  idleParentDeliverySetup,
   reportCount,
   setChildStatus,
   terminalEventActions,
@@ -263,15 +264,12 @@ test("durable generation events survive recreation, compaction, and duplicate sc
 });
 
 test("startup reporting wakes an idle parent for a deferred durable event", async () => {
-  const setup = spawnedChildSetup();
-  idleParent(setup);
-  const delivery = terminalEventActions(setup.store, setup.database);
+  const { delivery, setup } = idleParentDeliverySetup();
 
   delivery.actions.reportAll(setup.store.pendingSpawnedSessions());
 
   await expectParentWake(setup, delivery);
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  expectConsumedReports(setup, 1);
 });
 
 test("idle parents persist sibling events and surface them on next resume", () => {
@@ -316,7 +314,7 @@ test("idle parents persist sibling events and surface them on next resume", () =
 
   const reports = parentReports(setup.store, setup.parentId);
   const joinedReports = reports.join("\n");
-  expect(reportCount(setup.store, setup.parentId)).toBe(2);
+  expect(parentReports(setup.store, setup.parentId)).toHaveLength(2);
   expect(joinedReports).toContain(setup.childId);
   expect(joinedReports).toContain(siblingId);
   expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);

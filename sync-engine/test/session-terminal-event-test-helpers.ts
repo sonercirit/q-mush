@@ -15,6 +15,29 @@ import {
   spawnedChildSetup,
 } from "./session-store-spawn-test-helpers.ts";
 
+export function idleParentDeliverySetup() {
+  const setup = spawnedChildSetup();
+  idleParent(setup);
+  return {
+    delivery: terminalEventActions(setup.store, setup.database),
+    setup,
+  };
+}
+
+export function expectConsumedReports(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  count: number,
+): void {
+  expect(reportCount(setup.store, setup.parentId)).toBe(count);
+  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+}
+
+export function requireParent(setup: ReturnType<typeof spawnedChildSetup>) {
+  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+  if (parent === undefined) throw new Error("Spawned child parent unavailable");
+  return parent;
+}
+
 export function deferredReportSetup(
   overrides: Parameters<typeof terminalEventActions>[3] = {},
 ) {
