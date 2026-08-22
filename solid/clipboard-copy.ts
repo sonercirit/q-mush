@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js";
 
 const COPY_FEEDBACK_DURATION_MS = 2_000;
 
@@ -26,14 +26,32 @@ interface ClipboardCopy {
 export function createClipboardCopy(text: Accessor<string>): ClipboardCopy {
   const [state, setState] = createSignal<ClipboardCopyState>("idle");
   let feedbackTimer: number | undefined;
-  const copy = async (): Promise<void> => {
+  let textRevision = 0;
+  let copySequence = 0;
+  const clearFeedback = (): void => {
     if (feedbackTimer !== undefined) {
       window.clearTimeout(feedbackTimer);
+      feedbackTimer = undefined;
     }
+  };
+  createEffect(() => {
+    text();
+    textRevision += 1;
+    copySequence += 1;
+    clearFeedback();
+    setState("idle");
+  });
+  const copy = async (): Promise<void> => {
+    clearFeedback();
+    const sequence = ++copySequence;
+    const revision = textRevision;
+    const value = text();
     try {
-      await navigator.clipboard.writeText(text());
+      await navigator.clipboard.writeText(value);
+      if (sequence !== copySequence || revision !== textRevision) return;
       setState("copied");
     } catch {
+      if (sequence !== copySequence || revision !== textRevision) return;
       setState("failed");
     }
     feedbackTimer = window.setTimeout(() => {
@@ -41,10 +59,6 @@ export function createClipboardCopy(text: Accessor<string>): ClipboardCopy {
       feedbackTimer = undefined;
     }, COPY_FEEDBACK_DURATION_MS);
   };
-  onCleanup(() => {
-    if (feedbackTimer !== undefined) {
-      window.clearTimeout(feedbackTimer);
-    }
-  });
+  onCleanup(clearFeedback);
   return { copy, state };
 }

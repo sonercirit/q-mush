@@ -91,18 +91,20 @@ Memory.
   controls; shared Unicode result bound applies after serialization.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions.
   Session roots and each expanded child group paginate independently, nesting
-  every linked child exactly once. Messages take eight 10 MB PNG/JPEG/GIF/WebP
-  images. Sessions record active time, cost, token usage, context limit;
-  reported charges win. Auto-compaction defaults on at 95%; truncation enters
-  only its immediate compactor context, including persisted manual/idle
-  compaction, so partial output stays unfinished without retry marking. Idle
-  sessions compact manually or, opted in, at 30 idle minutes; compaction
-  soft-deletes messages into a replayable handoff; replays deliver drafts, skip
-  re-verifying. Composer stays mounted across statuses, explaining unavailable
-  actions, keeping drafts; draft fields echo a local signal debounced into the
-  shared draft — submit paths flush first; local prefs filter transcript
-  categories. Provider secrets never reach browser/runner payloads. Directory
-  picker uses `solid/directory-picker-client.tsx`
+  every linked child exactly once. The owned detail header shows the stable
+  session ID with responsive selectable text and clipboard feedback; public page
+  shells contain no session identity. Messages take eight 10 MB
+  PNG/JPEG/GIF/WebP images. Sessions record active time, cost, token usage,
+  context limit; reported charges win. Auto-compaction defaults on at 95%;
+  truncation enters only its immediate compactor context, including persisted
+  manual/idle compaction, so partial output stays unfinished without retry
+  marking. Idle sessions compact manually or, opted in, at 30 idle minutes;
+  compaction soft-deletes messages into a replayable handoff; replays deliver
+  drafts, skip re-verifying. Composer stays mounted across statuses, explaining
+  unavailable actions, keeping drafts; draft fields echo a local signal
+  debounced into the shared draft — submit paths flush first; local prefs filter
+  transcript categories. Provider secrets never reach browser/runner payloads.
+  Directory picker uses `solid/directory-picker-client.tsx`
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads root
   `AGENTS.md` (else `CLAUDE.md`).
 
