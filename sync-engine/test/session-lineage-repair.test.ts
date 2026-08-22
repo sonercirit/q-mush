@@ -260,36 +260,51 @@ describe("native spawn lineage repair", () => {
     closeSetup(setup);
   });
 
-  test("repairs a missing parent while preserving a non-null generation guard", () => {
-    const setup = orphanSetup();
-    directProvenance(setup, "generation-guard");
-    updateChild(setup, {
-      parentExecutionGeneration: setup.parent.generation,
-      parentSessionId: null,
-    });
-    setup.database.$client.run(`
-      CREATE TRIGGER mutate_generation_before_lineage_repair
-      BEFORE UPDATE OF parent_session_id ON agent_sessions
-      WHEN OLD.id = '${setup.child.id}'
-      BEGIN
-        UPDATE agent_sessions
-        SET parent_execution_generation = OLD.parent_execution_generation + 1
-        WHERE id = OLD.id;
-        SELECT RAISE(IGNORE);
-      END
-    `);
+  test.each([
+    { field: "generation", parent: false },
+    { field: "parent", parent: true },
+  ] as const)(
+    "skips a stale repair after another repair changes its $field guard",
+    ({ field, parent }) => {
+      const setup = directOrphan(`guard-trigger-first-${field}`);
+      const staleChild = createTestSession(setup.store, TEST_NOW + 2);
+      updateChild(
+        { ...setup, child: staleChild },
+        {
+          parentCallbackGeneration: null,
+          parentExecutionGeneration: null,
+          parentSessionId: null,
+        },
+      );
+      toolResult(setup, {
+        content: spawnOutput(staleChild.id),
+        id: `guard-trigger-second-${field}`,
+        toolName: "spawn_session",
+      });
+      const mutation = parent
+        ? `parent_session_id = '${staleChild.id}'`
+        : `parent_execution_generation = ${String(setup.parent.generation + 1)}`;
+      setup.database.$client.run(`
+        CREATE TRIGGER mutate_other_lineage_after_repair_${field}
+        AFTER UPDATE OF parent_session_id ON agent_sessions
+        WHEN OLD.id = '${setup.child.id}'
+        BEGIN
+          UPDATE agent_sessions SET ${mutation} WHERE id = '${staleChild.id}';
+        END
+      `);
 
-    expect(setup.store.repairSpawnedSessionLineage(TEST_NOW + 3)).toMatchObject(
-      { repaired: 0, skipped: 1 },
-    );
-    const lineage = storedSessionLineage(setup);
-    if (lineage === undefined) throw new TypeError("Child lineage unavailable");
-    expect([
-      lineage.parentSessionId,
-      lineage.parentExecutionGeneration,
-    ]).toEqual([null, setup.parent.generation + 1]);
-    closeSetup(setup);
-  });
+      expect(setup.store.repairSpawnedSessionLineage(TEST_NOW + 3)).toEqual({
+        ambiguous: 0,
+        repaired: 1,
+        skipped: 1,
+      });
+      expect(storedSessionLineage(setup, staleChild.id)).toEqual({
+        parentExecutionGeneration: parent ? null : setup.parent.generation + 1,
+        parentSessionId: parent ? staleChild.id : null,
+      });
+      closeSetup(setup);
+    },
+  );
 
   test.each(["direct", "parallel"] as const)(
     "repairs one same-owner workspace %s result without rearming its callback",

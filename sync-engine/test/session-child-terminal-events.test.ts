@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
@@ -199,6 +201,36 @@ function compactRunningParent(
     TEST_NOW + 7,
   );
 }
+
+function runningChildWithoutCallback() {
+  const setup = spawnedRunningChildSetup("independent runtime generations");
+  const child = setup.store.get(TEST_USER_ID, setup.childId);
+  if (child === undefined) throw new Error("Running child unavailable");
+  setup.database
+    .update(agentSessions)
+    .set({ parentCallbackGeneration: null })
+    .where(eq(agentSessions.id, child.id))
+    .run();
+  return { child, setup };
+}
+
+test("runtime terminal settlement uses the callback generation independently", () => {
+  const { child, setup } = runningChildWithoutCallback();
+
+  setup.store.commitRuntimeTerminal(
+    child.id,
+    [terminalRecordedMessage("independent terminal")],
+    TEST_NOW + 6,
+    child.generation,
+    null,
+  );
+
+  expect(setup.store.get(TEST_USER_ID, child.id)).toMatchObject({
+    parentExecutionGeneration: setup.parentGeneration,
+    status: "idle",
+  });
+  closeSpawnedChildSetup(setup);
+});
 
 test("continued child generations retain the parent delivery route", () => {
   const setup = spawnedChildSetup();

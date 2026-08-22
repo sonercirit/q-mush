@@ -1,4 +1,6 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
+import { agentSessions } from "../../shared/database/schema.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -19,6 +21,28 @@ describe("session store output limits", () => {
         createTestSession(store, TEST_NOW, { maxOutputTokens }),
       ).toThrow("output limit is invalid");
     }
+    database.$client.close();
+  });
+
+  test("recovers a terminal child as idle when only its callback route was cleared", () => {
+    const { database, store } = runningStore();
+    database
+      .update(agentSessions)
+      .set({ parentCallbackGeneration: null, parentExecutionGeneration: 7 })
+      .where(eq(agentSessions.id, STORE_SESSION_ID))
+      .run();
+    store.appendRuntimeAgentMessages(
+      STORE_SESSION_ID,
+      [{ content: "Recovered child answer", role: "assistant", toolCalls: [] }],
+      TEST_NOW + 2,
+      0,
+    );
+
+    expect(store.failInterrupted(TEST_NOW + 3)).toEqual([]);
+    expect(store.get(TEST_USER_ID, STORE_SESSION_ID)).toMatchObject({
+      parentExecutionGeneration: 7,
+      status: "idle",
+    });
     database.$client.close();
   });
 

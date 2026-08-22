@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import type { AgentSessionSummary } from "../shared/session-model.ts";
 import type { SessionController } from "./session-controller.ts";
+import { boundedSessionRows } from "./session-list-bounds.ts";
 import {
   executionEnvironmentLabel,
   SessionMetrics,
@@ -136,42 +137,6 @@ function visibleSessionRows(
   };
   for (const root of roots) append(root, 0);
   return rows;
-}
-
-function boundedSessionRows(
-  rows: readonly SessionListRow[],
-  limit: number,
-  selectedId: string | undefined,
-): readonly SessionListRow[] {
-  if (rows.length <= limit) return rows;
-  const selectedIndex = rows.findIndex(
-    ({ session }) => session.id === selectedId,
-  );
-  if (selectedIndex < limit) return rows.slice(0, limit);
-
-  const selectedPath: SessionListRow[] = [];
-  let expectedDepth = rows[selectedIndex]?.depth ?? -1;
-  for (
-    let index = selectedIndex;
-    index >= 0 && expectedDepth >= 0;
-    index -= 1
-  ) {
-    const row = rows[index];
-    if (row?.depth === expectedDepth) {
-      selectedPath.push(row);
-      expectedDepth -= 1;
-    }
-  }
-  const requiredRows = selectedPath.reverse().slice(-limit);
-  const requiredIds = new Set(requiredRows.map(({ session }) => session.id));
-  const leadingRows = rows
-    .slice(0, limit)
-    .filter(({ session }) => !requiredIds.has(session.id))
-    .slice(0, limit - requiredRows.length);
-  const includedIds = new Set(
-    [...leadingRows, ...requiredRows].map(({ session }) => session.id),
-  );
-  return rows.filter(({ session }) => includedIds.has(session.id));
 }
 
 function selectedAncestorIds(

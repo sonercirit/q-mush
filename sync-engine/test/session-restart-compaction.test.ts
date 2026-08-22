@@ -91,6 +91,22 @@ function settleClaimedRestart(
 }
 
 describe("restart handoff generation fencing", () => {
+  test("idle settlement uses a cleared callback route independently", () => {
+    const { identity, setup } = runningClaimedRestart("callback-independent");
+    setup.database
+      .update(agentSessions)
+      .set({ parentCallbackGeneration: null, parentExecutionGeneration: 9 })
+      .where(eq(agentSessions.id, identity.sessionId))
+      .run();
+
+    settleClaimedRestart(setup, identity, { status: "idle" });
+    expect(setup.store.get(TEST_USER_ID, identity.sessionId)).toMatchObject({
+      parentExecutionGeneration: 9,
+      status: "idle",
+    });
+    closeCompactionStore(setup);
+  });
+
   test("rejects malformed persisted handoffs", () => {
     const valid = {
       executionGeneration: 1,
