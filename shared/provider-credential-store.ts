@@ -665,12 +665,11 @@ export class ProviderCredentialStore {
       .get();
     if (stored === undefined) return false;
     const fingerprint = fingerprintProviderCredential(secret, stored);
-    const collision = this.#database
-      .select({ id: providerCredentials.id })
-      .from(providerCredentials)
-      .where(fingerprintCondition(this.#provider, userId, fingerprint))
-      .get();
-    if (collision !== undefined && collision.id !== credentialId) {
+    const collision = matchingCredentialId(
+      this.#database,
+      fingerprintCondition(this.#provider, userId, fingerprint),
+    );
+    if (collision !== undefined && collision !== credentialId) {
       throw new DuplicateProviderCredentialError();
     }
     const updated = this.#database
