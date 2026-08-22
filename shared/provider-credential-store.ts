@@ -256,21 +256,18 @@ function legacyCredentialSummary(
     source: credential.source,
   };
 }
-
 export interface ProviderCredentialPage {
   readonly items: readonly (ProviderCredentialSummary & {
     readonly provider: ProviderId;
   })[];
   readonly totalItems: number;
 }
-
 export class ProviderCredentialStore {
   readonly #cipher: CredentialCipher;
   readonly #database: AppDatabase;
   readonly #generateId: IdGenerator;
   readonly #provider: CredentialProviderId;
   readonly #scopeConfiguration: ConnectionScopeConfiguration;
-
   constructor(
     database: AppDatabase,
     cipher: CredentialCipher,
@@ -288,14 +285,12 @@ export class ProviderCredentialStore {
       ownerTable: providerCredentials,
     };
   }
-
   validateScopes(
     userId: string,
     workspaceIds: readonly string[],
   ): readonly string[] {
     return validateConnectionScopes(this.#database, userId, workspaceIds);
   }
-
   add(
     userId: string,
     credential: string,
@@ -321,11 +316,9 @@ export class ProviderCredentialStore {
       .from(providerCredentials)
       .where(fingerprintCondition(this.#provider, userId, fingerprint))
       .get();
-
     if (existing !== undefined && !existing.isDeleted) {
       throw new DuplicateProviderCredentialError();
     }
-
     const id = existing?.id ?? this.#generateId(now);
     const normalizedScopes = this.validateScopes(userId, workspaceIds);
     const isGlobal = normalizedScopes.includes(GLOBAL_WORKSPACE_ID);
@@ -368,7 +361,6 @@ export class ProviderCredentialStore {
           .where(eq(providerCredentials.id, id))
           .run();
       }
-
       replaceConnectionScopes(
         transaction,
         this.#scopeConfiguration,
@@ -389,7 +381,6 @@ export class ProviderCredentialStore {
       };
     });
   }
-
   list(
     userId: string,
     workspaceId?: string,
@@ -404,7 +395,6 @@ export class ProviderCredentialStore {
       workspaceIds: this.#workspaceIds(userId, credential.id),
     }));
   }
-
   #workspaceIds(userId: string, credentialId: string): readonly string[] {
     return readConnectionScopes(
       this.#database,
