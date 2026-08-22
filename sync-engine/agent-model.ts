@@ -29,6 +29,7 @@ import {
 import {
   agentCredentialFingerprint,
   usesAnthropicFormat,
+  type AgentCredentialRefresher,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
 } from "./agent-model-options.ts";
@@ -53,6 +54,7 @@ import {
   isOfficialAnthropicEndpoint,
 } from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
+import { recoverOpenAiOAuthUnauthorized } from "./openai-unauthorized-recovery.ts";
 import { completeProviderHttp } from "./provider-http.ts";
 import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
@@ -262,7 +264,7 @@ function validateAnthropicStepContinuation(
 
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
-  readonly #credential: AgentProviderCredential;
+  #credential: AgentProviderCredential;
   readonly #credentialFingerprint: string;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
@@ -275,6 +277,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #promptCacheKey: string | undefined;
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
+  readonly #refreshCredential: AgentCredentialRefresher | undefined;
   readonly #resolvedModel: string | null | undefined;
   #resolvedModelPromise: Promise<string | undefined> | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
@@ -305,6 +308,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#promptCacheKey = options.promptCacheKey;
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
+    this.#refreshCredential = options.refreshCredential;
     this.#resolvedModel = options.resolvedModel;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
@@ -324,7 +328,36 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#webSocketSession.close();
   };
 
+  #resetOutput(): void {
+    this.#onDelta?.({ content: "", reset: true, thinking: "" });
+  }
+
   async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
+    try {
+      return await this.#completeWithCurrentCredential(...parameters);
+    } catch (error) {
+      return recoverOpenAiOAuthUnauthorized({
+        complete: () => this.#completeWithCurrentCredential(...parameters),
+        currentCredential: this.#credential,
+        error,
+        provider: this.#provider,
+        refreshCredential: this.#refreshCredential,
+        replaceCredential: (credential) => {
+          this.#credential = credential;
+        },
+        resetOutput: () => {
+          this.#resetOutput();
+        },
+        resetTransport: () => {
+          this.#webSocketSession.close();
+        },
+      });
+    }
+  }
+
+  async #completeWithCurrentCredential(
+    ...parameters: CompletionArguments
+  ): Promise<AgentModelStep> {
     if (this.#provider !== "openai") {
       this.#onRequestState?.("active");
       return this.#completeHttp(...parameters);
@@ -352,7 +385,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       throw error;
     }
     if (error.started) {
-      this.#onDelta?.(emptyOutputDelta());
+      this.#resetOutput();
     }
   }
 

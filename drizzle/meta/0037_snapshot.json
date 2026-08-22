@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "de2aa140-7035-4f52-a75a-c4d883b2551b",
+  "id": "53ad1762-de47-4cbd-80d9-71e5b838c58b",
   "prevId": "eecfb908-6b7e-4015-834c-3214121d61f6",
   "tables": {
     "agent_messages": {
@@ -109,13 +109,6 @@
         },
         "tool_calls": {
           "name": "tool_calls",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "provider_replay": {
-          "name": "provider_replay",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1651,6 +1644,14 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        },
+        "requires_reauthentication": {
+          "name": "requires_reauthentication",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "is_default": {
           "name": "is_default",

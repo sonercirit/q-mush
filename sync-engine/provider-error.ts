@@ -28,6 +28,10 @@ const TRANSIENT_ERROR_CODES = new Set([
   "timeout",
   "upstream_error",
 ]);
+const OPENAI_AUTHENTICATION_ERROR_CODES = new Set([
+  "authentication_error",
+  "invalid_api_key",
+]);
 const PERMANENT_ERROR_CODES = new Set([
   "authentication_error",
   "bad_request",
@@ -68,6 +72,16 @@ export class ProviderCredentialRejectionError extends Error {
   }
 }
 
+export class ProviderCredentialReauthenticationRequiredError extends ProviderCredentialRejectionError {
+  constructor(providerName: string, status: 400 | 401 | 403 = 401) {
+    super(
+      `${providerName} login has expired. Connect the account again to continue.`,
+      status,
+    );
+    this.name = "ProviderCredentialReauthenticationRequiredError";
+  }
+}
+
 export function isProviderCredentialRejection(
   error: unknown,
 ): error is ProviderCredentialRejectionError {
@@ -75,8 +89,10 @@ export function isProviderCredentialRejection(
 }
 
 export class ProviderStreamError extends Error {
+  readonly authenticationFailure: boolean;
   readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
+  readonly status: number | undefined;
   readonly transient: boolean;
 
   constructor(
@@ -85,16 +101,20 @@ export class ProviderStreamError extends Error {
     options: ProviderStreamErrorOptions = {},
   ) {
     super(message);
+    this.authenticationFailure = options.authenticationFailure === true;
     this.name = "ProviderStreamError";
     this.reconnectWebSocket = options.reconnectWebSocket === true;
     this.retryAfterMilliseconds = options.retryAfterMilliseconds;
+    this.status = options.status;
     this.transient = transient;
   }
 }
 
 interface ProviderStreamErrorOptions {
+  readonly authenticationFailure?: boolean;
   readonly reconnectWebSocket?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
+  readonly status?: number | undefined;
 }
 
 function requiredTrimmedString(value: unknown): string | undefined {
@@ -202,6 +222,13 @@ function providerErrorDetails(
   };
 }
 
+function codeIsAuthenticationFailure(code: ProviderErrorCode): boolean {
+  return (
+    typeof code === "string" &&
+    OPENAI_AUTHENTICATION_ERROR_CODES.has(code.toLowerCase())
+  );
+}
+
 function codeIsWebSocketConnectionLimit(code: ProviderErrorCode): boolean {
   if (typeof code === "number") {
     return false;
@@ -254,8 +281,10 @@ export function readProviderStreamError(
     providerErrorMessage(details),
     !permanent && (transient || isProviderStreamErrorEvent(event)),
     {
+      authenticationFailure: details.codes.some(codeIsAuthenticationFailure),
       reconnectWebSocket: details.codes.some(codeIsWebSocketConnectionLimit),
       retryAfterMilliseconds: details.retryAfterMilliseconds,
+      status: details.status,
     },
   );
 }

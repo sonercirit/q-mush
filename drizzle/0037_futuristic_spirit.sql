@@ -1,0 +1,1 @@
+ALTER TABLE `provider_credentials` ADD `requires_reauthentication` integer DEFAULT false NOT NULL;

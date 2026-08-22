@@ -1,16 +1,21 @@
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
+import { createCredentialCipher } from "../../shared/credential-cipher.ts";
+import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import {
   createAuthenticatedRequest,
   readFlowCookies,
+  TEST_NOW,
+  TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { expectPkceParameters, expectRedirect } from "./oauth-test-helpers.ts";
 import { unavailableProviderResponse } from "./provider-fetch-fixtures.ts";
 import {
   addProviderApiKeys,
+  beginProviderAccount,
   createProviderAccountConnector,
   createProviderTestSetup,
   credentialSummaries,
@@ -79,6 +84,7 @@ const MANUAL_KEY_DETAILS = {
 interface KeyDetails {
   readonly accountId: string;
   readonly label: string;
+  oauthAccountId?: string | null;
 }
 
 function createProviderFetch(
@@ -89,8 +95,14 @@ function createProviderFetch(
     const request = recordProviderRequest(requests, input, init);
 
     if (request.url === "https://openrouter.ai/api/v1/auth/keys") {
+      const oauthAccountId = detailsByKey[OAUTH_KEY]?.oauthAccountId;
       return Promise.resolve(
-        Response.json({ key: OAUTH_KEY, user_id: "openrouter-account-oauth" }),
+        Response.json({
+          key: OAUTH_KEY,
+          ...(oauthAccountId === null
+            ? {}
+            : { user_id: oauthAccountId ?? "openrouter-account-oauth" }),
+        }),
       );
     }
 
@@ -111,7 +123,7 @@ const INTEGRATION_TEST_CONFIGURATION = defineProviderTestConfiguration(
   createOpenRouterIntegrationFromEnvironment,
   [OAUTH_CREDENTIAL_ID, FIRST_KEY_ID, SECOND_KEY_ID],
   "openrouter",
-  [STATE, VERIFIER],
+  [STATE, VERIFIER, "openrouter-state-two", "openrouter-verifier-two"],
 );
 
 const setupIntegration = createProviderTestSetup(
@@ -125,6 +137,49 @@ const setupDefaultIntegration = createProviderTestSetup({
 const connectAccount = createProviderAccountConnector(TEST_ROUTES);
 
 describe("OpenRouter credentials", () => {
+  test("rejects reconnect when OpenRouter omits the account identity", async () => {
+    const { database, integration } = setupIntegration({
+      [OAUTH_KEY]: {
+        accountId: "unused",
+        label: "unused",
+        oauthAccountId: null,
+      },
+    });
+    await connectAccount(integration, STATE, "authorization-code");
+    const store = new ProviderCredentialStore(
+      database,
+      createCredentialCipher(ENVIRONMENT.OPENROUTER_CREDENTIAL_KEY),
+      "openrouter",
+    );
+    store.markRequiresReauthentication(
+      TEST_USER_ID,
+      OAUTH_CREDENTIAL_ID,
+      TEST_NOW,
+    );
+    database.$client
+      .query(
+        "UPDATE provider_credentials SET provider_account_id = NULL WHERE id = ?",
+      )
+      .run(OAUTH_CREDENTIAL_ID);
+    const unchangedSecret = store.readSecret(TEST_USER_ID, OAUTH_CREDENTIAL_ID);
+    const reconnect = beginProviderAccount({
+      callbackPath: TEST_ROUTES.callbackPath,
+      code: "authorization-code",
+      integration,
+      oauthPath: `${TEST_ROUTES.oauthPath}?credentialId=${OAUTH_CREDENTIAL_ID}`,
+      state: "openrouter-state-two",
+    });
+
+    expectRedirect(
+      await integration.complete(reconnect.callbackRequest),
+      "http://localhost:3000/app?openrouter=wrong_account",
+    );
+    expect(store.readSecret(TEST_USER_ID, OAUTH_CREDENTIAL_ID)).toBe(
+      unchangedSecret,
+    );
+    database.$client.close();
+  });
+
   test("connects accounts with OAuth PKCE and stores multiple accounts or keys", async () => {
     const { database, integration, providerRequests } =
       setupIntegration(MANUAL_KEY_DETAILS);

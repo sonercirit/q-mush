@@ -13,6 +13,15 @@ import {
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
+export const OPENAI_AUTHENTICATION_ERROR_EVENT = {
+  error: {
+    code: "invalid_api_key",
+    message: "Incorrect API key provided",
+    type: "authentication_error",
+  },
+  type: "error",
+};
+
 export const COMPLETED_EVENT = {
   response: {
     output: [
@@ -32,16 +41,18 @@ export class FakeProviderSocket extends RecordingTestSocket {
   closeCode: number | undefined;
   closeCount = 0;
   closeReason: string | undefined;
+  readonly headers: Readonly<Record<string, string>>;
   readonly #listeners = new Map<
     string,
     Set<EventListenerOrEventListenerObject>
   >();
 
-  constructor() {
+  constructor(headers: Readonly<Record<string, string>> = {}) {
     super({
       closeEvent: () => new CloseEvent("close", { code: 1000 }),
       readyState: WebSocket.CONNECTING,
     });
+    this.headers = headers;
   }
 
   #changeListener(
@@ -139,8 +150,8 @@ export function recordDelay(delays: number[]): ModelRequestSleep {
 export class FakeProviderSockets {
   readonly created: FakeProviderSocket[] = [];
 
-  readonly create: WebSocketFactory = () => {
-    const socket = new FakeProviderSocket();
+  readonly create: WebSocketFactory = (_url, options) => {
+    const socket = new FakeProviderSocket(options.headers);
     this.created.push(socket);
     return socket;
   };
@@ -167,6 +178,17 @@ export function requireProviderSocket(
   if (socket === undefined) {
     throw new Error(`Provider socket ${String(index)} was not created`);
   }
+  return socket;
+}
+
+export async function openAndRejectProviderSocket(
+  sockets: FakeProviderSockets,
+  index: number,
+): Promise<FakeProviderSocket> {
+  await sockets.waitForAttempt(index);
+  const socket = requireProviderSocket(sockets, index);
+  socket.open();
+  socket.receive(OPENAI_AUTHENTICATION_ERROR_EVENT);
   return socket;
 }
 

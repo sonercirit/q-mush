@@ -63,6 +63,39 @@ function optionCall(
 }
 
 describe("agent model option discovery", () => {
+  test("rejects a persisted credential requiring reauthentication", async () => {
+    let discoveryCalls = 0;
+    const setup = await startToolSession(
+      scriptedModel([
+        {
+          content: "Inspect the unavailable credential.",
+          toolCalls: [optionCall("reauthentication-required", {})],
+        },
+        { content: "Credential checked.", toolCalls: [] },
+      ]),
+      {},
+      () => {
+        discoveryCalls += 1;
+        return catalog([modelOption(1)]);
+      },
+    );
+    setup.database.$client
+      .query(
+        "UPDATE provider_credentials SET requires_reauthentication = 1 WHERE id = ?",
+      )
+      .run(CREDENTIAL_ID);
+    const outputs = findToolResultContents(
+      await completedParentDetail(setup, "idle"),
+      "get_session_options",
+    );
+
+    expect(outputs).toEqual([
+      "Error: The model credential or provider is unavailable",
+    ]);
+    expect(discoveryCalls).toBe(1);
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("pages a large discovered catalog in stable provider order", async () => {
     const models = largeCatalog();
     const setup = await startModelOptionSession(models, [

@@ -24,6 +24,7 @@ import type { LoadedSessionDetailViewProps } from "./session-detail-view-props.t
 import { SessionEditorGroup } from "./session-editor-group.tsx";
 import { SessionForkEditor } from "./session-fork-client.tsx";
 import { SessionHistoryControls } from "./session-history-client.tsx";
+import { SessionIdentity } from "./session-identity.tsx";
 import {
   createSessionShortcuts,
   sessionComposerShortcut,
@@ -38,10 +39,12 @@ import { SessionStopDialog } from "./session-stop-dialog.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
+import {
+  isAtTranscriptScrollEnd,
+  transcriptScrollLock,
+} from "./session-transcript-scroll.ts";
 import { SessionTranscript } from "./session-transcript.tsx";
 import { SessionUsage } from "./session-usage-view.tsx";
-
-const SCROLL_END_TOLERANCE = 64;
 
 function currentPendingInputs(
   fallback: AgentSessionDetail,
@@ -84,13 +87,6 @@ function scrollRevision(
       ? "none"
       : `${detail.agentFile.name}:${String(detail.agentFile.content.length)}`;
   return `${detail.id}:${agentFileRevision}:${String(messages.length)}:${messages.at(-1)?.id ?? ""}`;
-}
-
-function isAtScrollEnd(element: HTMLElement): boolean {
-  return (
-    element.scrollHeight - element.clientHeight - element.scrollTop <=
-    SCROLL_END_TOLERANCE
-  );
 }
 
 export function SessionDetailBody(props: {
@@ -227,6 +223,7 @@ export function SessionDetailBody(props: {
               {`· Agent file: ${view().detail.agentFile?.name ?? "None"}`}
             </span>
           </div>
+          <SessionIdentity sessionId={view().detail.id} />
           <span class="mt-2 block">{props.sessionMetrics}</span>
           <SessionUsage kind="session" usage={view().detail.tokenUsage} />
         </div>
@@ -335,13 +332,15 @@ export function SessionDetailBody(props: {
         data-session-transcript="true"
         onScroll={(event) => {
           const element = event.currentTarget;
-          const programmatic = element.scrollTop === programmaticScrollTop;
+          const locked = transcriptScrollLock(
+            element,
+            {
+              programmaticScrollTop,
+              scrollLockEnabled: scrollLockEnabled(),
+            },
+            isAtTranscriptScrollEnd,
+          );
           programmaticScrollTop = undefined;
-          // A scroll from our last write can arrive after streamed layout grows.
-          // Preserve the lock for that event; user scrolling still uses proximity.
-          const locked = programmatic
-            ? scrollLockEnabled()
-            : isAtScrollEnd(element);
           shouldScrollToEnd = locked;
           setScrollLockEnabled(locked);
         }}

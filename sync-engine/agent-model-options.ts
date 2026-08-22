@@ -37,6 +37,10 @@ export type AgentProviderDiscoveryCredential = Omit<
   "id"
 >;
 
+export type AgentCredentialRefresher = (
+  credential: AgentProviderCredential,
+) => Promise<AgentProviderCredential>;
+
 // The one authoritative "does this session speak Anthropic Messages?"
 // predicate: request building, discovery, and the lazy output-limit refresh
 // must agree on it.
@@ -64,6 +68,7 @@ export interface AgentModelRequestOptions {
   readonly promptCacheKey?: string;
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
+  readonly refreshCredential?: AgentCredentialRefresher;
   readonly resolvedModel?: string | null;
   readonly systemPrompt?: string;
   readonly toolSettings?: ToolSettings;

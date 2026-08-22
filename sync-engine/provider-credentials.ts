@@ -264,6 +264,16 @@ export class ProviderCredentialEndpoints {
     }
   }
 
+  readCredentialMetadata(
+    userId: string,
+    credentialId: string,
+    workspaceId?: string,
+  ): ProviderCredentialSummary | undefined {
+    return this.#store
+      ?.list(userId, workspaceId)
+      .find((credential) => credential.id === credentialId);
+  }
+
   readCredential(
     userId: string,
     credentialId: string,
@@ -286,10 +296,33 @@ export class ProviderCredentialEndpoints {
     credentialId: string,
     secret: string,
     now: number,
-  ): void {
-    if (this.#store?.updateSecret(userId, credentialId, secret, now) !== true) {
-      throw new Error("The provider credential is no longer available");
+  ): boolean {
+    const store = this.#store;
+    if (store === undefined) {
+      return false;
     }
+    return store.updateSecret(userId, credentialId, secret, now);
+  }
+
+  reconnectCredential(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+    details: ProviderCredentialDetails,
+  ): boolean {
+    if (this.#store === undefined) {
+      return false;
+    }
+    return this.#store.updateSecret(
+      userId,
+      credentialId,
+      secret,
+      now,
+      true,
+      details.accountId ?? undefined,
+      details.label,
+    );
   }
 
   addConnectedAccount(
