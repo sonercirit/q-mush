@@ -67,9 +67,9 @@ import {
 } from "./session-current-model.ts";
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
-import { createOpenAiSessionCredentialRefresher } from "./session-openai-credential-refresh.ts";
 import { SessionRecorder } from "./session-recorder.ts";
 import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
+import { runtimeCredentialRefresher } from "./session-runtime-credential-refresh.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -153,16 +153,7 @@ async function loadModels(
       const onRequestState = (state: ProviderRequestState) => {
         markProviderPending(runtime, state);
       };
-      const refreshCredential = createOpenAiSessionCredentialRefresher({
-        credential: runtime.credential,
-        readCredential: runtime.readCredential,
-        selection: {
-          credentialId: runtime.detail.credentialId,
-          provider: runtime.detail.provider,
-          workspaceId: runtime.detail.workspaceId,
-        },
-        userId: runtime.userId,
-      });
+      const refreshCredential = runtimeCredentialRefresher(runtime);
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
