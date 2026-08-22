@@ -257,7 +257,7 @@ function legacyCredentialSummary(
   };
 }
 export interface ProviderCredentialPage {
-  readonly items: readonly (ProviderCredentialSummary & {
+  readonly items: readonly(ProviderCredentialSummary & {
     readonly provider: ProviderId;
   })[];
   readonly totalItems: number;
