@@ -3,7 +3,7 @@ import type { AgentAttachment } from "../../shared/agent-attachments.ts";
 import type { AttachmentFallbackSelection } from "../../shared/attachment-fallback.ts";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-
+import type { AgentCredentialRefresher } from "../agent-model-options.ts";
 import { explainAttachment } from "../attachment-fallback-model.ts";
 import type { AgentModelFactory } from "../session-agent-models.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
@@ -27,7 +27,7 @@ const CURRENT_CREDENTIAL = {
   isGlobal: true,
   label: "Current",
   secret: "secret",
-  source: "api_key" as const,
+  source: "oauth" as const,
 };
 const FALLBACK_CREDENTIAL = {
   ...CURRENT_CREDENTIAL,
@@ -49,7 +49,9 @@ function options(
     stepStarts.push("complete");
     return Promise.resolve(providerStep("explained"));
   });
+  const factoryCalls: Parameters<AgentModelFactory>[0][] = [];
   const factory = vi.fn((factoryOptions: Parameters<AgentModelFactory>[0]) => {
+    factoryCalls.push(factoryOptions);
     if (factoryOptions.onRequestState !== undefined) {
       requestStateCallbacks.push(factoryOptions.onRequestState);
     }
@@ -58,6 +60,7 @@ function options(
   return {
     complete,
     factory,
+    factoryCalls,
     requestStateCallbacks,
     requestStates,
     stepStarts,
@@ -158,16 +161,46 @@ describe("explain attachment", () => {
     expect(explanation.content).toContain("maximum output tokens");
   });
 
-  test("uses the session model when it supports the file modality", async () => {
+  test("uses the session model and its existing refresher for native files", async () => {
     const setup = options(["text", "file"]);
+    const refreshCredential: AgentCredentialRefresher = (credential) =>
+      Promise.resolve(credential);
 
-    await explainAttachment(setup.value);
+    await explainAttachment({ ...setup.value, refreshCredential });
 
     expect(setup.factory).toHaveBeenCalledWith(
       expect.objectContaining({
         credential: CURRENT_CREDENTIAL,
         model: "current-model",
+        refreshCredential,
       }),
+    );
+  });
+
+  test("binds a distinct OpenAI OAuth fallback refresher to that credential", async () => {
+    const setup = options(["text"]);
+    const currentRefreshCredential: AgentCredentialRefresher = (credential) =>
+      Promise.resolve(credential);
+    const readCredential = vi.fn(setup.value.resources.readCredential);
+
+    await explainAttachment({
+      ...setup.value,
+      refreshCredential: currentRefreshCredential,
+      resources: { ...setup.value.resources, readCredential },
+    });
+
+    const refreshCredential = setup.factoryCalls[0]?.refreshCredential;
+    if (refreshCredential === undefined) {
+      throw new Error("The fallback model has no credential refresher");
+    }
+    expect(refreshCredential).not.toBe(currentRefreshCredential);
+    await expect(refreshCredential(FALLBACK_CREDENTIAL)).resolves.toBe(
+      FALLBACK_CREDENTIAL,
+    );
+    expect(readCredential).toHaveBeenLastCalledWith(
+      "user-1",
+      { ...FALLBACK, workspaceId: "workspace-1" },
+      { force: true, rejectedSecret: FALLBACK_CREDENTIAL.secret },
     );
   });
 

@@ -63,6 +63,7 @@ export function createFallbackModel(
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
+    readonly refreshCredential?: AgentModelFactoryOptions["refreshCredential"];
     readonly toolSettings: ToolSettings;
   },
 ): AgentModel {
@@ -77,6 +78,9 @@ export function createFallbackModel(
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
+    ...(selection.refreshCredential === undefined
+      ? {}
+      : { refreshCredential: selection.refreshCredential }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",

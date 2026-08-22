@@ -230,7 +230,6 @@ export class ConnectedAccountOAuth {
         );
       } else if (
         reconnecting?.requiresReauthentication !== true ||
-        credential.details.accountId === null ||
         reconnecting.accountId !== credential.details.accountId ||
         !this.#credentials.reconnectCredential(
           user.id,

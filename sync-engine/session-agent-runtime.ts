@@ -428,6 +428,7 @@ export async function runSessionAgent(
             markSessionStepStart(runtime);
           },
           prompt: typeof promptValue === "string" ? promptValue : null,
+          refreshCredential: runtimeCredentialRefresher(runtime),
           resources: runtime,
           restartRequested: runtime.restartHandoffRequested,
           toolSettings: runtime.toolSettings,
