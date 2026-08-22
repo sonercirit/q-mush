@@ -257,7 +257,7 @@ function legacyCredentialSummary(
   };
 }
 export interface ProviderCredentialPage {
-  readonly items:readonly(ProviderCredentialSummary & {
+  readonly items: readonly (ProviderCredentialSummary & {
     readonly provider: ProviderId;
   })[];
   readonly totalItems: number;
@@ -299,14 +299,14 @@ export class ProviderCredentialStore {
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
-    const fingerprintedCredential =
+    const fingerprinted =
       details.apiFormat === "anthropic"
         ? `${credential}\n${details.apiFormat}`
         : credential;
     const fingerprint = fingerprintCredential(
       details.baseUrl === undefined
-        ? fingerprintedCredential
-        : `${details.baseUrl}\n${fingerprintedCredential}`,
+        ? fingerprinted
+        : `${details.baseUrl}\n${fingerprinted}`,
     );
     const existing = this.#database
       .select({
@@ -594,7 +594,12 @@ export class ProviderCredentialStore {
     });
     return changed;
   }
-  updateSecret(userId: string, credentialId: string, secret: string, now: number): boolean {
+  updateSecret(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+  ): boolean {
     const stored = this.#database
       .select(credentialSummarySelection())
       .from(providerCredentials)
