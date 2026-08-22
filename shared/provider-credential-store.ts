@@ -569,13 +569,11 @@ export class ProviderCredentialStore {
   }
   setDefault(userId: string, credentialId: string, now: number): boolean {
     let changed = false;
-
     this.#database.transaction((transaction) => {
       const activeId = matchingCredentialId(
         transaction,
         activeCredentialCondition(this.#provider, userId, credentialId),
       );
-
       if (activeId === undefined) return;
       transaction
         .update(providerCredentials)
@@ -594,10 +592,8 @@ export class ProviderCredentialStore {
         .run();
       changed = true;
     });
-
     return changed;
   }
-
   updateSecret(userId: string, credentialId: string, secret: string, now: number): boolean {
     const stored = this.#database
       .select(credentialSummarySelection())
@@ -628,7 +624,6 @@ export class ProviderCredentialStore {
       .all();
     return updated.length > 0;
   }
-
   remove(userId: string, credentialId: string, now: number): boolean {
     const condition = activeCredentialCondition(
       this.#provider,
@@ -636,9 +631,7 @@ export class ProviderCredentialStore {
       credentialId,
     );
     const storedId = matchingCredentialId(this.#database, condition);
-
     if (storedId === undefined) return false;
-
     this.#database.transaction((transaction) => {
       const scopeArguments = [
         transaction,
@@ -659,7 +652,6 @@ export class ProviderCredentialStore {
         .where(condition)
         .run();
     });
-
     return true;
   }
 }
