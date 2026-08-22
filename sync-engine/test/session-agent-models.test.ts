@@ -207,7 +207,6 @@ describe("session agent models", () => {
   });
 
   test("constructs one runtime refresher and shares it with agent, compactor, and native attachment models", () => {
-
     const { factory, selections } = modelSelections();
     const refreshCredential = () =>
       Promise.resolve({
@@ -230,7 +229,6 @@ describe("session agent models", () => {
     expect(
       selections.map(({ refreshCredential }) => refreshCredential),
     ).toEqual([refreshCredential, refreshCredential]);
-
   });
 
   test("passes a global fallback routing selection to the agent model", () => {

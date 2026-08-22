@@ -40,12 +40,12 @@ import {
 import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
 import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
-import { validateAnthropicStepContinuation } from "./anthropic-step-continuation.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
   assertAnthropicContinuationReplays,
 } from "./anthropic-request.ts";
+import { validateAnthropicStepContinuation } from "./anthropic-step-continuation.ts";
 import {
   genericProviderEndpoint,
   isOfficialAnthropicEndpoint,

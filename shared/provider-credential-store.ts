@@ -62,14 +62,12 @@ export {
   type ProviderId,
 };
 
-
 export class DuplicateProviderCredentialError extends Error {
   constructor() {
     super("This provider credential is already stored");
     this.name = "DuplicateProviderCredentialError";
   }
 }
-
 
 function ownedDefaultCondition(
   userId: string,
@@ -84,7 +82,6 @@ function ownedDefaultCondition(
     ? condition
     : and(condition, eq(providerCredentials.provider, provider));
 }
-
 
 function matchingCredentialId(
   ...[database, condition]: readonly [
@@ -107,7 +104,6 @@ function fingerprintCondition(
   );
 }
 
-
 function legacyCredentialSummary(
   credential: ProviderCredentialSummary,
 ): ProviderCredentialSummary {
@@ -125,7 +121,6 @@ function legacyCredentialSummary(
     source: credential.source,
   };
 }
-
 
 export class ProviderCredentialStore {
   readonly #cipher: CredentialCipher;
@@ -382,7 +377,6 @@ export class ProviderCredentialStore {
     });
   }
 
-
   setScopes(
     userId: string,
     credentialId: string,
@@ -444,7 +438,6 @@ export class ProviderCredentialStore {
   }
 
   markRequiresReauthentication(
-
     userId: string,
     credentialId: string,
     now: number,
@@ -494,7 +487,6 @@ export class ProviderCredentialStore {
       provider: this.#provider,
       userId,
     };
-
   }
   remove(userId: string, credentialId: string, now: number): boolean {
     const condition = this.#activeCredentialCondition(userId, credentialId);
