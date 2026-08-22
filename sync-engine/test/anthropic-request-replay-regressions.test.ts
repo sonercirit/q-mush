@@ -243,6 +243,33 @@ describe("anthropic-format generic provider", () => {
     expect(content.slice(0, -1)).toEqual(SIGNED_REPLAY.blocks.slice(0, -1));
   });
 
+  test("marks the trailing eligible replay block before ineligible signed blocks", async () => {
+    const [thinking, redactedThinking, text, toolUse] = SIGNED_REPLAY.blocks;
+    if (
+      thinking === undefined ||
+      redactedThinking === undefined ||
+      text === undefined ||
+      toolUse === undefined
+    ) {
+      throw new Error("The signed replay fixture was incomplete");
+    }
+    const replay = {
+      ...SIGNED_REPLAY,
+      blocks: [text, toolUse, thinking, redactedThinking],
+    };
+    const { content } = await completeReplayRequest({
+      providerReplay: replay,
+      toolContent: "",
+    });
+
+    expect(content).toEqual([
+      replay.blocks[0],
+      { ...replay.blocks[1], cache_control: TEST_PROMPT_CACHE_CONTROL },
+      replay.blocks[2],
+      replay.blocks[3],
+    ]);
+  });
+
   test("keeps a thinking-only replay through completion sanitization", async () => {
     const replay = thinkingOnlyReplay();
     const messages = await replayOnlyMessages([
