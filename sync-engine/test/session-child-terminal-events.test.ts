@@ -387,6 +387,9 @@ test("runner parent reports notify and wake the delivered parent", async () => {
     const queuedParent = setup.store.get(TEST_USER_ID, setup.parentId);
     expect(queuedParent).toMatchObject({ status: "queued" });
   });
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 50);
+  });
 });
 
 test("a report to a terminal parent notifies the child route", () => {
