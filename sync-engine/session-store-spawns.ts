@@ -8,6 +8,7 @@ import type {
   AgentSessionStatus,
 } from "../shared/session-model.ts";
 import { appendSystemPendingInput } from "./session-pending-inputs.ts";
+import { spawnedSessionCanReport } from "./session-spawn-report.ts";
 import { ownedActiveSessionCondition } from "./session-store-condition.ts";
 import {
   storedSessionCondition,
@@ -120,7 +121,12 @@ export interface PendingSpawnedSession {
   readonly userId: string;
 }
 
-const REPORTABLE_CHILD_STATUSES = ["completed", "failed", "stopped"] as const;
+const REPORTABLE_CHILD_STATUSES = [
+  "completed",
+  "failed",
+  "idle",
+  "stopped",
+] as const;
 
 export function pendingSpawnedSessions(
   database: AppDatabase,
@@ -153,11 +159,23 @@ export function pendingSpawnedSessions(
     )
     .orderBy(asc(agentSessions.createdAt), asc(agentSessions.id))
     .$dynamic();
-  const rows = limit === undefined ? query.all() : query.limit(limit).all();
-  return rows.flatMap(({ id, userId }) => {
-    const detail = read(userId, id);
-    return detail === undefined ? [] : [{ detail, userId }];
-  });
+  const pending: PendingSpawnedSession[] = [];
+  let offset = 0;
+  for (;;) {
+    const rows =
+      limit === undefined
+        ? query.all()
+        : query.limit(limit).offset(offset).all();
+    for (const { id, userId } of rows) {
+      const detail = read(userId, id);
+      if (detail !== undefined && spawnedSessionCanReport(detail)) {
+        pending.push({ detail, userId });
+        if (limit !== undefined && pending.length === limit) return pending;
+      }
+    }
+    if (limit === undefined || rows.length < limit) return pending;
+    offset += rows.length;
+  }
 }
 
 export function spawnedSessionLink(
@@ -183,6 +201,7 @@ export function spawnedSessionLink(
     (!stored.runnerRequired &&
       stored.reportedGeneration >= stored.generation) ||
     (stored.runnerRequired &&
+      stored.status !== "idle" &&
       REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
       stored.reportedGeneration >= stored.generation)
   ) {

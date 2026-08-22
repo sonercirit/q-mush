@@ -252,6 +252,47 @@ function parentSession() {
   };
 }
 
+test("labels idle attempts Ready, terminal success Completed, and input pauses non-final", () => {
+  const idle = parentSession();
+  const completed = {
+    ...idle,
+    id: "completed-session",
+    status: "completed" as const,
+    title: "Completed task",
+  };
+  const waiting = {
+    ...idle,
+    id: "waiting-session",
+    pendingQuestions: {
+      createdAt: 1,
+      executionGeneration: 0,
+      id: "questions-1",
+      questions: [
+        {
+          id: "decision",
+          maxLength: 50,
+          prompt: "Which path?",
+          type: "free_text" as const,
+        },
+      ],
+      toolCallId: "call-questions",
+    },
+    status: "paused" as const,
+    title: "Waiting task",
+  };
+  const { container } = mountedSessionList([idle, completed, waiting]);
+
+  expect(
+    query(container, `[data-session-id='${idle.id}']`).textContent,
+  ).toContain("Ready");
+  expect(
+    query(container, "[data-session-id='completed-session']").textContent,
+  ).toContain("Completed");
+  expect(
+    query(container, "[data-session-id='waiting-session']").textContent,
+  ).toContain("Waiting for answers");
+});
+
 test("nests spawned sessions under a collapsed parent", () => {
   const parent = parentSession();
   const child = {

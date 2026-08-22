@@ -1,6 +1,9 @@
-import { and, eq, type SQL } from "drizzle-orm";
+import { and, eq, isNull, type SQL } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
+import {
+  agentQuestionRequests,
+  agentSessions,
+} from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionStatus } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
@@ -99,10 +102,7 @@ function reportTerminalGeneration(
   if (
     parentId === null ||
     parentGeneration === null ||
-    state.parentReportedGeneration >= state.executionGeneration ||
-    (state.status !== "completed" &&
-      state.status !== "failed" &&
-      state.status !== "stopped")
+    state.parentReportedGeneration >= state.executionGeneration
   ) {
     return { status: "ready" };
   }
@@ -111,18 +111,30 @@ function reportTerminalGeneration(
     state.id,
     state.executionGeneration,
   );
+  const pendingQuestion = options.database
+    .select({ id: agentQuestionRequests.id })
+    .from(agentQuestionRequests)
+    .where(
+      and(
+        eq(agentQuestionRequests.sessionId, state.id),
+        eq(agentQuestionRequests.isDeleted, false),
+        isNull(agentQuestionRequests.answeredAt),
+      ),
+    )
+    .get();
   const report = spawnedSessionReport(
     {
       generation: state.executionGeneration,
       id: state.id,
       messages: transcript.messages,
+      ...(pendingQuestion === undefined ? { pendingQuestions: null } : {}),
       status: state.status,
       turns: transcript.turns,
     },
     parentId,
   );
   if (report === undefined) {
-    return { status: "blocked" };
+    return { status: "ready" };
   }
   const disposition = appendSpawnedSessionReportInTransaction(
     options.database,

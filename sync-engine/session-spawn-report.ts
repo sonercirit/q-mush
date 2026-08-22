@@ -14,7 +14,8 @@ export interface ParentSessionReport {
 type SpawnedSessionReportDetail = Pick<
   AgentSessionDetail,
   "generation" | "id" | "messages" | "status" | "turns"
->;
+> &
+  Partial<Pick<AgentSessionDetail, "pendingQuestions">>;
 
 function currentGenerationMessages(
   completed: SpawnedSessionReportDetail,
@@ -32,15 +33,38 @@ function currentGenerationMessages(
   );
 }
 
+function generationHasFinalResponse(
+  detail: SpawnedSessionReportDetail,
+  messages: readonly AgentSessionMessage[],
+): boolean {
+  if (detail.status !== "idle") return true;
+  const final = messages.at(-1);
+  return (
+    detail.pendingQuestions === null &&
+    final?.role === "assistant" &&
+    final.toolCalls.length === 0
+  );
+}
+
+export function spawnedSessionCanReport(
+  detail: SpawnedSessionReportDetail,
+): boolean {
+  if (
+    detail.status !== "completed" &&
+    detail.status !== "failed" &&
+    detail.status !== "idle" &&
+    detail.status !== "stopped"
+  ) {
+    return false;
+  }
+  return generationHasFinalResponse(detail, currentGenerationMessages(detail));
+}
+
 export function spawnedSessionReport(
   completed: SpawnedSessionReportDetail,
   parentId: string,
 ): ParentSessionReport | undefined {
-  if (
-    completed.status !== "completed" &&
-    completed.status !== "failed" &&
-    completed.status !== "stopped"
-  ) {
+  if (!spawnedSessionCanReport(completed)) {
     return undefined;
   }
   const failed = completed.status === "failed";

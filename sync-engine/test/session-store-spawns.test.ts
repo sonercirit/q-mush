@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
@@ -187,48 +187,54 @@ describe("spawned session report generation fencing", () => {
     setup.database.$client.close();
   });
 
-  test("skips over more than a batch of callbacks blocked by runner-required parents", () => {
+  test("bounds and advances re-query pages after reportability filtering", () => {
     const setup = spawnedChildSetup();
     const fixtureRows = setup.database
-      .select()
+      .select(getTableColumns(agentSessions))
       .from(agentSessions)
-      .where(inArray(agentSessions.id, [setup.parentId, setup.childId]))
       .all();
-    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
     const child = fixtureRows.find(({ id }) => id === setup.childId);
-    if (parent === undefined || child === undefined) {
+    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
+    if (child === undefined || parent === undefined) {
       throw new Error("The spawned-session fixture rows were unavailable");
     }
-    setup.database.$client
-      .query("UPDATE agent_sessions SET runner_required = 1 WHERE id = ?")
-      .run(setup.parentId);
-    for (let index = 0; index < 100; index += 1) {
-      setup.database
-        .insert(agentSessions)
-        .values({
-          ...child,
-          id: `blocked-child-${String(index).padStart(3, "0")}`,
-        })
-        .run();
-    }
-    const deliverableParentId = "deliverable-parent";
-    const deliverableChildId = "deliverable-child";
+    const blockedParentId = "runner-required-parent";
     setup.database
       .insert(agentSessions)
-      .values({ ...parent, id: deliverableParentId, runnerRequired: false })
+      .values({ ...parent, id: blockedParentId, runnerRequired: true })
       .run();
     setup.database
       .insert(agentSessions)
-      .values({
-        ...child,
-        id: deliverableChildId,
-        parentSessionId: deliverableParentId,
-      })
+      .values(
+        Array.from({ length: 6 }, (_, index) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() - 20 + index),
+          id: `runner-required-child-${String(index)}`,
+          parentSessionId: blockedParentId,
+        })),
+      )
+      .run();
+    setup.database
+      .insert(agentSessions)
+      .values(
+        (
+          [
+            ["idle-child-without-final-response", -1, "idle"],
+            ["second-reportable-child", 1, child.status],
+            ["third-reportable-child", 2, child.status],
+          ] as const
+        ).map(([id, timeOffset, status]) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() + timeOffset),
+          id,
+          status,
+        })),
+      )
       .run();
 
     expect(
-      setup.store.pendingSpawnedSessions(100).map(({ detail }) => detail.id),
-    ).toContain(deliverableChildId);
+      setup.store.pendingSpawnedSessions(2).map(({ detail }) => detail.id),
+    ).toEqual([setup.childId, "second-reportable-child"]);
     closeSetup(setup);
   });
 

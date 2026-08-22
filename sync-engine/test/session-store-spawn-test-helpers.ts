@@ -132,13 +132,11 @@ export function deliverSpawnedChildCallback(
   );
 }
 
-export function spawnedChildSetup() {
-  const setup = createStore();
-  const parent = createTestSession(setup.store);
-  expect(
-    setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 1),
-  ).toBe(true);
-  const child = completedChildWithParent(setup.store, parent);
+function linkedChildResult(
+  setup: ReturnType<typeof createStore>,
+  parent: { readonly generation: number; readonly id: string },
+  child: AgentSessionDetail,
+) {
   return {
     ...setup,
     childGeneration: child.generation,
@@ -146,6 +144,54 @@ export function spawnedChildSetup() {
     parentGeneration: parent.generation,
     parentId: parent.id,
   };
+}
+
+function runningSpawnParent() {
+  const setup = createStore();
+  const parent = createTestSession(setup.store);
+  expect(
+    setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 1),
+  ).toBe(true);
+  return { parent, setup };
+}
+
+export function spawnedRunningChildSetup(prompt: string) {
+  const { parent, setup } = runningSpawnParent();
+  const child = createTestSession(setup.store, TEST_NOW + 2, {
+    parentGeneration: parent.generation,
+    parentSessionId: parent.id,
+    prompt,
+  });
+  expect(
+    setup.store.transitionRuntime(
+      child.id,
+      "running",
+      TEST_NOW + 3,
+      child.generation,
+    ),
+  ).toBe(true);
+  setup.store.commitRuntimeTerminal(
+    child.id,
+    [terminalRecordedMessage(prompt)],
+    TEST_NOW + 4,
+    child.generation,
+    null,
+  );
+  setup.database.$client
+    .query(
+      "UPDATE agent_sessions SET status = 'running', active_started_at = ? WHERE id = ?",
+    )
+    .run(TEST_NOW + 5, child.id);
+  return linkedChildResult(setup, parent, child);
+}
+
+export function spawnedChildSetup() {
+  const { parent, setup } = runningSpawnParent();
+  return linkedChildResult(
+    setup,
+    parent,
+    completedChildWithParent(setup.store, parent),
+  );
 }
 
 export function closeSpawnedChildSetup(

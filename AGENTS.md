@@ -113,13 +113,16 @@ Memory.
   advances (successor reportable) from administrative advances (successor
   non-reportable), or duplicate/lost delivery mutations can survive. Grouped
   tools manage non-blocking owned children; a generation ledger delivers one
-  terminal event per attempt. Routes survive compaction; only attempts report,
-  administrative fences settle identity without duplicates, and callback
-  persistence/claiming are atomic. `callback_pending` blocks another attempt;
-  idle parents retain events until resumed. Delivery callbacks notify the parent
-  and wake it when runnable. `parallel` uses four ordered workers for 2+ calls
-  and propagates cancellation. `session-transcript.tsx` renders prompts,
-  definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
+  sanitized terminal event per attempt, including continued/immediate failures.
+  Terminal statuses and an idle generation ending in a final assistant response
+  report; an input pause or idle generation without a final response does not.
+  Routes survive delivery, recreation, compaction, and disconnects; only
+  attempts report, administrative fences settle identity without duplicates, and
+  callback persistence/claiming are atomic. `callback_pending` blocks another
+  attempt; idle parents retain events until resumed. Delivery callbacks notify
+  the parent and wake it when runnable. `parallel` uses four ordered workers for
+  2+ calls and propagates cancellation. `session-transcript.tsx` renders
+  prompts, definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
   diffs/results, preserving user line breaks; lists page by ten. Live streams
   use four-key preparation frames; batches patch once, compacting the oldest or
   protected candidate pre-eviction. `sync_tools` fan-out, pending buffers, keyed
