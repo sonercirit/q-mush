@@ -196,9 +196,6 @@ export function agentProviderRequestHeaders(
 
     headers.set("originator", "q_mush");
 
-    // The Codex backend routes a session to the machine that already holds its
-    // prompt cache, so the stable session identifier is what keeps hit rates
-    // high across steps.
     if (options.promptCacheKey !== undefined) {
       headers.set("session_id", options.promptCacheKey);
     }
