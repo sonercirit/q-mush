@@ -273,6 +273,7 @@ describe("anthropic-format generic provider", () => {
       thinkingOnlyAssistant(replay),
       { content: "Middle", role: "user" },
       { content: "Last", role: "user" },
+      thinkingOnlyAssistant(replay),
     ];
     const messages = await replayOnlyMessages(history);
 
@@ -290,6 +291,7 @@ describe("anthropic-format generic provider", () => {
         ],
         role: "user",
       },
+      { content: replay.blocks, role: "assistant" },
     ]);
   });
 
