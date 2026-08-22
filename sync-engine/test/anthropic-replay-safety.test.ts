@@ -28,7 +28,6 @@ const MOVED_SNAPSHOT = "claude-snapshot-20260201";
 const THINKING = "Inspect first.";
 const SIGNATURE = "signed-thinking";
 const CALL_ID = "read-call";
-
 const DEFAULT_COMPLETION_BLOCKS = [{ text: "Done.", type: "text" }] as const;
 const UNRESOLVED_MODEL_RESPONSES = [
   ["a missing retrieve route", () => new Response("missing", { status: 404 })],
