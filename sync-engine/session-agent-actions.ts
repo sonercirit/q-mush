@@ -352,7 +352,8 @@ export class SessionAgentActions {
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
       parent !== undefined &&
-      parent.status !== "stopped" &&
+      parent.status === "idle" &&
+      parent.restartHandoff === null &&
       sessionCanResume(parent) &&
       !this.#dependencies.activeSession(parent.id) &&
       this.#dependencies.runnerIsAvailable(

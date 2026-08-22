@@ -11,6 +11,7 @@ import { providerStep } from "./provider-step-fixtures.ts";
 import {
   childSessionId,
   completeChildAgentFile,
+  completeWokenParent,
   spawnCall,
   waitForChildRunnerTool,
 } from "./session-agent-spawn-helpers.ts";
@@ -201,12 +202,13 @@ test("a spawned session resumes its interrupted step after server recreation", a
     status: "completed",
   });
   await waitForTerminalParentNote(recreated.sessions, childId);
+  await completeWokenParent(recreated);
   expect(completionReports(recreated)).toHaveLength(1);
   expect(JSON.stringify(sessionFor(recreated, childId))).toContain(
     CHILD_SUMMARY,
   );
   expect(sessionFor(recreated, SESSION_ID)).toMatchObject({
-    generation: 0,
+    generation: 1,
     status: "idle",
   });
   closeSessionTestDatabase(initial.database);
@@ -218,6 +220,7 @@ test("a reported child event survives parent compaction and is consumed on resum
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
   await waitForCompletedChild(initial, childId);
   await waitForTerminalParentNote(initial.sessions, childId);
+  await completeWokenParent(initial);
   expect(completionReports(initial)).toHaveLength(1);
 
   const compacted = recreateSessionSetup(new ReportCompactionModel(), initial);

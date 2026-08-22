@@ -1,4 +1,5 @@
 import { isRecord } from "../../shared/auth-model.ts";
+import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import {
   completedParentToolResult,
   toolCall,
@@ -9,6 +10,7 @@ import {
   CREDENTIAL_ID,
   RUNNER_COMMAND_ID,
   RUNNER_ID,
+  SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import { waitForSessionValue } from "./session-integration-helpers.ts";
 
@@ -43,6 +45,60 @@ async function waitForRunnerSession(
       isRecord(value) &&
       value["sessionId"] === sessionId &&
       (tool === undefined || value["tool"] === tool),
+  );
+}
+
+export async function completeWokenParent(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+): Promise<void> {
+  const parent = await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    (value): value is NonNullable<typeof value> =>
+      typeof value === "object" &&
+      value !== null &&
+      "generation" in value &&
+      typeof value.generation === "number" &&
+      value.generation > 0 &&
+      "status" in value &&
+      (value.status === "idle" ||
+        value.status === "failed" ||
+        value.status === "running"),
+  );
+  if (
+    !isRecord(parent) ||
+    parent["status"] === "idle" ||
+    parent["status"] === "failed" ||
+    !isRecord(parent["runtimePending"]) ||
+    parent["runtimePending"]["component"] !== "runner_command"
+  ) {
+    return;
+  }
+  await waitForRunnerSession(setup, SESSION_ID);
+  const command = setup.latestRunnerCommand();
+  if (command === undefined || command.sessionId !== SESSION_ID) {
+    throw new Error("The woken parent command is unavailable");
+  }
+  const completed = setup.sessions.completeRunnerCommand(
+    RUNNER_ID,
+    command.id,
+    {
+      output: "null",
+      state: "completed",
+    },
+  );
+  if (!completed) {
+    throw new Error("The woken parent command was not completed");
+  }
+  await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
+    (value): value is NonNullable<typeof value> =>
+      typeof value === "object" &&
+      value !== null &&
+      "generation" in value &&
+      typeof value.generation === "number" &&
+      value.generation > 0 &&
+      "status" in value &&
+      (value.status === "idle" || value.status === "failed"),
   );
 }
 

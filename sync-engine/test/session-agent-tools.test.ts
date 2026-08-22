@@ -16,6 +16,7 @@ import {
 import {
   childSessionId,
   completeChildAgentFile,
+  completeWokenParent,
   spawnCall,
   waitForChildRunnerTool,
 } from "./session-agent-spawn-helpers.ts";
@@ -102,13 +103,18 @@ class SelfStoppingChildModel implements AgentModel {
           }
         : this.#step === 2
           ? { content: "Parent work is complete.", toolCalls: [] }
-          : childSessionId === undefined
-            ? undefined
+          : this.#step === 3
+            ? childSessionId === undefined
+              ? undefined
+              : {
+                  content: "Stopping the delegated session.",
+                  toolCalls: [
+                    toolCall("stop_session", { sessionId: childSessionId }),
+                  ],
+                }
             : {
-                content: "Stopping the delegated session.",
-                toolCalls: [
-                  toolCall("stop_session", { sessionId: childSessionId }),
-                ],
+                content: "The stopped child report was received.",
+                toolCalls: [],
               };
     if (step === undefined) {
       throw new Error("The child session ID is not available");
@@ -457,6 +463,7 @@ describe("session agent tools", () => {
       },
       { content: "I can keep working immediately.", toolCalls: [] },
       { content: "Delegated task done.", toolCalls: [] },
+      { content: "I received the delegated result.", toolCalls: [] },
     ]);
     const spawnSetup = await startToolSession(model);
     const parent = await completedParentDetail(spawnSetup, "idle");
@@ -477,13 +484,14 @@ describe("session agent tools", () => {
       hasSessionStatus("completed"),
     );
     await waitForTerminalParentNote(spawnSetup.sessions, childId);
+    await completeWokenParent(spawnSetup);
     const child = spawnSetup.sessions.detailForUser(TEST_USER_ID, childId);
     expect(JSON.stringify(child)).toContain("Delegated task done.");
     expect(JSON.stringify(await sessionDetail(spawnSetup.sessions))).toContain(
       "Delegated task done.",
     );
     expect(await sessionDetail(spawnSetup.sessions)).toMatchObject({
-      generation: 0,
+      generation: 1,
       status: "idle",
     });
     closeSessionTestDatabase(spawnSetup.database);
@@ -522,9 +530,10 @@ describe("session agent tools", () => {
       { content: "I received the child report.", toolCalls: [] },
     ]);
     const { setup } = await completedChildTerminalParent(model);
+    await completeWokenParent(setup);
 
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
-    expect(parent).toMatchObject({ generation: 0, status: "idle" });
+    expect(parent).toMatchObject({ generation: 1, status: "idle" });
     expect(JSON.stringify(parent)).toContain("Child work is complete.");
     closeSessionTestDatabase(setup.database);
   });
@@ -576,12 +585,13 @@ describe("session agent tools", () => {
     const { setup } = await completedChildTerminalParent(model, (childId) => {
       model.childSessionId = childId;
     });
+    await completeWokenParent(setup);
 
     const updatedParent = setup.sessions.detailForUser(
       TEST_USER_ID,
       SESSION_ID,
     );
-    expect(updatedParent?.generation).toBe(0);
+    expect(updatedParent?.generation).toBe(1);
     expect(updatedParent?.status).toBe("idle");
     expect(JSON.stringify(updatedParent)).toContain(
       '\\"status\\": \\"stopped\\"',
