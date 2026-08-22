@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { anthropicRequestBody } from "../../sync-engine/anthropic-request.ts";
 import {
   ANTHROPIC_READ_CALL,
   ANTHROPIC_TEST_CREDENTIAL,
@@ -348,6 +349,34 @@ describe("anthropic-format generic provider", () => {
 
   test("degrades stale signed tool replay after a historical model change", () =>
     expectReplayOutcome(staleReplayConversation(), false));
+
+  test("fails request assembly closed when replay differs from its assistant", () => {
+    expect(() =>
+      anthropicRequestBody({
+        adaptiveThinking: null,
+        credential: ANTHROPIC_TEST_CREDENTIAL,
+        credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+        maxOutputTokens: null,
+        messages: [
+          { content: "Hello", role: "user" },
+          {
+            ...readAssistant(SIGNED_REPLAY),
+            toolCalls: [
+              { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
+            ],
+          },
+          readToolResult("Setup"),
+        ],
+        model: KNOWN_MODEL,
+        provider: "generic",
+        reasoningEffort: undefined,
+        resolvedModel: KNOWN_MODEL,
+        stream: true,
+        systemPrompt: "System",
+        tools: [],
+      }),
+    ).toThrow(UNSAFE_TOOL_REPLAY_ERROR);
+  });
 
   test("fails closed when tool-call sanitization changes the assistant", () =>
     expectReplayOutcome(
