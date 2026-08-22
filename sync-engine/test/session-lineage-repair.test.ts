@@ -225,6 +225,24 @@ describe("native spawn lineage repair", () => {
     },
   );
 
+  test("rejects session-shaped output from a different tool in parallel", () => {
+    const setup = orphanSetup();
+    clearLineage(setup);
+    const misleadingEntry = {
+      output: spawnOutput(setup.child.id),
+      recipient_name: "read_session",
+    };
+    toolResult(setup, {
+      content: JSON.stringify([misleadingEntry]),
+      id: "repair-parallel-other-tool",
+      toolName: "parallel",
+    });
+
+    expectRepairResult(setup, { ambiguous: 0, repaired: 0, skipped: 0 });
+    expectUnlinked(setup);
+    closeSetup(setup);
+  });
+
   test("repairs provenance retained by parent compaction", () => {
     const setup = orphanSetup();
     clearLineage(setup);

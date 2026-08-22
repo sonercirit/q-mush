@@ -286,6 +286,19 @@ function childGroupSession(
   ).querySelector(`[data-session-id='${childId}']`);
 }
 
+test("renders status badges in session list rows", () => {
+  for (const [status, label] of [
+    ["idle", "Ready"],
+    ["completed", "Completed"],
+  ] as const) {
+    const session = { ...parentSession(), id: `status-${status}`, status };
+    const { container } = mountedSessionList([session]);
+    expect(
+      query(container, `[data-session-id='${session.id}']`).textContent,
+    ).toContain(label);
+  }
+});
+
 test("nests spawned sessions under a collapsed parent", () => {
   const parent = parentSession();
   const child = relatedSession(parent, "child-session", "Delegated task");

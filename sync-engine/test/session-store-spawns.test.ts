@@ -3,6 +3,10 @@ import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
 import {
+  claimSpawnedSessionReservation,
+  failSpawnedSessionReservation,
+} from "../session-spawn-reservation-store.ts";
+import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
@@ -169,6 +173,51 @@ function expectNoPendingReports(setup: SpawnedChildReference): void {
 }
 
 describe("spawned session report generation fencing", () => {
+  test("claims a pending reservation once and only allowClaimed can fail it afterward", () => {
+    const setup = createStore();
+    const [parent, child] = [
+      createTestSession(setup.store),
+      createTestSession(setup.store, TEST_NOW + 1),
+    ];
+    expect(
+      setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 2),
+    ).toBe(true);
+    const reservation = Object.assign(setup, {
+      childId: child.id,
+      childGeneration: child.generation,
+      parentId: parent.id,
+      parentGeneration: parent.generation,
+    });
+    updateSession(reservation, child.id, { spawnPreparationPending: true });
+    const identity = {
+      generation: child.generation,
+      sessionId: child.id,
+      userId: TEST_USER_ID,
+    };
+    const claimOptions = {
+      authority: { generation: parent.generation, sessionId: parent.id },
+      database: setup.database,
+      identity,
+    };
+
+    expect(claimSpawnedSessionReservation(claimOptions)).toBe(true);
+    expect(claimSpawnedSessionReservation(claimOptions)).toBe(false);
+    const failureOptions = {
+      content: "Launch failed after claim",
+      database: setup.database,
+      generateId: () => crypto.randomUUID(),
+      identity,
+      now: TEST_NOW + 3,
+    };
+    expect(failSpawnedSessionReservation(failureOptions)).toBe(false);
+    expect(
+      failSpawnedSessionReservation({ ...failureOptions, allowClaimed: true }),
+    ).toBe(true);
+    const failed = setup.store.get(TEST_USER_ID, child.id);
+    expect(failed?.status).toBe("failed");
+    setup.database.$client.close();
+  });
+
   test("allows a user-initiated child from an idle current parent", () => {
     const setup = createStore();
     const parent = createTestSession(setup.store);
