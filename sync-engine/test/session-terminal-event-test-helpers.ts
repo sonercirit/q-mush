@@ -96,12 +96,12 @@ export async function expectParentWake(
   setup: ReturnType<typeof spawnedChildSetup>,
   delivery: ReturnType<typeof terminalEventActions>,
 ): Promise<void> {
-  await vi.waitFor(() => {
-    expect(delivery.launchSession).toHaveBeenCalledTimes(1);
-    expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
-      generation: setup.parentGeneration + 1,
-      status: "queued",
-    });
+  await vi.waitFor(() =>
+    expect(delivery.launchSession).toHaveBeenCalledTimes(1),
+  );
+  expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+    generation: setup.parentGeneration + 1,
+    status: "queued",
   });
 }
 
