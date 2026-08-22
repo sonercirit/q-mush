@@ -62,6 +62,15 @@ export {
   type ProviderId,
 };
 
+function isCredentialFingerprintCollision(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message.includes(
+      "provider_credentials.user_id, provider_credentials.provider, provider_credentials.credential_fingerprint",
+    )
+  );
+}
+
 export class DuplicateProviderCredentialError extends Error {
   constructor() {
     super("This provider credential is already stored");
@@ -479,12 +488,7 @@ export class ProviderCredentialStore {
         ...(label === undefined ? {} : { label }),
       });
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message.includes(
-          "provider_credentials.user_id, provider_credentials.provider, provider_credentials.credential_fingerprint",
-        )
-      ) {
+      if (isCredentialFingerprintCollision(error)) {
         throw new DuplicateProviderCredentialError();
       }
       throw error;
