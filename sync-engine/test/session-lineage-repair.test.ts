@@ -8,7 +8,6 @@ import {
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { SessionStore } from "../session-store.ts";
 import { insertWorkspace } from "../workspace-write.ts";
 import {
   addTestUser,
@@ -361,11 +360,9 @@ describe("native spawn lineage repair", () => {
       parentSessionId: setup.parent.id,
       spawnPreparationPending: true,
     });
-    const recreated = new SessionStore(setup.database);
-
-    expect(recreated.recoverSpawnedSessionReservations(TEST_NOW + 5)).toBe(1);
+    expect(setup.store.recoverSpawnedSessionReservations(TEST_NOW + 5)).toBe(1);
     expectChild(setup, { ...stableLineage(setup), status: "failed" });
-    const pending = recreated.pendingSpawnedSessions();
+    const pending = setup.store.pendingSpawnedSessions();
     expect(pending).toHaveLength(1);
     expect(pending[0]?.userId).toBe(TEST_USER_ID);
     expect(pending[0]?.detail.id).toBe(setup.child.id);

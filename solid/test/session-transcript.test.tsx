@@ -29,7 +29,11 @@ function filtersWith(
 }
 
 test.each([
-  ["systemPrompt", "System prompt", "You are Q Mush"],
+  [
+    "systemPrompt",
+    "System prompt",
+    "Tool limits for this transcript are unavailable.",
+  ],
   ["agentInstructions", "AGENTS.md", "Project rule"],
   ["toolDefinitions", "Tool definitions", '"read"'],
   ["userMessages", "User category", "User category"],
@@ -65,6 +69,16 @@ test.each([
     }
   },
 );
+
+test("does not invent tool limits for historical transcripts", () => {
+  const html = renderMessages([], ["read"]);
+
+  expect(
+    html.match(/Tool limits for this transcript are unavailable\./gu),
+  ).toHaveLength(2);
+  expect(html).not.toContain("20000");
+  expect(html).not.toContain("20,000");
+});
 
 test("keeps tool calls and matching responses in one filter category", () => {
   const call = assistantToolCall({

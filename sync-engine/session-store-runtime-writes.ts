@@ -92,6 +92,8 @@ export function setRuntimeAgentFile(
 }
 
 export function markRuntimeStepStart(options: RuntimeWriteTarget): void {
+  // updateRunningSession is status- and generation-guarded, so a racing stop
+  // makes this write match zero rows.
   updateRunningSession(options, {
     stepStartedAt: new Date(options.now),
   });

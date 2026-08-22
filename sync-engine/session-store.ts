@@ -6,13 +6,13 @@ import type {
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { agentSessions } from "../shared/database/schema.ts";
 import { createUuidV7, SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -39,6 +39,7 @@ import {
   queuedSessionDetails,
   queuedSessionOwnerIds,
 } from "./session-queued.ts";
+import type { SessionRuntimes } from "./session-runtime.ts";
 import {
   claimSpawnedSessionReservation,
   failSpawnedSessionReservation,
@@ -79,6 +80,7 @@ import {
   reassignStoredSession,
   type ReassignSessionResult,
 } from "./session-store-reassignment.ts";
+import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { SessionStoreRestarts } from "./session-store-restarts.ts";
 import {
   setSessionCompactionFlag,
@@ -95,24 +97,40 @@ import {
   type PendingSpawnedSession,
   type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   stopStoredSession,
   transitionSessionRuntime,
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
+import { activeSessionToolSettings } from "./session-turn-store.ts";
 export class SessionStore extends SessionStoreRestarts {
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
+  readonly #reportParent: SessionStoreWriteResources["reportParent"];
   readonly #resources: readonly [AppDatabase, IdGenerator];
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
+  readonly #runtimes: Pick<SessionRuntimes, "pending">;
+  readonly #toolSettings: (userId: string) => ToolSettings;
+  constructor(
+    database: AppDatabase,
+    generateId: IdGenerator = createUuidV7,
+    toolSettings: (userId: string) => ToolSettings,
+    runtimes: Pick<SessionRuntimes, "pending">,
+    reportParent?: SessionStoreWriteResources["reportParent"],
+  ) {
     super(database, generateId);
     this.#resources = [database, generateId];
+    this.#reportParent = reportParent;
+    this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
     this.#questions = new AskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,
+      toolSettings: (_userId, sessionId, executionGeneration) =>
+        activeSessionToolSettings(database, sessionId, executionGeneration),
     });
+    this.#runtimes = runtimes;
   }
   repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult {
     return repairSpawnedSessionLineage(this.#database, now);
@@ -133,7 +151,18 @@ export class SessionStore extends SessionStoreRestarts {
     const generateId = this.#resources[1];
     const read = (userId: string, sessionId: string) =>
       this.get(userId, sessionId, workspaceId);
-    return { database, generateId, read };
+    return {
+      database,
+      generateId,
+      read,
+      toolSettings: this.#toolSettings,
+      ...(this.#reportParent === undefined
+        ? {}
+        : { reportParent: this.#reportParent }),
+    };
+  }
+  writeResources(workspaceId?: string) {
+    return this.#writeResources(workspaceId);
   }
   #generateId(now: number): string {
     return this.#resources[1](now);
@@ -205,6 +234,13 @@ export class SessionStore extends SessionStoreRestarts {
   questions(): AskQuestionsStore {
     return this.#questions;
   }
+  toolSettings(sessionId: string, executionGeneration: number): ToolSettings {
+    return activeSessionToolSettings(
+      this.#database,
+      sessionId,
+      executionGeneration,
+    );
+  }
   #readPendingQuestions(userId: string, sessionId: string) {
     return this.#questions.pending(userId, sessionId);
   }
@@ -241,6 +277,7 @@ export class SessionStore extends SessionStoreRestarts {
       userId,
       sessionId,
       workspaceId,
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
@@ -249,6 +286,7 @@ export class SessionStore extends SessionStoreRestarts {
       this.#readPendingQuestions.bind(this),
       userId,
       workspaceId,
+      this.#runtimes.pending.bind(this.#runtimes),
     );
   }
   history(
@@ -291,7 +329,7 @@ export class SessionStore extends SessionStoreRestarts {
     now: number,
   ): ReassignSessionResult {
     return reassignStoredSession({
-      database: this.#database,
+      resources: this.#writeResources(),
       now,
       read: (ownerId, id) => this.get(ownerId, id),
       runnerId,
@@ -469,15 +507,14 @@ export class SessionStore extends SessionStoreRestarts {
    * Runtime code must use the generation-required methods above.
    */
   #currentGeneration(sessionId: string): number {
-    const current = this.#database
-      .select({ generation: agentSessions.executionGeneration })
-      .from(agentSessions)
-      .where(activeSessionCondition({ id: sessionId }))
-      .get();
+    const current = readStoredSessionGeneration({
+      condition: activeSessionCondition({ id: sessionId }),
+      database: this.#database,
+    });
     if (current === undefined) {
       throw new DOMException("The agent session was stopped", "AbortError");
     }
-    return current.generation;
+    return current;
   }
   #current(): CurrentSessionStore {
     return new CurrentSessionStore(this, (sessionId) =>
@@ -537,6 +574,7 @@ export class SessionStore extends SessionStoreRestarts {
         database: this.#database,
         generateId: this.#resources[1],
         read: (ownerId, id) => this.get(ownerId, id, workspaceId),
+        toolSettings: this.#toolSettings,
       },
       sessionId,
       userId,

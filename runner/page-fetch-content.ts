@@ -1,10 +1,8 @@
 import { isRecord } from "../shared/auth-model.ts";
 
 export const MAXIMUM_RESPONSE_BYTES = 16 * 1_024 * 1_024;
-const MAXIMUM_OUTPUT_BYTES = 64 * 1_024;
 const MAXIMUM_LINKS = 200;
 const MAXIMUM_METADATA_FIELDS = 100;
-const MAXIMUM_TEXT_BYTES = 48 * 1_024;
 
 export const PAGE_CAPTURE_EXPRESSION = String.raw`(() => {
   const byteLength = (value) => new TextEncoder().encode(value).byteLength;
@@ -68,7 +66,7 @@ export const PAGE_CAPTURE_EXPRESSION = String.raw`(() => {
     .replace(/\n[\t ]+/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
-  const text = bounded(rawText, ${String(MAXIMUM_TEXT_BYTES)});
+  const text = bounded(rawText, ${String(MAXIMUM_RESPONSE_BYTES)});
   return {
     links,
     metadata,
@@ -152,10 +150,11 @@ export function readCapture(value: unknown): PageCapture {
     throw new Error("Chromium returned an invalid rendered page result");
   }
   const capture = value["result"]["value"];
+  // The response-byte limit is also the in-process capture text memory bound.
   if (
     !isRecord(capture) ||
     typeof capture["text"] !== "string" ||
-    Buffer.byteLength(capture["text"]) > MAXIMUM_TEXT_BYTES ||
+    Buffer.byteLength(capture["text"]) > MAXIMUM_RESPONSE_BYTES ||
     typeof capture["title"] !== "string" ||
     Buffer.byteLength(capture["title"]) > 2_048 ||
     !isRecord(capture["metadata"]) ||
@@ -187,13 +186,7 @@ export function readCapture(value: unknown): PageCapture {
   };
 }
 
-function truncateUtf8(value: string, maximumBytes: number): string {
-  return new TextDecoder().decode(
-    Buffer.from(value, "utf8").subarray(0, maximumBytes),
-  );
-}
-
-function outputRecord(response: PageResponse, capture: PageCapture) {
+export function outputRecord(response: PageResponse, capture: PageCapture) {
   return {
     charset: response.charset,
     contentType: response.contentType,
@@ -206,47 +199,7 @@ function outputRecord(response: PageResponse, capture: PageCapture) {
     truncated: {
       links: capture.truncated.links,
       metadata: capture.truncated.metadata,
-      output: false,
       text: capture.truncated.text,
     },
   };
-}
-
-export function boundedOutput(
-  response: PageResponse,
-  capture: PageCapture,
-): string {
-  const result = outputRecord(response, capture);
-  let output = JSON.stringify(result, undefined, 2);
-  if (Buffer.byteLength(output) <= MAXIMUM_OUTPUT_BYTES) {
-    return output;
-  }
-
-  result.truncated.output = true;
-  const refresh = (): void => {
-    output = JSON.stringify(result, undefined, 2);
-  };
-  while (
-    result.links.length > 0 &&
-    Buffer.byteLength(output) > MAXIMUM_OUTPUT_BYTES
-  ) {
-    result.links.pop();
-    result.truncated.links = true;
-    refresh();
-  }
-  if (Buffer.byteLength(output) > MAXIMUM_OUTPUT_BYTES) {
-    const overflow = Buffer.byteLength(output) - MAXIMUM_OUTPUT_BYTES;
-    result.text = truncateUtf8(
-      result.text,
-      Math.max(0, Buffer.byteLength(result.text) - overflow - 64),
-    );
-
-    result.truncated.text = true;
-    output = JSON.stringify(result, undefined, 2);
-  }
-  const finalSize = Buffer.byteLength(output);
-  if (finalSize > MAXIMUM_OUTPUT_BYTES) {
-    throw new Error("The rendered page metadata exceeds the output limit");
-  }
-  return output;
 }

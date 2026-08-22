@@ -1,8 +1,9 @@
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
-import { SYSTEM_ID } from "../shared/ids.ts";
+import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
+import { advanceStoredSessionGeneration } from "./session-generation-advance.ts";
 import {
   readStoredSessionSnapshots,
   sessionTimingUpdate,
@@ -10,9 +11,20 @@ import {
   storedSessionSnapshotCondition,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
-import { updateSessionAndEndGenerationTurn } from "./session-turn-store.ts";
 
-type RunnerReassignmentDatabase = Pick<AppDatabase, "select" | "update">;
+interface RunnerReassignmentResult {
+  readonly report?: NonNullable<
+    NonNullable<
+      ReturnType<typeof advanceStoredSessionGeneration>
+    >["reportedParent"]
+  >;
+  readonly userId: string;
+}
+
+type RunnerReassignmentDatabase = Pick<
+  AppDatabase,
+  "insert" | "select" | "update"
+>;
 
 function affectedRunnerSessions(
   database: Pick<AppDatabase, "select">,
@@ -44,23 +56,24 @@ function fenceAssignedSession(
   session: StoredSessionSnapshot,
   userId: string,
   runnerId: string,
+  generateId: IdGenerator,
   now: number,
-): boolean {
+): RunnerReassignmentResult | undefined {
   if (session.userId !== userId) {
     throw new Error("An assigned session has the wrong owner");
   }
-  return updateSessionAndEndGenerationTurn({
+  const advanced = advanceStoredSessionGeneration({
     condition: and(
       storedSessionSnapshotCondition(session),
       eq(agentSessions.runnerId, runnerId),
     ),
     database,
-    generation: session.executionGeneration,
+    generateId,
+    mode: "administrative",
     now,
     sessionId: session.id,
     values: {
       ...sessionTimingUpdate(session, now),
-      executionGeneration: sql`${agentSessions.executionGeneration} + 1`,
       interruptedHandoff: null,
       restartHandoff: null,
       runnerRequired: true,
@@ -73,18 +86,40 @@ function fenceAssignedSession(
       ...updatedAuditFields(SYSTEM_ID, now),
     },
   });
+  return advanced === undefined
+    ? undefined
+    : {
+        ...(advanced.reportedParent === undefined
+          ? {}
+          : { report: advanced.reportedParent }),
+        userId,
+      };
 }
 
 export function requireRunnerReassignment(
   database: RunnerReassignmentDatabase,
   userId: string,
   runnerId: string,
+  generateId: IdGenerator,
   now: number,
-): void {
+): readonly Required<RunnerReassignmentResult>[] {
   const affected = affectedRunnerSessions(database, userId, runnerId);
+  const reports: Required<RunnerReassignmentResult>[] = [];
   for (const session of affected) {
-    if (!fenceAssignedSession(database, session, userId, runnerId, now)) {
+    const result = fenceAssignedSession(
+      database,
+      session,
+      userId,
+      runnerId,
+      generateId,
+      now,
+    );
+    if (result === undefined) {
       throw new Error("An assigned session changed during runner removal");
     }
+    if (result.report !== undefined) {
+      reports.push({ report: result.report, userId: result.userId });
+    }
   }
+  return reports;
 }

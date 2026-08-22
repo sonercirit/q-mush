@@ -12,6 +12,7 @@ import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
 } from "../../shared/provider-credential-store.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -122,6 +123,12 @@ describe("session agent introspection tools", () => {
     const agentFileContent = "Always inspect the workspace AGENTS.md first.";
     const setup = await startToolSession(model, {
       agentFile: { content: agentFileContent, name: "AGENTS.md" },
+      toolSettings: {
+        read: () => ({
+          ...DEFAULT_TOOL_SETTINGS,
+          outputLimitCharacters: 50_000,
+        }),
+      },
     });
     const detail = await completedParentDetail(setup, "idle");
     const rawRead = findToolResultContents(detail, "read_session")[0];
@@ -149,7 +156,7 @@ describe("session agent introspection tools", () => {
         "tool",
         "tools",
       ],
-      truncated: true,
+      truncated: false,
     });
     expect(records(content["records"]).map((record) => record["role"])).toEqual(
       ["user", "thinking", "assistant", "tool", "assistant"],
@@ -165,12 +172,15 @@ describe("session agent introspection tools", () => {
       ]),
     );
     expect(read["metadata"]).toMatchObject({
-      toolDefinitions: { matched: AGENT_TOOLS.length },
-      truncation: { toolDefinitions: true },
+      toolDefinitions: {
+        matched: AGENT_TOOLS.length,
+        returned: AGENT_TOOLS.length,
+      },
+      truncation: { limit: false },
     });
     expect(serialized).toContain("hidden reasoning");
     expect(serialized).toContain("call-list_sessions");
-    expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(32_768);
+    expect(serialized).not.toContain("Tool output truncated");
     setup.database.$client.close();
   });
 

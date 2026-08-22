@@ -3,10 +3,8 @@ import { RunnerCommandExecutions } from "../../runner/runner-command-executions.
 import type { RunnerCommandExecutor } from "../../runner/runner-command.ts";
 import type { RunnerWritableSocket } from "../../runner/runner-socket-send.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import type {
-  RunnerCommandResult,
-  RunnerToolCommand,
-} from "../../shared/runner-command-broker.ts";
+import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
+import type { RunnerCommandResult } from "../../shared/tool-stream.ts";
 
 function command(id: string): RunnerToolCommand {
   return {

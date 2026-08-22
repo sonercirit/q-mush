@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import {
   createTestProviderCredential,
   TEST_USER_ID,

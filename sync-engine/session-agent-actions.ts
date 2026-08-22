@@ -1,33 +1,25 @@
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import {
-  selectedAgentTools,
-  type SessionAgentToolName,
-} from "../shared/agent-tools.ts";
-import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
-import type { RunnerSummary } from "../shared/runner-model.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
+import { type SessionAgentToolName } from "../shared/agent-tools.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
+import { throwIfSignalAborted } from "../shared/validation.ts";
 import { createJsonResponse } from "./http.ts";
 import {
   pauseQueuedSessionForRestart,
   responseToolOutput,
   sessionCanResume,
   spawnAgentSession,
-  type SessionAgentActionDependencies,
 } from "./session-agent-action-helpers.ts";
+import type { SessionAgentActionsDependencies } from "./session-agent-actions-dependencies.ts";
 import {
   compactSessionForAgent,
   steerSessionForAgent,
-  type SessionControlActionDependencies,
+  type CompactionSelection,
 } from "./session-agent-control.ts";
 import { listSessionsOutput } from "./session-agent-list.ts";
-import {
-  sessionAgentOptions,
-  type SessionRunnerPageRequest,
-} from "./session-agent-options-action.ts";
-import type {
-  GetSessionOptionsToolInput,
-  SessionOptionsSource,
-} from "./session-agent-options.ts";
+import { sessionAgentOptions } from "./session-agent-options-action.ts";
+import type { GetSessionOptionsToolInput } from "./session-agent-options.ts";
 import {
   readSessionOutput,
   type ReadSessionToolInput,
@@ -45,41 +37,12 @@ import {
 } from "./session-child-lifecycle.ts";
 import type { SessionDetailLookup } from "./session-command-types.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
-import type {
-  RunnerDirectoryBrowseResult,
-  RunnerDirectoryRequest,
-} from "./session-request-helpers.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 import { readSessionSnapshot } from "./session-store-agent-read.ts";
 import type { PendingSpawnedSession } from "./session-store-spawns.ts";
 
 function runnerUnavailableOutput(): string {
   return sessionToolOutput({ error: "runner_unavailable" });
-}
-
-type RunnerPageRequest = SessionRunnerPageRequest;
-
-interface SessionAgentActionsDependencies
-  extends SessionAgentActionDependencies, SessionControlActionDependencies {
-  readonly abortSession: (sessionId: string) => void;
-  readonly activeSession: (sessionId: string) => boolean;
-  readonly broker: Pick<RunnerCommandBroker, "cancelSession">;
-  readonly cleanupSession: (detail: AgentSessionDetail) => void;
-  readonly browseDirectories: (
-    request: RunnerDirectoryRequest,
-    signal: AbortSignal,
-  ) => Promise<RunnerDirectoryBrowseResult>;
-  readonly listOnlineRunners: (
-    userId: string,
-    workspaceId?: string,
-  ) => readonly RunnerSummary[];
-  readonly listRunnerOptions: (
-    userId: string,
-    request: RunnerPageRequest,
-  ) => {
-    readonly items: SessionOptionsSource["runners"];
-    readonly totalItems: number;
-  };
 }
 
 export class SessionAgentActions {
@@ -93,7 +56,7 @@ export class SessionAgentActions {
     parentSessionId: string,
     userId: string,
     parentGeneration: number,
-    signal: AbortSignal,
+    toolSettings: ToolSettings,
   ): SessionAgentToolActions {
     const authority: SessionExecutionAuthority = {
       generation: parentGeneration,
@@ -136,35 +99,43 @@ export class SessionAgentActions {
       return sessionId;
     };
     return {
-      compactSession: guardParent("compact_session", (sessionId) =>
+      compactSession: guardParent("compact_session", (sessionId, callSignal) =>
         this.#compact({
           authority: { ...authority, tool: "compact_session" },
           sessionId,
+          signal: callSignal,
           userId,
           workspaceId: parentWorkspaceId(),
         }),
       ),
-      continueSession: guardParent("continue_session", (sessionId) =>
-        this.#queue(
-          userId,
-          anotherSession(sessionId),
-          authority,
-          undefined,
-          parentWorkspaceId(),
-        ),
+      continueSession: guardParent(
+        "continue_session",
+        (sessionId, callSignal) =>
+          this.#queue(
+            userId,
+            anotherSession(sessionId),
+            authority,
+            undefined,
+            parentWorkspaceId(),
+            callSignal,
+          ),
       ),
-      browseRunnerDirectories: (runnerId, path) =>
+      browseRunnerDirectories: (runnerId, path, callSignal) =>
         this.#browseDirectories(
           userId,
           runnerId,
           path,
           authority,
           () => currentParentTool("browse_runner_directories"),
-          signal,
+          // Cancels the broker command at the limit; the wrapper still
+          // reports timed-out even when an execution never settles.
+          callSignal,
           parentWorkspaceId(),
         ),
-      getSessionOptions: guardParent("get_session_options", (input) =>
-        this.#options(userId, input, parentWorkspaceId()),
+      getSessionOptions: guardParent(
+        "get_session_options",
+        (input, callSignal) =>
+          this.#options(userId, input, parentWorkspaceId(), callSignal),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
@@ -178,11 +149,11 @@ export class SessionAgentActions {
         ),
       ),
       readSession: guardParent("read_session", (input) =>
-        this.#read(userId, input, parentWorkspaceId()),
+        this.#read(userId, input, parentWorkspaceId(), toolSettings),
       ),
       reassignSession: guardParent(
         "reassign_session",
-        (sessionId, runnerId, workingDirectory) =>
+        (sessionId, runnerId, workingDirectory, callSignal) =>
           this.#reassign(
             parentSessionId,
             userId,
@@ -190,31 +161,46 @@ export class SessionAgentActions {
             runnerId,
             workingDirectory,
             parentWorkspaceId(),
+            callSignal,
           ),
       ),
-      sendToSession: guardParent("send_to_session", (sessionId, message) =>
-        this.#queue(
-          userId,
-          anotherSession(sessionId),
-          authority,
-          message,
-          parentWorkspaceId(),
-        ),
+      sendToSession: guardParent(
+        "send_to_session",
+        (sessionId, message, callSignal) =>
+          this.#queue(
+            userId,
+            anotherSession(sessionId),
+            authority,
+            message,
+            parentWorkspaceId(),
+            callSignal,
+          ),
       ),
-      spawnSession: guardParent("spawn_session", (input) =>
-        this.#spawn(authority, userId, input),
+      spawnSession: guardParent("spawn_session", (input, callSignal) =>
+        this.#spawn(authority, userId, input, callSignal),
       ),
-      steerSession: guardParent("steer_session", (sessionId, message) =>
-        this.#steer(userId, sessionId, message, parentWorkspaceId()),
+      steerSession: guardParent(
+        "steer_session",
+        (sessionId, message, callSignal) =>
+          this.#steer(
+            userId,
+            sessionId,
+            message,
+            parentWorkspaceId(),
+            callSignal,
+          ),
       ),
-      stopSession: guardParent("stop_session", (sessionId, cascade) =>
-        this.#stop(
-          parentSessionId,
-          userId,
-          sessionId,
-          cascade,
-          parentWorkspaceId(),
-        ),
+      stopSession: guardParent(
+        "stop_session",
+        (sessionId, cascade, callSignal) =>
+          this.#stop(
+            parentSessionId,
+            userId,
+            sessionId,
+            cascade,
+            parentWorkspaceId(),
+            callSignal,
+          ),
       ),
     };
   }
@@ -267,6 +253,11 @@ export class SessionAgentActions {
     this.#wakeReport(this.#reportAndNotify(detail, userId), userId);
   }
 
+  reportedParent(report: SpawnedSessionCompletion, userId: string): void {
+    this.#dependencies.notify(userId, report.parentId);
+    this.#wakeReport(report, userId);
+  }
+
   stopSession(sessionId: string, detail?: AgentSessionDetail): void {
     this.#cancel(sessionId);
     if (detail !== undefined) {
@@ -282,7 +273,7 @@ export class SessionAgentActions {
 
   #cancel = (sessionId: string): void => {
     this.#dependencies.abortSession(sessionId);
-    this.#dependencies.broker.cancelSession(sessionId);
+    this.#dependencies.broker.cancelSessionCommands(sessionId);
   };
 
   #wakeReportedParent(parentId: string | undefined, userId: string): void {
@@ -317,6 +308,7 @@ export class SessionAgentActions {
     workspaceId: string,
   ): Promise<string> {
     const online = this.#onlineRunnerExists(userId, runnerId, workspaceId);
+    throwIfSignalAborted(signal, "Directory browsing was canceled");
     if (!online || !authorize()) {
       return runnerUnavailableOutput();
     }
@@ -332,10 +324,12 @@ export class SessionAgentActions {
         },
         signal,
       );
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return sessionToolOutput(
         result.status === "listed" ? result.listing : { error: result.status },
       );
     } catch {
+      throwIfSignalAborted(signal, "Directory browsing was canceled");
       return sessionToolOutput({ error: "directory_unavailable" });
     }
   }
@@ -376,6 +370,7 @@ export class SessionAgentActions {
     userId: string,
     input: ReadSessionToolInput,
     workspaceId: string,
+    toolSettings: ToolSettings,
   ): string {
     const selected = new Set(input.categories);
     const detail = readSessionSnapshot(this.#dependencies.database, {
@@ -399,8 +394,9 @@ export class SessionAgentActions {
       systemPrompt: createAgentSystemPrompt(
         detail.agentFile,
         detail.executionEnvironment,
+        toolSettings,
       ),
-      toolDefinitions: selectedAgentTools(detail.tools).map(
+      toolDefinitions: selectedAgentTools(detail.tools, toolSettings).map(
         ({ function: definition }) => definition,
       ),
     });
@@ -410,10 +406,12 @@ export class SessionAgentActions {
     userId: string,
     input: GetSessionOptionsToolInput,
     workspaceId: string,
+    signal: AbortSignal,
   ): Promise<string> {
     return sessionAgentOptions({
       dependencies: this.#dependencies,
       input,
+      signal,
       userId,
       workspaceId,
     });
@@ -430,6 +428,7 @@ export class SessionAgentActions {
     authority?: SessionExecutionAuthority,
     message?: string,
     workspaceId?: string,
+    signal?: AbortSignal,
   ): Promise<string> {
     const target = this.#detail(userId, sessionId, workspaceId);
     const unavailable = unavailableSessionResponse(target);
@@ -450,6 +449,9 @@ export class SessionAgentActions {
       userId,
       target,
       (credential) => {
+        // Credential access can outlive the tool deadline; never queue or
+        // launch after the caller already reported timed-out.
+        throwIfSignalAborted(signal, "The queue request was canceled");
         const queued = this.#dependencies.store.queue(
           userId,
           sessionId,
@@ -478,13 +480,16 @@ export class SessionAgentActions {
           ) {
             return createJsonResponse({ error: "server_restarting" }, 503);
           }
-          this.#dependencies.store.transitionRuntime(
+          this.#dependencies.store.settleRuntimeFailure(
             queued.detail.id,
-            "failed",
+            "Session failed: the child session could not be launched",
             this.#dependencies.now(),
             queued.detail.generation,
           );
+          const failed =
+            this.#dependencies.store.get(userId, sessionId) ?? queued.detail;
           this.#dependencies.notify(userId, sessionId);
+          this.reportOne(failed, userId);
           return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
         return this.#queuedResponse(userId, sessionId);
@@ -500,6 +505,7 @@ export class SessionAgentActions {
     runnerId: string,
     workingDirectory: string,
     workspaceId: string,
+    signal: AbortSignal,
   ): string {
     if (sessionId === parentSessionId) {
       throw new Error(
@@ -509,6 +515,7 @@ export class SessionAgentActions {
     if (this.#detail(userId, sessionId, workspaceId).id !== sessionId) {
       throw new Error("Session not found");
     }
+    throwIfSignalAborted(signal, "The reassignment was canceled");
     const result = this.#dependencies.store.reassign(
       userId,
       sessionId,
@@ -534,6 +541,7 @@ export class SessionAgentActions {
     authority: SessionExecutionAuthority,
     userId: string,
     input: SpawnSessionToolInput,
+    signal: AbortSignal,
   ): Promise<string> {
     const parentWorkspaceId = this.#dependencies.store.get(
       userId,
@@ -559,18 +567,15 @@ export class SessionAgentActions {
       authority,
       dependencies: this.#dependencies,
       input,
+      signal,
+      terminal: (detail) => {
+        this.reportOne(detail, userId);
+      },
       userId,
     });
   }
 
-  #compact(input: {
-    readonly authority: SessionExecutionAuthority & {
-      readonly tool: "compact_session";
-    };
-    readonly sessionId: string;
-    readonly userId: string;
-    readonly workspaceId: string;
-  }): Promise<string> {
+  #compact(input: CompactionSelection): Promise<string> {
     return compactSessionForAgent(this.#dependencies, input);
   }
 
@@ -579,10 +584,12 @@ export class SessionAgentActions {
     sessionId: string,
     message: string,
     workspaceId: string,
+    signal: AbortSignal,
   ): Promise<string> {
     return steerSessionForAgent(this.#dependencies, {
       message,
       sessionId,
+      signal,
       userId,
       workspaceId,
     });
@@ -594,8 +601,10 @@ export class SessionAgentActions {
     sessionId: string,
     cascade: boolean,
     workspaceId: string,
+    signal: AbortSignal,
   ): string {
     const target = this.#detail(userId, sessionId, workspaceId);
+    throwIfSignalAborted(signal, "The stop was canceled");
     if (target.status !== "stopped") {
       this.#dependencies.store.stop(
         userId,

@@ -1,6 +1,7 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, getTableColumns, sql } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -19,7 +20,7 @@ import {
 function report(
   setup: SpawnedChildReference,
   now = TEST_NOW + 5,
-): "delivered" | "promoted" | "terminal" | undefined {
+): "deferred" | "delivered" | "promoted" | "terminal" | undefined {
   return setup.store.spawnedSessionCallbackDisposition(
     TEST_USER_ID,
     setup.childId,
@@ -31,6 +32,18 @@ function report(
   );
 }
 
+function updateSession(
+  setup: SpawnedChildReference,
+  id: string,
+  values: Partial<typeof agentSessions.$inferInsert>,
+): void {
+  setup.database
+    .update(agentSessions)
+    .set(values)
+    .where(eq(agentSessions.id, id))
+    .run();
+}
+
 function updateGeneration(
   setup: SpawnedChildReference,
   target: "child" | "parent",
@@ -38,11 +51,25 @@ function updateGeneration(
   const id = target === "child" ? setup.childId : setup.parentId;
   const generation =
     target === "child" ? setup.childGeneration : setup.parentGeneration;
-  setup.database
-    .update(agentSessions)
-    .set({ executionGeneration: generation + 1 })
-    .where(eq(agentSessions.id, id))
-    .run();
+  updateSession(setup, id, { executionGeneration: generation + 1 });
+}
+
+function advanceChildGeneration(
+  setup: SpawnedChildReference,
+  mode: "administrative" | "attempt",
+  now: number,
+) {
+  return setup.database.transaction((transaction) =>
+    advanceStoredSessionGeneration({
+      condition: eq(agentSessions.id, setup.childId),
+      database: transaction,
+      generateId: () => crypto.randomUUID(),
+      mode,
+      now,
+      sessionId: setup.childId,
+      values: { status: "idle" },
+    }),
+  );
 }
 
 function expectReportDisposition(
@@ -94,19 +121,32 @@ function updateChild(
     runnerRequired?: true;
   },
 ): void {
-  setup.database
-    .update(agentSessions)
-    .set(values)
-    .where(eq(agentSessions.id, setup.childId))
-    .run();
+  updateSession(setup, setup.childId, values);
 }
 
-function expectedPendingReport(setup: SpawnedChildReference) {
+function setRunnerRequired(
+  setup: SpawnedChildReference,
+  id: string,
+  runnerRequired: boolean,
+): void {
+  updateSession(setup, id, { runnerRequired });
+}
+
+function expectedPendingReport(
+  setup: SpawnedChildReference,
+  kind: "follow_up" | "steer" = "steer",
+) {
   return {
     clientRequestId: `spawn:${setup.childId}:${String(setup.childGeneration)}`,
     content: "Child complete",
-    kind: "steer",
+    kind,
   } as const;
+}
+
+function expectPendingReport(setup: SpawnedChildReference): void {
+  closeAfterParentAssertion(setup, (parent) => {
+    expect(parent?.pendingInputs).toMatchObject([expectedPendingReport(setup)]);
+  });
 }
 
 function childSummary(setup: SpawnedChildReference) {
@@ -150,49 +190,96 @@ describe("spawned session report generation fencing", () => {
     setup.database.$client.close();
   });
 
-  test("skips over more than a batch of callbacks blocked by runner-required parents", () => {
+  test("bounds and advances re-query pages after reportability filtering", () => {
     const setup = spawnedChildSetup();
     const fixtureRows = setup.database
-      .select()
+      .select(getTableColumns(agentSessions))
       .from(agentSessions)
-      .where(inArray(agentSessions.id, [setup.parentId, setup.childId]))
       .all();
-    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
     const child = fixtureRows.find(({ id }) => id === setup.childId);
-    if (parent === undefined || child === undefined) {
+    const parent = fixtureRows.find(({ id }) => id === setup.parentId);
+    if (child === undefined || parent === undefined) {
       throw new Error("The spawned-session fixture rows were unavailable");
     }
-    setup.database.$client
-      .query("UPDATE agent_sessions SET runner_required = 1 WHERE id = ?")
-      .run(setup.parentId);
-    for (let index = 0; index < 100; index += 1) {
-      setup.database
-        .insert(agentSessions)
-        .values({
-          ...child,
-          id: `blocked-child-${String(index).padStart(3, "0")}`,
-        })
-        .run();
-    }
-    const deliverableParentId = "deliverable-parent";
-    const deliverableChildId = "deliverable-child";
+    const blockedParentId = "runner-required-parent";
     setup.database
       .insert(agentSessions)
-      .values({ ...parent, id: deliverableParentId, runnerRequired: false })
+      .values({ ...parent, id: blockedParentId, runnerRequired: true })
       .run();
     setup.database
       .insert(agentSessions)
-      .values({
-        ...child,
-        id: deliverableChildId,
-        parentSessionId: deliverableParentId,
-      })
+      .values(
+        Array.from({ length: 6 }, (_, index) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() - 20 + index),
+          id: `runner-required-child-${String(index)}`,
+          parentSessionId: blockedParentId,
+        })),
+      )
+      .run();
+    setup.database
+      .insert(agentSessions)
+      .values(
+        (
+          [
+            ["idle-child-without-final-response", -1, "idle"],
+            ["second-reportable-child", 1, child.status],
+            ["third-reportable-child", 2, child.status],
+          ] as const
+        ).map(([id, timeOffset, status]) => ({
+          ...child,
+          createdAt: new Date(child.createdAt.getTime() + timeOffset),
+          id,
+          status,
+        })),
+      )
       .run();
 
     expect(
-      setup.store.pendingSpawnedSessions(100).map(({ detail }) => detail.id),
-    ).toContain(deliverableChildId);
+      setup.store.pendingSpawnedSessions(2).map(({ detail }) => detail.id),
+    ).toEqual([setup.childId, "second-reportable-child"]);
     closeSetup(setup);
+  });
+
+  test("administrative and attempt advances fence opposite report generations", () => {
+    for (const mode of ["administrative", "attempt"] as const) {
+      const setup = spawnedChildSetup();
+      expectReportClaimed(setup);
+      const before = setup.childGeneration;
+
+      expect(advanceChildGeneration(setup, mode, TEST_NOW + 6)).toBeDefined();
+      const row = setup.database
+        .select({ reported: agentSessions.parentReportedGeneration })
+        .from(agentSessions)
+        .where(eq(agentSessions.id, setup.childId))
+        .get();
+      expect(row?.reported).toBe(
+        mode === "administrative" ? before + 1 : before,
+      );
+      closeSetup(setup);
+    }
+  });
+
+  test("refuses an administrative advance until a blocked terminal report is delivered", () => {
+    const setup = spawnedChildSetup();
+    setRunnerRequired(setup, setup.parentId, true);
+
+    const advanced = advanceChildGeneration(
+      setup,
+      "administrative",
+      TEST_NOW + 5,
+    );
+    expect(advanced).toBeUndefined();
+    expect(childSummary(setup)).toMatchObject({
+      generation: setup.childGeneration,
+      status: "completed",
+    });
+
+    setRunnerRequired(setup, setup.parentId, false);
+    expect(setup.store.pendingSpawnedSessions()).toHaveLength(1);
+    expectReportClaimed(setup, TEST_NOW + 6);
+    expect(setup.store.pendingSpawnedSessions()).toHaveLength(0);
+    expectPendingReport(setup);
   });
 
   test("includes a completed child whose runner was removed when its parent is runnable", () => {
@@ -203,11 +290,7 @@ describe("spawned session report generation fencing", () => {
       setup.store.pendingSpawnedSessions().map(({ detail }) => detail.id),
     ).toContain(setup.childId);
     expectReportClaimed(setup);
-    closeAfterParentAssertion(setup, (parent) => {
-      expect(parent?.pendingInputs).toMatchObject([
-        expectedPendingReport(setup),
-      ]);
-    });
+    expectPendingReport(setup);
   });
 
   test("persists and claims the current parent callback", () => {
@@ -273,7 +356,7 @@ describe("spawned session report generation fencing", () => {
   });
 
   test.each(["failed", "idle", "stopped"] as const)(
-    "consumes the callback for a terminal %s parent on the child transcript",
+    "persists the callback for a terminal %s parent",
     (status) => {
       const setup = spawnedChildSetup();
       if (status === "failed") {
@@ -306,10 +389,12 @@ describe("spawned session report generation fencing", () => {
         setup.store
           .get(TEST_USER_ID, setup.childId)
           ?.messages.some(({ role }) => role === "system"),
-      ).toBe(true);
+      ).toBe(false);
       closeAfterParentAssertion(setup, (parent) => {
         expect(parentHasChildReport(parent)).toBe(false);
-        expect(parent?.pendingInputs).toEqual([]);
+        expect(parent?.pendingInputs).toMatchObject([
+          expectedPendingReport(setup, "follow_up"),
+        ]);
         expect(parent?.status).toBe(status);
       });
     },
@@ -332,8 +417,11 @@ describe("spawned session report generation fencing", () => {
 
     expectReportClaimed(setup, TEST_NOW + 6);
     const paused = setup.store.get(TEST_USER_ID, setup.parentId);
-    expect(parentHasChildReport(paused)).toBe(true);
-    expect(paused).toMatchObject({ pendingInputs: [], status: "paused" });
+    expect(parentHasChildReport(paused)).toBe(false);
+    expect(paused).toMatchObject({
+      pendingInputs: [expectedPendingReport(setup, "follow_up")],
+      status: "paused",
+    });
     closeSetup(setup);
   });
 
@@ -362,4 +450,33 @@ describe("spawned session report generation fencing", () => {
     expectNoPendingReports(setup);
     closeSetup(setup);
   });
+});
+
+test("a failed report append does not claim or report delivery", () => {
+  const setup = spawnedChildSetup();
+  setup.database.$client.run(`
+    CREATE TRIGGER remove_parent_before_report
+    AFTER UPDATE OF parent_reported_generation ON agent_sessions
+    WHEN NEW.id = '${setup.childId}'
+    BEGIN
+      UPDATE agent_sessions SET is_deleted = 1 WHERE id = '${setup.parentId}';
+    END;
+  `);
+
+  expect(report(setup)).toBeUndefined();
+  expect(
+    setup.database
+      .select({
+        generation: sql<number>`${agentSessions.parentReportedGeneration} + 0`,
+      })
+      .from(agentSessions)
+      .where(
+        and(
+          eq(agentSessions.id, setup.childId),
+          eq(agentSessions.userId, TEST_USER_ID),
+        ),
+      )
+      .get()?.generation,
+  ).toBe(0);
+  closeSetup(setup);
 });

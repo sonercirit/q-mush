@@ -19,6 +19,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { terminalAgentStep } from "./deferred-agent-model.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
+import { recordContentsContaining } from "./session-agent-output-helpers.ts";
 import { spawnCall } from "./session-agent-spawn-helpers.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
 import {
@@ -38,6 +39,14 @@ import {
   startSessionAndCompleteAgentFile,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+
+function recordArray(
+  record: Record<string, unknown>,
+  key: string,
+): readonly unknown[] {
+  const value = record[key];
+  return Array.isArray(value) ? value : [];
+}
 
 function parentSessionRequests(
   requests: readonly AgentConversationMessage[][],
@@ -250,7 +259,7 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
   const continuedChild = await waitForSessionValue(
     readChild,
     (value) =>
-      hasSessionStatus("idle")(value) &&
+      hasSessionStatus("completed")(value) &&
       isRecord(value) &&
       value["generation"] === 1,
   );
@@ -258,7 +267,7 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
     generation: 1,
     parentExecutionGeneration: 0,
     parentSessionId: SESSION_ID,
-    status: "idle",
+    status: "completed",
   });
   const continuedChildDetail = setup.sessions.detailForUser(
     TEST_USER_ID,
@@ -269,11 +278,32 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
       ({ content }) => content === "Continued child result.",
     ),
   ).toHaveLength(1);
+  const parentWithSecondReport = await waitForSessionValue(
+    readParent,
+    (value) =>
+      isRecord(value) &&
+      recordContentsContaining(
+        value["pendingInputs"],
+        "Spawned session completed",
+      ).length === 1,
+  );
   expect(parentSessionRequests(model.requests)).toHaveLength(3);
+  const parentReports: readonly unknown[] | undefined = isRecord(
+    parentWithSecondReport,
+  )
+    ? [
+        ...recordArray(parentWithSecondReport, "messages"),
+        ...recordArray(parentWithSecondReport, "pendingInputs"),
+      ]
+    : undefined;
+  expect(Array.isArray(parentReports)).toBe(true);
+  const completedReports = recordContentsContaining(
+    parentReports,
+    "Spawned session completed",
+  );
+  expect(completedReports).toHaveLength(2);
   expect(
-    readParent()?.messages.filter(({ content }) =>
-      content.includes("Spawned session completed"),
-    ),
+    recordContentsContaining(completedReports, '"generation": 1'),
   ).toHaveLength(1);
   expect(
     commands.filter(

@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   DatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
@@ -33,6 +34,7 @@ import { runLaunchedSession } from "./session-launch-test-helpers.ts";
 import {
   createStore,
   createTestSession,
+  emptyRuntimes,
 } from "./session-store-test-fixtures.ts";
 
 function markerlessStartupSession(database: AppDatabase): void {
@@ -42,14 +44,19 @@ function markerlessStartupSession(database: AppDatabase): void {
     "018bcfe5-6800-7000-8000-000000000065",
   ];
   let idIndex = 0;
-  const startupStore = new SessionStore(database, () => {
-    const id = ids.at(idIndex);
-    idIndex += 1;
-    if (id === undefined) {
-      throw new Error("No ID remains for the startup recovery fixture");
-    }
-    return id;
-  });
+  const startupStore = new SessionStore(
+    database,
+    () => {
+      const id = ids.at(idIndex);
+      idIndex += 1;
+      if (id === undefined) {
+        throw new Error("No ID remains for the startup recovery fixture");
+      }
+      return id;
+    },
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
+  );
   createTestSession(startupStore, TEST_NOW, {
     credentialId: CREDENTIAL_ID,
     runnerId: RUNNER_ID,

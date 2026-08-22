@@ -41,10 +41,12 @@ export async function completedParentDetail(
 export async function startToolSessionSetup(
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
   agentFile: unknown = null,
+  request: Request = createSessionRequest(),
+  executionEnvironment: "bare_metal" | "container" = "bare_metal",
 ): Promise<void> {
-  const response = await setup.sessions.collection(createSessionRequest());
-  expect(response.status).toBe(201);
-  await completeAgentFileLookup(setup, agentFile);
+  const creation = await setup.sessions.collection(request);
+  expect(creation).toMatchObject({ status: 201 });
+  await completeAgentFileLookup(setup, agentFile, executionEnvironment);
 }
 
 export async function startToolSession(

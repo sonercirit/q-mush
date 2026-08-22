@@ -201,7 +201,7 @@ export function sessionTimingUpdate(
   };
 }
 
-type StoredSessionUpdate = Omit<
+export type StoredSessionUpdate = Omit<
   Partial<typeof agentSessions.$inferInsert>,
   "currentSegment" | "executionGeneration"
 > & {

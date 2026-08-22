@@ -8,6 +8,8 @@ import {
 } from "../shared/ask-questions.ts";
 import type { AgentSessionStatus } from "../shared/session-model.ts";
 import type { SessionRunStepTiming } from "../shared/session-timing.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
+import { boundToolResult } from "../shared/tool-output-limits.ts";
 import { activeQuestionSession } from "./ask-questions-session.ts";
 import type { RecoverableQuestionIdentity } from "./session-lifecycle-types.ts";
 
@@ -104,6 +106,11 @@ export interface AskQuestionsStoreResources {
   readonly generateId: (now: number) => string;
   readonly persistence: AskQuestionsPersistence;
   readonly systemActorId: string;
+  readonly toolSettings: (
+    userId: string,
+    sessionId: string,
+    executionGeneration: number,
+  ) => ToolSettings;
 }
 
 export type AnswerQuestionRequestResult =
@@ -477,13 +484,22 @@ export class AskQuestionsStore {
       if (answers === undefined) {
         throw new Error("The question answers are invalid");
       }
-      const result = canonicalAskQuestionsResult(answers);
+      const settings = this.#resources.toolSettings(
+        userId,
+        sessionId,
+        stored.executionGeneration,
+      );
+      const canonicalResult = canonicalAskQuestionsResult(answers);
+      const result = boundToolResult(
+        { output: canonicalResult },
+        settings,
+      ).output;
       if (requestIsAnswered(stored)) {
         if (stored.answers === null) {
           throw new Error("Stored agent question answers are missing");
         }
         const previous = parseAnswers(stored.answers, input.questions);
-        return canonicalAskQuestionsResult(previous) === result
+        return canonicalAskQuestionsResult(previous) === canonicalResult
           ? { request: stored, result, status: "already_answered" as const }
           : { status: "conflict" as const };
       }

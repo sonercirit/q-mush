@@ -1,4 +1,5 @@
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { CreateAgentSession } from "../../sync-engine/session-store-create.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -11,6 +12,8 @@ import { takeValue } from "./oauth-test-helpers.ts";
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+
+export const emptyRuntimes = { pending: (): undefined => undefined };
 
 export const STORE_RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const STORE_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -68,7 +71,12 @@ export function createStore() {
   return {
     database,
     generateId,
-    store: new SessionStore(database, generateId),
+    store: new SessionStore(
+      database,
+      generateId,
+      () => DEFAULT_TOOL_SETTINGS,
+      emptyRuntimes,
+    ),
   };
 }
 

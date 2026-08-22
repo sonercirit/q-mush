@@ -1,107 +1,46 @@
 import { randomUUID } from "node:crypto";
+import { countRestartProgressTools } from "./restart-progress-tools.ts";
+import type { RestartProgressTool } from "./restart-progress.ts";
 import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
+import {
+  abortRunnerCommand,
+  ignoreRunnerCommandCleanupError,
+  matchingRunnerCommands,
+  settlePendingRunnerCommand,
+  type PendingRunnerCommand,
+} from "./runner-command-pending.ts";
 import {
   RunnerCommandSurvivalState,
   type RunnerCommandSurvivalOptions,
 } from "./runner-command-survival.ts";
-import type {
-  RunnerCommandOutputDelta,
-  RunnerCommandResult,
-} from "./tool-stream.ts";
+import {
+  type DispatchRunnerToolCommand,
+  type RunnerCommandOutputDelta,
+  type RunnerCommandStream,
+  type RunnerCommandTransport,
+  type RunnerToolCommand,
+} from "./runner-command.ts";
+import { RunnerDisconnectedError } from "./runner-disconnected-error.ts";
+import type { RunnerCommandResult } from "./tool-stream.ts";
+import { abortSignalError, errorFromUnknown } from "./validation.ts";
 
+export {
+  failedRunnerCommandResult,
+  readRunnerExecutionEnvironment,
+  RUNNER_EXECUTION_CLEANUP_COMMAND,
+  RUNNER_TERMINAL_CLEANUP_ARGUMENT,
+  type DispatchRunnerToolCommand,
+  type RunnerCommandArguments,
+  type RunnerExecutionEnvironment,
+  type RunnerToolCommand,
+} from "./runner-command.ts";
 export type {
   RunnerCommandOutputDelta,
   RunnerCommandResult,
 } from "./tool-stream.ts";
 
-export function failedRunnerCommandResult(
-  error: unknown,
-  maximumDetailLength: number,
-): RunnerCommandResult {
-  const detail = error instanceof Error ? error.message : String(error);
-  return {
-    output: `Error: ${detail.slice(0, maximumDetailLength)}`,
-    state: "failed",
-  };
-}
-
-export type RunnerExecutionEnvironment = "bare_metal" | "container";
-
-export const RUNNER_EXECUTION_CLEANUP_COMMAND = "cleanup_execution_environment";
-export const RUNNER_TERMINAL_CLEANUP_ARGUMENT = "terminal";
-export const RUNNER_TOOL_OUTPUT_SPILL_COMMAND = "spill_tool_output";
-export const RUNNER_TOOL_OUTPUT_SPILL_CONTENT_ARGUMENT = "content";
-
-export function readRunnerExecutionEnvironment(
-  value: unknown,
-): RunnerExecutionEnvironment | undefined {
-  if (value === undefined || value === "bare_metal") {
-    return "bare_metal";
-  }
-  return value === "container" ? value : undefined;
-}
-
-export type RunnerCommandArguments = Readonly<Record<string, unknown>>;
-
-export interface RunnerToolCommand {
-  readonly arguments: RunnerCommandArguments;
-  readonly executionEnvironment: RunnerExecutionEnvironment;
-  readonly id: string;
-  readonly sessionId: string;
-  readonly tool: string;
-  readonly workingDirectory: string;
-}
-
-export interface DispatchRunnerToolCommand extends Omit<
-  RunnerToolCommand,
-  "id"
-> {
-  readonly authorize?: () => boolean;
-  readonly generation?: number;
-  readonly queueIfUnavailable?: boolean;
-  readonly runnerId: string;
-}
-
-interface RunnerCommandBrokerOptions extends RunnerCommandSurvivalOptions {
-  readonly cancel?: (runnerId: string, commandId: string) => void;
-  readonly commandId?: () => string;
-  readonly deliver?: (runnerId: string, command: RunnerToolCommand) => boolean;
-}
-
-export class RunnerDisconnectedError extends Error {
-  constructor(message = "The runner disconnected before the command returned") {
-    super(message);
-    this.name = "RunnerDisconnectedError";
-  }
-}
-
-interface PendingCommand {
-  readonly abort: (() => void) | undefined;
-  readonly authorize: (() => boolean) | undefined;
-  readonly command: RunnerToolCommand;
-  connectionGeneration: number | undefined;
-  readonly generation: number | undefined;
-  readonly reject: (error: Error) => void;
-  readonly resolve: (result: RunnerCommandResult) => void;
-  readonly runnerId: string;
-  readonly signal: AbortSignal | undefined;
-  readonly stream: ((delta: RunnerCommandOutputDelta) => void) | undefined;
-  nextSequence: number;
-  phase: "in_flight" | "queued";
-  queuedAfterDisconnect: boolean;
-}
-
-function abortError(message: string): DOMException {
-  return new DOMException(message, "AbortError");
-}
-
-function ignoreCleanupError(callback: () => void): void {
-  try {
-    callback();
-  } catch {
-    // The broker has already fenced the command; cleanup is best effort.
-  }
-}
+interface RunnerCommandBrokerOptions
+  extends RunnerCommandSurvivalOptions, RunnerCommandTransport {}
 
 interface RejectedCommand {
   readonly command: RunnerToolCommand;
@@ -113,8 +52,8 @@ export class RunnerCommandBroker {
   readonly #commandId: () => string;
   readonly #deliver:
     ((runnerId: string, command: RunnerToolCommand) => boolean) | undefined;
-  readonly #delivery: RunnerCommandDelivery<PendingCommand>;
-  readonly #pending = new Map<string, PendingCommand>();
+  readonly #delivery: RunnerCommandDelivery<PendingRunnerCommand>;
+  readonly #pending = new Map<string, PendingRunnerCommand>();
   readonly #processRegistrations = new Map<
     string,
     Readonly<{ commit: () => void; processNonce: string | undefined }>
@@ -135,21 +74,23 @@ export class RunnerCommandBroker {
   dispatch(
     input: DispatchRunnerToolCommand,
     signal?: AbortSignal,
-    stream?: (delta: RunnerCommandOutputDelta) => void,
+    stream?: RunnerCommandStream,
   ): Promise<RunnerCommandResult> {
     if (signal?.aborted) {
-      return Promise.reject(abortError("The agent session was stopped"));
+      return Promise.reject(
+        abortSignalError(signal, "The agent session was stopped"),
+      );
     }
     let initiallyAuthorized: boolean;
     try {
       initiallyAuthorized = input.authorize?.() !== false;
     } catch (error) {
-      return Promise.reject(
-        error instanceof Error ? error : new Error(String(error)),
-      );
+      return Promise.reject(errorFromUnknown(error));
     }
     if (!initiallyAuthorized) {
-      return Promise.reject(abortError("The agent session was stopped"));
+      return Promise.reject(
+        abortRunnerCommand("The agent session was stopped"),
+      );
     }
 
     const id = this.#commandId();
@@ -163,7 +104,13 @@ export class RunnerCommandBroker {
     const command: RunnerToolCommand = {
       arguments: input.arguments,
       executionEnvironment: input.executionEnvironment,
+      ...(input.executionLimitSeconds === undefined
+        ? {}
+        : { executionLimitSeconds: input.executionLimitSeconds }),
       id,
+      ...(input.outputLimitCharacters === undefined
+        ? {}
+        : { outputLimitCharacters: input.outputLimitCharacters }),
       sessionId: input.sessionId,
       tool: input.tool,
       workingDirectory: input.workingDirectory,
@@ -174,10 +121,15 @@ export class RunnerCommandBroker {
       if (!added) {
         return;
       }
-      this.#reject(id, abortError("The agent session was stopped"));
+      this.#reject(
+        id,
+        signal === undefined
+          ? abortRunnerCommand("The agent session was stopped")
+          : abortSignalError(signal, "The agent session was stopped"),
+      );
     };
     return new Promise<RunnerCommandResult>((resolve, reject) => {
-      const pending: PendingCommand = {
+      const pending: PendingRunnerCommand = {
         abort: signal === undefined ? undefined : cancel,
         authorize: input.authorize,
         command,
@@ -241,18 +193,15 @@ export class RunnerCommandBroker {
     return pending.command;
   }
 
-  #authorized(pending: PendingCommand): boolean {
+  #authorized(pending: PendingRunnerCommand): boolean {
     return pending.signal?.aborted !== true && pending.authorize?.() !== false;
   }
 
   #rejectUnknown(commandId: string, error: unknown): void {
-    this.#reject(
-      commandId,
-      error instanceof Error ? error : new Error(String(error)),
-    );
+    this.#reject(commandId, errorFromUnknown(error));
   }
 
-  #requireAuthorization(pending: PendingCommand): boolean {
+  #requireAuthorization(pending: PendingRunnerCommand): boolean {
     let authorized: boolean;
     try {
       authorized = this.#authorized(pending);
@@ -270,7 +219,7 @@ export class RunnerCommandBroker {
   #authorizedQueued(
     runnerId: string,
     excludedCommandIds?: ReadonlySet<string>,
-  ): PendingCommand | undefined {
+  ): PendingRunnerCommand | undefined {
     for (;;) {
       const pending = this.#delivery.next(runnerId, excludedCommandIds);
       if (pending === undefined || this.#requireAuthorization(pending)) {
@@ -280,8 +229,8 @@ export class RunnerCommandBroker {
   }
 
   #setPendingPhase(
-    pending: PendingCommand,
-    phase: PendingCommand["phase"],
+    pending: PendingRunnerCommand,
+    phase: PendingRunnerCommand["phase"],
   ): void {
     if (this.#pending.has(pending.command.id)) {
       pending.phase = phase;
@@ -290,7 +239,7 @@ export class RunnerCommandBroker {
 
   #unavailable(
     input: DispatchRunnerToolCommand,
-    pending: PendingCommand,
+    pending: PendingRunnerCommand,
   ): void {
     if (input.queueIfUnavailable === false) {
       this.#reject(pending.command.id, new RunnerDisconnectedError());
@@ -299,7 +248,7 @@ export class RunnerCommandBroker {
     this.#requeue(pending);
   }
 
-  #requeue(pending: PendingCommand): void {
+  #requeue(pending: PendingRunnerCommand): void {
     pending.connectionGeneration = undefined;
     this.#setPendingPhase(pending, "queued");
     if (this.#pending.has(pending.command.id)) {
@@ -432,14 +381,14 @@ export class RunnerCommandBroker {
     }
   }
 
-  #settlePending(pending: PendingCommand): void {
+  #settlePending(pending: PendingRunnerCommand): void {
     this.#settle(pending.command.id, pending);
   }
 
   #authorizedForRunner(
     runnerId: string,
     commandId: string,
-  ): PendingCommand | undefined {
+  ): PendingRunnerCommand | undefined {
     const pending = this.#pending.get(commandId);
     return pending?.runnerId === runnerId && this.#requireAuthorization(pending)
       ? pending
@@ -448,7 +397,7 @@ export class RunnerCommandBroker {
 
   #authorizedInFlight(
     ...parameters: readonly [runnerId: string, commandId: string]
-  ): PendingCommand | undefined {
+  ): PendingRunnerCommand | undefined {
     const pending = this.#authorizedForRunner(...parameters);
     if (pending?.phase !== "in_flight") {
       return undefined;
@@ -461,17 +410,27 @@ export class RunnerCommandBroker {
   }
 
   #matchingPending(
-    matches: (pending: PendingCommand) => boolean,
-  ): PendingCommand[] {
-    return Array.from(this.#pending.values()).filter(matches);
+    matches: (pending: PendingRunnerCommand) => boolean,
+  ): PendingRunnerCommand[] {
+    return matchingRunnerCommands(this.#pending, matches);
+  }
+
+  #sessionPending(sessionId: string): PendingRunnerCommand[] {
+    return this.#matchingPending(
+      ({ command }) => command.sessionId === sessionId,
+    );
+  }
+
+  pendingToolProgress(sessionId: string): readonly RestartProgressTool[] {
+    return countRestartProgressTools(
+      this.#sessionPending(sessionId).map(({ command }) => command.tool),
+    );
   }
 
   sessionCommandPhase(
     sessionId: string,
   ): "in_flight" | "queued" | "runner_disconnected" | undefined {
-    const commands = this.#matchingPending(
-      ({ command }) => command.sessionId === sessionId,
-    );
+    const commands = this.#sessionPending(sessionId);
     if (commands.length === 0) {
       return undefined;
     }
@@ -486,8 +445,8 @@ export class RunnerCommandBroker {
   #settleAuthorized(
     runnerId: string,
     commandId: string,
-    validate?: (pending: PendingCommand) => boolean,
-  ): PendingCommand | undefined {
+    validate?: (pending: PendingRunnerCommand) => boolean,
+  ): PendingRunnerCommand | undefined {
     const pending = this.#authorizedInFlight(runnerId, commandId);
     return pending === undefined || validate?.(pending) === false
       ? undefined
@@ -532,7 +491,7 @@ export class RunnerCommandBroker {
   }
 
   #rejectMatching(
-    matches: (pending: PendingCommand) => boolean,
+    matches: (pending: PendingRunnerCommand) => boolean,
     error: () => Error,
   ): readonly RejectedCommand[] {
     const matching = [...this.#pending.values()]
@@ -595,19 +554,15 @@ export class RunnerCommandBroker {
   runnerRemoved(runnerId: string): readonly RejectedCommand[] {
     return this.#rejectMatching(
       (pending) => pending.runnerId === runnerId,
-      () => abortError("The assigned runner was removed"),
+      () => abortRunnerCommand("The assigned runner was removed"),
     );
   }
 
-  cancelSession(sessionId: string): void {
-    this.cancelSessionCommands(sessionId);
-  }
-
   #cancelMatching(
-    matches: (pending: PendingCommand) => boolean,
+    matches: (pending: PendingRunnerCommand) => boolean,
     message: string,
   ): readonly RunnerToolCommand[] {
-    return this.#rejectMatching(matches, () => abortError(message)).map(
+    return this.#rejectMatching(matches, () => abortRunnerCommand(message)).map(
       ({ command }) => command,
     );
   }
@@ -616,11 +571,10 @@ export class RunnerCommandBroker {
     sessionId: string,
     generation: number,
   ): readonly RunnerToolCommand[] {
-    const generationMatches = (pending: PendingCommand): boolean =>
-      pending.generation === generation;
     return this.#cancelMatching(
       (pending) =>
-        generationMatches(pending) && pending.command.sessionId === sessionId,
+        pending.generation === generation &&
+        pending.command.sessionId === sessionId,
       "The session tools changed",
     );
   }
@@ -632,10 +586,10 @@ export class RunnerCommandBroker {
     );
   }
 
-  #rejectUnauthorized(pending: PendingCommand): void {
+  #rejectUnauthorized(pending: PendingRunnerCommand): void {
     this.#reject(
       pending.command.id,
-      abortError("The agent session was stopped"),
+      abortRunnerCommand("The agent session was stopped"),
     );
   }
 
@@ -653,7 +607,7 @@ export class RunnerCommandBroker {
       }
       if (this.#cancel !== undefined) {
         const cancel = this.#cancel;
-        ignoreCleanupError(() => {
+        ignoreRunnerCommandCleanupError(() => {
           cancel(pending.runnerId, commandId);
         });
       }
@@ -662,19 +616,12 @@ export class RunnerCommandBroker {
     pending.reject(error);
   }
 
-  #settle(commandId: string, pending: PendingCommand): void {
-    this.#pending.delete(commandId);
-
-    if (pending.abort !== undefined && pending.signal !== undefined) {
-      const abort = pending.abort;
-      const signal = pending.signal;
-      ignoreCleanupError(() => {
-        signal.removeEventListener("abort", abort);
-      });
-    }
-
-    if (pending.phase === "queued") {
-      this.#delivery.remove(pending.runnerId, commandId);
-    }
+  #settle(commandId: string, pending: PendingRunnerCommand): void {
+    settlePendingRunnerCommand(
+      this.#pending,
+      this.#delivery,
+      commandId,
+      pending,
+    );
   }
 }

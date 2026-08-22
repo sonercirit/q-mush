@@ -46,10 +46,11 @@ export type EnqueuePendingInputResult =
   | { readonly input: AgentSessionPendingInput; readonly status: "duplicate" }
   | { readonly status: "conflict" | "invalid_state" | "not_found" };
 
-interface StoredPendingInput {
+export interface StoredPendingInput {
   readonly clientRequestId: string;
   readonly content: string;
   readonly createdAt: Date;
+  readonly createdById: string;
   readonly id: string;
   readonly images: string | null;
   readonly kind: AgentSessionPendingInputKind;
@@ -78,6 +79,7 @@ const PENDING_SELECTION = {
   clientRequestId: agentPendingInputs.clientRequestId,
   content: agentPendingInputs.content,
   createdAt: agentPendingInputs.createdAt,
+  createdById: agentPendingInputs.createdById,
   id: agentPendingInputs.id,
   images: agentPendingInputs.images,
   kind: agentPendingInputs.kind,
@@ -138,7 +140,7 @@ function firstPendingInput(
   return orderedActiveInputs(activeInputQuery(database, sessionId)).get();
 }
 
-function activeInputs(
+export function activeStoredPendingInputs(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly StoredPendingInput[] {
@@ -153,22 +155,27 @@ export interface PendingInputForPromotion extends Pick<
   readonly images: readonly AgentImage[];
 }
 
+export function pendingInputForPromotion(
+  pending: StoredPendingInput,
+): PendingInputForPromotion {
+  return {
+    content: pending.content,
+    id: pending.id,
+    images: parseStoredImages(
+      pending.images,
+      "Stored pending session images are invalid",
+    ),
+    sessionId: pending.sessionId,
+  };
+}
+
 export function activePendingInput(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
+  accepts: (pending: StoredPendingInput) => boolean = () => true,
 ): PendingInputForPromotion | undefined {
-  const pending = firstPendingInput(database, sessionId);
-  return pending === undefined
-    ? undefined
-    : {
-        content: pending.content,
-        id: pending.id,
-        images: parseStoredImages(
-          pending.images,
-          "Stored pending session images are invalid",
-        ),
-        sessionId: pending.sessionId,
-      };
+  const pending = activeStoredPendingInputs(database, sessionId).find(accepts);
+  return pending === undefined ? undefined : pendingInputForPromotion(pending);
 }
 
 export function hasPendingSteeringInput(
@@ -181,7 +188,7 @@ export function storedPendingInputs(
   database: Pick<AppDatabase, "select">,
   sessionId: string,
 ): readonly AgentSessionPendingInput[] {
-  return activeInputs(database, sessionId).map(storedPendingInput);
+  return activeStoredPendingInputs(database, sessionId).map(storedPendingInput);
 }
 
 function validInputState(
@@ -203,7 +210,7 @@ export interface SessionSystemWriteTarget {
   readonly userId: string;
 }
 
-export function appendSystemFollowUp(
+export function appendSystemPendingInput(
   options: SessionSystemWriteTarget & {
     readonly clientRequestId: string;
     readonly content: string;
@@ -215,7 +222,7 @@ export function appendSystemFollowUp(
     sessionId: options.sessionId,
     userId: options.userId,
   });
-  if (session?.status !== "running") {
+  if (session === undefined) {
     return false;
   }
   const id = options.generateId(options.now);
@@ -564,7 +571,10 @@ export function takeSteeringInputs(options: {
       return [];
     }
     const consumed: StoredPendingInput[] = [];
-    for (const input of activeInputs(transaction, options.sessionId)) {
+    for (const input of activeStoredPendingInputs(
+      transaction,
+      options.sessionId,
+    )) {
       if (input.kind !== "steer") {
         break;
       }
@@ -619,6 +629,7 @@ export function settleNormalSessionBoundary(options: {
           previousExecutionGeneration: options.generation,
           segment: session.currentSegment,
           sessionId: options.sessionId,
+          toolSettings: "inherit",
           userId: session.userId,
         })
       : undefined;

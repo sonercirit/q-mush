@@ -7,6 +7,11 @@ import {
 import type { AgentSessionToolOption } from "../../shared/agent-tools.ts";
 import type { ProviderCredentialSummary } from "../../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
+import { MINIMUM_TOOL_OUTPUT_CHARACTERS } from "../../shared/tool-limits.ts";
+import {
+  toolOutputTruncationNotice,
+  unicodeCharacterCount,
+} from "../../shared/tool-output-limits.ts";
 import { sessionOptionsOutput } from "../../sync-engine/session-agent-options.ts";
 import {
   modelOptionIds,
@@ -15,16 +20,15 @@ import {
   testSessionOptionsSource,
 } from "./session-agent-option-fixtures.ts";
 import {
+  boundedStructuredToolOutput,
   jsonRecord,
   testArray,
   testRecord,
 } from "./session-agent-output-helpers.ts";
 
-const MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES = 24_000;
-
-const TRUNCATED_OPTION_METADATA = {
-  truncated: true,
-  truncation: { outputBytes: false, sourceFields: true },
+const COMPLETE_OPTION_METADATA = {
+  truncated: false,
+  truncation: { sourceFields: false },
 } as const;
 
 interface SessionCredentialOption extends Pick<
@@ -51,15 +55,6 @@ function parsed(
   source: Parameters<typeof sessionOptionsOutput>[1],
 ): Readonly<Record<string, unknown>> {
   return jsonRecord(sessionOptionsOutput(input, source));
-}
-
-function expectBoundedOutput(
-  serialized: string,
-): Readonly<Record<string, unknown>> {
-  expect(Buffer.byteLength(serialized, "utf8")).toBeLessThanOrEqual(
-    MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES,
-  );
-  return jsonRecord(serialized);
 }
 
 function numberedModels(length: number): readonly AgentModelOption[] {
@@ -111,7 +106,7 @@ describe("session option pagination", () => {
       totalItems: 11,
       totalPages: 2,
       truncated: false,
-      truncation: { outputBytes: false },
+      truncation: { sourceFields: false },
     });
     expect(testArray(read["items"])).toHaveLength(10);
     expect(JSON.stringify(read)).not.toContain("lastSeenAt");
@@ -445,22 +440,54 @@ describe("session option pagination", () => {
     ]);
   });
 
-  test("bounds serialized pages", () => {
-    const read = expectBoundedOutput(
-      modelOptionsOutput("x".repeat(3_000), false),
+  test("keeps get_session_options JSON and pagination at the Unicode boundary", () => {
+    const maximum = MINIMUM_TOOL_OUTPUT_CHARACTERS;
+    const output = boundedStructuredToolOutput(
+      modelOptionsOutput("😀".repeat(2_000), false),
+      maximum,
+      "get_session_options",
     );
+    const read = jsonRecord(output);
+    const items = testArray(read["items"]);
+
+    expect(unicodeCharacterCount(output)).toBeLessThanOrEqual(maximum);
+    expect(read).toMatchObject({
+      category: "models",
+      filters: {},
+      hasNext: false,
+      hasPrevious: false,
+      page: 1,
+      pageSize: 10,
+      totalItems: 10,
+      totalPages: 1,
+      truncated: true,
+      truncation: {
+        items: true,
+        outputCharacters: true,
+        sourceFields: false,
+      },
+    });
+    expect(items.length).toBeLessThan(10);
+    expect(read["returnedItems"]).toBe(items.length);
+    expect(read["notice"]).toBe(toolOutputTruncationNotice(maximum));
+    expect(output.split("Tool output truncated")).toHaveLength(2);
+    expect(output).not.toContain("�");
+  });
+
+  test("preserves serialized pages for the shared final character bound", () => {
+    const read = jsonRecord(modelOptionsOutput("x".repeat(3_000), false));
     expect(testArray(read["items"])).toHaveLength(10);
   });
 
-  test("bounds multibyte source fields by UTF-8 bytes", () => {
+  test("preserves multibyte source fields", () => {
     const serialized = modelOptionsOutput("😀".repeat(250), true);
-    const read = expectBoundedOutput(serialized);
+    const read = jsonRecord(serialized);
 
     expect(serialized).not.toContain("�");
-    expect(read).toMatchObject(TRUNCATED_OPTION_METADATA);
+    expect(read).toMatchObject(COMPLETE_OPTION_METADATA);
   });
 
-  test("reports bounded externally sourced fields", () => {
+  test("preserves externally sourced fields for the shared final bound", () => {
     const huge = "x".repeat(20_000);
     const runner: RunnerSummary = {
       architecture: huge,
@@ -506,10 +533,8 @@ describe("session option pagination", () => {
       ],
       [testSessionOptionsInput("tools"), testSessionOptionsSource({ tools })],
     ] as const) {
-      const parsedOutput = expectBoundedOutput(
-        sessionOptionsOutput(request, options),
-      );
-      expect(parsedOutput).toMatchObject(TRUNCATED_OPTION_METADATA);
+      const parsedOutput = jsonRecord(sessionOptionsOutput(request, options));
+      expect(parsedOutput).toMatchObject(COMPLETE_OPTION_METADATA);
     }
   });
 });

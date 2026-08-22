@@ -19,6 +19,7 @@ import {
   withRestoredFetch,
 } from "./controller-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
@@ -133,7 +134,7 @@ function applyDelta(
   thinking: string,
   reset = false,
 ): void {
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content,
     ...(reset ? { reset: true } : {}),
     sessionId,

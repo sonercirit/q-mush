@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamDeltaFrame } from "../../shared/tool-stream.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
@@ -153,6 +154,7 @@ function genericSession(response: Response): {
     realtime: undefined,
     streamId: "initial-step",
     toolStream,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
     userId: "user-1",
   });
 

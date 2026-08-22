@@ -1,13 +1,12 @@
-import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { isProviderId } from "../shared/provider-id.ts";
 import { readIdentifier } from "../shared/validation.ts";
-import {
-  safeAgentModelDiscoveryError,
-  type AgentModelDiscoverer,
-} from "./agent-model-discovery.ts";
+import { safeAgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
 import type { SessionCredentialAction } from "./session-credential-access.ts";
+import type { CredentialDiscoveryRequestOptions } from "./session-credential-discovery-options.ts";
+import { abortedServerRestartResponse } from "./session-restart-gate.ts";
 import {
   requestSessionWorkspaceId,
   type SessionWorkspaceReader,
@@ -42,13 +41,12 @@ function readModelDiscoveryInput(
     : { credentialId, provider, workspaceId };
 }
 
-export async function modelsForUser(options: {
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly request: Request;
-  readonly user: AuthenticatedUser;
-  readonly withCredential: WithModelCredential;
-  readonly workspaces: SessionWorkspaceReader;
-}): Promise<Response> {
+export async function modelsForUser(
+  options: CredentialDiscoveryRequestOptions<WithModelCredential> & {
+    readonly discoverModels: AgentModelDiscoverer;
+    readonly workspaces: SessionWorkspaceReader;
+  },
+): Promise<Response> {
   const selection = readModelDiscoveryInput(
     options.request,
     options.user.id,
@@ -61,6 +59,7 @@ export async function modelsForUser(options: {
           options.discoverModels,
           selection.provider,
           credential,
+          options.signal,
         ),
       );
 }
@@ -69,14 +68,22 @@ async function discoveredModelsResponse(
   discoverModels: AgentModelDiscoverer,
   provider: ProviderId,
   credential: Parameters<AgentModelDiscoverer>[1],
+  signal?: AbortSignal,
 ): Promise<Response> {
   try {
-    return createJsonResponse(await discoverModels(provider, credential));
+    const restartResponse = abortedServerRestartResponse(signal);
+    if (restartResponse !== undefined) return restartResponse;
+    return createJsonResponse(
+      await discoverModels(provider, credential, signal),
+    );
   } catch (error) {
-    return createApiError(
-      "provider_unavailable",
-      502,
-      safeAgentModelDiscoveryError(error),
+    return (
+      abortedServerRestartResponse(signal) ??
+      createApiError(
+        "provider_unavailable",
+        502,
+        safeAgentModelDiscoveryError(error),
+      )
     );
   }
 }

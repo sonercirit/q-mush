@@ -2,7 +2,7 @@ import type { SQL } from "drizzle-orm";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentSessions } from "../shared/database/schema.ts";
 
-import { selectedString } from "./database-count.ts";
+import { selectedString, selectedValue } from "./database-count.ts";
 
 const SESSION_USER_ID_SELECTION = {
   column: agentSessions.userId,
@@ -27,11 +27,29 @@ export function requireRunningSessionUserId(
   return userId;
 }
 
+const SESSION_GENERATION_SELECTION = {
+  column: agentSessions.executionGeneration,
+  table: agentSessions,
+} as const;
+
+export function readStoredSessionGeneration(options: {
+  readonly condition: SQL | undefined;
+  readonly database: Pick<AppDatabase, "select">;
+}): number | undefined {
+  const generation = selectedValue({
+    condition: options.condition,
+    database: options.database,
+    selected: SESSION_GENERATION_SELECTION,
+  });
+  return typeof generation === "number" ? generation : undefined;
+}
+
 const STORED_SESSION_STATE_SELECTION = {
   currentSegment: agentSessions.currentSegment,
   executionGeneration: agentSessions.executionGeneration,
   parentCallbackGeneration: agentSessions.parentCallbackGeneration,
   parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+  parentReportedGeneration: agentSessions.parentReportedGeneration,
   parentSessionId: agentSessions.parentSessionId,
   runnerRequired: agentSessions.runnerRequired,
   status: agentSessions.status,

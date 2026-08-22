@@ -13,6 +13,7 @@ import {
   completeAgentFileLookup,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
+import { closeSessionStoreTestSetup } from "./session-launch-race-helpers.ts";
 
 export interface TestLivenessClock {
   readonly advance: (milliseconds: number) => void;
@@ -121,7 +122,7 @@ export function sessionDetailStatus(
 export function closeLivenessSession(
   setup: Pick<ReturnType<typeof connectedSessionSetup>, "database">,
 ): void {
-  setup.database.$client.close();
+  closeSessionStoreTestSetup(setup);
 }
 
 export async function awaitProviderCall(

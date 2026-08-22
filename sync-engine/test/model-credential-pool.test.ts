@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { ProviderCredentialRejectionError } from "../provider-error.ts";
 import {
@@ -58,6 +58,39 @@ function createSetup() {
     balancer,
   );
   return { balancer, database, pool };
+}
+
+function credentialLoadGate() {
+  return {
+    entered: Promise.withResolvers<undefined>(),
+    release: Promise.withResolvers<undefined>(),
+  };
+}
+
+function gatedCredentialPool() {
+  const database = testDatabase();
+  const gate = credentialLoadGate();
+  let gated = true;
+  const pool = modelPool(database, async (_userId, selection) => {
+    if (gated && selection.credentialId === FIRST_CREDENTIAL_ID) {
+      gate.entered.resolve(undefined);
+      await gate.release.promise;
+    }
+    return createTestProviderCredential(selection.credentialId);
+  });
+  return { database, gate, pool, releaseGate: () => (gated = false) };
+}
+
+async function cancelGatedCredentialRead(
+  gate: ReturnType<typeof credentialLoadGate>,
+  pending: Promise<unknown>,
+  controller: AbortController,
+): Promise<void> {
+  await gate.entered.promise;
+  const reason = new DOMException("Deadline reached", "AbortError");
+  controller.abort(reason);
+  gate.release.resolve(undefined);
+  await expect(pending).rejects.toBe(reason);
 }
 
 describe("model credential pool", () => {
@@ -119,6 +152,31 @@ describe("model credential pool", () => {
       [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
       [expect.objectContaining({ id: SECOND_CREDENTIAL_ID })],
     ]);
+    database.$client.close();
+  });
+
+  test("propagates cancellation during balanced credential loading", async () => {
+    const { database, gate, pool } = gatedCredentialPool();
+    const controller = new AbortController();
+    const pending = pool.representative(
+      TEST_USER_ID,
+      SELECTION,
+      controller.signal,
+    );
+    await cancelGatedCredentialRead(gate, pending, controller);
+    database.$client.close();
+  });
+
+  test("canceled candidate reads do not consume or cool down the reusable pool", async () => {
+    const { database, gate, pool, releaseGate } = gatedCredentialPool();
+    const controller = new AbortController();
+    const pending = pool.candidates(TEST_USER_ID, SELECTION, controller.signal);
+    await cancelGatedCredentialRead(gate, pending, controller);
+    releaseGate();
+    const reusable = await pool.candidates(TEST_USER_ID, SELECTION);
+    expect(reusable.map(({ id }) => id).sort()).toEqual(
+      [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID].sort(),
+    );
     database.$client.close();
   });
 

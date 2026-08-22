@@ -3,7 +3,7 @@ import type { SessionAgentActionDependencies } from "./session-agent-action-help
 import { spawnedSessionReport } from "./session-spawn-report.ts";
 
 export interface SpawnedSessionCompletion {
-  readonly disposition: "delivered" | "promoted" | "terminal";
+  readonly disposition: "deferred" | "delivered" | "promoted" | "terminal";
   readonly parentId: string;
 }
 
@@ -57,10 +57,7 @@ export function stopSpawnedSessionChildren(
       userId,
     );
     if (reported !== undefined) {
-      dependencies.notify(
-        userId,
-        reported.disposition === "terminal" ? childId : reported.parentId,
-      );
+      dependencies.notify(userId, reported.parentId);
     }
   }
 }

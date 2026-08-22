@@ -1,4 +1,8 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
+import {
+  readDevelopmentRestartProgress,
+  type DevelopmentRestartProgress,
+} from "../shared/development-shutdown.ts";
 import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 import {
   parseJsonRecord,
@@ -9,6 +13,7 @@ import type {
   AgentSessionDetail,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
+import { readToolSettings, type ToolSettings } from "../shared/tool-limits.ts";
 import {
   isToolStreamDeltaFrame,
   isToolStreamSnapshotFrame,
@@ -37,10 +42,15 @@ export type RealtimeServerEvent =
       readonly type: "command_success";
     }
   | { readonly instanceId: string; readonly type: "ready" }
+  | {
+      readonly progress: readonly DevelopmentRestartProgress[];
+      readonly type: "development_restart_progress";
+    }
   | { readonly health: EngineHealthSnapshot; readonly type: "health" }
   | ToolStreamDeltaFrame
   | ToolStreamSnapshotFrame
   | { readonly runners: readonly RunnerSummary[]; readonly type: "runners" }
+  | { readonly settings: ToolSettings; readonly type: "tool_settings" }
   | { readonly session: AgentSessionDetail; readonly type: "session" }
   | {
       readonly pending: PendingAskQuestions | null;
@@ -91,6 +101,13 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
   switch (value["type"]) {
     case "ready":
       return { instanceId: requiredString(value, "instanceId"), type: "ready" };
+    case "q-mush:development-restart-progress": {
+      const progress = readDevelopmentRestartProgress(value["progress"]);
+      if (progress === undefined) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return { progress, type: "development_restart_progress" };
+    }
     case "health": {
       const health = value["health"];
       if (
@@ -144,6 +161,13 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
       return value;
     case "runners":
       return { runners: readRunners(value), type: "runners" };
+    case "tool_settings": {
+      const settings = readToolSettings(value["settings"]);
+      if (settings === undefined) {
+        throw new Error("The realtime server event was invalid");
+      }
+      return { settings, type: "tool_settings" };
+    }
     case "sessions":
       if (!Array.isArray(value["sessions"])) {
         throw new Error("The server returned an invalid agent session list");

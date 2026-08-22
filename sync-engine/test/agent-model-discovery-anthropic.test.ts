@@ -475,7 +475,9 @@ test("propagates an abort raised during the OpenAI-style effort probe", async ()
           );
         }
         controller.abort(reason);
-        return Promise.reject(reason);
+        // Returning a settled response lets the fetch promise finish without
+        // producing a second rejection after the combined signal wins.
+        return Promise.resolve(createJsonResponse({ data: [] }));
       },
       controller.signal,
     ),

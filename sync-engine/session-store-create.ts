@@ -13,6 +13,7 @@ import { runnerReadySessionCondition } from "./session-store-persistence.ts";
 import { serializeProviderPricing } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   insertStoredMessage,
   recordedMessageValues,
@@ -180,6 +181,7 @@ function storedSessionValues(
     openRouterProviderTag: input.openRouterProviderTag,
     parentExecutionGeneration: options.parentExecutionGeneration,
     parentCallbackGeneration: options.parentExecutionGeneration,
+    parentReportedGeneration: -1,
     parentSessionId: options.parentSessionId,
     spawnPreparationPending: options.spawnPreparationPending,
     provider: input.provider,
@@ -234,18 +236,15 @@ export function createStoredSession(
       parentGeneration !== undefined &&
       input.parentUserInitiated === true
     ) {
-      const parent = transaction
-        .select({ generation: agentSessions.executionGeneration })
-        .from(agentSessions)
-        .where(
-          runnerReadySessionCondition({
-            id: parentSessionId,
-            userId: input.userId,
-            workspaceId: input.workspaceId,
-          }),
-        )
-        .get();
-      if (parent?.generation !== parentGeneration) {
+      const parentGenerationAtCreation = readStoredSessionGeneration({
+        condition: runnerReadySessionCondition({
+          id: parentSessionId,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+        }),
+        database: transaction,
+      });
+      if (parentGenerationAtCreation !== parentGeneration) {
         return "parent_stale" as const;
       }
     }
@@ -284,6 +283,7 @@ export function createStoredSession(
       now,
       segment: 0,
       sessionId,
+      toolSettings: resources.toolSettings(input.userId),
       userId: input.userId,
     });
     const activeTurnId = activeSessionTurnId(transaction, sessionId);

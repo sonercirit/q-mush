@@ -1,15 +1,14 @@
-import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
   ProviderCredentialStore,
   type ProviderCredentialAccess,
-  type ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   sessionToolOutput,
@@ -18,6 +17,7 @@ import {
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
+import { restartSignalIsAborted } from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -29,13 +29,11 @@ type SessionAgentCredentialSelection = Pick<
 export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
-  readonly discoverModels: (
-    provider: ProviderId,
-    credential: ProviderCredentialAccess,
-  ) => Promise<AgentModelCatalog>;
+  readonly discoverModels: AgentModelDiscoverer;
+  readonly draining?: () => boolean;
   readonly store: SessionStore;
   readonly now: () => number;
-  readonly draining: () => boolean;
+  readonly restartSignal: () => AbortSignal;
   readonly pendingRestart: (runnerId: string) => RestartRequest | undefined;
   readonly launchSession: (
     credential: ProviderCredentialAccess,
@@ -48,6 +46,7 @@ export interface SessionAgentActionDependencies {
     credential: ProviderCredentialAccess,
     userId: string,
     rejectCredentialErrors: boolean,
+    signal?: AbortSignal,
   ) => Promise<SessionRequestModelMetadata>;
   readonly readCredential: (
     userId: string,
@@ -138,6 +137,8 @@ export async function spawnAgentSession(options: {
   readonly authority: SessionExecutionAuthority;
   readonly dependencies: SessionAgentActionDependencies;
   readonly input: SpawnSessionToolInput;
+  readonly signal?: AbortSignal;
+  readonly terminal: (detail: AgentSessionDetail) => void;
   readonly userId: string;
 }): Promise<string> {
   const { authority, dependencies, input, userId } = options;
@@ -242,7 +243,10 @@ export async function spawnAgentSession(options: {
       return fail("parent_stale");
     }
     dependencies.notify(userId, child.id);
-    if (dependencies.draining()) {
+    if (
+      restartSignalIsAborted(dependencies.restartSignal) ||
+      dependencies.draining?.() === true
+    ) {
       if (!claim()) return fail("parent_stale");
       return sessionToolOutput({ sessionId: child.id, status: "queued" });
     }

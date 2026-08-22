@@ -1,4 +1,5 @@
 import { isRecord } from "../shared/auth-model.ts";
+import { withoutControlCharacters } from "../shared/string-validation.ts";
 
 const ERROR_DETAIL_MAXIMUM_LENGTH = 500;
 const RETRY_AFTER_MAX_MILLISECONDS = 60_000;
@@ -222,19 +223,8 @@ function codeIsPermanent(code: ProviderErrorCode): boolean {
   return PERMANENT_ERROR_CODES.has(code.toLowerCase());
 }
 
-function removeControlCharacters(value: string): string {
-  let result = "";
-  for (const character of value) {
-    const codePoint = character.codePointAt(0) ?? 0;
-    if (codePoint >= 32 && codePoint !== 127) {
-      result += character;
-    }
-  }
-  return result;
-}
-
 function sanitize(value: string): string {
-  return removeControlCharacters(value)
+  return withoutControlCharacters(value)
     .replaceAll(SECRET_PATTERN, "[redacted]")
     .replace(/\s+/gu, " ")
     .trim()

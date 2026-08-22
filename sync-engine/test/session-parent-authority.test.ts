@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
-import type { AgentSessionSummary } from "../../shared/session-model.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -22,17 +24,17 @@ import {
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
+  inactiveSessionAgentActionDefaults,
   promiseGate,
-  sessionAgentActionDefaults,
   type PromiseGate,
 } from "./session-race-test-helpers.ts";
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
 const CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000092";
-const SECOND_CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000093";
 const FOREIGN_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000099";
 
 interface AuthoritySetup {
@@ -84,22 +86,9 @@ function transition(
   ).toBe(true);
 }
 
-function commonActionDependencies() {
-  return {
-    ...sessionAgentActionDefaults(),
-    abortSession: vi.fn(),
-    activeSession: () => false,
-    browseDirectories: () =>
-      Promise.resolve({ status: "runner_unavailable" as const }),
-    cleanupSession: () => undefined,
-    listOnlineRunners: () => [],
-  };
-}
-
 function authoritySetup(options: {
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
-  readonly metadataError?: Error;
   readonly runningTarget?: boolean;
   readonly withTarget?: boolean;
 }): AuthoritySetup {
@@ -124,12 +113,12 @@ function authoritySetup(options: {
     "target-authority-message",
     CHILD_SESSION_ID,
     "child-authority-message",
-    SECOND_CHILD_SESSION_ID,
-    "second-child-authority-message",
   ];
   const store = new SessionStore(
     database,
     () => ids.shift() ?? "unexpected-parent-authority-id",
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
   );
   const parent = createStoredSession(store, SESSION_ID, RUNNER_ID);
   transition(store, parent, "running", TEST_NOW + 1);
@@ -163,24 +152,13 @@ function authoritySetup(options: {
   );
   const notify = vi.fn();
   const runtimes = new SessionRuntimes();
-  const readCredential = async () => {
-    if (options.gateCredential === true) await credentialGate.wait();
-    return credential;
-  };
-  const withCredential: ConstructorParameters<
-    typeof SessionAgentActions
-  >[0]["withCredential"] = async (_userId, _selection, action) =>
-    action(await readCredential());
   const actions = new SessionAgentActions({
-    ...commonActionDependencies(),
+    ...inactiveSessionAgentActionDefaults(),
     compactSession: startManualSessionCompactionForUserId,
     database,
     discoverSessionMetadata: async () => {
       if (options.gateMetadata === true) {
         await metadataGate.wait();
-      }
-      if (options.metadataError !== undefined) {
-        throw options.metadataError;
       }
       return {
         adaptiveThinking: null,
@@ -189,19 +167,23 @@ function authoritySetup(options: {
         providerPricing: null,
       };
     },
-    draining: () => false,
     launchSession: launch,
     notify,
     now: () => TEST_NOW + 3,
-    readCredential,
+    readCredential: () => Promise.resolve(credential),
     runtimes,
     store,
-    withCredential,
+    withCredential: async (_userId, _selection, action) => {
+      if (options.gateCredential === true) {
+        await credentialGate.wait();
+      }
+      return action(credential);
+    },
   }).actions(
     SESSION_ID,
     TEST_USER_ID,
     parent.generation,
-    new AbortController().signal,
+    DEFAULT_TOOL_SETTINGS,
   );
 
   return {
@@ -249,48 +231,41 @@ function spawnInput() {
   };
 }
 
-function linkedChildSummaries(setup: AuthoritySetup) {
-  return setup.store.list(TEST_USER_ID).filter(({ id }) => id !== SESSION_ID);
-}
-
-function expectLinkedChild(
-  child: AgentSessionSummary | undefined,
-  status: "failed" | "queued",
-): void {
-  expect(child).toMatchObject({
-    parentExecutionGeneration: 0,
-    parentSessionId: SESSION_ID,
-    status,
-  });
-}
-
-function expectOnlyParentUnchanged(setup: AuthoritySetup): void {
+function expectNoSideEffects(setup: AuthoritySetup): void {
   expect(setup.launch).not.toHaveBeenCalled();
   expect(setup.notify).not.toHaveBeenCalled();
 }
 
 function closeAuthoritySetup(setup: AuthoritySetup): void {
-  expectOnlyParentUnchanged(setup);
+  expectNoSideEffects(setup);
   setup.close();
 }
 
-async function expectReservedStaleSpawn(
+async function fenceAtGate(
   gate: PromiseGate,
   setup: AuthoritySetup,
-  result: Promise<string>,
 ): Promise<void> {
   await gate.entered;
-  const reserved = linkedChildSummaries(setup)[0];
-  expectLinkedChild(reserved, "queued");
   fenceParent(setup);
   gate.release(undefined);
-  expect(await result).toContain("parent_stale");
-  expect(setup.launch).not.toHaveBeenCalled();
-  expectLinkedChild(
-    setup.store.get(TEST_USER_ID, reserved?.id ?? "missing"),
-    "failed",
+}
+
+function expectOnlyParentSession(setup: AuthoritySetup): void {
+  expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+  closeAuthoritySetup(setup);
+}
+
+async function expectStaleSpawn(
+  gate: PromiseGate,
+  setup: AuthoritySetup,
+): Promise<void> {
+  const result = setup.actions.spawnSession(
+    spawnInput(),
+    new AbortController().signal,
   );
-  setup.close();
+  await fenceAtGate(gate, setup);
+  expect(await result).toContain("parent_stale");
+  expectOnlyParentSession(setup);
 }
 
 function targetDetail(setup: AuthoritySetup) {
@@ -319,9 +294,9 @@ async function expectCompactionScheduled(
   setup: AuthoritySetup,
   sessionId = TARGET_SESSION_ID,
 ): Promise<void> {
-  expect(await setup.actions.compactSession(sessionId)).toContain(
-    "compaction_scheduled",
-  );
+  expect(
+    await setup.actions.compactSession(sessionId, new AbortController().signal),
+  ).toContain("compaction_scheduled");
 }
 
 async function expectCompactionRejected(
@@ -386,18 +361,117 @@ async function expectPendingCompaction(
   ).toBe(true);
 }
 
+async function expectDeadlineRejection(
+  setup: AuthoritySetup,
+  gate: PromiseGate,
+  deadline: AbortController,
+  result: Promise<string>,
+): Promise<void> {
+  await gate.entered;
+  // The global tool limit fired while the gated stage was pending; the
+  // caller already reported timed-out, so nothing may mutate or launch.
+  deadline.abort(new DOMException("The tool call timed out", "TimeoutError"));
+  gate.release(undefined);
+  await expect(result).rejects.toThrow("timed out");
+  expect(setup.launch).not.toHaveBeenCalled();
+}
+
+function targetOperation(
+  setup: AuthoritySetup,
+  operation: "compact" | "continue" | "send",
+  signal: AbortSignal,
+): Promise<string> {
+  return operation === "compact"
+    ? setup.actions.compactSession(TARGET_SESSION_ID, signal)
+    : operation === "continue"
+      ? setup.actions.continueSession(TARGET_SESSION_ID, signal)
+      : setup.actions.sendToSession(TARGET_SESSION_ID, "late message", signal);
+}
+
+function credentialCaseSetup(): {
+  readonly before: ReturnType<SessionStore["get"]>;
+  readonly setup: AuthoritySetup;
+} {
+  const setup = setupWithTarget("credential");
+  return { before: setup.store.get(TEST_USER_ID, TARGET_SESSION_ID), setup };
+}
+
+interface ImmediateMutationCase {
+  readonly execute: (
+    setup: AuthoritySetup,
+    signal: AbortSignal,
+  ) => Promise<string> | string;
+  readonly name: "reassign" | "steer" | "stop";
+}
+
+function immediateMutationCases(): readonly ImmediateMutationCase[] {
+  return [
+    {
+      execute: (setup, signal) =>
+        setup.actions.steerSession(TARGET_SESSION_ID, "late steering", signal),
+      name: "steer",
+    },
+    {
+      execute: (setup, signal) =>
+        setup.actions.reassignSession(
+          TARGET_SESSION_ID,
+          REPLACEMENT_RUNNER_ID,
+          "/late/reassignment",
+          signal,
+        ),
+      name: "reassign",
+    },
+    {
+      execute: (setup, signal) =>
+        setup.actions.stopSession(TARGET_SESSION_ID, true, signal),
+      name: "stop",
+    },
+  ];
+}
+
+function immediateMutationSetup(
+  name: ImmediateMutationCase["name"],
+): AuthoritySetup {
+  const setup = setupWithTarget("running");
+  if (name === "reassign") {
+    transition(setup.store, targetDetail(setup), "idle", TEST_NOW + 2);
+    const reassignmentTarget = setup.database.update(agentSessions);
+    reassignmentTarget
+      .set({ runnerRequired: true })
+      .where(eq(agentSessions.id, TARGET_SESSION_ID))
+      .run();
+  }
+  return setup;
+}
+
 describe("cross-session parent execution authority", () => {
+  test.each(immediateMutationCases())(
+    "rejects canceled $name before mutating the target",
+    async ({ execute, name }) => {
+      const setup = immediateMutationSetup(name);
+      const before = targetDetail(setup);
+      const deadline = new AbortController();
+      deadline.abort(
+        new DOMException("The tool call timed out", "TimeoutError"),
+      );
+
+      await expect(
+        Promise.resolve().then(() => execute(setup, deadline.signal)),
+      ).rejects.toThrow("timed out");
+      expectTargetUnchanged(setup, before);
+      expect(setup.notify).not.toHaveBeenCalled();
+      closeSetup(setup);
+    },
+  );
   test.each(["compact", "continue", "send"] as const)(
     "rejects credential-paused %s after the parent is fenced",
     async (operation) => {
-      const setup = setupWithTarget("credential");
-      const before = setup.store.get(TEST_USER_ID, TARGET_SESSION_ID);
-      const result =
-        operation === "compact"
-          ? setup.actions.compactSession(TARGET_SESSION_ID)
-          : operation === "continue"
-            ? setup.actions.continueSession(TARGET_SESSION_ID)
-            : setup.actions.sendToSession(TARGET_SESSION_ID, "stale message");
+      const { before, setup } = credentialCaseSetup();
+      const result = targetOperation(
+        setup,
+        operation,
+        new AbortController().signal,
+      );
       await expectTargetUnchangedAfterFencing(
         setup,
         setup.credentialGate,
@@ -413,11 +487,20 @@ describe("cross-session parent execution authority", () => {
     fenceParent(setup);
 
     expectSessionActionThrows(
-      () => setup.actions.compactSession(TARGET_SESSION_ID),
+      () =>
+        setup.actions.compactSession(
+          TARGET_SESSION_ID,
+          new AbortController().signal,
+        ),
       "stopped",
     );
     expectSessionActionThrows(
-      () => setup.actions.steerSession(TARGET_SESSION_ID, "stale steering"),
+      () =>
+        setup.actions.steerSession(
+          TARGET_SESSION_ID,
+          "stale steering",
+          new AbortController().signal,
+        ),
       "stopped",
     );
     expectTargetUnchanged(setup, before);
@@ -435,12 +518,22 @@ describe("cross-session parent execution authority", () => {
 
     await expectCompactionRejected(setup, "missing-session");
     expectSessionActionThrows(
-      () => setup.actions.steerSession("missing-session", "Do not deliver"),
+      () =>
+        setup.actions.steerSession(
+          "missing-session",
+          "Do not deliver",
+          new AbortController().signal,
+        ),
       "Session not found",
     );
     await expectCompactionRejected(setup, foreign.id);
     expectSessionActionThrows(
-      () => setup.actions.steerSession(foreign.id, "Do not cross scope"),
+      () =>
+        setup.actions.steerSession(
+          foreign.id,
+          "Do not cross scope",
+          new AbortController().signal,
+        ),
       "Session not found",
     );
     closeSetup(setup);
@@ -459,9 +552,12 @@ describe("cross-session parent execution authority", () => {
     const { runtime, target } = activeRuntime(setup);
     await expectPendingCompaction(setup, target);
     expect(setup.launchOperations).toEqual([]);
-    expect(await setup.actions.compactSession(TARGET_SESSION_ID)).toContain(
-      "compaction_already_scheduled",
-    );
+    expect(
+      await setup.actions.compactSession(
+        TARGET_SESSION_ID,
+        new AbortController().signal,
+      ),
+    ).toContain("compaction_already_scheduled");
     expect(
       setup.store.manualCompactionPending(TARGET_SESSION_ID, target.generation),
     ).toBe(true);
@@ -473,7 +569,11 @@ describe("cross-session parent execution authority", () => {
     const running = setupWithTarget("running");
 
     await expect(
-      running.actions.steerSession(TARGET_SESSION_ID, "Change direction"),
+      running.actions.steerSession(
+        TARGET_SESSION_ID,
+        "Change direction",
+        new AbortController().signal,
+      ),
     ).resolves.toContain("steering_scheduled");
     expect(
       running.store.get(TEST_USER_ID, TARGET_SESSION_ID)?.pendingInputs,
@@ -482,74 +582,50 @@ describe("cross-session parent execution authority", () => {
 
     const idle = setupWithTarget("idle");
     expect(() =>
-      idle.actions.steerSession(TARGET_SESSION_ID, "Too late"),
+      idle.actions.steerSession(
+        TARGET_SESSION_ID,
+        "Too late",
+        new AbortController().signal,
+      ),
     ).toThrow("send_to_session");
     closeSetup(idle);
   });
 
-  test("reserves concurrent children with the exact parent attempt before discovery", async () => {
-    const setup = authoritySetup({ gateMetadata: true });
-    const first = setup.actions.spawnSession(spawnInput());
-    const second = setup.actions.spawnSession({
-      ...spawnInput(),
-      prompt: "Second concurrent child",
-    });
+  test.each(["compact", "continue", "send"] as const)(
+    "rejects credential-paused %s after the deadline fires",
+    async (operation) => {
+      const { before, setup } = credentialCaseSetup();
+      const deadline = new AbortController();
+      await expectDeadlineRejection(
+        setup,
+        setup.credentialGate,
+        deadline,
+        targetOperation(setup, operation, deadline.signal),
+      );
+      expectTargetUnchanged(setup, before);
+      closeAuthoritySetup(setup);
+    },
+  );
 
-    await setup.metadataGate.entered;
-    await vi.waitFor(() => {
-      expect(setup.store.list(TEST_USER_ID)).toHaveLength(3);
-    });
-    const children = linkedChildSummaries(setup);
-    expect(children).toHaveLength(2);
-    expect(
-      children.every(
-        ({ parentExecutionGeneration, parentSessionId, status }) =>
-          parentExecutionGeneration === 0 &&
-          parentSessionId === SESSION_ID &&
-          status === "queued",
-      ),
-    ).toBe(true);
-
-    setup.metadataGate.release(undefined);
-    await expect(Promise.all([first, second])).resolves.toEqual([
-      expect.stringContaining('"status": "spawned"'),
-      expect.stringContaining('"status": "spawned"'),
-    ]);
-    expect(setup.launch).toHaveBeenCalledTimes(2);
-    setup.close();
-  });
-
-  test("persists an owned-provider discovery failure as one linked child", async () => {
-    const setup = authoritySetup({
-      metadataError: new Error("provider rejected immediately"),
-    });
-
-    const output = await setup.actions.spawnSession(spawnInput());
-    const children = linkedChildSummaries(setup);
-
-    expect(output).toContain('"status": "failed"');
-    expect(output).toContain(`"sessionId": "${children[0]?.id ?? "missing"}"`);
-    expect(children).toHaveLength(1);
-    expectLinkedChild(children[0], "failed");
-    expect(setup.launch).not.toHaveBeenCalled();
-    setup.close();
-  });
-
-  test("keeps a linked failed child when the parent is fenced during credential access", async () => {
+  test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });
-    await expectReservedStaleSpawn(
-      setup.credentialGate,
-      setup,
-      setup.actions.spawnSession(spawnInput()),
-    );
+    await expectStaleSpawn(setup.credentialGate, setup);
   });
 
-  test("keeps a linked failed child when the parent is fenced during metadata discovery", async () => {
+  test("does not create a child when the parent is fenced during metadata discovery", async () => {
     const setup = authoritySetup({ gateMetadata: true });
-    await expectReservedStaleSpawn(
-      setup.metadataGate,
+    await expectStaleSpawn(setup.metadataGate, setup);
+  });
+
+  test("does not create a child when the deadline fires during metadata discovery", async () => {
+    const setup = authoritySetup({ gateMetadata: true });
+    const deadline = new AbortController();
+    await expectDeadlineRejection(
       setup,
-      setup.actions.spawnSession(spawnInput()),
+      setup.metadataGate,
+      deadline,
+      setup.actions.spawnSession(spawnInput(), deadline.signal),
     );
+    expectOnlyParentSession(setup);
   });
 });
