@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
@@ -6,18 +7,18 @@ import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
-import {
-  codexEventResponse,
-  completeHello,
-  DONE_CODEX_OUTPUT,
-} from "./codex-response-fixtures.ts";
 import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import {
   cachedTextMessage,
   chatCompletionsDone,
 } from "./prompt-cache-fixtures.ts";
+import { expectDoneStep } from "./provider-step-fixtures.ts";
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+const DONE_CODEX_OUTPUT = {
+  content: [{ text: "Done.", type: "output_text" }],
+  type: "message",
+};
 const IMAGE_MESSAGE = {
   content: "Implement this design",
   images: [TEST_AGENT_IMAGE],
@@ -167,7 +168,24 @@ function capturedCodexModel(
 ): ChatCompletionsAgentModel {
   return codexModel({ fetch: captureRequest(capture, () => response), model });
 }
-
+function codexEventResponse(
+  output: readonly unknown[],
+  prefix = "",
+  usage?: Readonly<Record<string, number>>,
+): Response {
+  const completed = {
+    response: { output, ...(usage === undefined ? {} : { usage }) },
+    type: "response.completed",
+  };
+  return new Response(
+    `${prefix}data: ${JSON.stringify(completed)}\n\ndata: [DONE]\n\n`,
+  );
+}
+function completeHello(
+  model: ChatCompletionsAgentModel,
+): Promise<AgentModelStep> {
+  return model.complete([{ content: "Hello", role: "user" }]);
+}
 describe("chat completions agent model", () => {
   test("sends the native tool protocol to OpenRouter and reads tool calls", async () => {
     const capture = new RequestCapture();
@@ -489,6 +507,52 @@ describe("chat completions agent model", () => {
     );
     expect(JSON.stringify(body)).toContain("function_call_output");
     expect(JSON.stringify(body)).toContain("previous-call");
+  });
+  test("uses streamed Codex output when the completed response omits it", async () => {
+    const model = codexModel({
+      fetch: () =>
+        Promise.resolve(
+          new Response(
+            [
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":"I considered"}',
+              'event: response.reasoning_summary_text.delta\ndata: {"type":"response.reasoning_summary_text.delta","output_index":0,"summary_index":0,"delta":" the request."}',
+              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":"Hello"}',
+              'event: response.output_text.delta\ndata: {"type":"response.output_text.delta","delta":" there."}',
+              'event: response.output_item.added\ndata: {"type":"response.output_item.added","output_index":1,"item":{"type":"function_call","id":"function-1","call_id":"call-1","name":"read","arguments":""}}',
+              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"{\\"path\\":"}',
+              'event: response.function_call_arguments.delta\ndata: {"type":"response.function_call_arguments.delta","output_index":1,"delta":"\\"src/index.ts\\"}"}',
+              'event: response.completed\ndata: {"type":"response.completed","response":{"output":[]}}',
+              "data: [DONE]",
+              "",
+            ].join("\n\n"),
+          ),
+        ),
+      model: "codex-test-model",
+      reasoningEffort: "max",
+    });
+    expect(await completeHello(model)).toEqual({
+      content: "Hello there.",
+      contextTokens: null,
+      costUsd: null,
+      thinking: "I considered the request.",
+      tokenUsage: null,
+      toolCalls: [
+        {
+          arguments: '{"path":"src/index.ts"}',
+          id: "call-1",
+          name: "read",
+        },
+      ],
+    });
+  });
+  test("accepts Codex event streams without a local response-size limit", async () => {
+    const padding = `:${"x".repeat(10 * 1_024 * 1_024)}\n\n`;
+    const model = codexModel({
+      fetch: () =>
+        Promise.resolve(codexEventResponse([DONE_CODEX_OUTPUT], padding)),
+      model: "gpt-5-codex",
+    });
+    expectDoneStep(await completeHello(model));
   });
   test("shows the provider's error message", async () => {
     const model = new ChatCompletionsAgentModel({

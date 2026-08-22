@@ -84,16 +84,12 @@ export function anthropicJsonResponse(options: {
   readonly blocks: readonly Readonly<Record<string, unknown>>[];
   readonly container?: unknown;
   readonly model?: string;
-  readonly provenance?: string;
-  readonly requestModel?: string;
   readonly stopReason?: string;
 }): Response {
   return Response.json({
     container: options.container,
     content: options.blocks,
     model: options.model ?? KNOWN_ANTHROPIC_MODEL,
-    provenance: options.provenance,
-    requestModel: options.requestModel,
     role: "assistant",
     stop_reason: options.stopReason,
     type: "message",

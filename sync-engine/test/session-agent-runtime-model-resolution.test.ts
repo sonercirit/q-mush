@@ -1,12 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelRequestOptions } from "../agent-model-options.ts";
-import { agentCredentialFingerprint } from "../agent-model-options.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
-import { anthropicReplayIdentityFrom } from "../anthropic-replay-identity.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
   KNOWN_ANTHROPIC_MODEL,
+  thinkingReplayBlock,
   toolReplayBlock,
 } from "./anthropic-model-test-helpers.ts";
 import { anthropicJsonResponse } from "./anthropic-response-event-fixtures.ts";
@@ -33,22 +32,12 @@ const TOOL_CALL = {
 } as const;
 
 function clientToolResponse(): Response {
-  const { provenance } = anthropicReplayIdentityFrom({
-    credential: ANTHROPIC_TEST_CREDENTIAL,
-    credentialFingerprint: agentCredentialFingerprint(
-      ANTHROPIC_TEST_CREDENTIAL,
-    ),
-    model: REQUEST_ALIAS,
-    provider: "generic",
-    resolvedModel: KNOWN_ANTHROPIC_MODEL,
-  });
   return anthropicJsonResponse({
     blocks: [
+      thinkingReplayBlock("runtime-retry-signature"),
       toolReplayBlock({ id: TOOL_CALL.id, input: {}, name: TOOL_CALL.name }),
     ],
     model: KNOWN_ANTHROPIC_MODEL,
-    provenance,
-    requestModel: REQUEST_ALIAS,
   });
 }
 
@@ -81,24 +70,25 @@ describe("session Anthropic model resolution", () => {
           }
           completions.push(request);
           const response = responses.shift();
-          return response === undefined
-            ? Promise.reject(new Error("No completion response remains"))
-            : Promise.resolve(response);
+          if (response === undefined) {
+            throw new Error("No completion response remains");
+          }
+          return Promise.resolve(response);
         },
       });
     let now = TEST_NOW + 2;
 
     await expect(
       runSessionAgent({
-        broker: completingTestBroker(),
         braveSearch: { execute: () => Promise.resolve("unused search") },
+        broker: completingTestBroker(),
         credential: {
           ...ANTHROPIC_TEST_CREDENTIAL,
           isDefault: true,
           label: "Anthropic test",
         },
-        ...IDLE_RUNTIME_SIGNALS,
         detail,
+        ...IDLE_RUNTIME_SIGNALS,
         isCurrent: () => true,
         modelFactory,
         modelFetch: (request) => {
@@ -110,9 +100,9 @@ describe("session Anthropic model resolution", () => {
         sessionTools: unusedSessionToolActions({
           listSessions: () => "session list",
         }),
+        signal: new AbortController().signal,
         store: setup.store,
         userId: TEST_USER_ID,
-        signal: new AbortController().signal,
       }),
     ).resolves.toBe("complete");
 

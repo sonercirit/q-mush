@@ -11,7 +11,6 @@ import {
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 
 test("carries provider replay through a tool turn", async () => {
-  const recorded: AgentRecordedMessage[] = [];
   const model = new ScriptedAgentModel([
     {
       ...TEST_PROVIDER_REPLAY_ASSISTANT,
@@ -19,14 +18,16 @@ test("carries provider replay through a tool turn", async () => {
     },
     { content: "The project is ready.", toolCalls: [] },
   ]);
+  const recorded: AgentRecordedMessage[] = [];
 
+  const recordMessage = (messages: readonly AgentRecordedMessage[]) => {
+    recorded.push(...messages);
+  };
   await runAgentLoop({
     executeTool: () => Promise.resolve("# Q Mush"),
     initialMessages: [{ content: "Inspect this project", role: "user" }],
-    recordMessage: (messages) => {
-      recorded.splice(recorded.length, 0, ...messages);
-    },
     model,
+    recordMessage,
   });
 
   const expected = TEST_PROVIDER_REPLAY_ASSISTANT;
