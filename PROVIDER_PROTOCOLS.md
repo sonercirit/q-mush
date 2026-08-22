@@ -78,11 +78,11 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   trailing text block; a pause fails if none remain replayable. `cache_control`
   marks only text/client `tool_use`, scanning backward; trailing replay is
   resent verbatim. `pause_turn` validates resent blocks, replays them/container
-  without duplicate UI, sums usage, caps at five continuations, and fails terminal
-  client tools closed when replay cannot combine. The local proxy tolerates
-  unsigned tool-loop replay; strict endpoints may not. Streamed reasoning deltas
-  group by `output_index`/`summary_index`; separate summary parts with
-  paragraphs since completed responses may omit them.
+  without duplicate UI, sums usage, caps at five continuations, and fails
+  terminal client tools closed when replay cannot combine. The local proxy
+  tolerates unsigned tool-loop replay; strict endpoints may not. Streamed
+  reasoning deltas group by `output_index`/`summary_index`; separate summary
+  parts with paragraphs since completed responses may omit them.
 - **Admission:** Frozen clocks can collapse admission transitions; production
   cannot. Fresh sockets admit non-retained `response.*`; reused ones require an
   ID or `response.created`. WebSocket Mode expires at 60 minutes; either

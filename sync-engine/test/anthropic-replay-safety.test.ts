@@ -510,9 +510,7 @@ describe("Anthropic replay safety", () => {
       });
       expect(step.providerReplay).toBeDefined();
       expect(step.providerContinuation).toBeUndefined();
-      expect(step.content).toBe(
-        continuation === "pause_turn" ? "Done." : "",
-      );
+      expect(step.content).toBe(continuation === "pause_turn" ? "Done." : "");
     },
   );
 
