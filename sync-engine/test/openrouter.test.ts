@@ -156,6 +156,11 @@ describe("OpenRouter credentials", () => {
       OAUTH_CREDENTIAL_ID,
       TEST_NOW,
     );
+    database.$client
+      .query(
+        "UPDATE provider_credentials SET provider_account_id = NULL WHERE id = ?",
+      )
+      .run(OAUTH_CREDENTIAL_ID);
     const unchangedSecret = store.readSecret(TEST_USER_ID, OAUTH_CREDENTIAL_ID);
     const reconnect = beginProviderAccount({
       callbackPath: TEST_ROUTES.callbackPath,
