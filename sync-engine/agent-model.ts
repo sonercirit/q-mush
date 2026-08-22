@@ -12,7 +12,6 @@ import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
 import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
-  AGENT_TOOLS,
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
@@ -313,12 +312,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
-    this.#tools = this.#dynamicToolCache
-      ? AGENT_TOOLS
-      : selectedAgentTools(
-          this.#selectedTools,
-          options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
-        );
+    this.#tools = selectedAgentTools(
+      this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
+      options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+    );
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 
@@ -571,9 +568,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     return protocol === "anthropic"
       ? validateAnthropicStepContinuation(
           step,
-          this.#anthropicReplayIdentity(
-            resolvedModel ?? step.providerReplay?.model,
-          ),
+          this.#anthropicReplayIdentity(resolvedModel),
         )
       : step;
   }

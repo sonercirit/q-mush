@@ -57,7 +57,7 @@ interface AnthropicMessage {
 }
 
 const UNSAFE_TOOL_REPLAY =
-  "The Anthropic assistant tool turn cannot be replayed safely";
+  "The Anthropic assistant tool turn cannot be continued safely";
 
 // Anthropic accepts images and PDF documents; other attachment modalities
 // reach the model through the attachment fallback instead.
