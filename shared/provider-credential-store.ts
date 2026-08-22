@@ -89,7 +89,6 @@ function encryptionContext(userId: string, credentialId: string): string {
 function credentialOrder() {
   return [asc(providerCredentials.createdAt), asc(providerCredentials.id)];
 }
-
 function credentialSummarySelection() {
   return {
     accountId: providerCredentials.providerAccountId,
@@ -102,7 +101,6 @@ function credentialSummarySelection() {
     source: providerCredentials.source,
   };
 }
-
 function withEndpointFields<
   Credential extends {
     readonly apiFormat: ProviderApiFormat | null;
@@ -115,7 +113,6 @@ function withEndpointFields<
     ...(baseUrl === null ? {} : { baseUrl }),
   };
 }
-
 function accessibleActiveCredentialCondition(options: {
   readonly credentialId?: string;
   readonly database: AppDatabase;
@@ -143,7 +140,6 @@ function accessibleActiveCredentialCondition(options: {
       : inArray(providerCredentials.id, accessibleIds),
   );
 }
-
 function credentialScope(
   database: AppDatabase,
   provider: CredentialProviderId,
@@ -159,7 +155,6 @@ function credentialScope(
     ),
   );
 }
-
 function activeCredentialSummaries(
   database: AppDatabase,
   provider: CredentialProviderId,
@@ -174,7 +169,6 @@ function activeCredentialSummaries(
     .all()
     .map(withEndpointFields);
 }
-
 function accessibleCredentialIds(
   database: AppDatabase,
   provider: CredentialProviderId,
@@ -198,7 +192,6 @@ function accessibleCredentialIds(
     activeCredentialCondition(provider, userId),
   );
 }
-
 function matchingCredentialId(
   ...[database, condition]: readonly [
     database: Pick<AppDatabase, "select">,
@@ -208,7 +201,6 @@ function matchingCredentialId(
   const selection = database.select({ id: providerCredentials.id });
   return selection.from(providerCredentials).where(condition).get()?.id;
 }
-
 function fingerprintCondition(
   provider: CredentialProviderId,
   userId: string,
@@ -220,7 +212,6 @@ function fingerprintCondition(
     eq(providerCredentials.userId, userId),
   );
 }
-
 function modelCredentialCondition(
   userId: string,
   search?: string,
@@ -248,7 +239,6 @@ function modelCredentialCondition(
     ),
   );
 }
-
 function legacyCredentialSummary(
   credential: ProviderCredentialSummary,
 ): ProviderCredentialSummary {
