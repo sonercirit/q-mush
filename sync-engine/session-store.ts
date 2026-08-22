@@ -42,6 +42,7 @@ import {
 import type { SessionRuntimes } from "./session-runtime.ts";
 import {
   claimSpawnedSessionReservation,
+  discardSpawnedSessionReservation,
   failSpawnedSessionReservation,
   prepareSpawnedSessionReservation,
   recoverSpawnedSessionReservations,
@@ -173,6 +174,12 @@ export class SessionStore extends SessionStoreRestarts {
   #spawnIdentity(userId: string, sessionId: string, generation: number) {
     return { generation, sessionId, userId };
   }
+  #reservationOptions(userId: string, sessionId: string, generation: number) {
+    return {
+      database: this.#database,
+      identity: this.#spawnIdentity(userId, sessionId, generation),
+    };
+  }
   prepareSpawnedSession(
     identity: { readonly generation: number; readonly sessionId: string },
     userId: string,
@@ -209,6 +216,17 @@ export class SessionStore extends SessionStoreRestarts {
     };
     return claimSpawnedSessionReservation(options);
   }
+  discardSpawnedSessionPreparation(
+    userId: string,
+    sessionId: string,
+    generation: number,
+    now: number,
+  ): boolean {
+    return discardSpawnedSessionReservation({
+      ...this.#reservationOptions(userId, sessionId, generation),
+      now,
+    });
+  }
   failSpawnedSessionPreparation(
     userId: string,
     sessionId: string,
@@ -219,9 +237,8 @@ export class SessionStore extends SessionStoreRestarts {
     return failSpawnedSessionReservation({
       allowClaimed: true,
       content,
-      database: this.#database,
+      ...this.#reservationOptions(userId, sessionId, generation),
       generateId: this.#resources[1],
-      identity: this.#spawnIdentity(userId, sessionId, generation),
       now,
     });
   }

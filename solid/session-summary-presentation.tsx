@@ -108,6 +108,34 @@ function sessionCostText(
   }
 }
 
+function liveDuration(now: number, startedAt: number): string {
+  return formatSessionTime(Math.max(0, now - startedAt));
+}
+
+function LiveDuration(props: {
+  readonly kind: "run" | "step";
+  readonly now: () => number;
+  readonly startedAt: number | null;
+}): JSX.Element {
+  return (
+    <Show when={props.startedAt} keyed>
+      {(startedAt) => (
+        <span
+          class={
+            props.kind === "run" ? "text-emerald-200" : "text-emerald-200/80"
+          }
+          data-session-run-duration={props.kind === "run" ? "true" : undefined}
+          data-session-step-duration={
+            props.kind === "step" ? "true" : undefined
+          }
+        >
+          {`${props.kind === "run" ? "Run" : "Step"}: ${liveDuration(props.now(), startedAt)}`}
+        </span>
+      )}
+    </Show>
+  );
+}
+
 export function SessionMetrics(props: {
   readonly session: Pick<
     AgentSessionSummary,
@@ -115,6 +143,7 @@ export function SessionMetrics(props: {
     | "activeStartedAt"
     | "costBasis"
     | "costUsd"
+    | "runtimePending"
     | "stepStartedAt"
   >;
 }): JSX.Element {
@@ -125,24 +154,24 @@ export function SessionMetrics(props: {
       <span>
         {`Time: ${formatSessionTime(activeSessionDuration(props.session, now()))}`}
       </span>
-      <Show when={props.session.activeStartedAt} keyed>
-        {(startedAt) => (
-          <span class="text-emerald-200" data-session-run-duration="true">
-            {`Run: ${formatSessionTime(Math.max(0, now() - startedAt))}`}
-          </span>
-        )}
-      </Show>
-      <Show
-        when={
+      <LiveDuration
+        kind="run"
+        now={now}
+        startedAt={props.session.activeStartedAt}
+      />
+      <LiveDuration
+        kind="step"
+        now={now}
+        startedAt={
           props.session.activeStartedAt === null
             ? null
             : props.session.stepStartedAt
         }
-        keyed
-      >
-        {(stepStartedAt) => (
-          <span class="text-emerald-200/80" data-session-step-duration="true">
-            {`Step: ${formatSessionTime(Math.max(0, now() - stepStartedAt))}`}
+      />
+      <Show when={props.session.runtimePending} keyed>
+        {(pending) => (
+          <span class="text-amber-200/90" data-session-pending-component="true">
+            {`Pending: ${pending.component.replaceAll("_", " ")}`}
           </span>
         )}
       </Show>

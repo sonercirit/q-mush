@@ -175,8 +175,9 @@ class DrizzleSessionIntegration
       this.#runtimes,
       reportParent,
     );
-    this.#store.repairSpawnedSessionLineage(this.#now());
-    this.#store.recoverSpawnedSessionReservations(this.#now());
+    const recoveryNow = Date.now();
+    this.#store.repairSpawnedSessionLineage(recoveryNow);
+    this.#store.recoverSpawnedSessionReservations(recoveryNow);
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,

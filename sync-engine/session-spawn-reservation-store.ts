@@ -116,6 +116,18 @@ export function recoverSpawnedSessionReservations(
   );
 }
 
+export function discardSpawnedSessionReservation(options: {
+  readonly database: AppDatabase;
+  readonly identity: SpawnedSessionReservationIdentity;
+  readonly now: number;
+}): boolean {
+  return updateReservation(options.database, options.identity, {
+    isDeleted: true,
+    spawnPreparationPending: false,
+    ...updatedAuditFields(options.identity.userId, options.now),
+  });
+}
+
 export function failSpawnedSessionReservation(options: {
   readonly allowClaimed?: boolean;
   readonly content: string;

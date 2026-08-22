@@ -8,6 +8,7 @@ import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
+import { abortSignalError } from "../shared/validation.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
@@ -142,6 +143,26 @@ export async function spawnAgentSession(options: {
   readonly userId: string;
 }): Promise<string> {
   const { authority, dependencies, input, userId } = options;
+  const restartSignal = dependencies.restartSignal();
+  const operationSignal =
+    options.signal === undefined
+      ? restartSignal
+      : AbortSignal.any([options.signal, restartSignal]);
+  const cancellationOutput = (): string | undefined => {
+    if (options.signal?.aborted === true) {
+      throw abortSignalError(options.signal, "The spawn was canceled");
+    }
+    return restartSignal.aborted
+      ? sessionToolOutput({ error: "server_restarting" })
+      : undefined;
+  };
+  const cancellationAfterError = (error: unknown): string => {
+    const output = cancellationOutput();
+    if (output !== undefined) return output;
+    throw error;
+  };
+  const initialCancellation = cancellationOutput();
+  if (initialCancellation !== undefined) return initialCancellation;
   const parent = dependencies.store.get(userId, authority.sessionId);
   if (parent === undefined) {
     return sessionToolOutput({ error: "parent_session_unavailable" });
@@ -185,7 +206,24 @@ export async function spawnAgentSession(options: {
   }
   const child = created.detail;
   const childIdentity = { generation: child.generation, sessionId: child.id };
-  dependencies.notify(userId, child.id);
+  const discard = (): void => {
+    dependencies.store.discardSpawnedSessionPreparation(
+      userId,
+      child.id,
+      child.generation,
+      dependencies.now(),
+    );
+  };
+  const canceled = (): string | undefined => {
+    try {
+      const output = cancellationOutput();
+      if (output !== undefined) discard();
+      return output;
+    } catch (error) {
+      discard();
+      throw error;
+    }
+  };
 
   const fail = (
     error: string,
@@ -209,6 +247,8 @@ export async function spawnAgentSession(options: {
   const prepareAndLaunch = async (
     credential: ProviderCredentialAccess,
   ): Promise<string | undefined> => {
+    const cancellation = canceled();
+    if (cancellation !== undefined) return cancellation;
     let metadata: SessionRequestModelMetadata;
     try {
       metadata = await dependencies.discoverSessionMetadata(
@@ -216,10 +256,18 @@ export async function spawnAgentSession(options: {
         credential,
         userId,
         balanced,
+        operationSignal,
       );
     } catch (error) {
-      if (error instanceof Error && error.name === "SessionLaunchError") {
-        throw error;
+      try {
+        const cancellation = cancellationOutput();
+        if (cancellation !== undefined) {
+          discard();
+          return cancellation;
+        }
+      } catch (cancellationError) {
+        discard();
+        throw cancellationError;
       }
       if (balanced && dependencies.modelCredentialPool !== undefined) {
         if (
@@ -236,6 +284,10 @@ export async function spawnAgentSession(options: {
       }
       return fail("provider_unavailable");
     }
+    const postDiscoveryCancellation = canceled();
+    if (postDiscoveryCancellation !== undefined) {
+      return postDiscoveryCancellation;
+    }
     const prepared = dependencies.store.prepareSpawnedSession(
       childIdentity,
       userId,
@@ -244,7 +296,8 @@ export async function spawnAgentSession(options: {
       dependencies.now(),
     );
     if (prepared !== "prepared") {
-      return fail("parent_stale");
+      discard();
+      return sessionToolOutput({ error: "parent_stale" });
     }
     const preparedChild = dependencies.store.get(userId, child.id);
     if (preparedChild === undefined) {
@@ -282,9 +335,11 @@ export async function spawnAgentSession(options: {
       credentials = await dependencies.modelCredentialPool.candidates(
         userId,
         selection,
+        operationSignal,
       );
-    } catch {
-      return fail("credential_unavailable");
+    } catch (error) {
+      discard();
+      return cancellationAfterError(error);
     }
     if (credentials.length > 0) {
       for (const credential of credentials) {
@@ -309,6 +364,7 @@ export async function spawnAgentSession(options: {
     const launchFailure =
       error instanceof Error && error.name === "SessionLaunchError";
     if (launchFailure) throw error;
-    return fail("credential_unavailable");
+    discard();
+    return cancellationAfterError(error);
   }
 }
