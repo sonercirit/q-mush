@@ -264,6 +264,19 @@ function relatedSession(
   return { ...parent, id, parentSessionId, title };
 }
 
+function relatedChildren(
+  parent: AgentSessionSummary,
+  prefix: string,
+): readonly AgentSessionSummary[] {
+  return Array.from({ length: 24 }, (_, index) =>
+    relatedSession(
+      parent,
+      `${prefix}-${String(index + 1)}`,
+      `Child ${String(index + 1)}`,
+    ),
+  );
+}
+
 function expectSessionDepth(
   container: ParentNode,
   sessionId: string,
@@ -342,12 +355,7 @@ test("nests spawned sessions under a collapsed parent", () => {
 
 test("bounds expanded children while revealing the selected child", () => {
   const parent = parentSession();
-  const children = Array.from({ length: 24 }, (_, index) => ({
-    ...parent,
-    id: `child-${String(index + 1)}`,
-    parentSessionId: parent.id,
-    title: `Child ${String(index + 1)}`,
-  }));
+  const children = relatedChildren(parent, "child");
   const selected = children.at(-1);
   if (selected === undefined) throw new TypeError("Missing selected child");
   const { container, select } = mountedSessionList([parent, ...children]);
@@ -372,6 +380,43 @@ test("bounds expanded children while revealing the selected child", () => {
   expect(
     container.querySelector("[data-load-more-children='parent-session']"),
   ).not.toBeNull();
+});
+
+test("loads the next child page without changing the root page", () => {
+  const roots = Array.from({ length: 14 }, (_, index) => ({
+    ...parentSession(),
+    id: `root-${String(index + 1)}`,
+    title: `Root ${String(index + 1)}`,
+  }));
+  const parent = roots[0];
+  if (parent === undefined) throw new TypeError("Missing parent");
+  const children = relatedChildren(parent, "paged-child");
+  const { container } = mountedSessionList([...roots, ...children]);
+  const toggle = query(
+    container,
+    "button[aria-label='Expand child sessions for Root 1']",
+  );
+  if (!(toggle instanceof HTMLButtonElement))
+    throw new TypeError("Missing toggle");
+  toggle.click();
+
+  const rootCount = container.querySelectorAll(
+    "[data-session-depth='0']",
+  ).length;
+  expect(container.querySelectorAll("[data-session-depth='1']")).toHaveLength(
+    10,
+  );
+  const loadMore = query(container, "[data-load-more-children='root-1']");
+  if (!(loadMore instanceof HTMLButtonElement))
+    throw new TypeError("Missing child pager");
+  loadMore.click();
+
+  expect(container.querySelectorAll("[data-session-depth='1']")).toHaveLength(
+    20,
+  );
+  expect(container.querySelectorAll("[data-session-depth='0']")).toHaveLength(
+    rootCount,
+  );
 });
 
 test("reparents realtime rows without leaving a duplicate root", () => {

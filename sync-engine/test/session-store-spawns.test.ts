@@ -13,6 +13,7 @@ import {
 import {
   expectParentId,
   spawnedChildSetup,
+  spawnedRunningChildSetup,
   type SpawnedChildReference,
 } from "./session-store-spawn-test-helpers.ts";
 import {
@@ -128,6 +129,12 @@ function updateChild(
   updateSession(setup, setup.childId, values);
 }
 
+function expectNoSpawnLink(setup: SpawnedChildReference): void {
+  expect(spawnedLink(setup)).toBeUndefined();
+  expectNoPendingReports(setup);
+  closeSetup(setup);
+}
+
 function setRunnerRequired(
   setup: SpawnedChildReference,
   id: string,
@@ -215,6 +222,16 @@ describe("spawned session report generation fencing", () => {
     ).toBe(true);
     const failed = setup.store.get(TEST_USER_ID, child.id);
     expect(failed?.status).toBe("failed");
+    setup.database.$client.close();
+  });
+
+  test("hides reservations from both queued-session launch queries", () => {
+    const setup = spawnedRunningChildSetup("Hidden reservation");
+    updateSession(setup, setup.childId, { spawnPreparationPending: true });
+
+    expect(setup.store.queuedSessions(TEST_USER_ID)).toEqual([]);
+    expect(setup.store.queuedSessionOwnerIds()).toEqual([]);
+
     setup.database.$client.close();
   });
 
@@ -499,17 +516,23 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 
-  test("does not expose historical links without a generation", () => {
-    const setup = spawnedChildSetup();
-    updateChild(setup, {
-      parentCallbackGeneration: null,
-      parentExecutionGeneration: null,
-    });
-
-    expect(spawnedLink(setup)).toBeUndefined();
-    expectNoPendingReports(setup);
-    closeSetup(setup);
-  });
+  test.each([
+    ["callback", { parentCallbackGeneration: null }],
+    [
+      "callback and execution",
+      {
+        parentCallbackGeneration: null,
+        parentExecutionGeneration: null,
+      },
+    ],
+  ] as const)(
+    "does not expose historical links without %s generation",
+    (_name, values) => {
+      const setup = spawnedChildSetup();
+      updateChild(setup, values);
+      expectNoSpawnLink(setup);
+    },
+  );
 });
 
 test("a failed report append does not claim or report delivery", () => {

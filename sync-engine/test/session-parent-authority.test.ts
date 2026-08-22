@@ -87,8 +87,10 @@ function transition(
 }
 
 function authoritySetup(options: {
+  readonly fenceOnNotify?: boolean;
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
+  readonly draining?: boolean;
   readonly runningTarget?: boolean;
   readonly withTarget?: boolean;
 }): AuthoritySetup {
@@ -150,7 +152,11 @@ function authoritySetup(options: {
       return true;
     },
   );
-  const notify = vi.fn();
+  const notify = vi.fn(() => {
+    if (options.fenceOnNotify === true) {
+      new RunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
+    }
+  });
   const runtimes = new SessionRuntimes();
   const actions = new SessionAgentActions({
     ...inactiveSessionAgentActionDefaults(),
@@ -167,6 +173,7 @@ function authoritySetup(options: {
         providerPricing: null,
       };
     },
+    ...(options.draining === true ? { draining: () => true } : {}),
     launchSession: launch,
     notify,
     now: () => TEST_NOW + 3,
@@ -606,6 +613,25 @@ describe("cross-session parent execution authority", () => {
       closeAuthoritySetup(setup);
     },
   );
+
+  test.each([
+    { draining: false, path: "launch" },
+    { draining: true, path: "restart queue" },
+  ])("rejects a stale parent at the pre-$path claim", async ({ draining }) => {
+    const setup = authoritySetup({ draining, fenceOnNotify: true });
+
+    expect(
+      await setup.actions.spawnSession(
+        spawnInput(),
+        new AbortController().signal,
+      ),
+    ).toContain("parent_stale");
+    expect(setup.launch).not.toHaveBeenCalled();
+    expect(
+      setup.store.list(TEST_USER_ID).some(({ status }) => status === "failed"),
+    ).toBe(true);
+    closeSetup(setup);
+  });
 
   test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });
