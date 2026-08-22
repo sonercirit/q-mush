@@ -249,7 +249,11 @@ test("a reported child event survives parent compaction and is consumed on resum
   expect(JSON.stringify(compactedParent)).toContain(COMPACTION_REPORT_SUMMARY);
   const afterCompaction = sessionFor(compacted, SESSION_ID);
   expect(afterCompaction?.pendingInputs).toEqual([]);
-  expect(completionReports(compacted)).toHaveLength(1);
+  expect(
+    afterCompaction?.messages.filter(({ content }) =>
+      content.includes(COMPACTION_REPORT_SUMMARY),
+    ),
+  ).toHaveLength(1);
   closeSessionTestDatabase(initial.database);
 });
 
