@@ -166,7 +166,7 @@ export function agentProviderRequestHeaders(
       isOfficialAnthropicEndpoint(credential.baseUrl)
     ) {
       // The beta degrades pre-4.5 context overshoots to a stop, not an error.
-      // Keep it first-party-only: gateways reject unknown betas.
+      // First-party only: gateways reject unknown betas.
       headers.set("anthropic-beta", ANTHROPIC_CONTEXT_WINDOW_BETA);
     }
     if (token.length > 0) {
