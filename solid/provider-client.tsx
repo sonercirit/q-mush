@@ -1,6 +1,9 @@
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
 import type { ProviderQuotaResetOutcome } from "../shared/provider-quota.ts";
-import type { WorkspaceList } from "../shared/workspace-model.ts";
+import {
+  GLOBAL_WORKSPACE_ID,
+  type WorkspaceList,
+} from "../shared/workspace-model.ts";
 import { RemovalButton } from "./client-controls.tsx";
 import { Collection } from "./collection.tsx";
 import { optionalWorkspaces } from "./connection-client.ts";
@@ -41,6 +44,7 @@ interface CredentialItemProps {
     credential: ProviderCredential,
     trigger: HTMLElement,
   ) => void;
+  readonly selectedWorkspaceId?: string;
   readonly state: ProviderViewState;
   readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
@@ -91,6 +95,11 @@ function CredentialActions(props: CredentialItemProps): JSX.Element {
 }
 
 function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
+  const reconnectUnavailable = (): boolean =>
+    props.credential.source === "oauth" && props.credential.accountId === null;
+  const reconnectPath = (): string | undefined =>
+    reconnectUnavailable() ? undefined : props.configuration.oauthPath;
+
   return (
     <li
       class="flex min-w-0 flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/60 p-4 sm:p-5 md:flex-row md:items-center md:justify-between"
@@ -113,7 +122,34 @@ function ProviderCredentialItem(props: CredentialItemProps): JSX.Element {
                   : "OpenAI API endpoint"
                 : "API key"}
           </span>
+          <Show when={props.credential.requiresReauthentication}>
+            <span class="rounded-full border border-amber-300/30 bg-amber-300/10 px-2.5 py-1 text-xs font-semibold text-amber-100">
+              Re-login required
+            </span>
+          </Show>
         </div>
+        <Show when={props.credential.requiresReauthentication}>
+          <p class="mt-2 text-sm font-medium text-amber-100" role="alert">
+            {`This ${props.configuration.name} login has expired. `}
+            <Show
+              fallback={
+                reconnectUnavailable()
+                  ? `This connection has no verified ${props.configuration.name} account ID, so it cannot be reconnected. Remove it, then connect ${props.configuration.name} again as a new credential.`
+                  : "Connect the account again before using it in a session."
+              }
+              when={reconnectPath()}
+            >
+              {(oauthPath) => (
+                <a
+                  class="underline decoration-amber-200/60 underline-offset-2 hover:text-white"
+                  href={`${oauthPath()}?workspaceId=${encodeURIComponent(props.selectedWorkspaceId ?? GLOBAL_WORKSPACE_ID)}&credentialId=${encodeURIComponent(props.credential.id)}`}
+                >
+                  Reconnect this account
+                </a>
+              )}
+            </Show>
+          </p>
+        </Show>
         <p class="path-wrap mt-2 text-sm text-slate-400">
           {props.credential.baseUrl ??
             props.credential.accountId ??
@@ -182,6 +218,9 @@ function ProviderCredentialList(
           controller: props.controller,
           credential,
           onOpenSessionReassignment: props.onOpenSessionReassignment,
+          ...(props.selectedWorkspaceId === undefined
+            ? {}
+            : { selectedWorkspaceId: props.selectedWorkspaceId }),
           state: state(),
           ...optionalWorkspaces(props.workspaces),
         };

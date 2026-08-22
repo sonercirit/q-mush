@@ -1,7 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import { ActiveSessionTools } from "./active-session-tools.ts";
@@ -28,13 +27,8 @@ import {
   type ManualCompactionDependencies,
 } from "./session-compaction-actions.ts";
 import type { SessionLaunchBoundary } from "./session-creation.ts";
-import {
-  readSessionCredential,
-  withSessionCredential,
-  type SessionCredentialAction,
-  type SessionCredentialReaders,
-  type SessionCredentialSelection,
-} from "./session-credential-access.ts";
+import type { SessionCredentialReaders } from "./session-credential-access.ts";
+import { SessionCredentialAccess } from "./session-credential-service.ts";
 import {
   permissiveWorkspaceReader,
   type SessionDependencies,
@@ -160,6 +154,9 @@ class DrizzleSessionIntegration
     this.#now = dependencies.now ?? Date.now;
     this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;
+    const credentials = new SessionCredentialAccess(providers);
+    this.#readCredential = credentials.read;
+    this.#withCredential = credentials.with;
     this.#credentialPool = new ModelCredentialPool({
       database,
       readCredential: this.#readCredential,
@@ -510,18 +507,9 @@ class DrizzleSessionIntegration
     }
   };
 
-  readonly #readCredential = async (
-    userId: string,
-    selection: SessionCredentialSelection,
-  ): Promise<ProviderCredentialAccess | undefined> =>
-    readSessionCredential(this.#providers, userId, selection);
+  readonly #readCredential: SessionCredentialAccess["read"];
 
-  readonly #withCredential = (
-    userId: string,
-    selection: SessionCredentialSelection,
-    action: SessionCredentialAction,
-  ): Promise<Response> =>
-    withSessionCredential(this.#providers, userId, selection, action);
+  readonly #withCredential: SessionCredentialAccess["with"];
 
   async #modelsForUser(
     request: Request,

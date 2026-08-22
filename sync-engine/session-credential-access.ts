@@ -3,22 +3,9 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import { createApiError } from "./http.ts";
-
-interface SessionCredentialReader {
-  readCredential(
-    userId: string,
-    credentialId: string,
-    workspaceId?: string,
-  ):
-    | Promise<ProviderCredentialAccess | undefined>
-    | ProviderCredentialAccess
-    | undefined;
-}
-
-export type SessionCredentialReaders = Readonly<
-  Record<"openai" | "openrouter", SessionCredentialReader> &
-    Partial<Record<Extract<ProviderId, "generic">, SessionCredentialReader>>
->;
+import type { ProviderCredentialRefreshRequest } from "./provider-credential-reader.ts";
+import type { SessionCredentialReaders } from "./session-credential-readers.ts";
+export type { SessionCredentialReaders } from "./session-credential-readers.ts";
 
 export type SessionCredentialAction = (
   credential: ProviderCredentialAccess,
@@ -30,10 +17,17 @@ export interface SessionCredentialSelection {
   readonly workspaceId?: string;
 }
 
+export type SessionCredentialRead = (
+  userId: string,
+  selection: SessionCredentialSelection,
+  refresh?: ProviderCredentialRefreshRequest,
+) => Promise<ProviderCredentialAccess | undefined>;
+
 export function readSessionCredential(
   providers: SessionCredentialReaders,
   userId: string,
   selection: SessionCredentialSelection,
+  refresh?: ProviderCredentialRefreshRequest,
 ): Promise<ProviderCredentialAccess | undefined> {
   const reader = providers[selection.provider];
   return Promise.resolve(
@@ -41,6 +35,7 @@ export function readSessionCredential(
       userId,
       selection.credentialId,
       selection.workspaceId,
+      refresh,
     ),
   );
 }

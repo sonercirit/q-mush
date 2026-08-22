@@ -78,8 +78,15 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   16 MiB, then retire. ID-less admission skips retained IDs until a new one;
   completion retires it. Concurrency closes superseded sockets; fenced watchdog
   failures abort.
-- **Retry:** Requests unacknowledged through the 5-minute liveness grace fail
-  without retry, resumable by `continue`. Other WebSocket/accepted-HTTP
-  interruptions or provider errors retry before persistence; replays reset
-  partial UI deltas; exhausted sockets use HTTP. Permanent errors/aborts never
-  retry; terminal failures persist as nonreplayed `error`.
+- **Retry:** An OpenAI OAuth API 401 forces one credential refresh and one
+  replay of the unpersisted step after clearing partial output; concurrent
+  refreshes coalesce because refresh tokens rotate. A second 401 stops. Native
+  attachments share the session refresher; distinct fallback models bind the
+  selected credential's refresher. Responses WebSocket recovery recognizes
+  canonical nested `authentication_error` and `invalid_api_key` events as well
+  as HTTP status failures. Requests unacknowledged through the 5-minute liveness
+  grace fail without retry, resumable by `continue`. Other
+  WebSocket/accepted-HTTP interruptions or provider errors retry before
+  persistence; replays reset partial UI deltas; exhausted sockets use HTTP.
+  Permanent errors/aborts never retry; terminal failures persist as nonreplayed
+  `error`.

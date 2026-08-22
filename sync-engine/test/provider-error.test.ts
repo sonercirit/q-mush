@@ -65,7 +65,25 @@ describe("provider stream error classification", () => {
         type: "error",
       });
       expect(error.reconnectWebSocket).toBe(true);
+      expect(error.status).toBe(400);
       expect(error.transient).toBe(false);
+    }
+  });
+
+  test("exposes canonical no-status authentication signals", () => {
+    for (const errorDetail of [
+      { code: "invalid_api_key", type: "invalid_request_error" },
+      { code: null, type: "authentication_error" },
+    ]) {
+      const error = readProviderStreamError({
+        error: { ...errorDetail, message: "Authentication failed" },
+        type: "error",
+      });
+      expect(error).toMatchObject({
+        authenticationFailure: true,
+        status: undefined,
+        transient: false,
+      });
     }
   });
 

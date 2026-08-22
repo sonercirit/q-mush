@@ -161,6 +161,31 @@ describe("session agent models", () => {
     });
   });
 
+  test("constructs one runtime refresher and shares it with agent, compactor, and native attachment models", () => {
+    const { factory, selections } = modelSelections();
+    const refreshCredential = () =>
+      Promise.resolve({
+        ...CREDENTIAL,
+        source: "oauth" as const,
+      });
+    const models = createSessionAgentModels({
+      agentFile: null,
+      credential: { ...CREDENTIAL, source: "oauth" },
+      detail: TEST_SESSION_DETAIL,
+      factory,
+      isCurrent: () => true,
+      refreshCredential,
+      realtime: undefined,
+      toolSettings: DEFAULT_TOOL_SETTINGS,
+      userId: "user-1",
+    });
+    models.createCompactor();
+
+    expect(
+      selections.map(({ refreshCredential }) => refreshCredential),
+    ).toEqual([refreshCredential, refreshCredential]);
+  });
+
   test("passes a global fallback routing selection to the agent model", () => {
     const { factory, selections } = modelSelections();
 

@@ -26,10 +26,10 @@ import { createSessionContextTokenCapAction } from "./session-context-limit-acti
 import { type SessionLaunchBoundary } from "./session-creation.ts";
 import {
   readSessionCredential,
-  type SessionCredentialReaders,
   type SessionCredentialSelection,
 } from "./session-credential-access.ts";
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
+import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 import { requiredSessionDetail } from "./session-detail.ts";
 import { readAuthorizedSessionHistory } from "./session-history.ts";
 import type { CreateSessionInput, PromptInput } from "./session-input.ts";

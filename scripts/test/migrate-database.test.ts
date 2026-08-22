@@ -535,27 +535,26 @@ test("preserves existing OpenRouter credentials", async () => {
     ],
   );
   const migratedDatabase = await migrateLegacyDatabase(legacyDatabase, path);
-  expect(migratedDatabase.select().from(providerCredentials).all()).toEqual([
-    {
-      apiFormat: null,
-      baseUrl: null,
-      createdAt: new Date(timestamp),
-      createdById: userId,
-      credentialFingerprint: "openrouter-key-fingerprint",
-      encryptedCredential: "encrypted-openrouter-key",
-      id: credentialId,
-      isDefault: false,
-      isDeleted: false,
-      isGlobal: true,
-      label: "Migrated key",
-      provider: "openrouter",
-      providerAccountId: "openrouter-account",
-      source: "api_key",
-      updatedAt: new Date(timestamp),
-      updatedById: userId,
-      userId,
-    },
-  ]);
+  expect(migratedDatabase.select().from(providerCredentials).get()).toEqual({
+    apiFormat: null,
+    baseUrl: null,
+    createdAt: new Date(timestamp),
+    createdById: userId,
+    credentialFingerprint: "openrouter-key-fingerprint",
+    encryptedCredential: "encrypted-openrouter-key",
+    id: credentialId,
+    isDefault: false,
+    isDeleted: false,
+    isGlobal: true,
+    label: "Migrated key",
+    provider: "openrouter",
+    providerAccountId: "openrouter-account",
+    requiresReauthentication: false,
+    source: "api_key",
+    updatedAt: new Date(timestamp),
+    updatedById: userId,
+    userId,
+  });
   migratedDatabase.$client.close();
 });
 

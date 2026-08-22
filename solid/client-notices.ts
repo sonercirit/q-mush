@@ -20,9 +20,13 @@ const NOTICES: Readonly<
     outcomes: {
       connected:
         "OpenAI account connected. Its API credential is ready on this machine.",
+      credential_conflict:
+        "That OpenAI credential is already stored. Remove the conflicting credential, then reconnect.",
       denied: "OpenAI access was canceled. Nothing was added.",
       invalid_state:
         "That OpenAI connection could not be verified. Please start a new one.",
+      wrong_account:
+        "This OpenAI account does not match the expired connection. Remove the expired connection, then add this account as a new credential.",
     },
   },
   openrouter: {
@@ -30,9 +34,13 @@ const NOTICES: Readonly<
     outcomes: {
       connected:
         "OpenRouter account connected. Its API key is ready on this machine.",
+      credential_conflict:
+        "That OpenRouter credential is already stored. Remove the conflicting credential, then reconnect.",
       denied: "OpenRouter access was canceled. Nothing was added.",
       invalid_state:
         "That OpenRouter connection could not be verified. Please start a new one.",
+      wrong_account:
+        "This OpenRouter account does not match the expired connection. Remove the expired connection, then add this account as a new credential.",
     },
   },
 };
