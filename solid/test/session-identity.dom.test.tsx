@@ -64,7 +64,9 @@ function expectCopyState(
 }
 
 function mockSuccessfulClipboard(): MockInstance<Clipboard["writeText"]> {
-  return vi.spyOn(navigator.clipboard, "writeText").mockResolvedValue();
+  const writeText = vi.spyOn(navigator.clipboard, "writeText");
+  writeText.mockImplementation(() => Promise.resolve());
+  return writeText;
 }
 
 function delayedCopy(): {
