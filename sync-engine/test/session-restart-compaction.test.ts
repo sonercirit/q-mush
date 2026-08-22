@@ -292,11 +292,7 @@ describe("restart handoff generation fencing", () => {
         userId: TEST_USER_ID,
       },
     ]);
-    setup.database
-      .update(agentSessions)
-      .set({ executionGeneration: identity.generation + 1 })
-      .where(eq(agentSessions.id, identity.sessionId))
-      .run();
+    mutateGeneration(setup, identity.generation + 1);
 
     expect(setup.restart.pending()).toEqual([]);
     closeCompactionStore(setup);

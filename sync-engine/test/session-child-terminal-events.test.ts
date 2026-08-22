@@ -1,6 +1,4 @@
-import { eq } from "drizzle-orm";
 import { expect, test, vi } from "vitest";
-import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
@@ -204,13 +202,12 @@ function compactRunningParent(
 
 function runningChildWithoutCallback() {
   const setup = spawnedRunningChildSetup("independent runtime generations");
-  const child = setup.store.get(TEST_USER_ID, setup.childId);
-  if (child === undefined) throw new Error("Running child unavailable");
-  setup.database
-    .update(agentSessions)
-    .set({ parentCallbackGeneration: null })
-    .where(eq(agentSessions.id, child.id))
-    .run();
+  const child = requireSpawnedChild(setup);
+  setup.database.$client
+    .query(
+      "UPDATE agent_sessions SET parent_callback_generation = NULL WHERE id = ?",
+    )
+    .run(child.id);
   return { child, setup };
 }
 

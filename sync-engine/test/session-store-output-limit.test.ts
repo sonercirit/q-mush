@@ -12,6 +12,19 @@ import {
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
 
+function appendRuntimeAnswer(
+  store: ReturnType<typeof runningStore>["store"],
+  messages: Parameters<typeof store.appendRuntimeAgentMessages>[1],
+): void {
+  store.appendRuntimeAgentMessages(STORE_SESSION_ID, messages, TEST_NOW + 2, 0);
+}
+
+function expectRecovered(
+  store: ReturnType<typeof runningStore>["store"],
+): void {
+  expect(store.failInterrupted(TEST_NOW + 3)).toEqual([]);
+}
+
 describe("session store output limits", () => {
   test("rejects an invalid persisted output-token limit", () => {
     const { database, store } = createStore();
@@ -31,14 +44,11 @@ describe("session store output limits", () => {
       .set({ parentCallbackGeneration: null, parentExecutionGeneration: 7 })
       .where(eq(agentSessions.id, STORE_SESSION_ID))
       .run();
-    store.appendRuntimeAgentMessages(
-      STORE_SESSION_ID,
-      [{ content: "Recovered child answer", role: "assistant", toolCalls: [] }],
-      TEST_NOW + 2,
-      0,
-    );
+    appendRuntimeAnswer(store, [
+      { content: "Recovered child answer", role: "assistant", toolCalls: [] },
+    ]);
 
-    expect(store.failInterrupted(TEST_NOW + 3)).toEqual([]);
+    expectRecovered(store);
     expect(store.get(TEST_USER_ID, STORE_SESSION_ID)).toMatchObject({
       parentExecutionGeneration: 7,
       status: "idle",
@@ -52,17 +62,12 @@ describe("session store output limits", () => {
     // notice — but the process exited before the session row settled.
     const notice =
       "The response was truncated: it reached the maximum output tokens.";
-    store.appendRuntimeAgentMessages(
-      STORE_SESSION_ID,
-      [
-        { content: "Truncated answer", role: "assistant", toolCalls: [] },
-        { content: notice, role: "error" },
-      ],
-      TEST_NOW + 2,
-      0,
-    );
+    appendRuntimeAnswer(store, [
+      { content: "Truncated answer", role: "assistant", toolCalls: [] },
+      { content: notice, role: "error" },
+    ]);
 
-    expect(store.failInterrupted(TEST_NOW + 3)).toEqual([]);
+    expectRecovered(store);
 
     const recovered = store.get(TEST_USER_ID, STORE_SESSION_ID);
     const trailingRoles = recovered?.messages.map(({ role }) => role).slice(-2);

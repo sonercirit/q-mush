@@ -220,12 +220,35 @@ function expectRepairRejected(setup: LineageRepairSetup, skipped = 1): void {
   closeSetup(setup);
 }
 
+function expectRepairCounts(
+  setup: LineageRepairSetup,
+  repaired: number,
+  skipped: number,
+  now?: number,
+): void {
+  expectRepairResult(setup, { ambiguous: 0, repaired, skipped }, now);
+}
+
 function expectRepairSucceeded(
   setup: LineageRepairSetup,
   now = TEST_NOW + 3,
 ): void {
-  expectRepairResult(setup, { ambiguous: 0, repaired: 1, skipped: 0 }, now);
+  expectRepairCounts(setup, 1, 0, now);
   expectChild(setup, stableLineage(setup));
+}
+
+function expectGuardedRepair(
+  setup: LineageRepairSetup,
+  staleChild: AgentSessionDetail,
+  parentChanged: boolean,
+): void {
+  expectRepairCounts(setup, 1, 1);
+  expect(storedSessionLineage(setup, staleChild.id)).toEqual({
+    parentExecutionGeneration: parentChanged
+      ? null
+      : setup.parent.generation + 1,
+    parentSessionId: parentChanged ? staleChild.id : null,
+  });
 }
 
 function closeSetup(setup: LineageRepairSetup): void {
@@ -293,15 +316,7 @@ describe("native spawn lineage repair", () => {
         END
       `);
 
-      expect(setup.store.repairSpawnedSessionLineage(TEST_NOW + 3)).toEqual({
-        ambiguous: 0,
-        repaired: 1,
-        skipped: 1,
-      });
-      expect(storedSessionLineage(setup, staleChild.id)).toEqual({
-        parentExecutionGeneration: parent ? null : setup.parent.generation + 1,
-        parentSessionId: parent ? staleChild.id : null,
-      });
+      expectGuardedRepair(setup, staleChild, parent);
       closeSetup(setup);
     },
   );
