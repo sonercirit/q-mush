@@ -5,7 +5,7 @@ import {
   type AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
-import { resolveAnthropicModel } from "../../sync-engine/anthropic-model-resolution.ts";
+import { resolveAnthropicModelAttempt } from "../../sync-engine/anthropic-model-resolution.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
   ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
@@ -492,7 +492,7 @@ describe("Anthropic replay safety", () => {
 
   test("propagates a caller abort while resolving an alias", async () => {
     const controller = new AbortController();
-    const resolution = resolveAnthropicModel({
+    const resolution = resolveAnthropicModelAttempt({
       credential: ANTHROPIC_TEST_CREDENTIAL,
       fetch: () => {
         controller.abort();

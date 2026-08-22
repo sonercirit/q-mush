@@ -106,9 +106,3 @@ export async function resolveAnthropicModelAttempt(options: {
   const id = isRecord(value) ? value["id"] : undefined;
   return isAgentModelId(id) ? resolvedModel(id) : unresolvedModel();
 }
-
-export async function resolveAnthropicModel(
-  options: Parameters<typeof resolveAnthropicModelAttempt>[0],
-): Promise<string | undefined> {
-  return (await resolveAnthropicModelAttempt(options)).model;
-}

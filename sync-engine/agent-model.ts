@@ -9,10 +9,10 @@ import type {
   AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
   AGENT_TOOLS,
-  selectedAgentTools,
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
@@ -20,6 +20,7 @@ import { anthropicReplayMatchesAssistant } from "../shared/anthropic-replay.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
 import {
   completionMessages,
   completionSignal,
@@ -27,11 +28,11 @@ import {
   type OptionalStep,
 } from "./agent-completion.ts";
 import {
+  agentCredentialFingerprint,
   usesAnthropicFormat,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
 } from "./agent-model-options.ts";
-import { agentModelRequestBody } from "./agent-model-request.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import {
   completeAnthropicPauseTurns,
@@ -54,6 +55,7 @@ import {
 } from "./generic-provider-url.ts";
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { completeProviderHttp } from "./provider-http.ts";
+import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
@@ -293,7 +295,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#adaptiveThinking = options.adaptiveThinking ?? null;
     this.#credential = options.credential;
-    this.#credentialFingerprint = options.credentialFingerprint;
+    this.#credentialFingerprint =
+      options.credentialFingerprint ??
+      agentCredentialFingerprint(options.credential);
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
@@ -314,7 +318,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
     this.#tools = this.#dynamicToolCache
       ? AGENT_TOOLS
-      : selectedAgentTools(this.#selectedTools);
+      : selectedAgentTools(
+          this.#selectedTools,
+          options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+        );
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 
@@ -409,7 +416,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     stream: boolean,
     resolvedModel?: string,
   ): unknown {
-    return agentModelRequestBody({
+    return requestBody({
       adaptiveThinking: this.#adaptiveThinking,
       credential: this.#credential,
       credentialFingerprint: this.#credentialFingerprint,

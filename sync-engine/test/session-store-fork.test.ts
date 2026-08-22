@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -256,7 +257,7 @@ describe("session store forks", () => {
 
   test("replays signed metadata after reopening the database", () => {
     const path = join(temporaryDirectory(), "session.sqlite");
-    const database = createAuthenticatedTestDatabase(path);
+    const database = createAuthenticatedTestDatabase({ path });
     addSessionTestRunner(database, "replay-restart-machine", STORE_RUNNER_ID);
     addTestProviderCredential(database, testSessionInput().credentialId);
     const ids = [
@@ -264,13 +265,18 @@ describe("session store forks", () => {
       "018bcfe5-6800-7000-8000-000000000044",
       "018bcfe5-6800-7000-8000-000000000045",
     ];
-    const store = new SessionStore(database, () => {
-      const replayId = ids.shift();
-      if (replayId === undefined) {
-        throw new Error("No fork replay test ID remains");
-      }
-      return replayId;
-    });
+    const store = new SessionStore(
+      database,
+      () => {
+        const replayId = ids.shift();
+        if (replayId === undefined) {
+          throw new Error("No fork replay test ID remains");
+        }
+        return replayId;
+      },
+      () => DEFAULT_TOOL_SETTINGS,
+      { pending: () => undefined },
+    );
     createTestSession(store, TEST_NOW, {
       images: [],
       model: PROVIDER_REPLAY.model,
@@ -285,7 +291,12 @@ describe("session store forks", () => {
 
     const reopened = createDatabase(path);
     expect(
-      replayConversation(new SessionStore(reopened), STORE_SESSION_ID)[1],
+      replayConversation(
+        new SessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
+          pending: () => undefined,
+        }),
+        STORE_SESSION_ID,
+      )[1],
     ).toEqual(expect.objectContaining({ providerReplay: PROVIDER_REPLAY }));
     reopened.$client.close();
   });

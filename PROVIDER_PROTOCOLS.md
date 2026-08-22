@@ -63,8 +63,8 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   `low`. Adaptive-only models (Fable) ignore `enabled`; newer models default
   `display` to `omitted` — empty thinking text plus a signature while thinking
   tokens bill. Anthropic replay binds the alias, resolved response model,
-  credential/format/endpoint provenance, and exact assistant artifact. Failed
-  or unavailable identity leaves text-only Messages running but blocks both
+  credential/format/endpoint provenance, and exact assistant artifact. Failed or
+  unavailable identity leaves text-only Messages running but blocks both
   client-tool execution and provider-directed pause follow-up. Exact JSON-safe
   blocks, including additive fields, persist; corrupt metadata warns but leaves
   transcripts readable. Durable client-tool continuations require matching
@@ -73,16 +73,16 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   incompatible tool history falls back to plain reconstruction. Trailing result
   IDs use deduplicated, order-insensitive sets. Transient retrieval failures
   retry later; permanent unresolved identities stay cached. Known resolved
-  identities flow to agent, compactor, and attachment fallback. Empty text
-  drops (whitespace stays), but content and replay are withheld together across
-  every trailing text block; a pause fails if none remain replayable.
-  `cache_control` marks only text/client `tool_use`, scanning backward; trailing
-  replay is resent verbatim. `pause_turn` validates resent blocks, replays them
-  without duplicate UI, sums usage, caps at five continuations, and fails
-  terminal client tools closed when replay cannot combine. The local proxy
-  tolerates unsigned tool-loop replay; strict endpoints may not. Streamed reasoning deltas group
-  by `output_index`/`summary_index`; separate summary parts with paragraphs
-  since completed responses may omit them.
+  identities flow to agent, compactor, and attachment fallback. Empty text drops
+  (whitespace stays), but content and replay are withheld together across every
+  trailing text block; a pause fails if none remain replayable. `cache_control`
+  marks only text/client `tool_use`, scanning backward; trailing replay is
+  resent verbatim. `pause_turn` validates resent blocks, replays them without
+  duplicate UI, sums usage, caps at five continuations, and fails terminal
+  client tools closed when replay cannot combine. The local proxy tolerates
+  unsigned tool-loop replay; strict endpoints may not. Streamed reasoning deltas
+  group by `output_index`/`summary_index`; separate summary parts with
+  paragraphs since completed responses may omit them.
 - **Admission:** Frozen clocks can collapse admission transitions; production
   cannot. Fresh sockets admit non-retained `response.*`; reused ones require an
   ID or `response.created`. WebSocket Mode expires at 60 minutes; either

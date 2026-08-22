@@ -1,3 +1,7 @@
+import {
+  readAgentAttachments,
+  type AgentAttachment,
+} from "../shared/agent-attachments.ts";
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
 import {
   isAgentSessionToolName,
@@ -8,50 +12,63 @@ import {
 import { createUuidV7 } from "../shared/ids.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import {
-  RunnerDisconnectedError,
   type RunnerCommandBroker,
-  type RunnerCommandResult,
+  type RunnerCommandOutputDelta,
 } from "../shared/runner-command-broker.ts";
-import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  SessionRuntimePendingComponent,
+} from "../shared/session-model.ts";
+import {
+  toolExecutionLimitSeconds,
+  type ToolSettings,
+} from "../shared/tool-limits.ts";
+import type { RunnerCommandResult } from "../shared/tool-stream.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
+import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills } from "./agent-skills.ts";
-import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
-import {
-  isAskQuestionsPause,
-  isAskQuestionsToolName,
-  pauseForAskQuestions,
-} from "./ask-questions-pause.ts";
+import { isAskQuestionsPause } from "./ask-questions-pause.ts";
+import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
+import { activeToolTracker } from "./session-active-tool-tracking.ts";
 import { loadSessionAgentFile } from "./session-agent-file.ts";
 import { runCompactingAgentLoop } from "./session-agent-loop.ts";
+import {
+  executeForSession,
+  isRestartHandoffError,
+  markSessionStepStart,
+  recordCompaction,
+  recordRuntimeUsage,
+  throwIfRestartRequested,
+  writeRuntime,
+} from "./session-agent-runtime-state.ts";
+
 import {
   createSessionAgentModels,
   type AgentModelFactory,
   type SessionAgentModels,
 } from "./session-agent-models.ts";
+import { currentExecutionTools } from "./session-agent-tool-authority.ts";
+import {
+  executeAuthorizedRuntimeTool,
+  type AgentToolDispatcher,
+} from "./session-agent-tool-execution.ts";
 import {
   executeSessionAgentTool,
   type SessionAgentToolActions,
 } from "./session-agent-tools.ts";
+import { agentStepUsage, compactionUsage } from "./session-compaction-usage.ts";
 import {
-  compactionUsage,
-  type CompactionUsage,
-} from "./session-compaction-usage.ts";
-import { readSessionConversation } from "./session-conversation.ts";
-import { sessionRequestMetadata } from "./session-current-model.ts";
+  discoverCurrentSessionModel,
+  sessionRequestMetadata,
+} from "./session-current-model.ts";
+import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
-import {
-  createRunnerToolDispatcher,
-  type AgentToolDispatcher,
-} from "./session-runner-tool-dispatcher.ts";
-import {
-  recordSessionRuntimeUsage,
-  writeSessionRuntime,
-  type SessionRuntimeWriter,
-} from "./session-runtime-write.ts";
+import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -59,6 +76,7 @@ import { boundSessionToolOutput } from "./session-tool-output.ts";
 import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
+  readonly activeTools: ActiveSessionTools;
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
   readonly broker: RunnerCommandBroker;
   readonly credential: ProviderCredentialAccess;
@@ -70,103 +88,26 @@ export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRunti
   readonly manualCompactionRequested: () => boolean;
   readonly modelFactory: AgentModelFactory;
   readonly now: () => number;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly restartHandoffRequested: () => boolean;
   readonly notify: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly sessionTools: SessionAgentToolActions;
   readonly signal: AbortSignal;
   readonly store: SessionStore;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }
 
-function markSessionStepStart(runtime: SessionAgentRuntimeDependencies): void {
-  // Status- and generation-guarded: a racing stop or restart makes this
-  // write match zero rows instead of throwing.
-  const { store } = runtime;
-  writeSessionRuntime(runtime, store.markRuntimeStepStart.bind(store));
-}
-
-function recordCompactionContext(
+function markProviderPending(
   runtime: SessionAgentRuntimeDependencies,
-  contextTokens: number | null,
+  state: ProviderRequestState,
 ): void {
-  if (contextTokens !== null) {
-    recordSessionRuntimeUsage(runtime, {
-      contextTokens,
-      costBasis: null,
-      costUsd: null,
-    });
-  }
-}
-
-function recordCompaction(
-  runtime: SessionAgentRuntimeDependencies,
-  summary: string,
-  usage: CompactionUsage,
-  startedAt: number,
-  terminal = false,
-): void {
-  recordCompactionContext(runtime, usage.contextTokens);
-  writeSessionRuntime(runtime, (sessionId, now, generation) => {
-    if (terminal) {
-      runtime.store.compactRuntimeTerminal(
-        sessionId,
-        summary,
-        usage,
-        now,
-        generation,
-        startedAt,
-        runtime.detail.restartHandoff,
-      );
-      return;
-    }
-    runtime.store.compactRuntimeConversation(
-      sessionId,
-      summary,
-      usage,
-      now,
-      generation,
-      startedAt,
-    );
-  });
-}
-
-function isSessionRestartHandoff(
-  runtime: SessionAgentRuntimeDependencies,
-  error: unknown,
-): boolean {
-  return (
-    error instanceof RunnerDisconnectedError &&
-    runtime.restartHandoffRequested()
+  runtime.pendingComponent(
+    state === "admission" ? "provider_admission" : "provider_request",
   );
-}
-
-function restartHandoffError(): DOMException {
-  return new DOMException(
-    "The runner disconnected during a restart handoff",
-    "RestartHandoff",
-  );
-}
-
-async function executeForSession<Result>(
-  runtime: SessionAgentRuntimeDependencies,
-  execute: () => Promise<Result>,
-  handoff?: (error: DOMException) => void,
-): Promise<Result> {
-  try {
-    return await execute();
-  } catch (error) {
-    if (isSessionRestartHandoff(runtime, error)) {
-      const handoffError = restartHandoffError();
-      handoff?.(handoffError);
-      throw handoffError;
-    }
-    throw error;
-  }
-}
-
-export function isRestartHandoffError(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "RestartHandoff";
 }
 
 async function loadModels(
@@ -176,53 +117,64 @@ async function loadModels(
     readonly toolStream?: ToolStreamPublisher;
   } = {},
 ): Promise<SessionAgentModels> {
-  const agentFile = await executeForSession(runtime, () =>
-    loadSessionAgentFile(
-      runtime.broker,
-      runtime.detail,
-      runtime.signal,
-      runtime.isCurrent,
-    ),
-  );
-  writeSessionRuntime(runtime, (sessionId, now, generation) => {
-    runtime.store.setRuntimeAgentFile(sessionId, agentFile, now, generation);
-  });
-  const metadata = await sessionRequestMetadata(
-    runtime,
-    (apply) => {
-      writeSessionRuntime(runtime, apply);
-    },
+  const settings = runtime.toolSettings;
+  return withLoadingDeadline(
     runtime.signal,
-  );
-  const resolution = await executeForSession(runtime, () =>
-    resolveAnthropicModelAttempt({
-      credential: runtime.credential,
-      fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
-      model: runtime.detail.model,
-      provider: runtime.detail.provider,
-      signal: runtime.signal,
-    }),
-  );
-  const resolvedModel =
-    resolution.model ?? (resolution.retryable ? undefined : null);
-  const models = createSessionAgentModels({
-    agentFile,
-    credential: runtime.credential,
-    detail: { ...runtime.detail, ...metadata },
-    factory: runtime.modelFactory,
-    isCurrent: runtime.isCurrent,
-    onStepStart: () => {
-      markSessionStepStart(runtime);
+    settings,
+    async (signal) => {
+      const agentFile = await executeForSession(runtime, () => {
+        runtime.pendingComponent("runner_command");
+        return loadSessionAgentFile(
+          runtime.broker,
+          runtime.detail,
+          signal,
+          runtime.isCurrent,
+        );
+      });
+      writeRuntime(runtime, (sessionId, now, generation) => {
+        runtime.store.setRuntimeAgentFile(
+          sessionId,
+          agentFile,
+          now,
+          generation,
+        );
+      });
+      throwIfRestartRequested(runtime);
+      runtime.pendingComponent("provider_request");
+      const metadata = await sessionRequestMetadata(
+        runtime,
+        (apply) => {
+          writeRuntime(runtime, apply);
+        },
+        signal,
+      );
+      throwIfRestartRequested(runtime);
+      const onRequestState = (state: ProviderRequestState) => {
+        markProviderPending(runtime, state);
+      };
+      return createSessionAgentModels({
+        agentFile,
+        credential: runtime.credential,
+        detail: { ...runtime.detail, ...metadata },
+        factory: runtime.modelFactory,
+        isCurrent: runtime.isCurrent,
+        onRequestState,
+        onStepStart: () => {
+          markSessionStepStart(runtime);
+        },
+        realtime: runtime.realtime,
+        ...(options.streamId === undefined
+          ? {}
+          : { streamId: options.streamId }),
+        ...(options.toolStream === undefined
+          ? {}
+          : { toolStream: options.toolStream }),
+        toolSettings: settings,
+        userId: runtime.userId,
+      });
     },
-    realtime: runtime.realtime,
-    ...(resolvedModel === undefined ? {} : { resolvedModel }),
-    ...(options.streamId === undefined ? {} : { streamId: options.streamId }),
-    ...(options.toolStream === undefined
-      ? {}
-      : { toolStream: options.toolStream }),
-    userId: runtime.userId,
-  });
-  return models;
+    isRestartHandoffError,
+  );
 }
 
 export async function compactSessionConversation(
@@ -237,7 +189,7 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = readSessionConversation(runtime, models.resolvedModel);
+  const conversation = sessionRuntimeConversation(runtime);
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -277,18 +229,10 @@ function restartInterruptedToolResult(): RunnerCommandResult {
 
 function boundRuntimeToolOutput(
   runtime: SessionAgentRuntimeDependencies,
-  signal: AbortSignal,
   result: RunnerCommandResult,
-): Promise<RunnerCommandResult> {
-  return boundSessionToolOutput(
-    {
-      broker: runtime.broker,
-      detail: runtime.detail,
-      isCurrent: runtime.isCurrent,
-      signal,
-    },
-    result,
-  );
+  toolName?: string,
+): RunnerCommandResult {
+  return boundSessionToolOutput(result, runtime.toolSettings, toolName);
 }
 
 async function executeAgentTool(
@@ -304,10 +248,21 @@ async function executeAgentTool(
     ? Input
     : never,
 ): Promise<RunnerCommandResult> {
-  if (isRestartHandoffError(toolSignal.reason)) {
+  if (
+    isRestartHandoffError(toolSignal.reason) ||
+    runtime.restartHandoffRequested()
+  ) {
     return restartInterruptedToolResult();
   }
+  const trackOuterCall =
+    call.name === "brave_search" ||
+    call.name === "parallel" ||
+    (isAgentSessionToolName(call.name) && isSessionAgentToolName(call.name));
+  const finishOuterTracking = trackOuterCall
+    ? runtime.activeTools.begin(runtime.detail.id, call.id, call.name)
+    : () => undefined;
   try {
+    runtime.pendingComponent("engine_tool");
     if (
       !isAgentSessionToolName(call.name) ||
       !stepTools.has(call.name) ||
@@ -318,45 +273,15 @@ async function executeAgentTool(
         state: "failed",
       };
     }
-    if (isAskQuestionsToolName(call.name)) {
-      return {
-        output: pauseForAskQuestions(
-          {
-            notify: (userId, sessionId) => {
-              if (
-                userId === runtime.userId &&
-                sessionId === runtime.detail.id
-              ) {
-                runtime.notify();
-              }
-            },
-            now: runtime.now,
-            questions: runtime.store.questions(),
-          },
-          {
-            arguments: call.arguments,
-            executionGeneration: runtime.detail.generation,
-            selected: stepTools.has("ask_questions"),
-            sessionId: runtime.detail.id,
-            source: "direct",
-            toolCallId: call.id,
-            userId: runtime.userId,
-          },
-        ),
-        state: "completed",
-      };
-    }
-    const skillOutput = skills.executeResult(
-      call.name,
-      call.arguments,
-      toolSignal,
-      call.id,
-    );
-    const result = await (skillOutput ??
-      dispatchTool(call.name, call.arguments, toolSignal, call.id));
-    return skillOutput === undefined
-      ? result
-      : await boundRuntimeToolOutput(runtime, toolSignal, result);
+    return await executeAuthorizedRuntimeTool({
+      call,
+      dispatch: dispatchTool,
+      executeSkill: skills.executeResult,
+      outerSignal: toolSignal,
+      settings: runtime.toolSettings,
+      runtime,
+      stepTools,
+    });
   } catch (error) {
     if (isAskQuestionsPause(error)) {
       throw error;
@@ -368,13 +293,21 @@ async function executeAgentTool(
       return restartInterruptedToolResult();
     }
     throw error;
+  } finally {
+    finishOuterTracking();
   }
 }
 
 export async function runSessionAgent(
   runtime: SessionAgentRuntimeDependencies,
 ): Promise<"complete" | "handoff"> {
+  const settings = runtime.toolSettings;
   const streamId = createUuidV7();
+  const initialMessages = sessionRuntimeConversation(runtime);
+  const messages =
+    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
+      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
+      : initialMessages;
   const toolStream = new ToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
@@ -383,39 +316,137 @@ export async function runSessionAgent(
     workspaceId: runtime.detail.workspaceId,
   });
   const models = await loadModels(runtime, { streamId, toolStream });
-  const initialMessages = readSessionConversation(
-    runtime,
-    models.resolvedModel,
-  );
-  const messages =
-    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
-      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
-      : initialMessages;
   const handoffController = new AbortController();
   const toolSignal = AbortSignal.any([
     runtime.signal,
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  const stepBoundaryRequested = (): boolean =>
-    runtime.detail.restartHandoff === null && runtime.restartHandoffRequested();
-  const { currentToolNames, dispatchRunnerTool } = createRunnerToolDispatcher({
-    ...(models.resolvedModel === undefined
-      ? {}
-      : { currentResolvedModel: models.resolvedModel }),
-    executeForSession: (execute, handoff) =>
-      executeForSession(runtime, execute, handoff),
-    handoffController,
-    runtime,
-    toolSignal,
-    toolStream,
-    writeRuntime: ((write) => {
-      writeSessionRuntime(runtime, write);
-    }) satisfies SessionRuntimeWriter,
-  });
+  // Resumed runs park at their next step boundary too; exempting them let a
+  // drain that caught one never converge.
+  const stepBoundaryRequested = runtime.restartHandoffRequested;
+  const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
+    currentExecutionTools({
+      current: runtime.currentTools?.(),
+      isCurrent: runtime.isCurrent,
+      persisted: runtime.detail.tools,
+    });
   const currentTools = (): ReadonlySet<AgentSessionToolName> | undefined => {
     const tools = readAgentSessionToolNames(currentToolNames());
     return tools === undefined ? undefined : new Set(tools);
+  };
+  const trackTool = activeToolTracker(runtime.activeTools, runtime.detail.id);
+  const dispatchRunnerTool = async (
+    name: string,
+    toolArguments: Readonly<Record<string, unknown>>,
+    signal: AbortSignal = toolSignal,
+    callId?: string,
+  ): Promise<RunnerCommandResult> => {
+    runtime.pendingComponent("runner_command");
+    const result = await executeForSession(
+      runtime,
+      () =>
+        runtime.broker.dispatch(
+          {
+            arguments: toolArguments,
+            authorize: () =>
+              currentToolNames()?.some((candidate) => candidate === name) ===
+              true,
+            executionEnvironment: runtime.detail.executionEnvironment,
+            executionLimitSeconds: toolExecutionLimitSeconds(settings),
+            generation: runtime.detail.generation,
+            outputLimitCharacters: settings.outputLimitCharacters,
+            runnerId: runtime.detail.runnerId,
+            sessionId: runtime.detail.id,
+            tool: name,
+            workingDirectory: runtime.detail.workingDirectory,
+          },
+          signal,
+          callId === undefined
+            ? undefined
+            : (delta: RunnerCommandOutputDelta) => {
+                toolStream.output(callId, delta);
+              },
+        ),
+      (error) => {
+        handoffController.abort(error);
+      },
+    );
+    if (name !== "explain_file" || result.state !== "completed") {
+      return result;
+    }
+    const finishExplanationTracking = trackTool(
+      callId ?? createUuidV7(),
+      name,
+      { runnerCommand: false },
+    );
+    try {
+      const promptValue = toolArguments["prompt"];
+      if (
+        promptValue !== undefined &&
+        (typeof promptValue !== "string" || promptValue.length > 4_000)
+      ) {
+        throw new Error(
+          "Tool argument prompt must be a string of at most 4000 characters",
+        );
+      }
+      let attachment: AgentAttachment | undefined;
+      try {
+        attachment = readAgentAttachments([JSON.parse(result.output)])?.[0];
+      } catch {
+        attachment = undefined;
+      }
+      if (attachment === undefined) {
+        throw new Error("The runner returned invalid file attachment data");
+      }
+      throwIfRestartRequested(runtime);
+      runtime.pendingComponent("provider_request");
+      const currentModel = await discoverCurrentSessionModel(runtime, signal);
+      // Discovery may ignore cancellation and settle after the wrapper already
+      // reported timed-out; never start explanation model work afterward.
+      throwIfAgentAborted(signal);
+      throwIfRestartRequested(runtime);
+      if (currentModel === undefined) {
+        throw new Error(
+          "The session model is unavailable for file explanation",
+        );
+      }
+      const explanation = await explainAttachment(
+        {
+          attachment,
+          currentCredential: runtime.credential,
+          currentModel,
+          currentModelId: runtime.detail.model,
+          currentProvider: runtime.detail.provider,
+          currentProviderPricing: runtime.detail.providerPricing,
+          currentProviderTag: runtime.detail.openRouterProviderTag,
+          factory: runtime.modelFactory,
+          onStepStart: () => {
+            markSessionStepStart(runtime);
+          },
+          prompt: typeof promptValue === "string" ? promptValue : null,
+          resources: runtime,
+          toolSettings: runtime.toolSettings,
+          userId: runtime.userId,
+          workspaceId: runtime.detail.workspaceId,
+        },
+        signal,
+      );
+      const usage = agentStepUsage(
+        { contextTokens: null, ...explanation.usage },
+        (step) =>
+          estimateAgentStepCost(
+            { providerPricing: explanation.providerPricing },
+            step.tokenUsage,
+          ),
+      );
+      if (usage !== undefined) {
+        recordRuntimeUsage(runtime, usage);
+      }
+      return { output: explanation.content, state: "completed" };
+    } finally {
+      finishExplanationTracking();
+    }
   };
   const dispatchTool: AgentToolDispatcher = (
     name,
@@ -435,13 +466,15 @@ export async function runSessionAgent(
           (sleepSignal) =>
             waitForSessionSteeringInput(runtime.detail.id, sleepSignal),
           runtime.now,
+          settings,
         ).then((output) => ({ output, state: "completed" }));
       }
       return executeSessionAgentTool(
         runtime.sessionTools,
         name,
         toolArguments,
-      ).then((result) => boundRuntimeToolOutput(runtime, signal, result));
+        signal,
+      );
     }
     return dispatchRunnerTool(name, toolArguments, signal, callId);
   };
@@ -449,6 +482,9 @@ export async function runSessionAgent(
     braveSearch: runtime.braveSearch,
     currentTools: currentToolNames,
     executeTool: dispatchTool,
+    restartRequested: runtime.restartHandoffRequested,
+    trackTool: (callId, name, runnerCommand) =>
+      trackTool(callId ?? createUuidV7(), name, { runnerCommand }),
     tools: runtime.detail.tools,
     userId: runtime.userId,
     workspaceId: runtime.detail.workspaceId,
@@ -472,6 +508,8 @@ export async function runSessionAgent(
     }
     return messages;
   };
+  const finalizeToolResult = (result: RunnerCommandResult, toolName: string) =>
+    boundRuntimeToolOutput(runtime, result, toolName);
   try {
     return await runCompactingAgentLoop({
       agentCost: (step) =>
@@ -489,6 +527,7 @@ export async function runSessionAgent(
           toolSignal,
           call,
         ),
+      finalizeToolResult,
       ...(runtime.detail.restartHandoff?.operation === "agent"
         ? { initialContextTokens: runtime.detail.currentContextTokens }
         : {}),

@@ -104,7 +104,7 @@ export function createCredentialCipher(
   );
 }
 
-function fingerprintCredential(value: string): string {
+export function fingerprintCredential(value: string): string {
   return sha256Base64Url(value);
 }
 

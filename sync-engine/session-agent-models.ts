@@ -8,6 +8,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentCredentialFingerprint,
@@ -64,12 +65,16 @@ export function createFallbackModel(
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
     readonly resolvedModel?: string | null;
+    readonly toolSettings?: ToolSettings;
   },
 ): AgentModel {
   return factory({
     adaptiveThinking: selection.adaptiveThinking,
     credential: selection.credential,
     credentialFingerprint: agentCredentialFingerprint(selection.credential),
+    ...(selection.toolSettings === undefined
+      ? {}
+      : { toolSettings: selection.toolSettings }),
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
@@ -90,13 +95,16 @@ function modelOptions(
   credential: ProviderCredentialAccess,
   systemPrompt: string,
   resolvedModel: string | null | undefined,
+  toolSettings: ToolSettings,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
+  onRequestState?: AgentModelFactoryOptions["onRequestState"],
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
     credential,
     credentialFingerprint: agentCredentialFingerprint(credential),
+    toolSettings,
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,
       provider: detail.provider,
@@ -109,6 +117,7 @@ function modelOptions(
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
+    ...(onRequestState === undefined ? {} : { onRequestState }),
     promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
@@ -131,8 +140,10 @@ function createConfiguredModel(
       options.credential,
       systemPrompt,
       options.resolvedModel,
+      options.toolSettings,
       onDelta,
       onStepStart,
+      options.onRequestState,
     ),
   );
 }
@@ -144,11 +155,13 @@ export function createSessionAgentModels(options: {
   readonly factory: AgentModelFactory;
   readonly id?: () => string;
   readonly isCurrent: () => boolean;
+  readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
   readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
   readonly resolvedModel?: string | null;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }): SessionAgentModels {
   const id = options.id ?? createUuidV7;
@@ -189,6 +202,7 @@ export function createSessionAgentModels(options: {
   const systemPrompt = createAgentSystemPrompt(
     options.agentFile,
     options.detail.executionEnvironment,
+    options.toolSettings,
   );
   const publishCompaction = (
     event:

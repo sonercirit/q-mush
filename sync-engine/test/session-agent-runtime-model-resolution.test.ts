@@ -96,6 +96,7 @@ describe("session Anthropic model resolution", () => {
           return Promise.reject(new TypeError("temporary retrieval failure"));
         },
         now: () => (now += 1),
+        pendingComponent: () => undefined,
         sessionTools: unusedSessionToolActions({
           listSessions: () => "session list",
         }),

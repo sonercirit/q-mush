@@ -3,8 +3,6 @@ import type { AnthropicAssistantReplay } from "../../shared/anthropic-replay.ts"
 import { isRecord } from "../../shared/auth-model.ts";
 import {
   ANTHROPIC_READ_CALL,
-  anthropicHarness,
-  doneAnthropicEvents,
   SIGNED_ANTHROPIC_REPLAY,
   type AnthropicHarness,
 } from "./anthropic-model-test-helpers.ts";
@@ -25,27 +23,6 @@ export function anthropicAssistant(
   return providerReplay === undefined
     ? message
     : { ...message, providerReplay };
-}
-
-export function anthropicReplayConversation(options: {
-  readonly providerReplay?: AnthropicAssistantReplay;
-  readonly toolContent: string;
-}): readonly AgentConversationMessage[] {
-  return [
-    { content: "Hello", role: "user" },
-    anthropicAssistant(options.providerReplay),
-    {
-      content: options.toolContent,
-      role: "tool",
-      toolCallId: ANTHROPIC_READ_CALL.id,
-      toolName: ANTHROPIC_READ_CALL.name,
-    },
-    { content: "Continue", role: "user" },
-  ];
-}
-
-export function signedReplayHarness(): AnthropicHarness {
-  return anthropicHarness([doneAnthropicEvents()]);
 }
 
 // Replays a captured step as the assistant turn of a fresh request so tests
@@ -71,7 +48,7 @@ export async function capturedReplayRequest(
   return capturedAssistantContent(harness, 1);
 }
 
-export async function capturedAssistantContent(
+async function capturedAssistantContent(
   harness: AnthropicHarness,
   requestIndex = 0,
 ): Promise<unknown> {

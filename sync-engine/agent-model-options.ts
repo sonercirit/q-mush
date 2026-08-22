@@ -29,8 +29,8 @@ export function agentModelOpenRouterProviderRouting(
 
 export type AgentProviderCredential = Pick<
   ProviderCredentialAccess,
-  "accountId" | "apiFormat" | "baseUrl" | "id" | "secret" | "source"
->;
+  "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
+> & { readonly id?: string };
 
 export type AgentProviderDiscoveryCredential = Omit<
   AgentProviderCredential,
@@ -52,7 +52,7 @@ export type ProviderRequestState = "active" | "admission";
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
-  readonly credentialFingerprint: string;
+  readonly credentialFingerprint?: string;
   readonly dynamicToolCache?: boolean;
   readonly maxOutputTokens: number | null;
   readonly model: string;
@@ -66,6 +66,6 @@ export interface AgentModelRequestOptions {
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly resolvedModel?: string | null;
   readonly systemPrompt?: string;
-  readonly toolSettings: ToolSettings;
+  readonly toolSettings?: ToolSettings;
   readonly tools?: readonly AgentSessionToolName[];
 }

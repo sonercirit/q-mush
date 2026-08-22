@@ -10,7 +10,7 @@ type AnthropicModelOptions = ConstructorParameters<
   typeof ChatCompletionsAgentModel
 >[0];
 
-export const ANTHROPIC_TEST_BASE_URL = "https://anthropic.example.test/v1";
+const ANTHROPIC_TEST_BASE_URL = "https://anthropic.example.test/v1";
 export const ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT =
   "test-credential-fingerprint";
 export const ANTHROPIC_TEST_CREDENTIAL = {

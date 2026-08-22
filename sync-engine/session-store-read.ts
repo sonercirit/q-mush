@@ -412,11 +412,14 @@ function replayForIdentity(
 
 export function conversationFromInternalMessages(
   messages: readonly InternalSessionMessage[],
-  identity: AnthropicReplayIdentity,
+  identity?: AnthropicReplayIdentity,
 ): readonly AgentConversationMessage[] {
   const conversation: AgentConversationMessage[] = [];
   for (const source of messages) {
-    const internal = replayForIdentity(source, identity);
+    const internal =
+      identity === undefined
+        ? { message: source.message }
+        : replayForIdentity(source, identity);
     const message = internal.message;
     switch (message.role) {
       case "assistant":
