@@ -187,12 +187,15 @@ export async function spawnAgentSession(options: {
   const childIdentity = { generation: child.generation, sessionId: child.id };
   dependencies.notify(userId, child.id);
 
-  const fail = (error: string): string => {
+  const fail = (
+    error: string,
+    content = "Session failed: the child session could not be prepared",
+  ): string => {
     const failed = dependencies.store.failSpawnedSessionPreparation(
       userId,
       child.id,
       child.generation,
-      "Session failed: the child session could not be prepared",
+      content,
       dependencies.now(),
     );
     dependencies.notify(userId, child.id);
@@ -215,16 +218,21 @@ export async function spawnAgentSession(options: {
         balanced,
       );
     } catch (error) {
-      if (
-        balanced &&
-        dependencies.modelCredentialPool?.reject(
-          userId,
-          selection,
-          credential.id,
-          error,
-        ) === true
-      ) {
-        return undefined;
+      if (error instanceof Error && error.name === "SessionLaunchError") {
+        throw error;
+      }
+      if (balanced && dependencies.modelCredentialPool !== undefined) {
+        if (
+          dependencies.modelCredentialPool.reject(
+            userId,
+            selection,
+            credential.id,
+            error,
+          )
+        ) {
+          return undefined;
+        }
+        throw error;
       }
       return fail("provider_unavailable");
     }
@@ -253,18 +261,22 @@ export async function spawnAgentSession(options: {
     if (!claim()) return fail("parent_stale");
     if (!dependencies.launchSession(credential, preparedChild, userId)) {
       if (pauseQueuedSessionForRestart(dependencies, preparedChild, userId)) {
-        return sessionToolOutput({
-          error: "server_restarting",
-          sessionId: child.id,
-          status: "queued",
-        });
+        return sessionToolOutput({ error: "server_restarting" });
       }
-      return fail("session_launch_failed");
+      fail(
+        "session_launch_failed",
+        "Session failed: the child session could not be launched",
+      );
+      const failedChild = dependencies.store.get(userId, child.id);
+      if (failedChild !== undefined) options.terminal(failedChild);
+      const launchError = new Error("The child session could not be launched");
+      launchError.name = "SessionLaunchError";
+      throw launchError;
     }
     return sessionToolOutput({ sessionId: child.id, status: "spawned" });
   };
 
-  if (balanced) {
+  if (balanced && dependencies.modelCredentialPool !== undefined) {
     let credentials: readonly ProviderCredentialAccess[];
     try {
       credentials =
@@ -275,22 +287,29 @@ export async function spawnAgentSession(options: {
     } catch {
       return fail("credential_unavailable");
     }
-    for (const credential of credentials) {
-      const output = await prepareAndLaunch(credential);
-      if (output !== undefined) return output;
+    if (credentials.length > 0) {
+      for (const credential of credentials) {
+        const output = await prepareAndLaunch(credential);
+        if (output !== undefined) return output;
+      }
+      return fail("credential_unavailable");
+    }
+  }
+
+  try {
+    const response = await dependencies.withCredential(
+      userId,
+      { ...selection, credentialId: reservedCredential.id },
+      async (value) =>
+        new Response(await prepareAndLaunch(value), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    return await response.text();
+  } catch (error) {
+    if (error instanceof Error && error.name === "SessionLaunchError") {
+      throw error;
     }
     return fail("credential_unavailable");
   }
-
-  let credential: ProviderCredentialAccess | undefined;
-  try {
-    credential = await dependencies.readCredential(userId, {
-      ...selection,
-      credentialId: reservedCredential.id,
-    });
-  } catch {
-    return fail("credential_unavailable");
-  }
-  if (credential === undefined) return fail("credential_unavailable");
-  return (await prepareAndLaunch(credential)) ?? fail("provider_unavailable");
 }
