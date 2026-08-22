@@ -249,20 +249,18 @@ describe("cross-session parent execution authority", () => {
     },
   );
 
-  test.each([{ draining: true, path: "restart queue" }])(
-    "rejects a stale parent at the pre-$path claim",
-    async ({ draining }) => {
-      const setup = authoritySetup({ draining, fenceOnNotify: true });
+  test.each([
+    { draining: false, path: "launch" },
+    { draining: true, path: "restart queue" },
+  ])("rejects a stale parent at the pre-$path claim", async ({ draining }) => {
+    const setup = authoritySetup({ draining, fenceOnNotify: true });
 
-      expect(await expectSpawnWithoutLaunch(setup)).toContain("parent_stale");
-      expect(
-        setup.store
-          .list(TEST_USER_ID)
-          .some(({ status }) => status === "failed"),
-      ).toBe(true);
-      closeSetup(setup);
-    },
-  );
+    expect(await expectSpawnWithoutLaunch(setup)).toContain("parent_stale");
+    expect(
+      setup.store.list(TEST_USER_ID).some(({ status }) => status === "failed"),
+    ).toBe(true);
+    closeSetup(setup);
+  });
 
   test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });

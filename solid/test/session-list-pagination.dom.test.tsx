@@ -8,6 +8,27 @@ import {
   relatedChildren,
 } from "./session-list-test-helpers.tsx";
 
+function pagedRoots(prefix: string, count: number) {
+  const roots: ReturnType<typeof parentSession>[] = [];
+  for (let index = 1; index <= count; index += 1) {
+    roots.push({ ...parentSession(), id: `${prefix}-${String(index)}` });
+  }
+  return roots;
+}
+
+test("keeps the selected root visible beyond the first root page", () => {
+  const roots = pagedRoots("selected-root", 11);
+  const selected = roots[10];
+  if (selected === undefined) throw new TypeError("Missing selected root");
+
+  const { container } = mountedSessionList(roots, selected.id);
+
+  expect(
+    container.querySelector(`[data-session-id='${selected.id}']`),
+  ).not.toBeNull();
+  expectDepthCount(container, 0, 10);
+});
+
 test("loads the next child page without changing the root page", () => {
   const roots = Array.from({ length: 14 }, (_, index) => ({
     ...parentSession(),
@@ -75,10 +96,7 @@ test("resets child pagination when the root list identity changes", () => {
 });
 
 test("clamps repeated root pagination at the available roots", () => {
-  const roots = Array.from({ length: 11 }, (_, index) => ({
-    ...parentSession(),
-    id: `bounded-root-${String(index)}`,
-  }));
+  const roots = pagedRoots("bounded-root", 11);
   const { container } = mountedSessionList(roots);
   const pager = query(container, "[data-load-more-sessions='true']");
   if (!(pager instanceof HTMLButtonElement))

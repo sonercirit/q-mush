@@ -16,6 +16,8 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
   createStore,
   createTestSession,
@@ -27,6 +29,21 @@ interface LineageRepairSetup extends StoreSetup {
   readonly child: AgentSessionDetail;
   readonly parent: AgentSessionDetail;
   readonly turnId: string;
+}
+
+function startupSessionSetup(
+  database: LineageRepairSetup["database"],
+  now: () => number,
+) {
+  return connectedSessionSetup(
+    new ScriptedAgentModel([]),
+    "api_key",
+    undefined,
+    {
+      database,
+      now,
+    },
+  );
 }
 
 function toolResult(
@@ -200,6 +217,16 @@ function closeSetup(setup: LineageRepairSetup): void {
 }
 
 describe("native spawn lineage repair", () => {
+  test("repairs historical orphan lineage when sessions start", () => {
+    const seeded = directOrphan("startup-repair");
+    updateChild(seeded, { status: "idle" });
+
+    const sessions = startupSessionSetup(seeded.database, () => TEST_NOW + 3);
+
+    expect(storedSessionLineage(seeded)).toEqual(stableLineage(seeded));
+    sessions.database.$client.close();
+  });
+
   test.each(["direct", "parallel"] as const)(
     "repairs one same-owner workspace %s result without rearming its callback",
     (kind) => {
