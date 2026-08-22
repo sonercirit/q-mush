@@ -3,6 +3,7 @@ import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import {
   childSessionId,
   completeChildAgentFile,
+  completeWokenParent,
   spawnCall,
 } from "./session-agent-spawn-helpers.ts";
 import {
@@ -61,9 +62,10 @@ describe("failed spawned session reports", () => {
     );
 
     expectFailedChild(child, report, "The child made partial progress.");
+    await completeWokenParent(setup);
     expect(
       setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    ).toMatchObject({ generation: 0, status: "idle" });
+    ).toMatchObject({ generation: 1, status: "failed" });
     closeSessionTestDatabase(setup.database);
   });
 

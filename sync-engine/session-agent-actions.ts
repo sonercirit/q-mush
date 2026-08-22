@@ -31,6 +31,7 @@ import {
 } from "./session-agent-tools.ts";
 import { unavailableSessionResponse } from "./session-availability.ts";
 import {
+  reportCanWakeParent,
   reportSpawnedSessionCompletion,
   stopSpawnedSessionChildren,
   type SpawnedSessionCompletion,
@@ -231,7 +232,7 @@ export class SessionAgentActions {
     report: SpawnedSessionCompletion | undefined,
     userId: string,
   ): void {
-    if (report?.disposition === "delivered") {
+    if (reportCanWakeParent(report)) {
       this.#wakeReportedParent(report.parentId, userId);
     }
   }
@@ -240,7 +241,7 @@ export class SessionAgentActions {
     const parentsByUser = new Map<string, string[]>();
     for (const { detail, userId } of pending) {
       const report = this.#reportAndNotify(detail, userId);
-      if (report?.disposition === "delivered") {
+      if (reportCanWakeParent(report)) {
         const parents = parentsByUser.get(userId) ?? [];
         parents.push(report.parentId);
         parentsByUser.set(userId, parents);
@@ -270,9 +271,17 @@ export class SessionAgentActions {
   }
 
   stopChildren(parent: AgentSessionDetail, userId: string): void {
-    stopSpawnedSessionChildren(this.#dependencies, parent, userId, (child) => {
-      this.stopSession(child.id, child);
-    });
+    stopSpawnedSessionChildren(
+      this.#dependencies,
+      parent,
+      userId,
+      (child) => {
+        this.stopSession(child.id, child);
+      },
+      (report) => {
+        this.#wakeReport(report, userId);
+      },
+    );
   }
 
   #cancel = (sessionId: string): void => {
@@ -342,8 +351,9 @@ export class SessionAgentActions {
     await this.#dependencies.settled?.(parentSessionId);
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
-      parent !== undefined &&
-      parent.status !== "stopped" &&
+      parent?.status === "idle" &&
+      parent.pendingQuestions === null &&
+      parent.restartHandoff === null &&
       sessionCanResume(parent) &&
       !this.#dependencies.activeSession(parent.id) &&
       this.#dependencies.runnerIsAvailable(

@@ -38,7 +38,6 @@ import {
   STORE_RUNNER_ID,
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
-
 export function runningSetup() {
   const { database, generateId, store } = createStore();
   const detail = createTestSession(store);
@@ -50,14 +49,12 @@ export function runningSetup() {
   expect(running).toBe(true);
   return { database, detail, generateId, store };
 }
-
 export function closeSetup(
   setup: Pick<ReturnType<typeof createStore>, "database">,
 ): void {
   const database = setup.database.$client;
   database.close();
 }
-
 export function watchdogSetup(
   setup: Pick<ReturnType<typeof createStore>, "database" | "store">,
   options: {
@@ -111,7 +108,6 @@ export function watchdogSetup(
     watchdog,
   };
 }
-
 function scanPastGrace(
   watchdog: ReturnType<typeof watchdogSetup>,
   elapsedMs = 1_003,
@@ -120,7 +116,6 @@ function scanPastGrace(
   watchdog.setNow(TEST_NOW + elapsedMs);
   watchdog.scan();
 }
-
 export function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
@@ -165,7 +160,6 @@ export function launchRuntime(
     },
   };
 }
-
 function launchPendingRuntime(
   setup: ReturnType<typeof runningSetup>,
   component: SessionRuntimePendingComponent,
@@ -182,7 +176,6 @@ function launchPendingRuntime(
   }
   return { ...runtime, runtimes };
 }
-
 function admissionWatchdogSetup() {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "provider_admission");
@@ -192,7 +185,6 @@ function admissionWatchdogSetup() {
   });
   return { runtime, setup, watchdog };
 }
-
 function dispatchBash(
   setup: ReturnType<typeof runningSetup>,
   broker: RunnerCommandBroker,
@@ -207,7 +199,6 @@ function dispatchBash(
     workingDirectory: "/work/project",
   });
 }
-
 function expectStoredStatus(
   setup: ReturnType<typeof runningSetup>,
   expected: string,
@@ -215,7 +206,6 @@ function expectStoredStatus(
   const status = setup.store.get(TEST_USER_ID, setup.detail.id)?.status;
   expect(status).toBe(expected);
 }
-
 function expectRuntimeRemainsActive(
   setup: ReturnType<typeof runningSetup>,
   runtime: ReturnType<typeof launchPendingRuntime>,
@@ -225,7 +215,6 @@ function expectRuntimeRemainsActive(
   runtime.resolve();
   closeSetup(setup);
 }
-
 function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
   const setup = runningSetup();
   const create = () =>
@@ -253,7 +242,6 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
     });
   return { create, setup };
 }
-
 function expectSchedulerError(
   liveness: NonNullable<SessionDependencies["liveness"]>,
   message: string,
@@ -262,7 +250,6 @@ function expectSchedulerError(
   expect(create).toThrow(message);
   closeSetup(setup);
 }
-
 test("stops the default global scan interval", () => {
   const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
   const clearIntervalSpy = vi.spyOn(globalThis, "clearInterval");
@@ -283,7 +270,6 @@ test("stops the default global scan interval", () => {
     clearIntervalSpy.mockRestore();
   }
 });
-
 test("stops an injected scan interval once across repeated shutdowns", async () => {
   const cleared: unknown[] = [];
   const setup = connectedSessionSetup(
@@ -302,10 +288,8 @@ test("stops an injected scan interval once across repeated shutdowns", async () 
   expect(cleared).toEqual(["liveness-timer"]);
   closeLivenessSession(setup);
 });
-
 test("rejects a below-floor grace outside the explicit test bypass", () => {
   const setup = runningSetup();
-
   expect(() =>
     watchdogSetup(setup, {
       allowUnsafeTestTiming: false,
@@ -314,27 +298,22 @@ test("rejects a below-floor grace outside the explicit test bypass", () => {
   ).toThrow("at least 60000 ms");
   closeSetup(setup);
 });
-
 test("rejects a below-floor production scan interval", () => {
   expectSchedulerError(
     { graceMs: 60_000, intervalMs: 9_999 },
     "interval must be at least 10000 ms",
   );
 });
-
 test("rejects a production scan interval longer than its grace", () => {
   expectSchedulerError(
     { graceMs: 60_000, intervalMs: 60_001 },
     "interval must not exceed the grace period",
   );
 });
-
 test("fails a running session whose runtime disappeared beyond the grace bound", () => {
   const setup = runningSetup();
   const liveness = watchdogSetup(setup, { graceMs: 1_000 });
-
   scanPastGrace(liveness);
-
   const failed = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
   expect(failed).toMatchObject({ status: "failed" });
   expect(failed?.messages.at(-1)?.content).toContain(
@@ -345,7 +324,6 @@ test("fails a running session whose runtime disappeared beyond the grace bound",
   expect(liveness.notify).toHaveBeenCalledWith(TEST_USER_ID, STORE_SESSION_ID);
   closeSetup(setup);
 });
-
 test("requires the stored execution generation to match its runtime", () => {
   const setup = runningSetup();
   const staleRuntimes = new SessionRuntimes();
@@ -358,33 +336,25 @@ test("requires the stored execution generation to match its runtime", () => {
     graceMs: 1_000,
     runtimes: staleRuntimes,
   });
-
   scanPastGrace(watchdog);
-
   expectStoredStatus(setup, "failed");
   runtime.resolve();
   closeSetup(setup);
 });
-
 test("allows legitimate provider retries to refresh the admission bound", () => {
   const admission = admissionWatchdogSetup();
   const { runtime, setup, watchdog } = admission;
-
   watchdog.scan();
   for (let minute = 1; minute <= 12; minute += 1) {
     watchdog.setNow(TEST_NOW + minute * 60_000);
     runtime.pending("provider_admission");
     watchdog.scan();
   }
-
   expectRuntimeRemainsActive(setup, runtime);
 });
-
 test("fails provider admission that remains unacknowledged beyond the grace bound", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
-
   scanPastGrace(watchdog);
-
   expectStoredStatus(setup, "failed");
   expect(
     setup.store.get(TEST_USER_ID, setup.detail.id)?.messages.at(-1)?.content,
@@ -395,7 +365,6 @@ test("fails provider admission that remains unacknowledged beyond the grace boun
   expect(runtime.signal).toMatchObject({ aborted: true });
   closeSetup(setup);
 });
-
 test("does not time out an acknowledged provider request", () => {
   const setup = runningSetup();
   const activeProvider = launchPendingRuntime(setup, "provider_request");
@@ -403,27 +372,21 @@ test("does not time out an acknowledged provider request", () => {
     graceMs: 1_000,
     runtimes: activeProvider.runtimes,
   });
-
   scanPastGrace(watchdog, 20 * 60_000);
-
   expectStoredStatus(setup, "running");
   activeProvider.resolve();
   closeSetup(setup);
 });
-
 test("preserves early acknowledgement", () => {
   const { runtime, setup, watchdog } = admissionWatchdogSetup();
-
   watchdog.scan();
   watchdog.setNow(TEST_NOW + 999);
   runtime.pending("provider_request");
   watchdog.scan();
   watchdog.setNow(TEST_NOW + 20 * 60_000);
   watchdog.scan();
-
   expectRuntimeRemainsActive(setup, runtime);
 });
-
 test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "startup");
@@ -437,15 +400,12 @@ test("fails a queued runner command even when its runner recently connected", as
     broker,
   });
   watchdog.watchdog.runnerConnected(STORE_RUNNER_ID);
-
   scanPastGrace(watchdog);
-
   expectStoredStatus(setup, "failed");
   await expect(queuedCommand).rejects.toThrow("stopped");
   runtime.resolve();
   closeSetup(setup);
 });
-
 test("recovers a durable shutdown marker instead of failing its session", () => {
   const setup = runningSetup();
   const watchdog = watchdogSetup(setup, { graceMs: 1_000 });
@@ -459,7 +419,6 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
     ),
   ).toBe(true);
   watchdog.scan();
-
   const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);
   expect(recovered).toMatchObject({
     generation: setup.detail.generation + 1,
@@ -469,7 +428,6 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
   expect(watchdog.finished).not.toHaveBeenCalled();
   closeSetup(setup);
 });
-
 function parentCallbackCount(setup: ReturnType<typeof spawnedChildSetup>) {
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
   return [
@@ -481,26 +439,25 @@ function parentCallbackCount(setup: ReturnType<typeof spawnedChildSetup>) {
       content.includes("Spawned session failed"),
   ).length;
 }
-
 function pendingCallbacksAreDelivered(
   setup: ReturnType<typeof spawnedChildSetup>,
 ): void {
-  expect(parentCallbackCount(setup)).toBe(1);
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  const callbackCount = parentCallbackCount(setup);
+  const remainingSpawns = setup.store.pendingSpawnedSessions();
+  expect({ callbackCount, remainingSpawns }).toEqual({
+    callbackCount: 1,
+    remainingSpawns: [],
+  });
 }
-
 test("two real scans deliver a pending child callback exactly once", () => {
   const setup = spawnedChildSetup();
   const actions = orchestrationActions(setup.database, setup.store);
   const watchdog = watchdogSetup(setup, { actions });
-
   watchdog.scan();
   watchdog.scan();
-
   pendingCallbacksAreDelivered(setup);
   closeSetup(setup);
 });
-
 test("a watchdog-failed child reports failure to its parent exactly once", () => {
   const setup = spawnedChildSetup();
   setup.database.$client
@@ -522,21 +479,17 @@ test("a watchdog-failed child reports failure to its parent exactly once", () =>
     graceMs: 1_000,
     runtimes,
   });
-
   scanPastGrace(watchdog);
   watchdog.scan();
-
   expect(setup.store.get(TEST_USER_ID, setup.childId)?.status).toBe("failed");
   pendingCallbacksAreDelivered(setup);
   parentRuntime.resolve(undefined);
   closeSetup(setup);
 });
-
 async function deferredLivenessSession() {
   const model = new DeferredAgentModel();
   return { model, ...(await createUnsafeLivenessSession(model)) };
 }
-
 test("compacts an opted-in idle session after a liveness scan", async () => {
   const run = await deferredLivenessSession();
   const { clock, setup } = run;
@@ -551,35 +504,24 @@ test("compacts an opted-in idle session after a liveness scan", async () => {
       updatedAt: new Date(TEST_NOW),
     })
     .run();
-  // Thirty minutes pass for the session, not the runner: keep its
-  // heartbeat fresh so queueing sees an available runner.
   setup.database
     .update(runners)
     .set({ lastSeenAt: new Date(clock.now() + restDuration) })
     .run();
-
-  // The idle scheduler rides the liveness cadence: thirty minutes of rest
-  // plus one scan must compact without any other trigger, proving the
-  // afterScan seam is actually wired.
   scanAfter(clock, restDuration);
-
   await waitForCompactedSession(setup);
   closeLivenessSession(setup);
 });
-
 test("does not time out a provider-call-only runtime", async () => {
   const { clock, model, setup } = await deferredLivenessSession();
   await awaitProviderCall(model.requests);
-
   scanAfter(clock, 20 * 60_000);
-
   const running = sessionDetailStatus(setup);
   expect(running).toBe("running");
   model.resolveContent("Provider call completed.");
   await waitForIdleSession(setup);
   closeLivenessSession(setup);
 });
-
 test("does not time out an engine-side sleep", async () => {
   let requestCount = 0;
   const model: AgentModel = {
@@ -601,9 +543,7 @@ test("does not time out an engine-side sleep", async () => {
     (detail) =>
       typeof detail === "string" && detail.includes("Sleeping in the engine."),
   );
-
   scanAfter(clock, 20 * 60_000);
-
   expect(sessionDetailStatus(setup, SESSION_ID)).toBe("running");
   notifySessionSteeringInput(SESSION_ID);
   await waitForSessionValue(
@@ -612,7 +552,6 @@ test("does not time out an engine-side sleep", async () => {
   );
   closeLivenessSession(setup);
 });
-
 test("does not time out a twenty-minute command on a live runner connection", async () => {
   const setup = runningSetup();
   const currentRuntimes = new SessionRuntimes();
@@ -632,12 +571,10 @@ test("does not time out a twenty-minute command on a live runner connection", as
     runtimes: currentRuntimes,
   });
   watchdog.watchdog.runnerConnected(STORE_RUNNER_ID);
-
   const twentyMinutesLater = TEST_NOW + 20 * 60_000;
   watchdog.scan();
   watchdog.setNow(twentyMinutesLater);
   watchdog.scan();
-
   const statusAfterTwentyMinutes = setup.store.get(
     TEST_USER_ID,
     setup.detail.id,
@@ -645,7 +582,6 @@ test("does not time out a twenty-minute command on a live runner connection", as
   expect(statusAfterTwentyMinutes).toBe("running");
   expect(broker.isActive(STORE_RUNNER_ID, "twenty-minute-command")).toBe(true);
   expect(watchdog.notify).not.toHaveBeenCalled();
-
   expect(
     broker.complete(STORE_RUNNER_ID, "twenty-minute-command", {
       output: "done",

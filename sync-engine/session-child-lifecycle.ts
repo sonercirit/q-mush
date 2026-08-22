@@ -7,6 +7,14 @@ export interface SpawnedSessionCompletion {
   readonly parentId: string;
 }
 
+export function reportCanWakeParent(
+  report: SpawnedSessionCompletion | undefined,
+): report is SpawnedSessionCompletion {
+  return (
+    report?.disposition === "delivered" || report?.disposition === "deferred"
+  );
+}
+
 export function reportSpawnedSessionCompletion(
   dependencies: SessionAgentActionDependencies,
   detail: AgentSessionDetail,
@@ -39,6 +47,7 @@ export function stopSpawnedSessionChildren(
   parent: AgentSessionDetail,
   userId: string,
   stopChild: (child: AgentSessionDetail) => void,
+  reportedParent: (report: SpawnedSessionCompletion) => void,
 ): void {
   for (const childId of dependencies.store.activeSpawnedSessionChildren(
     userId,
@@ -58,6 +67,7 @@ export function stopSpawnedSessionChildren(
     );
     if (reported !== undefined) {
       dependencies.notify(userId, reported.parentId);
+      reportedParent(reported);
     }
   }
 }

@@ -10,7 +10,10 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { spawnCall } from "./session-agent-spawn-helpers.ts";
+import {
+  completeWokenParent,
+  spawnCall,
+} from "./session-agent-spawn-helpers.ts";
 import { startToolSession } from "./session-agent-tool-setup.ts";
 import {
   RUNNER_ID,
@@ -194,10 +197,13 @@ function expectCallbackPersisted(
   const { setup } = lifecycle;
   const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
   const child = childDetail(lifecycle);
-  expect(parent).toMatchObject({ generation: 0, status: parentStatus });
+  expect(parent).toMatchObject({
+    generation: parentStatus === "idle" ? 1 : 0,
+    status: parentStatus,
+  });
   expect(callbackContentIncludes(lifecycle, lifecycle.childId)).toBe(true);
   expect(child).toMatchObject({
-    parentExecutionGeneration: parent?.generation,
+    parentExecutionGeneration: 0,
   });
 
   expect(
@@ -239,6 +245,9 @@ async function completeChildAndConsumeCallback(
   lifecycle.model.finishChild();
   await waitForChildStatus(lifecycle, "completed");
   await waitForCallbackDisposition(lifecycle);
+  if (parentStatus === "idle") {
+    await completeWokenParent(lifecycle.setup);
+  }
   expectCallbackPersisted(lifecycle, parentStatus);
   await closeLifecycle(lifecycle);
 }

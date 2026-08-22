@@ -27,15 +27,12 @@ import {
   sessionMessageIds,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
-
 afterEach(() => {
   vi.restoreAllMocks();
 });
-
 function selectedSessionState(state: SessionViewState): SessionViewState {
   return { ...state, selectedId: TEST_SESSION_DETAIL.id };
 }
-
 function promptDraft(state: SessionViewState, prompt: string) {
   return {
     ...state.draft,
@@ -47,11 +44,9 @@ function promptDraft(state: SessionViewState, prompt: string) {
     workingDirectory: "/workspace",
   };
 }
-
 function assistantMessage(id = "assistant-1", content = "Response") {
   return transcriptMessage(id, content, "assistant", 2);
 }
-
 function streamMessageIds(
   sessionId: string,
   thinking: boolean,
@@ -61,7 +56,6 @@ function streamMessageIds(
     `stream:${sessionId}:assistant`,
   ];
 }
-
 function expectStreamAfter(
   controller: SessionController,
   persistedIds: readonly string[],
@@ -73,18 +67,15 @@ function expectStreamAfter(
     ...streamMessageIds(sessionId, thinking),
   ]);
 }
-
 interface SelectedTurn {
   readonly assistant?: AgentSessionDetail["messages"][number];
   readonly controller: SessionController;
   readonly detail: AgentSessionDetail;
   readonly user: AgentSessionDetail["messages"][number];
 }
-
 interface SelectedIdleTurn extends SelectedTurn {
   readonly assistant: AgentSessionDetail["messages"][number];
 }
-
 function selectedTurn(
   sessionId: string,
   status: "idle",
@@ -111,7 +102,6 @@ async function selectedTurn(
     user,
   };
 }
-
 async function selectedIdleTurn(sessionId: string): Promise<SelectedIdleTurn> {
   return selectedTurn(sessionId, "idle");
 }
@@ -194,9 +184,10 @@ async function expectReadCommand(
   command: ReturnType<typeof vi.fn>,
 ): Promise<void> {
   await vi.waitFor(() => {
-    expect(command).toHaveBeenCalledWith("sessions.read", {
-      sessionId: TEST_SESSION_DETAIL.id,
-    });
+    expect(command.mock.calls).toContainEqual([
+      "sessions.read",
+      { sessionId: TEST_SESSION_DETAIL.id },
+    ]);
   });
 }
 

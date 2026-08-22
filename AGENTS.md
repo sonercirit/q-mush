@@ -129,21 +129,25 @@ Memory.
   Routes survive delivery, recreation, compaction, and disconnects; only
   attempts report, administrative fences settle identity without duplicates, and
   callback persistence/claiming are atomic. `callback_pending` blocks another
-  attempt; idle parents retain events until resumed. Delivery callbacks notify
-  the parent and wake it when runnable. `parallel` uses four ordered workers for
-  2+ calls and propagates cancellation. `session-transcript.tsx` renders
-  prompts, definitions (`session-tool-definitions.tsx`), Markdown, code/JSON,
-  diffs/results, preserving user line breaks; lists page by ten. Live streams
-  use four-key preparation frames; batches patch once, compacting the oldest or
-  protected candidate pre-eviction. `sync_tools` fan-out, pending buffers, keyed
-  snapshots stay bounded (`realtime-stream-buffer-limits.ts`); reconnects dedupe
-  resyncs. Mutation/stop freezes model/tool UI; settlement rebases streams.
-  Disconnect drops unrendered fragments, resyncs paused tools. Every eviction
-  requests snapshots: an undelivered terminal can't clear a running row.
-  Barriers and 100/session, 1,000/user caps block stale revival and key reuse.
-  Epochs stay monotonic while updates/barriers are queued; releasing the last
-  barrier reclaims its epoch once updates drain. Terminal cleanup can't reset
-  epochs with later barriers. Resets replace model state; state events coalesce
+  attempt; non-runnable parents retain events until resumed. Delivery callbacks
+  notify the parent and wake it only when it is idle, has no restart handoff,
+  has no active execution, can resume, and its runner is available; failed,
+  stopped, paused/queued/running, runner-required, and restart-draining parents
+  retain events until explicitly resumed or recovered. `parallel` uses four
+  ordered workers for 2+ calls and propagates cancellation.
+  `session-transcript.tsx` renders prompts, definitions
+  (`session-tool-definitions.tsx`), Markdown, code/JSON, diffs/results,
+  preserving user line breaks; lists page by ten. Live streams use four-key
+  preparation frames; batches patch once, compacting the oldest or protected
+  candidate pre-eviction. `sync_tools` fan-out, pending buffers, keyed snapshots
+  stay bounded (`realtime-stream-buffer-limits.ts`); reconnects dedupe resyncs.
+  Mutation/stop freezes model/tool UI; settlement rebases streams. Disconnect
+  drops unrendered fragments, resyncs paused tools. Every eviction requests
+  snapshots: an undelivered terminal can't clear a running row. Barriers and
+  100/session, 1,000/user caps block stale revival and key reuse. Epochs stay
+  monotonic while updates/barriers are queued; releasing the last barrier
+  reclaims its epoch once updates drain. Terminal cleanup can't reset epochs
+  with later barriers. Resets replace model state; state events coalesce
   one/frame; ready, health, commands, and user-scoped tool-setting updates apply
   immediately; no-op snapshots suppress notices. Solid preserves focus/scroll;
   detail disables document anchoring, and only bottom-pinned transcripts follow
