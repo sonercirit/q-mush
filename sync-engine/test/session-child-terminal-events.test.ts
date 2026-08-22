@@ -25,10 +25,12 @@ import {
 } from "./session-store-test-fixtures.ts";
 import {
   continueChild,
+  expectConsumedReportCount,
   expectConsumedReports,
   expectParentWake,
   idleParentDeliverySetup,
   reportCount,
+  reportPendingDelivery,
   setChildStatus,
   terminalEventActions,
 } from "./session-terminal-event-test-helpers.ts";
@@ -76,7 +78,7 @@ function expectReportTotals(
   notify: ReturnType<typeof vi.fn>,
   total: number,
 ): void {
-  expect(reportCount(setup.store, setup.parentId)).toBe(total);
+  expectConsumedReportCount(setup, total);
   expect(notify).toHaveBeenCalledTimes(total);
 }
 
@@ -266,7 +268,7 @@ test("durable generation events survive recreation, compaction, and duplicate sc
 test("startup reporting wakes an idle parent for a deferred durable event", async () => {
   const { delivery, setup } = idleParentDeliverySetup();
 
-  delivery.actions.reportAll(setup.store.pendingSpawnedSessions());
+  reportPendingDelivery(setup, delivery);
 
   await expectParentWake(setup, delivery);
   expectConsumedReports(setup, 1);

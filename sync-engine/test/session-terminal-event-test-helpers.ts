@@ -28,47 +28,68 @@ export function expectConsumedReports(
   setup: ReturnType<typeof spawnedChildSetup>,
   count: number,
 ): void {
-  expect(reportCount(setup.store, setup.parentId)).toBe(count);
+  expectConsumedReportCount(setup, count);
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 }
 
+export function parentState(setup: ReturnType<typeof spawnedChildSetup>) {
+  return setup.store.get(TEST_USER_ID, setup.parentId);
+}
+
 export function requireParent(setup: ReturnType<typeof spawnedChildSetup>) {
-  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+  const parent = parentState(setup);
   if (parent === undefined) throw new Error("Spawned child parent unavailable");
   return parent;
+}
+
+export function continuedChildSetup() {
+  const setup = spawnedChildSetup();
+  const continued = continueChild(setup);
+  return { continued, setup };
+}
+
+export function reportParentDisposition(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+  disposition: "deferred" | "delivered",
+): void {
+  delivery.actions.reportedParent(
+    { disposition, parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+}
+
+type DeliveryArguments = [
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+];
+
+export function reportPendingDelivery(
+  ...[setup, delivery]: DeliveryArguments
+): void {
+  delivery.actions.reportAll(setup.store.pendingSpawnedSessions());
 }
 
 export function deferredReportSetup(
   overrides: Parameters<typeof terminalEventActions>[3] = {},
 ) {
   const setup = spawnedChildSetup();
-  const delivery = terminalEventActions(
-    setup.store,
-    setup.database,
-    vi.fn(),
-    overrides,
-  );
+  const delivery = deliverySetup(setup, overrides);
   delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
   return { delivery, setup };
 }
 
 export async function deliverDeferredReport(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  delivery: ReturnType<typeof terminalEventActions>,
+  ...[setup, delivery]: DeliveryArguments
 ): Promise<void> {
-  delivery.actions.reportedParent(
-    { disposition: "deferred", parentId: setup.parentId },
-    TEST_USER_ID,
-  );
+  reportParentDisposition(setup, delivery, "deferred");
   await Promise.resolve();
 }
 
-export function expectDurableReport(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  delivery: ReturnType<typeof terminalEventActions>,
-): void {
+export function expectDurableReport(...args: DeliveryArguments): void {
+  const [setup, delivery] = args;
   expect(delivery.launchSession).not.toHaveBeenCalled();
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
+  expectConsumedReportCount(setup, 1);
 }
 
 export function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
@@ -109,6 +130,13 @@ export function terminalEventActions(
   };
 }
 
+export function deliverySetup(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  overrides: Parameters<typeof terminalEventActions>[3] = {},
+) {
+  return terminalEventActions(setup.store, setup.database, vi.fn(), overrides);
+}
+
 export function idleParent(setup: ReturnType<typeof spawnedChildSetup>): void {
   setup.database.$client
     .query("UPDATE agent_sessions SET status = 'idle' WHERE id = ?")
@@ -116,16 +144,30 @@ export function idleParent(setup: ReturnType<typeof spawnedChildSetup>): void {
 }
 
 export async function expectParentWake(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  delivery: ReturnType<typeof terminalEventActions>,
+  ...[setup, delivery]: DeliveryArguments
 ): Promise<void> {
-  await vi.waitFor(() =>
-    expect(delivery.launchSession).toHaveBeenCalledTimes(1),
-  );
-  expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+  await vi.waitFor(() => expectQueuedParent(setup, delivery));
+}
+
+export function expectQueuedParentState(
+  setup: ReturnType<typeof spawnedChildSetup>,
+): void {
+  expect(parentState(setup)).toMatchObject({
     generation: setup.parentGeneration + 1,
     status: "queued",
   });
+}
+
+function expectQueuedParent(...[setup, delivery]: DeliveryArguments): void {
+  expect(delivery.launchSession).toHaveBeenCalledTimes(1);
+  expectQueuedParentState(setup);
+}
+
+export function expectConsumedReportCount(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  count: number,
+): void {
+  expect(reportCount(setup.store, setup.parentId)).toBe(count);
 }
 
 export function reportCount(store: SessionStore, parentId: string): number {

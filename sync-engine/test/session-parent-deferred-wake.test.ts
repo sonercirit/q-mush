@@ -11,21 +11,24 @@ import {
 } from "./session-store-spawn-test-helpers.ts";
 import {
   continueChild,
+  continuedChildSetup,
   deferredReportSetup,
   deliverDeferredReport,
   expectConsumedReports,
   expectDurableReport,
   expectParentWake,
+  expectQueuedParentState,
   idleParent,
   idleParentDeliverySetup,
+  parentState,
+  reportParentDisposition,
   requireParent,
   setChildStatus,
   terminalEventActions,
 } from "./session-terminal-event-test-helpers.ts";
 
 test("stopping a child wakes a runnable idle parent and consumes its report", async () => {
-  const setup = spawnedChildSetup();
-  const continued = continueChild(setup);
+  const { continued, setup } = continuedChildSetup();
   transitionSpawnedChild(setup, continued.generation, TEST_NOW + 7);
   idleParent(setup);
   const delivery = terminalEventActions(setup.store, setup.database);
@@ -73,9 +76,7 @@ const deferredParentCases: DeferredParentCase[] = [
     arrange: ({ setup }: DeferredParentContext) =>
       setChildStatus({ ...setup, childId: setup.parentId }, status),
     assertParent: ({ setup }: DeferredParentContext) => {
-      expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe(
-        status,
-      );
+      expect(parentState(setup)?.status).toBe(status);
     },
     name: `a deferred report does not launch a ${status} parent and remains durable`,
   })),
@@ -87,7 +88,7 @@ const deferredParentCases: DeferredParentCase[] = [
   ).map(([state, overrides]) => ({
     arrange: ({ setup }: DeferredParentContext) => idleParent(setup),
     assertParent: ({ setup }: DeferredParentContext) => {
-      expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+      expect(parentState(setup)).toMatchObject({
         generation: setup.parentGeneration,
         status: "idle",
       });
@@ -113,16 +114,13 @@ const deferredParentCases: DeferredParentCase[] = [
         );
     },
     assertParent: ({ setup }) => {
-      expect(
-        setup.store.get(TEST_USER_ID, setup.parentId)?.restartHandoff,
-      ).not.toBeNull();
+      expect(parentState(setup)?.restartHandoff).not.toBeNull();
     },
     name: "a deferred report does not launch a restart-draining parent",
   },
   {
     arrange: ({ setup }) => {
-      const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-      if (parent === undefined) throw new Error("Question parent unavailable");
+      const parent = requireParent(setup);
       const pending = setup.store
         .questions()
         .create(
@@ -137,7 +135,7 @@ const deferredParentCases: DeferredParentCase[] = [
       return pending.id;
     },
     assertParent: ({ setup }, pendingId) => {
-      expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+      expect(parentState(setup)).toMatchObject({
         pendingQuestions: { id: pendingId },
         status: "idle",
       });
@@ -163,18 +161,9 @@ test("a manual resume racing the deferred wake consumes one report in one attemp
   const { delivery, setup } = idleParentDeliverySetup();
   delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
 
-  delivery.actions.reportedParent(
-    { disposition: "deferred", parentId: setup.parentId },
-    TEST_USER_ID,
-  );
+  reportParentDisposition(setup, delivery, "deferred");
   const manual = setup.store.queue(TEST_USER_ID, setup.parentId, TEST_NOW + 10);
-  await vi.waitFor(() => {
-    const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-    expect(parent).toMatchObject({
-      generation: setup.parentGeneration + 1,
-      status: "queued",
-    });
-  });
+  await vi.waitFor(() => expectQueuedParentState(setup));
 
   expect(["busy", "queued"]).toContain(manual.status);
   expect(delivery.launchSession.mock.calls.length).toBeLessThanOrEqual(1);
