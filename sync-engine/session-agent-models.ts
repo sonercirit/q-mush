@@ -123,20 +123,20 @@ function modelOptions(
 }
 
 export function createSessionAgentModels(options: {
-  readonly agentFile: AgentFile | null;
-  readonly credential: ProviderCredentialAccess;
   readonly refreshCredential?: AgentModelRequestOptions["refreshCredential"];
-  readonly detail: AgentSessionDetail;
-  readonly factory: AgentModelFactory;
   readonly id?: () => string;
+  readonly agentFile: AgentFile | null;
+  readonly detail: AgentSessionDetail;
+  readonly credential: ProviderCredentialAccess;
+  readonly factory: AgentModelFactory;
   readonly isCurrent: () => boolean;
   readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
-  readonly onStepStart?: () => void;
   readonly realtime: RealtimeHub | undefined;
-  readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
+  readonly streamId?: string;
   readonly toolSettings: ToolSettings;
   readonly userId: string;
+  readonly onStepStart?: () => void;
 }): SessionAgentModels {
   const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
