@@ -346,8 +346,8 @@ test("runner parent reports notify and wake the delivered parent", async () => {
     const queuedParent = setup.store.get(TEST_USER_ID, setup.parentId);
     expect(queuedParent).toMatchObject({ status: "queued" });
   });
-  await new Promise<void>((resolve) => {
-    setTimeout(resolve, 50);
+  await vi.waitFor(() => {
+    expect(delivery.launchSession).toHaveBeenCalledTimes(1);
   });
 });
 
