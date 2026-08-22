@@ -10,7 +10,7 @@ import {
   reportCount,
   setChildStatus,
   terminalEventActions,
-} from "./session-child-terminal-events.test.ts";
+} from "./session-terminal-event-test-helpers.ts";
 import {
   continueSpawnedChild,
   requireSpawnedChild,
