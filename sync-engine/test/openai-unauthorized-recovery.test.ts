@@ -1,5 +1,6 @@
 import { describe, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
   ChatCompletionsAgentModel,
   type AgentProviderCredential,
@@ -87,7 +88,12 @@ function openAiModelOptions(
   model: string,
   provider: "generic" | "openai" = "openai",
 ) {
-  return { maxOutputTokens: null, model, provider } as const;
+  return {
+    maxOutputTokens: null,
+    model,
+    provider,
+    toolSettings: DEFAULT_TOOL_SETTINGS,
+  } as const;
 }
 
 function refreshSetup(

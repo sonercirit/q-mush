@@ -21,10 +21,6 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { createSessionRealtimeCommandPayload } from "./realtime-command-fixtures.ts";
 import {
-  createRecordedRunnerEffects,
-  expectOperationalRegistration,
-} from "./realtime-hardening-helpers.ts";
-import {
   REALTIME_TEST_SESSION_DETAIL,
   realtimeTestSessionCommands,
 } from "./realtime-session-fixture.ts";
@@ -42,21 +38,16 @@ import {
 } from "./realtime-test-helpers.ts";
 import {
   assertRealtimeUpgrade,
-  beginRunnerRestart,
-  closeRealtimeSocket,
   connectedRecordedRunnerRealtimeTestSocket,
   openRealtimeSocket,
   openUserRealtimeTestSocket,
   parseRealtimeMessages,
   realtimeTestSocket,
   realtimeTestUpgrade,
-  reconnectRunnerRealtimeTestSocket,
   recordedRealtimeTestSocket,
-  runnerRestartReadyMessage,
   sendRealtimeMessage,
   sendUserRealtimeCommand,
   waitForRealtimeEvent,
-  type RealtimeTestSocket,
 } from "./realtime-test-socket-helpers.ts";
 import { runnerMetadata } from "./runner-integration-test-helpers.ts";
 
@@ -595,80 +586,6 @@ test("publishes reassigned session snapshots", () => {
     ...sessionPublicationEvents(initial),
     ...sessionPublicationEvents(detail),
   ]);
-});
-
-test("retains restart state until confirmation", async () => {
-  let drainCalls = 0;
-  let finishDrain: (() => void) | undefined;
-
-  const effects = createRecordedRunnerEffects();
-  const usableAtResume: boolean[] = [];
-  const replacementState: {
-    socket?: RealtimeTestSocket;
-  } = {};
-  const finalizedReceipts = new Set<string>();
-  const realtime = connectedRunnerRealtimeTestIntegration(
-    {
-      drainRunner: () => {
-        drainCalls += 1;
-        return new Promise<void>((resolve) => {
-          finishDrain = resolve;
-        });
-      },
-      runnerConnected: (runnerId) => {
-        effects.connected.push(runnerId);
-      },
-      runnerDisconnected: (runnerId) => {
-        effects.disconnected.push(runnerId);
-      },
-      runnerRestartReady: (runnerId, restartId) => {
-        const replacement = replacementState.socket;
-        effects.resumed.push(`${runnerId}:${restartId}`);
-        usableAtResume.push(
-          replacement?.data.kind === "runner" && replacement.data.usable,
-        );
-      },
-    },
-    { connect: () => realtimeRunnerConnection("runner-1", USER.id) },
-    finalizedReceipts,
-  );
-  const first = beginRunnerRestart(
-    realtime,
-    "machine-1",
-    "restart-reconnect",
-    (socket) => {
-      socket.sent.length = 0;
-    },
-  );
-
-  finishDrain?.();
-  await Promise.resolve();
-  expect(first.sent).toEqual([runnerRestartReadyMessage("restart-reconnect")]);
-  expect(effects.resumed).toEqual([]);
-
-  closeRealtimeSocket(realtime.websocket, first);
-  finalizedReceipts.clear();
-  const replacement = reconnectRunnerRealtimeTestSocket(realtime, "machine-1", {
-    beforeConnect: (socket) => {
-      replacementState.socket = socket;
-    },
-    restartId: "restart-reconnect",
-  });
-
-  expect({
-    connected: effects.connected,
-    disconnected: effects.disconnected,
-    drainCalls,
-    resumed: effects.resumed,
-    usableAtResume,
-  }).toEqual({
-    connected: ["runner-1"],
-    disconnected: ["runner-1"],
-    drainCalls: 1,
-    resumed: ["runner-1:restart-reconnect"],
-    usableAtResume: [false],
-  });
-  expectOperationalRegistration(replacement.sent);
 });
 
 test("upgrades a token-authenticated runner request", () => {

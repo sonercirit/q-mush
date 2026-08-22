@@ -9,10 +9,9 @@ import type {
   AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
 import {
   AGENT_SESSION_TOOL_NAMES,
-  AGENT_TOOLS,
-  selectedAgentTools,
   type AgentSessionToolName,
   type AgentToolDefinition,
 } from "../shared/agent-tools.ts";
@@ -43,7 +42,7 @@ import {
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { recoverOpenAiOAuthUnauthorized } from "./openai-unauthorized-recovery.ts";
 import { completeProviderHttp } from "./provider-http.ts";
-import { providerRequestBody } from "./provider-request-body.ts";
+import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
@@ -265,9 +264,10 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
-    this.#tools = this.#dynamicToolCache
-      ? AGENT_TOOLS
-      : selectedAgentTools(this.#selectedTools);
+    this.#tools = selectedAgentTools(
+      this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
+      options.toolSettings,
+    );
     this.#webSocket = options.webSocket ?? defaultWebSocket;
   }
 
@@ -390,7 +390,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     protocol: ProviderRequestProtocol,
     stream: boolean,
   ): unknown {
-    return providerRequestBody({
+    return requestBody({
       adaptiveThinking: this.#adaptiveThinking,
       dynamicToolCache: this.#dynamicToolCache,
       maxOutputTokens: this.#maxOutputTokens,

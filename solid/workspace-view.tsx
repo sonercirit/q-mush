@@ -19,6 +19,8 @@ import { SessionPanel } from "./session-client.tsx";
 import type { SessionController } from "./session-controller.ts";
 import { credentialOptions } from "./session-credential-list.ts";
 import { discoverProviderUpdateModels } from "./session-provider-update-controller.ts";
+import { ToolSettingsPanel } from "./tool-settings-client.tsx";
+import type { ToolSettingsController } from "./tool-settings-controller.ts";
 import { WorkspacePanel, WorkspaceSwitcher } from "./workspace-client.tsx";
 import type { WorkspaceController } from "./workspace-controller.ts";
 
@@ -55,6 +57,7 @@ export function Workspace(props: {
   readonly openRouter: ProviderController;
   readonly prompts: PromptController;
   readonly runners: RunnerController;
+  readonly toolSettings: ToolSettingsController;
   readonly user: AuthenticatedUser;
   readonly workspaces: WorkspaceController;
 }): JSX.Element {
@@ -96,8 +99,10 @@ export function Workspace(props: {
           openAi={props.openAi.view}
           openRouter={props.openRouter.view}
           runners={props.runners.view}
+          toolSettings={() => props.toolSettings.view().settings}
         />
       </Show>
+      <ToolSettingsPanel controller={props.toolSettings} />
       <AttachmentFallbackSettings
         credentials={credentialOptions(
           props.openAi.view(),

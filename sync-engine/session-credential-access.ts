@@ -5,6 +5,7 @@ import type {
 import { createApiError } from "./http.ts";
 import type { ProviderCredentialRefreshRequest } from "./provider-credential-reader.ts";
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
+export type { SessionCredentialReaders } from "./session-credential-readers.ts";
 
 export type SessionCredentialAction = (
   credential: ProviderCredentialAccess,

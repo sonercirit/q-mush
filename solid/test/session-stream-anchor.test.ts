@@ -6,6 +6,7 @@ import type { SessionViewState } from "../../solid/session-client.tsx";
 import { SessionController } from "../../solid/session-controller.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import {
   sessionDetailWithStatus,
   sessionMessageIds,
@@ -23,7 +24,7 @@ function unanchoredDeltaController(
   );
   const controller = createRoot(() => new SessionController(reactive));
   const delta = { content, sessionId, thinking } as const;
-  controller.applyDelta({ ...delta, type: "session_delta" });
+  applySessionDelta(controller, { ...delta, type: "session_delta" });
   reactive.setState((state) => ({ ...state, selectedId: sessionId }));
   controller.applyDetail(
     sessionDetailWithStatus("running", messages, sessionId),
@@ -152,7 +153,7 @@ test("a provisional suffix collision recovers the full fresh stream", () => {
   // The next delta disproves the collision, so the buffer must have
   // survived: the stream reappears immediately with its head intact, before
   // any snapshot refresh.
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: "",
     sessionId,
     thinking: "omething new",
@@ -215,7 +216,7 @@ test("a paired exact-thinking suffix-content match stays provisional", () => {
 
   // The suffix-content half keeps the match provisional, so the buffer
   // survives and a disproving delta restores the full stream immediately.
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: " more",
     sessionId,
     thinking: "",

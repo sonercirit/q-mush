@@ -8,6 +8,7 @@ function queuedSessionCondition(userId?: string) {
     userId === undefined ? undefined : eq(agentSessions.userId, userId),
     eq(agentSessions.isDeleted, false),
     eq(agentSessions.status, "queued"),
+    eq(agentSessions.spawnPreparationPending, false),
   );
 }
 

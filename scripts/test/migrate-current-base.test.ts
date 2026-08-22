@@ -39,8 +39,9 @@ const CURRENT_BASE_MIGRATIONS = [
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
 const STEP_STARTED_MIGRATION_TIMESTAMP = 1_786_576_532_455;
 const MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP = 1_786_595_654_131;
+const PARENT_REPORT_MIGRATION_TIMESTAMP = 1_787_268_023_468;
+const TOOL_SETTINGS_MIGRATION_TIMESTAMP = 1_786_905_773_660;
 const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
-const CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP = 1_786_892_381_070;
 
 let temporaryDirectory: string | undefined;
 
@@ -95,7 +96,6 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map((column) => column.name);
   expect(credentialColumns).toContain("api_format");
-  expect(credentialColumns).toContain("requires_reauthentication");
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "idle_compact",
   );
@@ -108,14 +108,22 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
     "adaptive_thinking",
   );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "parent_callback_generation",
+  );
+  expect(agentSessionColumnNames(upgradedDatabase.$client)).toContain(
+    "spawn_preparation_pending",
+  );
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 4",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 6",
     )
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
-    CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP,
+    1_787_359_766_762,
+    PARENT_REPORT_MIGRATION_TIMESTAMP,
+    TOOL_SETTINGS_MIGRATION_TIMESTAMP,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
     MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
     STEP_STARTED_MIGRATION_TIMESTAMP,

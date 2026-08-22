@@ -57,6 +57,7 @@ export async function updateSessionTools(
     toolUpdateWarning: null,
     updatingTools: true,
   });
+  options.realtime.rebaseStream(detail.id);
   try {
     const preview = readPreview(
       await options.transport.command(

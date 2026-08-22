@@ -1,3 +1,4 @@
+import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentModel } from "../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
 import { createUuidV7 } from "../shared/ids.ts";
@@ -7,14 +8,15 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
   agentModelOpenRouterProviderRouting,
-  type AgentCredentialRefresher,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
-import type { SessionAgentModelCreationOptions } from "./session-agent-model-options.ts";
+import type { RealtimeHub } from "./realtime-hub.ts";
 import { sessionToolCacheCapability } from "./session-tool-capability.ts";
+import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
 interface AgentModelFactoryOptions
   extends
@@ -56,11 +58,12 @@ export function createFallbackModel(
     readonly credential: ProviderCredentialAccess;
     readonly maxOutputTokens: number | null;
     readonly model: string;
+    readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
-    readonly refreshCredential?: AgentCredentialRefresher;
+    readonly toolSettings: ToolSettings;
   },
 ): AgentModel {
   return factory({
@@ -68,15 +71,16 @@ export function createFallbackModel(
     credential: selection.credential,
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
+    ...(selection.onRequestState === undefined
+      ? {}
+      : { onRequestState: selection.onRequestState }),
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
-    ...(selection.refreshCredential === undefined
-      ? {}
-      : { refreshCredential: selection.refreshCredential }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
+    toolSettings: selection.toolSettings,
     tools: [],
   });
 }
@@ -85,9 +89,11 @@ function modelOptions(
   detail: AgentSessionDetail,
   credential: ProviderCredentialAccess,
   systemPrompt: string,
+  toolSettings: ToolSettings,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
-  refreshCredential?: AgentCredentialRefresher,
+  onRequestState?: AgentModelFactoryOptions["onRequestState"],
+  refreshCredential?: AgentModelFactoryOptions["refreshCredential"],
 ): AgentModelFactoryOptions {
   return {
     adaptiveThinking: detail.adaptiveThinking,
@@ -104,19 +110,35 @@ function modelOptions(
     ...agentModelRoutingOptions(detail.openRouterProviderTag),
     ...(onDelta === undefined ? {} : { onDelta }),
     ...(onStepStart === undefined ? {} : { onStepStart }),
+    ...(onRequestState === undefined ? {} : { onRequestState }),
+    ...(refreshCredential === undefined ? {} : { refreshCredential }),
     promptCacheKey: detail.id,
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
-    ...(refreshCredential === undefined ? {} : { refreshCredential }),
     systemPrompt,
+    toolSettings,
     tools: detail.tools,
   };
 }
 
-export function createSessionAgentModels(
-  options: SessionAgentModelCreationOptions,
-): SessionAgentModels {
+export function createSessionAgentModels(options: {
+  readonly agentFile: AgentFile | null;
+  readonly credential: ProviderCredentialAccess;
+  readonly refreshCredential?: AgentModelRequestOptions["refreshCredential"];
+  readonly detail: AgentSessionDetail;
+  readonly factory: AgentModelFactory;
+  readonly id?: () => string;
+  readonly isCurrent: () => boolean;
+  readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
+  readonly onStepStart?: () => void;
+  readonly realtime: RealtimeHub | undefined;
+  readonly streamId?: string;
+  readonly toolStream?: ToolStreamPublisher;
+  readonly toolSettings: ToolSettings;
+  readonly userId: string;
+}): SessionAgentModels {
+  const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();
   const startStep = (): void => {
@@ -155,6 +177,7 @@ export function createSessionAgentModels(
   const systemPrompt = createAgentSystemPrompt(
     options.agentFile,
     options.detail.executionEnvironment,
+    toolSettings,
   );
   const publishCompaction = (
     event:
@@ -190,31 +213,28 @@ export function createSessionAgentModels(
   const publishCompactionSettled = (): void => {
     publishCompaction({ type: "settled" });
   };
-  return {
-    agent: options.factory(
+  const createModel = (onStepStart?: () => void) =>
+    options.factory(
       modelOptions(
         options.detail,
         options.credential,
         systemPrompt,
+        toolSettings,
         onDelta,
-        startStep,
+        onStepStart,
+        options.onRequestState,
         options.refreshCredential,
       ),
-    ),
+    );
+  return {
+    agent: createModel(startStep),
     createCompactor: () => {
       streamId = id();
       return new ModelConversationCompactor(
-        options.factory(
-          modelOptions(
-            options.detail,
-            options.credential,
-            systemPrompt,
-            onDelta,
-            // The compactor stream ID is already fresh; its step start only
-            // needs the persistence hook, not another stream reset.
-            options.onStepStart,
-            options.refreshCredential,
-          ),
+        createModel(
+          // The compactor stream ID is already fresh; its step start only
+          // needs the persistence hook, not another stream reset.
+          options.onStepStart,
         ),
         publishCompactionRequest,
       );

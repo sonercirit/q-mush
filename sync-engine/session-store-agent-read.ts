@@ -144,14 +144,12 @@ export function readSessionSnapshot(
   const rows = database
     .select({
       agentFileContent: includeSystem
-        ? sql<
-            string | null
-          >`CASE WHEN ${agentSessions.agentFileContent} IS NULL THEN NULL ELSE substr(${agentSessions.agentFileContent}, 1, 10001) END`
+        ? agentSessions.agentFileContent
         : sql<null>`null`,
       agentFileName: includeSystem
         ? agentSessions.agentFileName
         : sql<null>`null`,
-      content: sql<string | null>`substr(${agentMessages.content}, 1, 8001)`,
+      content: agentMessages.content,
       createdAt: agentMessages.createdAt,
       executionEnvironment: agentSessions.executionEnvironment,
       id: agentSessions.id,

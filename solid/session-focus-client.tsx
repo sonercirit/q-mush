@@ -7,6 +7,7 @@ import {
   type JSX,
 } from "solid-js";
 import type { RunnerSummary } from "../shared/runner-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import { controllerView } from "./controller-view.ts";
 import type { SessionController } from "./session-controller.ts";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
@@ -20,6 +21,7 @@ interface SessionResultsProps {
   readonly onOpenDirectoryPicker: () => void;
   readonly runners: readonly RunnerSummary[];
   readonly setFocusMode: (focused: boolean) => void;
+  toolSettings: ToolSettings | undefined;
 }
 
 export function SessionResults(props: SessionResultsProps): JSX.Element {
@@ -213,6 +215,7 @@ export function SessionResults(props: SessionResultsProps): JSX.Element {
             onOpenDirectoryPicker={props.onOpenDirectoryPicker}
             runners={props.runners}
             state={state()}
+            toolSettings={props.toolSettings}
           />
         </div>
       </div>

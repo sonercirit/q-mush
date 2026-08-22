@@ -1,8 +1,6 @@
 import { describe, expect, test } from "vitest";
-import {
-  RunnerCommandBroker,
-  RunnerDisconnectedError,
-} from "../../shared/runner-command-broker.ts";
+import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -78,7 +76,7 @@ describe("runner command disconnect survival", () => {
     const canceled: string[] = [];
     const { broker, result } = disconnectedDispatch("cancel-after-disconnect");
 
-    broker.cancelSession(SESSION_ID);
+    broker.cancelSessionCommands(SESSION_ID);
 
     await expectUnauthorizedRunnerCommand(result);
     expect(recordCancellation(broker, canceled)).toBe(true);

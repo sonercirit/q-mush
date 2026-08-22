@@ -1,8 +1,10 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { createDatabase, type AppDatabase } from "../shared/database.ts";
+import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
+import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
+import { ActiveSessionTools } from "./active-session-tools.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoverer,
@@ -18,16 +20,21 @@ import {
 } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import { SessionAgentActions } from "./session-agent-actions.ts";
-import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
+import { createSessionAgentActions } from "./session-agent-actions-factory.ts";
+import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import {
   startManualSessionCompactionForUserId,
   type ManualCompactionDependencies,
 } from "./session-compaction-actions.ts";
 import type { SessionLaunchBoundary } from "./session-creation.ts";
-import type { SessionCredentialReaders } from "./session-credential-readers.ts";
-import { SessionCredentialAccess } from "./session-credential-service.ts";
+import {
+  readSessionCredential,
+  withSessionCredential,
+  type SessionCredentialAction,
+  type SessionCredentialReaders,
+  type SessionCredentialSelection,
+} from "./session-credential-access.ts";
 import {
   permissiveWorkspaceReader,
   type SessionDependencies,
@@ -58,11 +65,13 @@ import { launchQueuedSessions } from "./session-queued-launcher.ts";
 import { createRealtimeSessionCommands } from "./session-realtime-factory.ts";
 import type { RealtimeSessionCommands } from "./session-realtime-integration.ts";
 import { SessionRequestHelpers } from "./session-request-helpers.ts";
+import { SessionRestartAbort } from "./session-restart-abort.ts";
 import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
+import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { SessionStore } from "./session-store.ts";
 import {
   compactSessionForUser,
@@ -71,6 +80,7 @@ import {
   type SessionUserActionDependencies,
 } from "./session-user-actions.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
+import { ToolSettingsStore } from "./tool-settings-store.ts";
 
 export type { SessionIntegration } from "./session-integration.ts";
 
@@ -78,6 +88,7 @@ class DrizzleSessionIntegration
   extends SessionIntegrationApi
   implements SessionIntegration
 {
+  readonly #activeTools: ActiveSessionTools;
   readonly #broker: RunnerCommandBroker;
   readonly #auth: GoogleAuth;
   readonly #braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -88,7 +99,6 @@ class DrizzleSessionIntegration
   readonly #now: () => number;
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
   readonly #providers: SessionCredentialReaders;
-  readonly #credentials: SessionCredentialAccess;
   readonly #realtime: RealtimeHub | undefined;
   readonly #realtimeCommands: RealtimeSessionCommands;
   readonly #questions: SessionQuestionActionDependencies;
@@ -99,14 +109,26 @@ class DrizzleSessionIntegration
   readonly #finisher: SessionFinisher;
   readonly #failureReconciler = new SessionFailureReconciler();
   readonly #runners: RunnerIntegration;
-  readonly #runtimes = new SessionRuntimes();
+  readonly #runtimes: SessionRuntimes;
+  readonly #restartController = new SessionRestartAbort();
   readonly #restart;
   readonly #restartGate: SessionRestartCoordinator;
   readonly #removal: RunnerRemovalCoordinator;
   readonly #shutdown: ShutdownInterruptedSessionStore;
   readonly #store: SessionStore;
+  readonly #toolSettings: Pick<ToolSettingsStore, "read">;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
+
+  /** @internal Exposes the configured restart gate to integration tests. */
+  agentActionsDraining(): boolean {
+    return this.#actions.isDraining();
+  }
+
+  /** @internal Simulates a restart boundary in integration tests. */
+  abortAgentActionsForRestart(): void {
+    this.#restartController.abort("integration test restart");
+  }
   readonly #fallbacks: ReturnType<typeof createAttachmentFallbackIntegration>;
 
   constructor(
@@ -117,6 +139,7 @@ class DrizzleSessionIntegration
   ) {
     super();
     this.#auth = auth;
+    this.#activeTools = dependencies.activeTools ?? new ActiveSessionTools();
     this.#realtime = dependencies.realtime;
     this.#broker =
       dependencies.broker ??
@@ -135,19 +158,36 @@ class DrizzleSessionIntegration
       dependencies.modelFactory ??
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
+    this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;
-    this.#credentials = new SessionCredentialAccess(providers);
     this.#credentialPool = new ModelCredentialPool({
       database,
-      readCredential: this.#credentials.read,
+      readCredential: this.#readCredential,
     });
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
     this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
+    const reportParent = (
+      userId: string,
+      report: { disposition: SpawnedReportDisposition; parentId: string },
+    ) => {
+      this.#actions.reportedParent(
+        { disposition: report.disposition, parentId: report.parentId },
+        userId,
+      );
+    };
+    this.#toolSettings =
+      dependencies.toolSettings ?? new ToolSettingsStore(database);
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
+      (userId) => this.#toolSettings.read(userId),
+      this.#runtimes,
+      reportParent,
     );
+    const recoveryNow = this.#now();
+    this.#store.repairSpawnedSessionLineage(recoveryNow);
+    this.#store.recoverSpawnedSessionReservations(recoveryNow);
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
@@ -160,6 +200,7 @@ class DrizzleSessionIntegration
       now: this.#now,
       providers: this.#providers,
       requests: this.#requests,
+      restartSignal: () => this.#restartController.signal,
     });
     this.#cleanup = new SessionExecutionCleanup(this.#broker);
     this.#removal = new RunnerRemovalCoordinator({
@@ -169,10 +210,32 @@ class DrizzleSessionIntegration
       runtimes: this.#runtimes,
       store: this.#store,
     });
-    this.#restart = createSessionRestartControl(this.#runtimes, () =>
-      createUuidV7(this.#now()),
+    this.#restart = createSessionRestartControl(
+      this.#runtimes,
+      () => createUuidV7(this.#now()),
+      {
+        pendingTools: (sessionId) => [
+          ...this.#activeTools.progress(sessionId, false),
+          ...this.#broker.pendingToolProgress(sessionId),
+        ],
+        now: this.#now,
+        ...dependencies.restartTiming,
+      },
     );
-    this.#actions = this.#createActions(database);
+    this.#actions = createSessionAgentActions({
+      broker: this.#broker,
+      cleanup: this.#cleanup,
+      database,
+      discoverModels: this.#models,
+      discoverOpenRouterProviders: this.#discoverProviders,
+      launch: (...parameters) => this.#launch(...parameters),
+      restartSignal: () => this.#restartController.signal,
+      readCredential: this.#readCredential,
+      requests: this.#requests,
+      runners: this.#runners,
+      ...this.#context(),
+      ...this.#credentialRuntime(),
+    });
     this.#finisher = new SessionFinisher({
       actions: this.#actions,
       cleanup: (detail) => {
@@ -191,10 +254,7 @@ class DrizzleSessionIntegration
           {
             launch: this.#launch,
             questions: this.#questions,
-            runnerIsAvailable: this.#runnerAvailable,
-            runtimes: this.#runtimes,
-            store: this.#store,
-            withCredential: this.#credentials.with,
+            ...this.#credentialRuntime(),
           },
           answered,
         ),
@@ -218,8 +278,11 @@ class DrizzleSessionIntegration
         this.#finisher.finish(detail, userId, error, recovered);
       },
       modelFactory: this.#modelFactory,
-      readCredential: this.#credentials.readForSession,
+      activeTools: this.#activeTools,
+      readCredential: this.#readCredential,
       realtime: this.#realtime,
+      shouldPersistRestartMarker: (request) =>
+        request.requestedBy === "server" || !this.#shutdown.recoveryEnabled(),
       shutdownInterrupted: this.#shutdown,
       ...this.#sessionRuntimeState(),
     });
@@ -234,6 +297,7 @@ class DrizzleSessionIntegration
       providers: this.#providers,
       questions: this.#questions,
       runnerIsAvailable: this.#runnerAvailable,
+      restartSignal: () => this.#restartController.signal,
       toolUpdates: this.#sessionMutationControl(),
       ...this.#launchBoundary(),
     });
@@ -250,6 +314,9 @@ class DrizzleSessionIntegration
       restart: this.#restart,
       runnerIsAvailable: this.#runnerAvailable,
       ...this.#sessionState(),
+    });
+    this.#runners.onParentReport((userId, report) => {
+      this.#actions.reportedParent(report, userId);
     });
     this.#runners.onRemoving((userId, runnerId) => {
       this.#removal.removing(userId, runnerId);
@@ -284,6 +351,7 @@ class DrizzleSessionIntegration
         });
       },
       broker: this.#broker,
+      cleanup: this.#cleanup.cleanup.bind(this.#cleanup),
       database,
       dependencies,
       runtimes: this.#runtimes,
@@ -331,13 +399,15 @@ class DrizzleSessionIntegration
         ),
       requests: this.#requests,
       restart: this.#restart,
+      restartController: this.#restartController,
       restartCoordinator: this.#restartGate,
       runnerRemoval: this.#removal,
       runtimes: this.#runtimes,
       stopChildren: this.#actions.stopChildren.bind(this.#actions),
       stopLivenessScans: this.#liveness.stop,
+      shutdownInterrupted: this.#shutdown,
       store: this.#store,
-      withCredentialAccess: this.#credentials.with,
+      withCredentialAccess: this.#withCredential,
       workspaces: this.#workspaces,
     };
   }
@@ -350,7 +420,7 @@ class DrizzleSessionIntegration
           this.#launch(detail, credential, ownerId),
         notify: this.#notify,
         readCredential: (ownerId, detail, action) =>
-          this.#credentials.read(ownerId, detail).then((credential) => {
+          this.#readCredential(ownerId, detail).then((credential) => {
             if (credential !== undefined) {
               action(credential);
             }
@@ -371,10 +441,20 @@ class DrizzleSessionIntegration
     this.#restart.accepts(runnerId) &&
     this.#runners.runnerIsAvailable(userId, runnerId, workspaceId);
 
+  #credentialRuntime() {
+    return {
+      runnerIsAvailable: this.#runnerAvailable,
+      runtimes: this.#runtimes,
+      store: this.#store,
+      withCredential: this.#withCredential,
+    };
+  }
+
   #sessionMutationControl() {
     return {
       broker: this.#broker,
       now: this.#now,
+      restartSignal: () => this.#restartController.signal,
       runtimes: this.#runtimes,
     };
   }
@@ -399,64 +479,9 @@ class DrizzleSessionIntegration
   ): ManualCompactionDependencies {
     return {
       ...this.#launchBoundary(),
-      credential: this.#credentials.with,
+      credential: this.#withCredential,
       operation,
     };
-  }
-
-  #createActions(database: AppDatabase): SessionAgentActions {
-    return new SessionAgentActions({
-      activeSession: (id) => this.#runtimes.active(id),
-      settled: this.#runtimes.cleared.bind(this.#runtimes),
-      abortSession: this.#runtimes.abort.bind(this.#runtimes),
-      broker: this.#broker,
-      browseDirectories: (request, signal) =>
-        this.#requests.browseDirectories(request, signal),
-      database,
-      discoverModels: this.#models,
-      draining: () => this.#runtimes.draining,
-      cleanupSession: (detail) => {
-        void this.#cleanup.cleanupTerminal(detail);
-      },
-      compactSession: startManualSessionCompactionForUserId,
-      runtimes: this.#runtimes,
-      pendingRestart: (runnerId) => this.#runtimes.pendingRestart(runnerId),
-      discoverSessionMetadata: (
-        input,
-        credential,
-        userId,
-        rejectCredentialErrors,
-      ) =>
-        discoverSessionAgentMetadata(
-          {
-            discoverModels: this.#models,
-            discoverOpenRouterProviders: this.#discoverProviders,
-          },
-          input,
-          credential,
-          userId,
-          rejectCredentialErrors,
-        ),
-      launchSession: (credential, detail, userId, operation) =>
-        this.#launch(detail, credential, userId, operation),
-      listOnlineRunners: (userId, workspaceId) =>
-        this.#runners.onlineForUser(userId, workspaceId),
-      listRunnerOptions: (userId, request) =>
-        this.#runners.listOnlineForUser(
-          userId,
-          {
-            limit: request.limit,
-            offset: request.offset,
-            ...(request.search === undefined ? {} : { search: request.search }),
-          },
-          request.workspaceId,
-        ),
-      ...this.#context(),
-      readCredential: this.#credentials.read,
-      runnerIsAvailable: this.#runnerAvailable,
-      store: this.#store,
-      withCredential: this.#credentials.with,
-    });
   }
 
   attachmentFallbacks(request: Request): Promise<Response> | Response {
@@ -485,6 +510,19 @@ class DrizzleSessionIntegration
     }
   };
 
+  readonly #readCredential = async (
+    userId: string,
+    selection: SessionCredentialSelection,
+  ): Promise<ProviderCredentialAccess | undefined> =>
+    readSessionCredential(this.#providers, userId, selection);
+
+  readonly #withCredential = (
+    userId: string,
+    selection: SessionCredentialSelection,
+    action: SessionCredentialAction,
+  ): Promise<Response> =>
+    withSessionCredential(this.#providers, userId, selection, action);
+
   async #modelsForUser(
     request: Request,
     user: AuthenticatedUser,
@@ -492,8 +530,9 @@ class DrizzleSessionIntegration
     return modelsForUser({
       discoverModels: this.#models,
       request,
+      signal: this.#restartController.signal,
       user,
-      withCredential: this.#credentials.with,
+      withCredential: this.#withCredential,
       workspaces: this.#workspaces,
     });
   }
@@ -505,8 +544,9 @@ class DrizzleSessionIntegration
       discoverModels: this.#models,
       discoverOpenRouterProviders: this.#discoverProviders,
       launchBoundary: () => this.#launchBoundary(),
+      restartSignal: () => this.#restartController.signal,
       runnerIsAvailable: this.#runnerAvailable,
-      withCredential: this.#credentials.with,
+      withCredential: this.#withCredential,
     };
   }
 }

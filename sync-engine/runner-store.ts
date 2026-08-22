@@ -45,6 +45,10 @@ import {
   tokenHashMatches,
 } from "./runner-token.ts";
 import type { RunnerAvailabilityParameters } from "./session-runner-availability.ts";
+import {
+  emitReportedParent,
+  type ReportedParentEvent,
+} from "./session-store-resources.ts";
 
 export type {
   RunnerConnection,
@@ -73,6 +77,7 @@ type StoredRunnerSummary = Pick<
 interface RunnerStoreContext {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
+  readonly reportParent?: (userId: string, report: ReportedParentEvent) => void;
 }
 
 interface ActiveRunnerFilter {
@@ -185,8 +190,13 @@ export class RunnerStore {
     database: AppDatabase,
     generateId: IdGenerator = createUuidV7,
     generateActivationId: () => string = createUuidV7,
+    reportParent?: RunnerStoreContext["reportParent"],
   ) {
-    this.#context = { database, generateId };
+    this.#context = {
+      database,
+      generateId,
+      ...(reportParent === undefined ? {} : { reportParent }),
+    };
     this.#scopeConfiguration = {
       associationTable: runnerWorkspaces,
       generateId,
@@ -574,10 +584,20 @@ export class RunnerStore {
         return false;
       }
 
-      requireRunnerReassignment(transaction, userId, runnerId, now);
-      return true;
+      const reports = requireRunnerReassignment(
+        transaction,
+        userId,
+        runnerId,
+        this.#context.generateId,
+        now,
+      );
+      return { reports };
     });
-    return removed;
+    if (removed === false) return false;
+    for (const { report, userId: ownerId } of removed.reports) {
+      emitReportedParent(this.#context, ownerId, report);
+    }
+    return true;
   }
 
   #accessibleIds(userId: string, workspaceId: string): readonly string[] {

@@ -3,6 +3,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
 import { sessionStepTiming } from "../../shared/session-step-timing.ts";
 import { startedAtUtc } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { disposeTestViews } from "./dom-test-helpers.ts";
 import {
   mountTestTranscriptView,
@@ -121,6 +122,7 @@ test("uses durable turn settlement for a terminal step", () => {
       executionGeneration: 0,
       id: "turn-one",
       startedAt: 1,
+      toolSettings: DEFAULT_TOOL_SETTINGS,
     },
   ]);
 

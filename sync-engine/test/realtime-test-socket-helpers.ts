@@ -414,10 +414,11 @@ function upgradeRecordedRealtimeTestSocket(
 
 export function openUserRealtimeTestSocket(
   realtime: ReturnType<typeof createRealtimeIntegration>,
+  workspaceId = "workspace-1",
 ): ReturnType<typeof recordedRealtimeTestSocket> {
   const connection = upgradeRecordedRealtimeTestSocket(
     realtime,
-    "/api/realtime?workspaceId=workspace-1",
+    `/api/realtime?workspaceId=${encodeURIComponent(workspaceId)}`,
   );
   openRealtimeSocket(realtime.websocket, connection.socket);
   connection.record.sent.length = 0;

@@ -1,6 +1,7 @@
 import type { AgentFile } from "../shared/agent-file.ts";
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { ToolStreamPublisher } from "./tool-stream-publisher.ts";
 
@@ -12,6 +13,7 @@ export interface SessionModelContextOptions {
   readonly realtime: RealtimeHub | undefined;
   readonly streamId?: string;
   readonly toolStream?: ToolStreamPublisher;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }
 
@@ -30,6 +32,7 @@ export function sessionModelContextOptions(
     realtime: options.realtime,
     ...stream,
     ...tool,
+    toolSettings: options.toolSettings,
     userId: options.userId,
   };
 }

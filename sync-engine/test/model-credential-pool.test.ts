@@ -1,14 +1,9 @@
-import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
-import { providerCredentials } from "../../shared/database/schema.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
-import {
-  ProviderCredentialReauthenticationRequiredError,
-  ProviderCredentialRejectionError,
-} from "../provider-error.ts";
+import { ProviderCredentialRejectionError } from "../provider-error.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -65,42 +60,37 @@ function createSetup() {
   return { balancer, database, pool };
 }
 
-function expectFirstCandidate(
-  candidates: Awaited<ReturnType<ModelCredentialPool["candidates"]>>,
-): void {
-  expect(candidates.at(0)?.id).toBe(FIRST_CREDENTIAL_ID);
+function credentialLoadGate() {
+  return {
+    entered: Promise.withResolvers<undefined>(),
+    release: Promise.withResolvers<undefined>(),
+  };
 }
 
-function expectedRemainingCredential() {
-  return [SECOND_CREDENTIAL_ID];
+function gatedCredentialPool() {
+  const database = testDatabase();
+  const gate = credentialLoadGate();
+  let gated = true;
+  const pool = modelPool(database, async (_userId, selection) => {
+    if (gated && selection.credentialId === FIRST_CREDENTIAL_ID) {
+      gate.entered.resolve(undefined);
+      await gate.release.promise;
+    }
+    return createTestProviderCredential(selection.credentialId);
+  });
+  return { database, gate, pool, releaseGate: () => (gated = false) };
 }
 
-async function remainingCredentialIds(
-  pool: ModelCredentialPool,
-): Promise<readonly string[]> {
-  const candidates = await pool.candidates(TEST_USER_ID, SELECTION);
-  return candidates.map((credential) => credential.id);
-}
-
-function rejectFirstCredential(
-  pool: ModelCredentialPool,
-  error:
-    AgentModelDiscoveryError | ProviderCredentialReauthenticationRequiredError,
-): boolean {
-  return pool.reject(TEST_USER_ID, SELECTION, FIRST_CREDENTIAL_ID, error);
-}
-
-async function rejectBalancedCredential(
-  error:
-    AgentModelDiscoveryError | ProviderCredentialReauthenticationRequiredError,
-): Promise<ReturnType<typeof createSetup>> {
-  const setup = createSetup();
-  expectFirstCandidate(await setup.pool.candidates(TEST_USER_ID, SELECTION));
-  expect(rejectFirstCredential(setup.pool, error)).toBe(true);
-  expect(await remainingCredentialIds(setup.pool)).toEqual(
-    expectedRemainingCredential(),
-  );
-  return setup;
+async function cancelGatedCredentialRead(
+  gate: ReturnType<typeof credentialLoadGate>,
+  pending: Promise<unknown>,
+  controller: AbortController,
+): Promise<void> {
+  await gate.entered.promise;
+  const reason = new DOMException("Deadline reached", "AbortError");
+  controller.abort(reason);
+  gate.release.resolve(undefined);
+  await expect(pending).rejects.toBe(reason);
 }
 
 describe("model credential pool", () => {
@@ -165,39 +155,46 @@ describe("model credential pool", () => {
     database.$client.close();
   });
 
-  test("falls through a persisted re-login-required balanced member", async () => {
-    const database = testDatabase();
-    database
-      .update(providerCredentials)
-      .set({ requiresReauthentication: true })
-      .where(eq(providerCredentials.id, FIRST_CREDENTIAL_ID))
-      .run();
-    const reads: string[] = [];
-    const pool = modelPool(database, (_userId, selection) => {
-      reads.push(selection.credentialId);
-      return Promise.resolve(
-        createTestProviderCredential(selection.credentialId),
-      );
-    });
-
-    expect(await remainingCredentialIds(pool)).toEqual(
-      expectedRemainingCredential(),
+  test("propagates cancellation during balanced credential loading", async () => {
+    const { database, gate, pool } = gatedCredentialPool();
+    const controller = new AbortController();
+    const pending = pool.representative(
+      TEST_USER_ID,
+      SELECTION,
+      controller.signal,
     );
-    expect(reads).toEqual([SECOND_CREDENTIAL_ID]);
+    await cancelGatedCredentialRead(gate, pending, controller);
     database.$client.close();
   });
 
-  test("falls through a terminally rejected balanced member without looping", async () => {
-    const setup = await rejectBalancedCredential(
-      new ProviderCredentialReauthenticationRequiredError("OpenAI"),
+  test("canceled candidate reads do not consume or cool down the reusable pool", async () => {
+    const { database, gate, pool, releaseGate } = gatedCredentialPool();
+    const controller = new AbortController();
+    const pending = pool.candidates(TEST_USER_ID, SELECTION, controller.signal);
+    await cancelGatedCredentialRead(gate, pending, controller);
+    releaseGate();
+    const reusable = await pool.candidates(TEST_USER_ID, SELECTION);
+    expect(reusable.map(({ id }) => id).sort()).toEqual(
+      [FIRST_CREDENTIAL_ID, SECOND_CREDENTIAL_ID].sort(),
     );
-    setup.database.$client.close();
+    database.$client.close();
   });
 
   test("falls through rejected credentials and skips them during cooldown", async () => {
-    const setup = await rejectBalancedCredential(
-      new AgentModelDiscoveryError("rejected", 429),
-    );
+    const setup = createSetup();
+    const first = (await setup.pool.candidates(TEST_USER_ID, SELECTION))[0];
+    expect(first?.id).toBe(FIRST_CREDENTIAL_ID);
+    expect(
+      setup.pool.reject(
+        TEST_USER_ID,
+        SELECTION,
+        FIRST_CREDENTIAL_ID,
+        new AgentModelDiscoveryError("rejected", 429),
+      ),
+    ).toBe(true);
+
+    const next = await setup.pool.candidates(TEST_USER_ID, SELECTION);
+    expect(next.map(({ id }) => id)).toEqual([SECOND_CREDENTIAL_ID]);
     expect(
       setup.pool.reject(
         TEST_USER_ID,

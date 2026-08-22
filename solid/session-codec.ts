@@ -23,6 +23,7 @@ import type {
   AgentSessionMessage,
   AgentSessionTurn,
 } from "../shared/session-model.ts";
+import { readToolSettings } from "../shared/tool-limits.ts";
 import {
   isNullOrPositiveSafeInteger,
   readFiniteNumber,
@@ -204,12 +205,14 @@ function readTurn(value: unknown): AgentSessionTurn {
     value["executionGeneration"],
   );
   const startedAt = readFiniteNumber(value["startedAt"]);
+  const toolSettings = readToolSettings(value["toolSettings"]);
   if (
     boundaryMessageId === undefined ||
     endedAt === undefined ||
     executionGeneration === undefined ||
     typeof value["id"] !== "string" ||
     startedAt === undefined ||
+    toolSettings === undefined ||
     !Number.isSafeInteger(startedAt) ||
     (endedAt !== null &&
       (!Number.isSafeInteger(endedAt) || endedAt < startedAt))
@@ -222,6 +225,7 @@ function readTurn(value: unknown): AgentSessionTurn {
     executionGeneration,
     id: value["id"],
     startedAt,
+    toolSettings,
   };
 }
 

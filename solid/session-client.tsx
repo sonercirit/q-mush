@@ -63,6 +63,7 @@ import { OpenRouterProviderSelect } from "./session-provider-select.tsx";
 import { runnerSelectOptions } from "./session-reassignment-client.ts";
 import { selectedSessionCredentialAvailable } from "./session-resource-availability.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
+import { SessionToolLimitsHeader } from "./session-tool-limits-note.tsx";
 import { SessionToolPicker } from "./session-tool-picker.tsx";
 
 export type {
@@ -155,6 +156,7 @@ function NewSessionForm(
     readonly credentials: readonly CredentialOption[];
     readonly credentialsSettled: boolean;
     readonly state: NewSessionFormState;
+    readonly toolSettings?: SessionPanelResources["toolSettings"];
   },
 ): JSX.Element {
   const runners = createMemo(() => props.runners);
@@ -440,6 +442,7 @@ function NewSessionForm(
         onChange={(tools) => {
           props.controller.setTools(tools);
         }}
+        settings={props.toolSettings?.()}
         tools={props.state.draft.tools}
       />
       <SessionPromptInput
@@ -474,7 +477,11 @@ function NewSessionForm(
         <button
           aria-keyshortcuts={shortcuts().steerKeys}
           class="shrink-0 rounded-xl bg-emerald-300 px-5 py-3 font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-50"
-          disabled={props.state.creating || !available()}
+          disabled={
+            props.state.creating ||
+            !available() ||
+            props.toolSettings?.() === undefined
+          }
           title={`Start session (${shortcuts().steerLabel})`}
           type="submit"
         >
@@ -546,19 +553,7 @@ export function SessionPanel(
         inert={props.controller.directoryPicker.view().open}
         {...renderDebugBoundary("sessions-panel", "Agent sessions panel")}
       >
-        <p class="text-sm font-medium text-emerald-300">
-          First-party agent runtime
-        </p>
-        <h2
-          class="mt-2 text-2xl font-semibold text-white"
-          id="agent-sessions-title"
-        >
-          New agent session
-        </h2>
-        <p class="mt-3 max-w-3xl leading-7 text-slate-400">
-          Start and steer coding sessions on your connected computers. Q Mush
-          owns the model loop and runner tools end to end.
-        </p>
+        <SessionToolLimitsHeader settings={() => props.toolSettings?.()} />
         <NewSessionForm
           controller={props.controller}
           credentials={credentials()}
@@ -566,6 +561,7 @@ export function SessionPanel(
           onOpenDirectoryPicker={openDirectoryPicker}
           runners={online()}
           state={newSessionState()}
+          toolSettings={props.toolSettings}
         />
         <ControllerRetryNotice
           error={state().error}
@@ -582,6 +578,7 @@ export function SessionPanel(
           onOpenDirectoryPicker={openDirectoryPicker}
           runners={online()}
           setFocusMode={setFocusMode}
+          toolSettings={props.toolSettings?.()}
         />
       </section>
       <DirectoryPicker

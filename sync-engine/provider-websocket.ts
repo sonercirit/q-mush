@@ -1,9 +1,20 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
-import { ProviderStreamError } from "./provider-error.ts";
+import { isRecord } from "../shared/auth-model.ts";
 import {
-  createProviderStreamAccumulator,
-  type ProviderTextDelta,
-} from "./provider-stream.ts";
+  ProviderStreamError,
+  readProviderStreamError,
+} from "./provider-error.ts";
+import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
+import { createProviderStreamAccumulator } from "./provider-stream.ts";
+
+function uncorrelatedError(
+  message: string,
+  started: boolean,
+): ProviderWebSocketError {
+  return new ProviderWebSocketError(message, started, {
+    reconnectImmediately: true,
+  });
+}
 
 interface ProviderWebSocket extends EventTarget {
   readonly readyState: number;
@@ -21,6 +32,12 @@ export type ProviderWebSocketFactory = (
 ) => ProviderWebSocket;
 
 const OPEN_STATE = 1;
+// Bun documents 16 MiB as the default `Bun.serve` WebSocket
+// `maxPayloadLength`, not as a client WebSocket limit. Borrow that documented
+// transport-scale value as an application memory budget for the client fence;
+// crossing it retires the socket without evicting IDs or weakening the fence.
+const MAX_RETAINED_RESPONSE_ID_BYTES = 16 * 1024 * 1024;
+const textEncoder = new TextEncoder();
 
 export class ProviderWebSocketError extends Error {
   readonly reconnectImmediately: boolean;
@@ -57,11 +74,22 @@ function messageText(event: Event): string {
   return event.data;
 }
 
-interface ProviderWebSocketRequest {
+function providerResponseId(
+  event: Readonly<Record<string, unknown>>,
+): string | undefined {
+  const responseId = event["response_id"];
+  if (typeof responseId === "string" && responseId.length > 0) {
+    return responseId;
+  }
+  const response = event["response"];
+  const id = isRecord(response) ? response["id"] : undefined;
+  return typeof id === "string" && id.length > 0 ? id : undefined;
+}
+
+interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
   readonly body: Readonly<Record<string, unknown>>;
   readonly createSocket: ProviderWebSocketFactory;
   readonly headers: Readonly<Record<string, string>>;
-  readonly onDelta?: (delta: ProviderTextDelta) => void;
   readonly signal?: AbortSignal;
   readonly url: string;
 }
@@ -73,11 +101,22 @@ interface ProviderWebSocketRequest {
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
 export class ProviderWebSocketSession {
+  // A provider controls response-ID length and request completion rate, so the
+  // documented 60-minute socket lifetime cannot by itself bound this fence.
+  // Retain at most the explicit memory budget above, then retire rather than
+  // evicting an ID and reopening the stale-frame admission race. Observed
+  // OpenAI `resp_…` IDs are about 53 bytes; correctness does not rely on that.
+  #priorResponseIdBytes = 0;
+  #priorResponseIds = new Set<string>();
   #socket: ProviderWebSocket | undefined;
+  #socketGeneration = 0;
 
   close(): void {
     const socket = this.#socket;
     this.#socket = undefined;
+    this.#socketGeneration += 1;
+    this.#priorResponseIds.clear();
+    this.#priorResponseIdBytes = 0;
     socket?.close(1000, "Session complete");
   }
 
@@ -98,18 +137,30 @@ export class ProviderWebSocketSession {
     if (options.signal?.aborted === true) {
       return Promise.reject(abortError());
     }
+    options.onRequestState?.("admission");
 
     return new Promise<AgentModelStep>((resolve, reject) => {
       const accumulator = createProviderStreamAccumulator(
         "responses",
         options.onDelta,
       );
+      const requestGeneration = ++this.#socketGeneration;
       const reusedSocket = this.#takeOpenSocket();
       const socket =
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
+      const priorResponseIds =
+        reusedSocket === undefined ? new Set<string>() : this.#priorResponseIds;
+      let retainedBytes =
+        reusedSocket === undefined ? 0 : this.#priorResponseIdBytes;
+      // Transfer the fence to this request. The session field accumulates no
+      // duplicate copy while the request owns the only reusable socket.
+      this.#priorResponseIds = new Set<string>();
+      this.#priorResponseIdBytes = 0;
+      let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
+      let requestActive = false;
       let settled = false;
       const settle = (
         error: Error | undefined,
@@ -125,8 +176,29 @@ export class ProviderWebSocketSession {
         socket.removeEventListener("message", onMessage);
         socket.removeEventListener("error", onError);
         socket.removeEventListener("close", onClose);
+        // Only a successfully completed step leaves this socket reusable, so
+        // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
-          this.#socket = socket;
+          if (requestGeneration === this.#socketGeneration) {
+            if (currentResponseId === undefined) {
+              socket.close(1000, "Unidentified response complete");
+            } else {
+              if (!priorResponseIds.has(currentResponseId)) {
+                priorResponseIds.add(currentResponseId);
+                retainedBytes +=
+                  textEncoder.encode(currentResponseId).byteLength;
+              }
+              if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
+                this.#priorResponseIds = priorResponseIds;
+                this.#priorResponseIdBytes = retainedBytes;
+                this.#socket = socket;
+              } else {
+                socket.close(1000, "Response ID retention limit reached");
+              }
+            }
+          } else {
+            socket.close(1000, "Connection superseded");
+          }
           resolve(step);
         } else {
           reject(error ?? new Error("The provider returned no model step"));
@@ -165,6 +237,7 @@ export class ProviderWebSocketSession {
         } catch (error) {
           if (reusedSocket === undefined) {
             failUnknown(error);
+            socket.close(1011, "Provider connection failed");
             return;
           }
           // A reused socket that rejects a send died between steps; surface
@@ -186,6 +259,91 @@ export class ProviderWebSocketSession {
         try {
           const value: unknown = JSON.parse(messageText(event));
           invalidProviderMessage = false;
+          if (!isRecord(value)) {
+            return;
+          }
+          const eventResponseId = providerResponseId(value);
+          if (!requestActive) {
+            if (value["type"] === "error") {
+              if (
+                reusedSocket !== undefined &&
+                eventResponseId !== undefined &&
+                priorResponseIds.has(eventResponseId)
+              ) {
+                return;
+              }
+              if (reusedSocket !== undefined) {
+                const providerError = readProviderStreamError(value);
+                if (!providerError.transient) {
+                  accumulator.push(value);
+                  return;
+                }
+                // An uncorrelated error can be a delayed frame from the prior
+                // response. Retire the reused socket and replay this request
+                // on a fresh connection rather than assigning stale failure.
+                fail(
+                  uncorrelatedError(
+                    "The reused provider WebSocket returned an uncorrelated error",
+                    false,
+                  ),
+                );
+                socket.close(1011, "Uncorrelated provider error");
+                return;
+              }
+              accumulator.push(value);
+              return;
+            }
+            const eventType = value["type"];
+            const responseEvent =
+              typeof eventType === "string" &&
+              eventType.startsWith("response.");
+            const retainedResponse =
+              eventResponseId !== undefined &&
+              priorResponseIds.has(eventResponseId);
+            const admitsRequest =
+              responseEvent &&
+              !retainedResponse &&
+              (reusedSocket === undefined ||
+                eventResponseId !== undefined ||
+                eventType === "response.created");
+            if (!admitsRequest) {
+              return;
+            }
+            // response.created is canonical. Otherwise, any response event on
+            // a fresh socket or an identified non-retained response event on a
+            // reused socket correlates the request; unidentified events on a
+            // reused socket are potentially stale and discarded.
+            currentResponseId = eventResponseId;
+            requestActive = true;
+            options.onRequestState?.("active");
+          } else if (
+            reusedSocket !== undefined &&
+            value["type"] === "error" &&
+            eventResponseId === undefined &&
+            !readProviderStreamError(value).reconnectWebSocket
+          ) {
+            fail(
+              uncorrelatedError(
+                "The provider WebSocket returned an uncorrelated error",
+                receivedEvent,
+              ),
+            );
+            socket.close(1011, "Uncorrelated provider error");
+            return;
+          } else if (
+            eventResponseId !== undefined &&
+            currentResponseId === undefined
+          ) {
+            if (priorResponseIds.has(eventResponseId)) {
+              return;
+            }
+            currentResponseId = eventResponseId;
+          } else if (
+            eventResponseId !== undefined &&
+            eventResponseId !== currentResponseId
+          ) {
+            return;
+          }
           accumulator.push(value);
           receivedEvent = true;
 

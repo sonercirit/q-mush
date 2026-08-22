@@ -3,6 +3,7 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
 import { MemoryStorage } from "./memory-storage.ts";
+import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import {
   applyTranscriptDelta,
   DOM_TEST_DISPOSALS,
@@ -127,7 +128,12 @@ test("spaces adjacent top-level transcript blocks", () => {
 
 test("copies session information and transcript from the detail header", async () => {
   const writeText = mockClipboardWrite();
-  const { container } = mountTestSessionDetail(copyTestDetail());
+  const pendingSince = Date.UTC(2026, 7, 20, 4, 0);
+  const { container } = mountTestSessionDetail({
+    ...copyTestDetail(),
+    runtimePending: { component: "provider_admission", since: pendingSince },
+    status: "running",
+  });
   const copy = queryTestElement(container, "[data-copy-session='true']");
   if (!(copy instanceof HTMLButtonElement)) {
     throw new TypeError("The session copy control is not a button");
@@ -140,7 +146,8 @@ test("copies session information and transcript from the detail header", async (
     [
       "Fix the app",
       "Session ID: session-1",
-      "Status: idle",
+      "Status: running",
+      "Pending component: provider_admission since 2026-08-20T04:00:00.000Z",
       "Model: openai · gpt-5-codex",
       "Working directory: .",
       "",
@@ -219,7 +226,7 @@ test("the composer stays mounted and retains focus through a busy transition", (
     "Running. Follow up starts the next turn; Steer is injected at the next step boundary, after the current model call and its tools settle.",
   );
 
-  controller.applyDelta({
+  applySessionDelta(controller, {
     content: "Live output",
     sessionId: running.id,
     thinking: "",

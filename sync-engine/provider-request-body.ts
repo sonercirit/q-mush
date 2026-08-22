@@ -6,6 +6,7 @@ import type {
   AgentSessionToolName,
   AgentToolDefinition,
 } from "../shared/agent-tools.ts";
+import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { anthropicRequestBody } from "./anthropic-request.ts";
 import {
   providerChatMessage,
@@ -18,11 +19,11 @@ import {
 import type { ProviderModelRequest } from "./provider-request.ts";
 
 function reasoningConfiguration(
-  provider: ProviderModelRequest["provider"],
-  responsesProtocol: boolean,
+  provider: ProviderId,
+  codexOAuth: boolean,
   reasoningEffort: AgentReasoningEffort | undefined,
 ): Readonly<Record<string, unknown>> {
-  if (responsesProtocol) {
+  if (codexOAuth) {
     return {
       reasoning: {
         ...(reasoningEffort === undefined ? {} : { effort: reasoningEffort }),
@@ -30,7 +31,11 @@ function reasoningConfiguration(
       },
     };
   }
-  if (reasoningEffort === undefined) return {};
+
+  if (reasoningEffort === undefined) {
+    return {};
+  }
+
   return provider === "openrouter"
     ? { reasoning: { effort: reasoningEffort, summary: "auto" } }
     : { reasoning_effort: reasoningEffort };
@@ -42,7 +47,9 @@ function toolConfiguration(
   responsesProtocol: boolean,
   dynamicToolCache: boolean,
 ): Readonly<Record<string, unknown>> {
-  if (tools.length === 0 || selectedTools.length === 0) return {};
+  if (tools.length === 0 || selectedTools.length === 0) {
+    return {};
+  }
   const toolChoice =
     dynamicToolCache && responsesProtocol
       ? {
@@ -62,19 +69,33 @@ function toolConfiguration(
   };
 }
 
-function providerPreferences(
+function openRouterProviderPreferences(
   routing: OpenRouterProviderRouting | undefined,
 ): Readonly<Record<string, unknown>> | undefined {
   if (routing?.type === "provider") {
     return { allow_fallbacks: false, order: [routing.tag] };
   }
-  if (routing?.type === "order") return { order: [routing.tag] };
-  if (routing?.type === "no_fallbacks") return { allow_fallbacks: false };
+  if (routing?.type === "order") {
+    return { order: [routing.tag] };
+  }
+  if (routing?.type === "no_fallbacks") {
+    return { allow_fallbacks: false };
+  }
   return routing?.type === "sort" ? { sort: routing.sort } : undefined;
 }
 
+// OpenRouter forwards Anthropic-style cache_control markers to providers that
+// price cached prefixes and strips them elsewhere. Generic OpenAI-format
+// endpoints get plain messages: local runtimes such as Ollama reject array
+// content with tool metadata, and only the Anthropic protocol is known to
+// honor the markers. OpenAI itself caches automatically, keyed by
+// prompt_cache_key.
+function usesCacheBreakpoints(request: ProviderModelRequest): boolean {
+  return request.provider === "openrouter";
+}
+
 function chatMessages(request: ProviderModelRequest): readonly unknown[] {
-  if (request.provider !== "openrouter") {
+  if (!usesCacheBreakpoints(request)) {
     return [
       { content: request.systemPrompt, role: "system" },
       ...request.messages.map((message) => providerChatMessage(message)),
@@ -94,6 +115,9 @@ function chatMessages(request: ProviderModelRequest): readonly unknown[] {
   ];
 }
 
+// prompt_cache_key is an OpenAI parameter; OpenRouter tolerates and may
+// forward it, but strict generic OpenAI-compatible servers reject unknown
+// fields, so generic requests omit it.
 function promptCacheKeyField(
   request: ProviderModelRequest,
 ): Readonly<Record<string, string>> {
@@ -102,10 +126,11 @@ function promptCacheKeyField(
     : { prompt_cache_key: request.promptCacheKey };
 }
 
-export function providerRequestBody(request: ProviderModelRequest): unknown {
+export function requestBody(request: ProviderModelRequest): unknown {
   if (request.protocol === "anthropic") {
     return anthropicRequestBody(request);
   }
+
   const responsesProtocol = request.protocol === "responses";
   const reasoning = reasoningConfiguration(
     request.provider,
@@ -118,13 +143,18 @@ export function providerRequestBody(request: ProviderModelRequest): unknown {
     responsesProtocol,
     request.dynamicToolCache,
   );
+
   if (!responsesProtocol) {
     return {
       messages: chatMessages(request),
       model: request.model,
       ...(request.provider === "openrouter" &&
       request.openRouterProviderRouting !== undefined
-        ? { provider: providerPreferences(request.openRouterProviderRouting) }
+        ? {
+            provider: openRouterProviderPreferences(
+              request.openRouterProviderRouting,
+            ),
+          }
         : {}),
       ...promptCacheKeyField(request),
       ...reasoning,
@@ -134,6 +164,7 @@ export function providerRequestBody(request: ProviderModelRequest): unknown {
       ...tools,
     };
   }
+
   return {
     include: ["reasoning.encrypted_content"],
     input: request.messages.flatMap(providerResponsesInput),

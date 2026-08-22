@@ -2,9 +2,11 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { isDiskFullFailure } from "./database-write-resilience.ts";
+import { isRestartHandoffError } from "./session-agent-runtime-state.ts";
 import {
   compactSessionConversation,
   runSessionAgent,
@@ -16,7 +18,6 @@ import {
   sessionModelRuntime,
   type SessionModelRuntimeResources,
 } from "./session-model-runtime.ts";
-import { isRestartHandoffError } from "./session-restart-handoff-error.ts";
 import type {
   DurableRestartPersistence,
   SessionRestartRequester,
@@ -34,14 +35,13 @@ interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly operation: RestartHandoffOperation;
+  readonly pendingComponent: (
+    component: SessionRuntimePendingComponent,
+  ) => void;
   readonly resources: SessionModelRuntimeResources;
   readonly restartPersistence: DurableRestartPersistence;
   readonly store: SessionStore;
   readonly userId: string;
-}
-
-function isAbort(error: unknown): boolean {
-  return error instanceof DOMException && error.name === "AbortError";
 }
 
 function identity(
@@ -199,6 +199,7 @@ export async function runPersistedSession(
       options.userId,
       options.controller,
       () => options.restartRequest() !== undefined,
+      options.pendingComponent,
     );
     const manualCompaction = options.operation !== "agent";
     const outcome = await (manualCompaction
@@ -257,7 +258,7 @@ export async function runPersistedSession(
       return;
     }
 
-    if (!options.controller.signal.aborted && !isAbort(error)) {
+    if (!options.controller.signal.aborted) {
       finishFailedSession(options, error, claimedIdentity);
     }
   }

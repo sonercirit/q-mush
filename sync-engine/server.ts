@@ -30,26 +30,18 @@ import {
   SESSION_OPENROUTER_PROVIDERS_PATH,
   SESSIONS_PATH,
   STYLESHEET_PATH,
+  TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import type { GoogleAuth } from "./auth.ts";
-import type { BraveSearchSkill } from "./brave-search.ts";
 import {
   clientBuildConfiguration,
   createClientPlugins,
   readFavicon,
 } from "./client-build.ts";
-import type { GenericProviderIntegration } from "./generic-provider.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
-import type { OpenAiIntegration } from "./openai.ts";
-import type { OpenRouterIntegration } from "./openrouter.ts";
 import type { RenderedPages } from "./pages.ts";
-import type { PromptIntegration } from "./prompts.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
-import type { RunnerExecutableProvider } from "./runner-executable.ts";
-import type { RunnerIntegration } from "./runners.ts";
-import type { SessionIntegration } from "./sessions.ts";
-import type { WorkspaceIntegration } from "./workspaces.ts";
+import type { RequestHandlerIntegrations } from "./server-integrations.ts";
 
 const DEFAULT_Q_MUSH_PORT = 12_345;
 
@@ -411,17 +403,11 @@ export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
   pages: RenderedPages,
-  googleAuth: GoogleAuth,
-  openAi: OpenAiIntegration,
-  openRouter: OpenRouterIntegration,
-  braveSearch: BraveSearchSkill,
-  runners: RunnerIntegration,
-  sessions: SessionIntegration,
-  prompts: PromptIntegration,
-  workspaces: WorkspaceIntegration,
-  runnerExecutables: RunnerExecutableProvider,
-  generic?: GenericProviderIntegration,
+  integrations: RequestHandlerIntegrations,
 ): (request: Request) => Promise<Response> {
+  const { braveSearch, generic, googleAuth, openAi } = integrations;
+  const { openRouter, prompts, runnerExecutables, runners } = integrations;
+  const { sessions, toolSettings, workspaces } = integrations;
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const faviconSource = readFavicon();
@@ -477,6 +463,10 @@ export function createRequestHandler(
 
       if (pathname === SESSIONS_PATH) {
         return sessions.collection(request);
+      }
+
+      if (pathname === TOOL_SETTINGS_PATH) {
+        return toolSettings.collection(request);
       }
 
       if (pathname === PROMPTS_PATH) {

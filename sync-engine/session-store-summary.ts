@@ -115,6 +115,7 @@ function parseStoredTools(value: string): readonly AgentSessionToolName[] {
 
 export function summarizeStoredSession(
   stored: StoredSessionSummary,
+  runtimePending: AgentSessionSummary["runtimePending"] = null,
 ): AgentSessionSummary {
   const {
     currentSegment,
@@ -138,6 +139,7 @@ export function summarizeStoredSession(
     providerPricing: parseProviderPricing(stored.providerPricing),
     pendingQuestions: null,
     restartHandoff: parseRestartHandoff(stored.restartHandoff),
+    runtimePending,
     tools: parseStoredTools(stored.tools),
     updatedAt: stored.updatedAt.getTime(),
   };

@@ -24,8 +24,6 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 const CHILD_PROMPT = "Keep working until the parent reaches a terminal state.";
-const TERMINAL_CALLBACK_NOTE =
-  "Completion callback was not delivered because the parent session";
 
 type ParentTerminalStatus = "failed" | "idle" | "stopped";
 
@@ -148,8 +146,19 @@ async function runningChildSetup() {
   return { childId, model, setup };
 }
 
-function terminalCallbackRecorded(value: unknown): boolean {
-  return JSON.stringify(value).includes(TERMINAL_CALLBACK_NOTE);
+function callbackContentIncludes(
+  lifecycle: ChildLifecycleSetup,
+  content: string,
+): boolean {
+  const parent = lifecycle.setup.sessions.detailForUser(
+    TEST_USER_ID,
+    SESSION_ID,
+  );
+  return [...(parent?.messages ?? []), ...(parent?.pendingInputs ?? [])].some(
+    (message) =>
+      message.content.includes("Spawned session") &&
+      message.content.includes(content),
+  );
 }
 
 function childDetail(lifecycle: ChildLifecycleSetup) {
@@ -173,25 +182,24 @@ async function waitForCallbackDisposition(
   lifecycle: ChildLifecycleSetup,
 ): Promise<void> {
   await waitForSessionValue(
-    () => childDetail(lifecycle),
-    terminalCallbackRecorded,
+    () => callbackContentIncludes(lifecycle, lifecycle.childId),
+    (recorded) => recorded === true,
   );
 }
 
-function expectCallbackNoOp(
+function expectCallbackPersisted(
   lifecycle: ChildLifecycleSetup,
   parentStatus: ParentTerminalStatus,
 ): void {
-  const { model, setup } = lifecycle;
+  const { setup } = lifecycle;
   const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
   const child = childDetail(lifecycle);
   expect(parent).toMatchObject({ generation: 0, status: parentStatus });
-  expect(
-    parent?.messages.some(({ content }) => content.includes("Spawned session")),
-  ).toBe(false);
-  expect(child).toMatchObject({ parentExecutionGeneration: null });
-  expect(terminalCallbackRecorded(child)).toBe(true);
-  expect(model.parentRequests).toBe(2);
+  expect(callbackContentIncludes(lifecycle, lifecycle.childId)).toBe(true);
+  expect(child).toMatchObject({
+    parentExecutionGeneration: parent?.generation,
+  });
+
   expect(
     setup.sessions
       .listForUser(TEST_USER_ID)
@@ -231,7 +239,7 @@ async function completeChildAndConsumeCallback(
   lifecycle.model.finishChild();
   await waitForChildStatus(lifecycle, "completed");
   await waitForCallbackDisposition(lifecycle);
-  expectCallbackNoOp(lifecycle, parentStatus);
+  expectCallbackPersisted(lifecycle, parentStatus);
   await closeLifecycle(lifecycle);
 }
 
@@ -253,7 +261,7 @@ async function exerciseTerminalParent(
     ).resolves.toMatchObject({ status: "stopped" });
   }
   await stoppedChildWithCallback(lifecycle);
-  expectCallbackNoOp(lifecycle, status);
+  expectCallbackPersisted(lifecycle, status);
   await closeLifecycle(lifecycle);
 }
 
