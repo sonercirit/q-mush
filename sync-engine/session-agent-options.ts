@@ -12,7 +12,6 @@ import {
 } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { normalizeSearchText } from "../shared/search.ts";
-import { utf8ByteLength, utf8Prefix } from "../shared/utf8.ts";
 import { boundedPaginatedOutput } from "./session-agent-pagination.ts";
 
 export const SESSION_OPTION_CATEGORIES = [
@@ -26,7 +25,6 @@ type SessionOptionCategory = (typeof SESSION_OPTION_CATEGORIES)[number];
 
 export const SESSION_OPTIONS_PAGE_SIZE = 10;
 export const MAXIMUM_SESSION_OPTIONS_SEARCH_LENGTH = 100;
-const MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES = 24_000;
 
 export interface GetSessionOptionsToolInput {
   readonly category: SessionOptionCategory;
@@ -73,23 +71,13 @@ export interface SessionOptionsSource {
   readonly tools: readonly AgentSessionToolOption[];
 }
 
-const MAXIMUM_OPTION_TEXT_BYTES = 300;
-const MAXIMUM_OPTION_DESCRIPTION_BYTES = 1_000;
-const MAXIMUM_OPTION_MODALITIES = 5;
-const MAXIMUM_OPTION_MODALITY_BYTES = 80;
-const MAXIMUM_OPTION_PRICE_BYTES = 100;
-
 interface BoundedOption<T> {
   readonly option: T;
   readonly truncated: boolean;
 }
 
-function boundedText(
-  value: string,
-  maximumBytes = MAXIMUM_OPTION_TEXT_BYTES,
-): BoundedOption<string> {
-  const option = utf8Prefix(value, maximumBytes);
-  return { option, truncated: utf8ByteLength(option) < utf8ByteLength(value) };
+function boundedText(value: string): BoundedOption<string> {
+  return { option: value, truncated: false };
 }
 
 function boundedNullableText(
@@ -104,7 +92,7 @@ function boundedPrice(
   value: string | number | undefined,
 ): BoundedOption<string | number | undefined> {
   return typeof value === "string"
-    ? boundedText(value, MAXIMUM_OPTION_PRICE_BYTES)
+    ? boundedText(value)
     : { option: value, truncated: false };
 }
 
@@ -167,13 +155,7 @@ function boundedModel(
     if (values === null) {
       return null;
     }
-    const selected = values.slice(0, MAXIMUM_OPTION_MODALITIES);
-    truncated ||= selected.length < values.length;
-    return selected.map((value) => {
-      const bounded = boundedText(value, MAXIMUM_OPTION_MODALITY_BYTES);
-      truncated ||= bounded.truncated;
-      return bounded.option;
-    });
+    return values.map((value) => value);
   };
   const named = boundedNamedFields(option);
   const pricing = boundedPricing(option.pricing);
@@ -248,19 +230,15 @@ function normalizedValues(values: readonly (string | undefined)[]): string {
 function boundedModelSearchText(option: AgentModelOption): string {
   const pricing = option.pricing;
   const boundedValues = (values: readonly string[] | null): readonly string[] =>
-    (values ?? [])
-      .slice(0, MAXIMUM_OPTION_MODALITIES)
-      .map((value) => utf8Prefix(value, MAXIMUM_OPTION_MODALITY_BYTES));
+    values ?? [];
   const boundedPrice = (
     value: string | number | undefined,
   ): string | undefined =>
-    typeof value === "string"
-      ? utf8Prefix(value, MAXIMUM_OPTION_PRICE_BYTES)
-      : value?.toString();
+    typeof value === "string" ? value : value?.toString();
   return normalizedValues([
     option.contextWindow?.toString(),
-    utf8Prefix(option.id, MAXIMUM_OPTION_TEXT_BYTES),
-    utf8Prefix(option.label, MAXIMUM_OPTION_TEXT_BYTES),
+    option.id,
+    option.label,
     ...boundedValues(option.inputModalities),
     ...boundedValues(option.outputModalities),
     ...[...new Set(option.reasoningEfforts)].slice(
@@ -354,10 +332,7 @@ function optionsForCategory(
     case "tools":
       return source.tools.map(
         ({ classification, description, label, name }) => {
-          const boundedDescription = boundedText(
-            description,
-            MAXIMUM_OPTION_DESCRIPTION_BYTES,
-          );
+          const boundedDescription = boundedText(description);
           const boundedLabel = boundedText(label);
           return {
             option: {
@@ -514,11 +489,9 @@ export function sessionOptionsOutput(
       ...(input.search === undefined ? {} : { search: input.search }),
     },
     items,
-    maximumBytes: MAXIMUM_SESSION_OPTIONS_OUTPUT_BYTES,
     page: input.page,
     pageSize: SESSION_OPTIONS_PAGE_SIZE,
     sourceFields,
-    tooLargeMessage: "The bounded session options output is too large",
     totalItems,
   });
 }

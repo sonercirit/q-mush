@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../../shared/tool-stream.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { SessionPendingInputs } from "../../solid/session-pending-client.tsx";
@@ -62,6 +63,7 @@ function renderTestTranscript(
             executionGeneration: 0,
             id: "live-json-turn",
             startedAt: 1,
+            toolSettings: DEFAULT_TOOL_SETTINGS,
           },
         ]
       : undefined;

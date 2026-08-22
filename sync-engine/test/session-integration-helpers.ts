@@ -3,8 +3,15 @@ import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
+import {
+  DEFAULT_TOOL_SETTINGS,
+  toolExecutionLimitSeconds,
+} from "../../shared/tool-limits.ts";
 import type { createSessionIntegration } from "../../sync-engine/sessions.ts";
-import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
+import {
+  createAuthenticatedRequest,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   deferredSessionSetup,
   type DeferredAgentModel,
@@ -51,6 +58,17 @@ export function hasSessionStatus(
   return (value) => isRecord(value) && value["status"] === expected;
 }
 
+export async function waitForSessionIdStatus(
+  setup: ReturnType<typeof connectedSessionSetup>,
+  sessionId: string,
+  status: string,
+): Promise<void> {
+  await waitForSessionValue(
+    () => setup.sessions.detailForUser(TEST_USER_ID, sessionId),
+    hasSessionStatus(status),
+  );
+}
+
 export async function waitForSessionStatus(
   setup: ReturnType<typeof connectedSessionSetup>,
   status: string,
@@ -76,6 +94,15 @@ export function expectedRunnerCommand(
     id: RUNNER_COMMAND_ID,
     sessionId: SESSION_ID,
     workingDirectory: "/work/project",
+    ...(command.tool === "list_directories" ||
+    command.tool === RUNNER_AGENT_FILE_COMMAND
+      ? {}
+      : {
+          executionLimitSeconds: toolExecutionLimitSeconds(
+            DEFAULT_TOOL_SETTINGS,
+          ),
+          outputLimitCharacters: DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
+        }),
     ...command,
   };
 }
@@ -115,12 +142,13 @@ export function completeRunnerCommand(
 export async function completeAgentFileLookup(
   setup: ConnectedSessionSetup,
   agentFile: unknown = null,
+  executionEnvironment: RunnerToolCommand["executionEnvironment"] = "bare_metal",
 ): Promise<void> {
   await expectRunnerCommand(
     setup,
     {
       arguments: {},
-      executionEnvironment: "bare_metal",
+      executionEnvironment,
       id: RUNNER_COMMAND_ID,
       sessionId: SESSION_ID,
       tool: RUNNER_AGENT_FILE_COMMAND,

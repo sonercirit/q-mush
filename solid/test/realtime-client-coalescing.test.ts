@@ -1,149 +1,158 @@
 import { expect, test } from "vitest";
 import type { RealtimeServerEvent } from "../../solid/realtime-client-codec.ts";
-import { RealtimeConnection } from "../../solid/realtime-client.ts";
+import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
+import {
+  realtimeEventRecorder,
+  receiveRealtimeEvents,
+  runNextRealtimeFrame,
+  runningRealtimeEventRecorder,
+  testSessionDelta,
+} from "./realtime-client-coalescing-fixture.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
-class CoalescingSocket extends EventTarget {
-  get readyState(): number {
-    return WebSocket.OPEN;
-  }
-
-  close(): void {
-    this.dispatchEvent(new Event("close"));
-  }
-
-  send(): void {
-    // No client messages are relevant to delta coalescing.
-  }
-
-  receive(event: unknown): void {
-    const message = new MessageEvent("message");
-    Object.defineProperty(message, "data", { value: JSON.stringify(event) });
-    this.dispatchEvent(message);
-  }
+function streamedEvents(
+  events: readonly RealtimeClientEvent[],
+): readonly RealtimeServerEvent[] {
+  return events.flatMap((event) =>
+    event.type === "stream_batch"
+      ? event.updates.filter((update) => update.type !== "tool_update")
+      : [],
+  );
 }
 
-function expectFramesAndLatest(
-  events: readonly RealtimeServerEvent[],
-  frames: readonly (() => void)[],
-  frameCount: number,
-  frameIndex: number,
-  eventCount: number,
-  expected: Readonly<Record<string, unknown>>,
-): void {
-  expect(frames).toHaveLength(frameCount);
-  frames[frameIndex]?.();
-  expect(events).toHaveLength(eventCount);
-  expect(events.at(-1)).toMatchObject(expected);
+function latestStreamedEvent(
+  events: readonly RealtimeClientEvent[],
+): RealtimeServerEvent | undefined {
+  return streamedEvents(events).at(-1);
 }
 
-test("coalesces session deltas into one update per animation frame", () => {
-  const events: RealtimeServerEvent[] = [];
-  const frames: (() => void)[] = [];
-  const socket = new CoalescingSocket();
-  const connection = new RealtimeConnection((event) => events.push(event), {
-    clearTimeout: () => undefined,
-    createSocket: () => socket,
-    location: { href: "https://qmush.example/app", protocol: "https:" },
-    requestFrame: (callback) => {
-      frames.push(callback);
-      return frames.length;
+function expectLatestEvent(events: readonly RealtimeClientEvent[]) {
+  return expect(events.at(-1));
+}
+
+function expectLatestDelta(events: readonly RealtimeClientEvent[]) {
+  return expect(latestStreamedEvent(events));
+}
+
+test("keeps post-snapshot deltas behind a production-order session barrier", () => {
+  const { running, stream } = runningRealtimeEventRecorder("barrier-instance");
+
+  receiveRealtimeEvents(stream, [
+    testSessionDelta("A", running.id, "barrier-stream"),
+    { session: running, type: "session" },
+    testSessionDelta("B", running.id, "barrier-stream"),
+  ]);
+
+  expect(stream.events).toEqual([]);
+  const expectedFrames: readonly Readonly<Record<string, unknown>>[][] = [
+    [],
+    [{ type: "stream_batch", updates: [{ content: "A" }] }],
+    [{ session: { id: running.id }, type: "session" }],
+    [{ type: "stream_batch", updates: [{ content: "B" }] }],
+  ];
+  for (const expected of expectedFrames) {
+    runNextRealtimeFrame(stream.setup.requestFrames);
+    expect(stream.events.slice(-expected.length)).toMatchObject(expected);
+  }
+  stream.setup.connection.stop();
+});
+
+test("orders a replaced state key at its latest wire position", () => {
+  const { running, stream } = runningRealtimeEventRecorder(
+    "state-replacement-instance",
+  );
+
+  receiveRealtimeEvents(stream, [
+    { session: running, type: "session" },
+    {
+      pending: null,
+      sessionId: running.id,
+      type: "session_questions",
     },
-    setTimeout: () => 1,
+    {
+      session: { ...running, updatedAt: running.updatedAt + 1 },
+      type: "session",
+    },
+  ]);
+
+  // One frame drains the whole deferred state queue in wire order.
+  runNextRealtimeFrame(stream.setup.requestFrames);
+  expect(stream.events).toMatchObject([
+    { type: "session_questions" },
+    { session: { updatedAt: running.updatedAt + 1 }, type: "session" },
+  ]);
+  expectLatestEvent(stream.events).toMatchObject({
+    session: { updatedAt: running.updatedAt + 1 },
+    type: "session",
   });
-  connection.start();
-  socket.receive({ instanceId: "instance-1", type: "ready" });
-  events.length = 0;
+  stream.setup.connection.stop();
+});
 
-  for (const event of [
-    {
-      content: "Hello",
-      sessionId: "session-1",
-      thinking: "Considering",
-      type: "session_delta",
-    },
-    {
-      content: " world",
-      sessionId: "session-1",
-      thinking: " carefully",
-      type: "session_delta",
-    },
-  ] as const) {
-    socket.receive(event);
-  }
-  socket.receive({ sessions: [], type: "sessions" });
+test("coalesces deltas while preserving reset, snapshot, and disconnect order", () => {
+  const stream = realtimeEventRecorder("coalescing-instance");
+  const frames = stream.setup.requestFrames;
 
-  expect(events).toHaveLength(0);
-  expect(frames).toHaveLength(2);
-  frames[1]?.();
-  expect(events).toHaveLength(1);
-  expect(events[0]?.type).toBe("sessions");
-  socket.receive({
-    content: "Replacement",
+  stream.receive(
+    testSessionDelta("Hello", "session-1", "stream-original", "Considering"),
+  );
+  stream.receive(
+    testSessionDelta(" world", "session-1", "stream-original", " carefully"),
+  );
+  runNextRealtimeFrame(frames);
+  expectLatestDelta(stream.events).toMatchObject({
+    thinking: "Considering carefully",
+    content: "Hello world",
+  });
+
+  stream.receive({
+    ...testSessionDelta(
+      "Replacement",
+      "session-1",
+      "stream-replacement",
+      "Reconsidering",
+    ),
     reset: true,
-    sessionId: "session-1",
-    thinking: "Reconsidering",
-    type: "session_delta",
   });
-  socket.receive({
-    content: " response",
-    sessionId: "session-1",
-    thinking: " from scratch",
-    type: "session_delta",
-  });
-  frames[0]?.();
-  expect(events.at(-1)).toMatchObject({
+  stream.receive(
+    testSessionDelta(
+      " response",
+      "session-1",
+      "stream-replacement",
+      " from scratch",
+    ),
+  );
+  runNextRealtimeFrame(frames);
+  expectLatestDelta(stream.events).toMatchObject({
     content: "Replacement response",
     reset: true,
+    streamId: "stream-replacement",
     thinking: "Reconsidering from scratch",
   });
 
-  socket.receive({
-    content: "!",
-    sessionId: TEST_SESSION_DETAIL.id,
-    thinking: "",
-    type: "session_delta",
+  stream.receive(testSessionDelta("before snapshot", TEST_SESSION_DETAIL.id));
+  stream.receive(testSessionDelta("other", "session-other"));
+  stream.receive({ session: TEST_SESSION_DETAIL, type: "session" });
+  runNextRealtimeFrame(frames);
+  runNextRealtimeFrame(frames);
+  expectLatestEvent(stream.events).toMatchObject({
+    type: "stream_batch",
+    updates: [
+      { content: "before snapshot", sessionId: TEST_SESSION_DETAIL.id },
+    ],
   });
-  socket.receive({
-    content: "other",
-    sessionId: "session-other",
-    thinking: "",
-    type: "session_delta",
-  });
-  socket.receive({ session: TEST_SESSION_DETAIL, type: "session" });
-  expect(events.at(-1)).toMatchObject({ content: "!", thinking: "" });
-  expect(frames).toHaveLength(4);
-  frames[3]?.();
-  expect(events.at(-1)).toEqual({
+  runNextRealtimeFrame(frames);
+  expectLatestEvent(stream.events).toMatchObject({
     session: TEST_SESSION_DETAIL,
     type: "session",
   });
-  frames[2]?.();
-  expect(events).toHaveLength(5);
-  expect(events.at(-1)).toMatchObject({
+  runNextRealtimeFrame(frames);
+  expectLatestDelta(stream.events).toMatchObject({
     content: "other",
     sessionId: "session-other",
   });
 
-  socket.receive({
-    content: "fresh",
-    sessionId: TEST_SESSION_DETAIL.id,
-    thinking: "",
-    type: "session_delta",
-  });
-  expectFramesAndLatest(events, frames, 5, 4, 6, {
-    content: "fresh",
-    thinking: "",
-  });
-
-  socket.receive({
-    content: "discarded",
-    sessionId: "session-2",
-    thinking: "",
-    type: "session_delta",
-  });
-  expect(frames).toHaveLength(6);
-  connection.stop();
-  frames[5]?.();
-  expect(events).toHaveLength(6);
+  stream.receive(testSessionDelta("discarded", "session-2"));
+  stream.setup.connection.stop();
+  runNextRealtimeFrame(frames);
+  expectLatestDelta(stream.events).toHaveProperty("content", "other");
 });

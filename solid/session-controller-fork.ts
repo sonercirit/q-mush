@@ -76,6 +76,7 @@ export async function forkSessionFromView(
   const { detail, sessions, transport } = realtime;
   const previousIds = new Set(sessions.map(({ id: sessionId }) => sessionId));
   const revision = options.view.begin({ forking: true });
+  options.realtime.rebaseStream(detail.id);
   options.view.patch({ error: undefined });
   options.loader.noteMutationStarted();
   try {

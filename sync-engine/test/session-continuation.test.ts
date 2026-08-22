@@ -19,12 +19,12 @@ import {
 import {
   connectedSessionSetup,
   createSessionRequest,
-  RUNNER_COMMAND_ID,
   SESSION_ID,
 } from "./session-integration-fixtures.ts";
 import {
   completeAgentFileLookup,
   completeRunnerCommand,
+  expectedRunnerCommand,
   expectRunnerCommand,
   hasSessionStatus,
   sessionDetail,
@@ -186,6 +186,55 @@ describe("session continuation", () => {
     closeContinuationSetup(continuation.setup);
   });
 
+  test("propagates configured limits to a real runner command", async () => {
+    const configured = {
+      executionLimitMinutes: 7,
+      outputLimitCharacters: 12_345,
+    } as const;
+    const finalStep = {
+      content: "Configured limits complete.",
+      toolCalls: [],
+    };
+    const model = new ScriptedAgentModel([
+      {
+        content: "Reading.",
+        toolCalls: [
+          {
+            arguments: '{"path":"README.md"}',
+            id: "configured-read",
+            name: "read",
+          },
+        ],
+      },
+      finalStep,
+    ]);
+    const setup = connectedSessionSetup(model, "api_key", undefined, {
+      toolSettings: { read: () => configured },
+    });
+    const initialRequest = createSessionRequest();
+    const created = await setup.sessions.collection(initialRequest);
+    expect(created.status).toBe(201);
+    await completeAgentFileLookup(setup);
+
+    const configuredCall = {
+      arguments: { path: "README.md" },
+      executionLimitSeconds: 7 * 60,
+      outputLimitCharacters: configured.outputLimitCharacters,
+      tool: "read" as const,
+    };
+    await expectRunnerCommand(
+      setup,
+      expectedRunnerCommand(configuredCall),
+      "The configured runner command was not delivered",
+    );
+    completeRunnerCommand(setup, "configured output");
+    await waitForSessionValue(
+      () => sessionDetail(setup.sessions),
+      hasSessionStatus("idle"),
+    );
+    setup.database.$client.close();
+  });
+
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
     const model = new ScriptedAgentModel([
       {
@@ -225,14 +274,10 @@ describe("session continuation", () => {
     await completeAgentFileLookup(setup);
     await expectRunnerCommand(
       setup,
-      {
+      expectedRunnerCommand({
         arguments: { path: "README.md" },
-        executionEnvironment: "bare_metal",
-        id: RUNNER_COMMAND_ID,
-        sessionId: SESSION_ID,
         tool: "read",
-        workingDirectory: "/work/project",
-      },
+      }),
       "The runner did not receive an agent command",
     );
 

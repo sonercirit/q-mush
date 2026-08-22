@@ -1,6 +1,7 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionDependencies } from "./session-dependencies.ts";
@@ -23,6 +24,7 @@ interface SessionLivenessSchedulerOptions {
   /** Runs after each liveness scan on the same cadence and stop lifecycle. */
   readonly afterScan?: () => void;
   readonly broker: RunnerCommandBroker;
+  readonly cleanup: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly database: AppDatabase;
   readonly dependencies: SessionDependencies;
   readonly notify: SessionNotification;
@@ -44,6 +46,7 @@ export function createSessionLivenessWatchdog(
   const watchdog = new SessionLivenessWatchdog({
     actions: options.actions,
     broker: options.broker,
+    cleanup: options.cleanup,
     database: options.database,
     generateId: dependencies.randomId ?? createUuidV7,
     ...(dependencies.liveness?.allowUnsafeTestTiming === true

@@ -1,13 +1,21 @@
 import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
+import { CONFIGURED_TOOL_SETTINGS } from "../../shared/test/tool-settings-fixtures.ts";
+import { formatToolLimitsStatement } from "../../shared/tool-limits.ts";
 import { SessionToolUpdateEditor } from "../session-tool-update-client.tsx";
 import {
+  clickTestButton,
   disposeTestViews,
   mountTestView,
   queryTestElementAs,
 } from "./dom-test-helpers.ts";
 import { mountTestSessionDetail } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
+import {
+  expectConfiguredBashMaximum,
+  expectNoToolLimitsNote,
+} from "./session-tool-test-helpers.ts";
+import { testToolUpdateEditorProps } from "./session-tool-update-fixtures.ts";
 
 const DISPOSALS: (() => void)[] = [];
 
@@ -71,15 +79,27 @@ function expectToolEditorCollapsed(
   expect(findDescription()).toBeUndefined();
 }
 
-test("shows update access only while the tool picker is expanded", () => {
+test("uses configured schemas without rendering another limits note", () => {
   const container = mountTestView(
     () => (
       <SessionToolUpdateEditor
-        detail={TEST_SESSION_DETAIL}
-        disabled={false}
-        onApply={() => Promise.resolve({ updated: true, warning: null })}
+        {...testToolUpdateEditorProps(CONFIGURED_TOOL_SETTINGS)}
       />
     ),
+    DISPOSALS,
+  );
+  clickTestButton(container, "[data-session-tool-toggle='true']");
+
+  expectNoToolLimitsNote(container);
+  expect(container.textContent).not.toContain(
+    formatToolLimitsStatement(CONFIGURED_TOOL_SETTINGS),
+  );
+  expectConfiguredBashMaximum(container);
+});
+
+test("shows update access only while the tool picker is expanded", () => {
+  const container = mountTestView(
+    () => <SessionToolUpdateEditor {...testToolUpdateEditorProps()} />,
     DISPOSALS,
   );
   const toolToggle = queryTestElementAs(

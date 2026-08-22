@@ -32,6 +32,7 @@ import {
 } from "./session-integration-fixtures.ts";
 import {
   hasSessionStatus,
+  waitForSessionIdStatus,
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
@@ -334,17 +335,6 @@ function markSessionCompleted(setup: ConnectedSetup): void {
     .run();
 }
 
-async function waitForSessionStatus(
-  setup: ConnectedSetup,
-  sessionId: string,
-  status: string,
-): Promise<unknown> {
-  return waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, sessionId),
-    hasSessionStatus(status),
-  );
-}
-
 async function completedSessionContaining(
   setup: ConnectedSetup,
   sessionId: string,
@@ -360,14 +350,18 @@ async function completedSessionContaining(
 
 test("rejects invalid compact and steer dispatch arguments", async () => {
   const outputs = await Promise.all([
-    executeSessionAgentTool(unusedSessionToolActions(), "compact_session", {
-      sessionId: SESSION_ID,
-      unexpected: true,
-    }),
-    executeSessionAgentTool(unusedSessionToolActions(), "steer_session", {
-      message: "",
-      sessionId: SESSION_ID,
-    }),
+    executeSessionAgentTool(
+      unusedSessionToolActions(),
+      "compact_session",
+      { sessionId: SESSION_ID, unexpected: true },
+      new AbortController().signal,
+    ),
+    executeSessionAgentTool(
+      unusedSessionToolActions(),
+      "steer_session",
+      { message: "", sessionId: SESSION_ID },
+      new AbortController().signal,
+    ),
   ]);
 
   expect(outputs[0].output).toContain("invalid arguments");
@@ -436,7 +430,7 @@ test("retires a failed scheduled generation before retrying compaction", async (
   const setup = controlledSetup(model);
   await expectCreatedDefaultSession(setup);
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-  await waitForSessionStatus(setup, SESSION_ID, "failed");
+  await waitForSessionIdStatus(setup, SESSION_ID, "failed");
   expect(operationRows(setup)[0]?.deleted).toBe(true);
 
   const continued = await continueSession(setup);
@@ -493,7 +487,7 @@ test("compact_session wakes a completed target, compacts, and continues it", asy
   const setup = controlledSetup(model);
   await expectCreatedPromptSession(setup, "Completed compaction target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
-  await waitForSessionStatus(setup, SESSION_ID, "idle");
+  await waitForSessionIdStatus(setup, SESSION_ID, "idle");
   markSessionCompleted(setup);
 
   const parentId = await createPromptSession(

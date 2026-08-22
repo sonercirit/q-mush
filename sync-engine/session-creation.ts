@@ -5,16 +5,19 @@ import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import { createApiError } from "./http.ts";
-import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import { persistQueuedRestartHandoff } from "./session-agent-action-helpers.ts";
 import type { CreateSessionInput } from "./session-input.ts";
+import type { RestartAwareSessionModelDiscoveryDependencies } from "./session-model-discovery-dependencies.ts";
 import {
   optionalCredentialRejection,
   sessionMetadataFromDependencies,
   type SessionMetadataResult,
 } from "./session-provider-selection.ts";
+import {
+  abortedServerRestartResponse,
+  serverRestartingResponse,
+} from "./session-restart-gate.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -81,7 +84,7 @@ export function failedSessionLaunchResponse(
   operation: RestartHandoffOperation,
 ): Response {
   if (pauseSessionForRestart(dependencies, detail, operation)) {
-    return createApiError("server_restarting", 503);
+    return serverRestartingResponse();
   }
   dependencies.store.transitionRuntime(
     detail.id,
@@ -90,25 +93,24 @@ export function failedSessionLaunchResponse(
     detail.generation,
   );
   return dependencies.store.get(userId, detail.id)?.status === "paused"
-    ? createApiError("server_restarting", 503)
+    ? serverRestartingResponse()
     : createApiError("session_launch_failed", 500);
 }
 
 export type SessionCreationDependencies = Omit<
   SessionLaunchBoundary,
   "runtimes" | "store"
-> & {
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
-  readonly onCreated?: (detail: AgentSessionDetail) => void;
-  readonly rejectCredentialErrors?: boolean;
-  readonly runtimes: Pick<SessionRuntimes, "accepts" | "pendingRestart">;
-  readonly serializeCreatedDetail?: CreatedSessionSerializer;
-  readonly store: Pick<
-    SessionStore,
-    "create" | "get" | "pauseQueuedForRestart" | "transitionRuntime"
-  >;
-};
+> &
+  RestartAwareSessionModelDiscoveryDependencies & {
+    readonly onCreated?: (detail: AgentSessionDetail) => void;
+    readonly rejectCredentialErrors?: boolean;
+    readonly runtimes: Pick<SessionRuntimes, "accepts" | "pendingRestart">;
+    readonly serializeCreatedDetail?: CreatedSessionSerializer;
+    readonly store: Pick<
+      SessionStore,
+      "create" | "get" | "pauseQueuedForRestart" | "transitionRuntime"
+    >;
+  };
 
 interface PreparedSessionResponse {
   readonly response: Response;
@@ -215,20 +217,30 @@ export function sessionMetadataErrorResponse(
 type PreparedSessionInput = CreateSessionInput &
   Pick<CreateAgentSession, "workspaceId">;
 
+type SessionCredentialPreparationDependencies = Pick<
+  SessionCreationDependencies,
+  | "discoverModels"
+  | "discoverOpenRouterProviders"
+  | "rejectCredentialErrors"
+  | "restartSignal"
+>;
+
 export function prepareSessionCredential(
-  dependencies: Pick<
-    SessionCreationDependencies,
-    "discoverModels" | "discoverOpenRouterProviders" | "rejectCredentialErrors"
-  >,
-  user: AuthenticatedUser,
-  input: PreparedSessionInput,
-  credential: ProviderCredentialAccess,
+  dependencies: SessionCredentialPreparationDependencies,
+  options: {
+    readonly credential: ProviderCredentialAccess;
+    readonly input: PreparedSessionInput;
+    readonly restartSignal: AbortSignal;
+    readonly user: AuthenticatedUser;
+  },
 ): Promise<SessionMetadataResult> {
+  const { credential, input, restartSignal, user } = options;
   return sessionMetadataFromDependencies({
     credential,
     dependencies,
     input,
     ownerId: user.id,
+    signal: restartSignal,
     ...optionalCredentialRejection(dependencies.rejectCredentialErrors),
   });
 }
@@ -239,7 +251,11 @@ export function createPreparedSession(
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
   metadata: PreparedSessionMetadata,
+  restartSignal: AbortSignal,
 ): Response {
+  if (restartSignal.aborted) {
+    return serverRestartingResponse();
+  }
   const capError = contextTokenCapValidationError(
     input.userContextTokenCap ?? null,
     metadata.maxContextTokens,
@@ -248,7 +264,7 @@ export function createPreparedSession(
     return createApiError("invalid_context_token_cap", 400, capError);
   }
   if (!dependencies.runtimes.accepts(input.runnerId)) {
-    return createApiError("server_restarting", 503);
+    return serverRestartingResponse();
   }
   let created: ReturnType<SessionStore["create"]>;
   try {
@@ -316,14 +332,30 @@ export async function createValidatedSession(
   user: AuthenticatedUser,
   input: PreparedSessionInput,
   credential: ProviderCredentialAccess,
+  restartSignal: AbortSignal,
 ): Promise<Response> {
-  const metadata = await prepareSessionCredential(
-    dependencies,
-    user,
-    input,
-    credential,
-  );
+  const restarting = abortedServerRestartResponse(restartSignal);
+  if (restarting !== undefined) return restarting;
+  let metadata: SessionMetadataResult;
+  try {
+    metadata = await prepareSessionCredential(dependencies, {
+      credential,
+      input,
+      restartSignal,
+      user,
+    });
+  } catch (error) {
+    if (!restartSignal.aborted) throw error;
+    return serverRestartingResponse();
+  }
   return "error" in metadata
     ? sessionMetadataErrorResponse(metadata)
-    : createPreparedSession(dependencies, user, input, credential, metadata);
+    : createPreparedSession(
+        dependencies,
+        user,
+        input,
+        credential,
+        metadata,
+        restartSignal,
+      );
 }

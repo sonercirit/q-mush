@@ -18,7 +18,7 @@ import { settleSessionFailure } from "./session-restart-failure-store.ts";
 import {
   runningCondition,
   sessionGenerationCondition,
-  storedParentExecutionGeneration,
+  storedParentCallbackGeneration,
 } from "./session-store-persistence.ts";
 import { requireRunningSessionUserId } from "./session-store-state.ts";
 import type { SessionRuntimeTarget } from "./session-store-types.ts";
@@ -92,6 +92,8 @@ export function setRuntimeAgentFile(
 }
 
 export function markRuntimeStepStart(options: RuntimeWriteTarget): void {
+  // updateRunningSession is status- and generation-guarded, so a racing stop
+  // makes this write match zero rows.
   updateRunningSession(options, {
     stepStartedAt: new Date(options.now),
   });
@@ -253,7 +255,7 @@ function terminalSessionStatus(
 ): "completed" | "idle" {
   const condition = runningSessionCondition(options);
   return normalSessionCompletionStatus({
-    parentExecutionGeneration: storedParentExecutionGeneration(
+    parentCallbackGeneration: storedParentCallbackGeneration(
       options.resources.database,
       condition,
     ),

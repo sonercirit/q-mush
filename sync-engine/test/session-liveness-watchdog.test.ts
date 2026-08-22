@@ -2,6 +2,7 @@ import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions, runners } from "../../shared/database/schema.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { SessionLivenessWatchdog } from "../../sync-engine/session-liveness-watchdog.ts";
@@ -38,7 +39,7 @@ import {
   STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
 
-function runningSetup() {
+export function runningSetup() {
   const { database, generateId, store } = createStore();
   const detail = createTestSession(store);
   const running = store.transitionCurrent(
@@ -50,14 +51,14 @@ function runningSetup() {
   return { database, detail, generateId, store };
 }
 
-function closeSetup(
+export function closeSetup(
   setup: Pick<ReturnType<typeof createStore>, "database">,
 ): void {
   const database = setup.database.$client;
   database.close();
 }
 
-function watchdogSetup(
+export function watchdogSetup(
   setup: Pick<ReturnType<typeof createStore>, "database" | "store">,
   options: {
     readonly actions?: ConstructorParameters<
@@ -65,6 +66,9 @@ function watchdogSetup(
     >[0]["actions"];
     readonly allowUnsafeTestTiming?: boolean;
     readonly broker?: RunnerCommandBroker;
+    readonly cleanup?: ConstructorParameters<
+      typeof SessionLivenessWatchdog
+    >[0]["cleanup"];
     readonly graceMs?: number;
     readonly runtimes?: SessionRuntimes;
   } = {},
@@ -82,6 +86,7 @@ function watchdogSetup(
     actions: options.actions ?? { finished, reportAll, stopChildren },
     allowUnsafeTestTiming: options.allowUnsafeTestTiming ?? true,
     broker: options.broker ?? new RunnerCommandBroker(),
+    cleanup: options.cleanup ?? vi.fn(),
     database: setup.database,
     generateId: () => "watchdog-failure-message",
     graceMs: options.graceMs ?? 60_000,
@@ -116,21 +121,76 @@ function scanPastGrace(
   watchdog.scan();
 }
 
-function launchRuntime(
+export function launchRuntime(
   setup: ReturnType<typeof runningSetup>,
   runtimes: SessionRuntimes,
   generation: number,
+  component?: SessionRuntimePendingComponent,
 ) {
   const deferred = Promise.withResolvers<undefined>();
+  let signal: AbortSignal | undefined;
+  let setPending:
+    ((component: SessionRuntimePendingComponent) => void) | undefined;
   expect(
     runtimes.launch(
       setup.detail.id,
       STORE_RUNNER_ID,
       generation,
-      () => deferred.promise,
+      ({ controller, pendingComponent }) => {
+        signal = controller.signal;
+        setPending = pendingComponent;
+        if (component !== undefined) pendingComponent(component);
+        return component === "provider_admission"
+          ? new Promise<never>((_resolve, reject) => {
+              const rejectAbort = () => {
+                reject(
+                  new DOMException("The session was aborted", "AbortError"),
+                );
+              };
+              controller.signal.addEventListener("abort", rejectAbort, {
+                once: true,
+              });
+            })
+          : deferred.promise;
+      },
     ),
   ).toBe(true);
-  return deferred;
+  return {
+    ...deferred,
+    pending: (pending: SessionRuntimePendingComponent) => {
+      setPending?.(pending);
+    },
+    get signal() {
+      return signal;
+    },
+  };
+}
+
+function launchPendingRuntime(
+  setup: ReturnType<typeof runningSetup>,
+  component: SessionRuntimePendingComponent,
+) {
+  const runtimes = new SessionRuntimes(() => Date.now());
+  const runtime = launchRuntime(
+    setup,
+    runtimes,
+    setup.detail.generation,
+    component,
+  );
+  if (runtime.signal === undefined) {
+    throw new Error("The pending runtime signal was unavailable");
+  }
+  return { ...runtime, runtimes };
+}
+
+function admissionWatchdogSetup() {
+  const setup = runningSetup();
+  const runtime = launchPendingRuntime(setup, "provider_admission");
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: runtime.runtimes,
+  });
+  return { runtime, setup, watchdog };
 }
 
 function dispatchBash(
@@ -156,6 +216,16 @@ function expectStoredStatus(
   expect(status).toBe(expected);
 }
 
+function expectRuntimeRemainsActive(
+  setup: ReturnType<typeof runningSetup>,
+  runtime: ReturnType<typeof launchPendingRuntime>,
+): void {
+  expectStoredStatus(setup, "running");
+  expect(runtime.signal).toMatchObject({ aborted: false });
+  runtime.resolve();
+  closeSetup(setup);
+}
+
 function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
   const setup = runningSetup();
   const create = () =>
@@ -166,6 +236,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
         stopChildren: vi.fn(),
       },
       broker: new RunnerCommandBroker(),
+      cleanup: vi.fn(),
       database: setup.database,
       dependencies: {
         braveSearch: { execute: () => Promise.resolve("unused") },
@@ -295,16 +366,73 @@ test("requires the stored execution generation to match its runtime", () => {
   closeSetup(setup);
 });
 
+test("allows legitimate provider retries to refresh the admission bound", () => {
+  const admission = admissionWatchdogSetup();
+  const { runtime, setup, watchdog } = admission;
+
+  watchdog.scan();
+  for (let minute = 1; minute <= 12; minute += 1) {
+    watchdog.setNow(TEST_NOW + minute * 60_000);
+    runtime.pending("provider_admission");
+    watchdog.scan();
+  }
+
+  expectRuntimeRemainsActive(setup, runtime);
+});
+
+test("fails provider admission that remains unacknowledged beyond the grace bound", () => {
+  const { runtime, setup, watchdog } = admissionWatchdogSetup();
+
+  scanPastGrace(watchdog);
+
+  expectStoredStatus(setup, "failed");
+  expect(
+    setup.store.get(TEST_USER_ID, setup.detail.id)?.messages.at(-1)?.content,
+  ).toContain("provider request was not acknowledged");
+  expect(
+    setup.store.get(TEST_USER_ID, setup.detail.id)?.runtimePending,
+  ).toBeNull();
+  expect(runtime.signal).toMatchObject({ aborted: true });
+  closeSetup(setup);
+});
+
+test("does not time out an acknowledged provider request", () => {
+  const setup = runningSetup();
+  const activeProvider = launchPendingRuntime(setup, "provider_request");
+  const watchdog = watchdogSetup(setup, {
+    graceMs: 1_000,
+    runtimes: activeProvider.runtimes,
+  });
+
+  scanPastGrace(watchdog, 20 * 60_000);
+
+  expectStoredStatus(setup, "running");
+  activeProvider.resolve();
+  closeSetup(setup);
+});
+
+test("preserves early acknowledgement", () => {
+  const { runtime, setup, watchdog } = admissionWatchdogSetup();
+
+  watchdog.scan();
+  watchdog.setNow(TEST_NOW + 999);
+  runtime.pending("provider_request");
+  watchdog.scan();
+  watchdog.setNow(TEST_NOW + 20 * 60_000);
+  watchdog.scan();
+
+  expectRuntimeRemainsActive(setup, runtime);
+});
+
 test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
-  const runtimes = new SessionRuntimes();
-  const runtime = launchRuntime(setup, runtimes, setup.detail.generation);
+  const runtime = launchPendingRuntime(setup, "startup");
   const broker = new RunnerCommandBroker({
     commandId: () => "undispatched-command",
   });
   const queuedCommand = dispatchBash(setup, broker);
   const watchdog = watchdogSetup(setup, {
-    runtimes,
+    runtimes: runtime.runtimes,
     graceMs: 1_000,
     broker,
   });
@@ -330,7 +458,6 @@ test("recovers a durable shutdown marker instead of failing its session", () => 
       TEST_NOW + 2,
     ),
   ).toBe(true);
-
   watchdog.scan();
 
   const recovered = setup.store.get(TEST_USER_ID, setup.detail.id);

@@ -1,9 +1,10 @@
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 
-type RestartRequestPersistence = (
+export type RestartRequestPersistence = (
   request: RestartRequest,
   durable: boolean,
+  forcePark?: boolean,
 ) => Promise<void> | void;
 
 export interface SessionRestartRequester {

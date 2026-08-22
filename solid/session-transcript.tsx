@@ -8,15 +8,14 @@ import {
 } from "solid-js";
 import type { AgentFile } from "../shared/agent-file.ts";
 import { createAgentSystemPrompt } from "../shared/agent-prompt.ts";
-import {
-  selectedAgentTools,
-  type AgentSessionToolName,
-} from "../shared/agent-tools.ts";
+import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
+import { type AgentSessionToolName } from "../shared/agent-tools.ts";
 import type {
   AgentSessionDetail,
   AgentSessionMessage,
   AgentSessionStatus,
 } from "../shared/session-model.ts";
+import { type ToolSettings } from "../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../shared/tool-stream.ts";
 import { clipboardCopyLabel, createClipboardCopy } from "./clipboard-copy.ts";
 import { createNestedScrollRef } from "./nested-scroll.ts";
@@ -26,7 +25,7 @@ import { CompactionRequestTranscriptMessage } from "./session-compaction-transcr
 import { SessionImagePreviews } from "./session-image-client.tsx";
 import {
   LiveToolActivityContent,
-  LiveToolStream,
+  LiveToolStreamList,
   renderToolHeader,
 } from "./session-live-tool-activity.tsx";
 import { MarkdownView } from "./session-markdown.tsx";
@@ -37,7 +36,7 @@ import {
   type StreamedMessageRenderer,
 } from "./session-streamed-messages.tsx";
 import { renderStructuredText } from "./session-structured-text.tsx";
-import { renderStructuredCode } from "./session-syntax.tsx";
+import { ToolDefinitions } from "./session-tool-definitions.tsx";
 import { renderToolResult } from "./session-tool-result.tsx";
 import {
   createSessionTranscriptCounts,
@@ -91,27 +90,6 @@ function renderTranscriptInstruction(options: {
       label={options.label}
       labelClasses="text-amber-200"
     />
-  );
-}
-
-function ToolDefinitions(props: {
-  readonly serializedTools: string;
-}): JSX.Element {
-  return (
-    <li
-      class="min-w-0 rounded-xl border border-cyan-300/20 bg-cyan-300/10 p-3 sm:p-4"
-      {...renderDebugBoundary("tool-definitions", "Tool definitions")}
-    >
-      <p class="text-xs font-semibold tracking-wide text-cyan-200 uppercase">
-        Tool definitions
-      </p>
-      <details class="mt-3">
-        <summary class="cursor-pointer text-sm font-medium text-cyan-100 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-cyan-300">
-          Show selected tool schemas
-        </summary>
-        <div class="mt-3">{renderStructuredCode(props.serializedTools)}</div>
-      </details>
-    </li>
   );
 }
 
@@ -197,6 +175,7 @@ function ConversationTranscriptMessage(props: {
   readonly liveToolStreams?: readonly ToolStreamEntry[];
   readonly message: AgentSessionMessage;
   readonly onFork?: ((messageId: string) => void) | undefined;
+  readonly settings?: ToolSettings | undefined;
   readonly showContent?: boolean;
   readonly showTools?: boolean;
   readonly toolStreams?: Accessor<ReadonlyMap<string, ToolStreamEntry>>;
@@ -205,6 +184,7 @@ function ConversationTranscriptMessage(props: {
   const system = (): boolean => props.message.role === "system";
   const showContent = (): boolean => props.showContent ?? true;
   const showTools = (): boolean => props.showTools ?? true;
+  const settings = (): ToolSettings | undefined => props.settings;
   return (
     <li
       class={`min-w-0 rounded-2xl border p-3 sm:p-4 ${user() ? "sm:ml-8 border-emerald-300/20 bg-emerald-300/10" : system() ? "border-rose-300/20 bg-rose-300/10" : "sm:mr-8 border-white/10 bg-white/[0.04]"}`}
@@ -276,12 +256,13 @@ function ConversationTranscriptMessage(props: {
                     name: call.name,
                   })}
                   <div class="mt-2">
-                    {renderToolArguments(call.name, call.arguments)}
+                    {renderToolArguments(call.name, call.arguments, settings())}
                   </div>
                   <Show when={stream()}>
                     {(liveStream) => (
                       <LiveToolActivityContent
                         includeArguments={false}
+                        settings={settings()}
                         stream={liveStream()}
                       />
                     )}
@@ -294,9 +275,10 @@ function ConversationTranscriptMessage(props: {
       ) : null}
       <Show when={showTools() && (props.liveToolStreams?.length ?? 0) > 0}>
         <ul class="mt-3 space-y-2">
-          <For each={props.liveToolStreams}>
-            {(stream) => <LiveToolStream stream={stream} />}
-          </For>
+          <LiveToolStreamList
+            settings={settings()}
+            streams={props.liveToolStreams ?? []}
+          />
         </ul>
       </Show>
     </li>
@@ -307,6 +289,7 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly filters: Readonly<SessionTranscriptFilters>;
   readonly liveToolStreams: readonly ToolStreamEntry[];
   readonly nestedScrollKey: string;
+  readonly settings: Accessor<ToolSettings | undefined>;
   readonly onForkMessage?: ((messageId: string) => void) | undefined;
   readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
 };
@@ -320,6 +303,7 @@ function renderTranscriptMessage(
         <ConversationTranscriptMessage
           liveToolStreams={props.liveToolStreams}
           message={props.message}
+          settings={props.settings()}
           onFork={props.onForkMessage}
           showContent={props.filters.assistantMessages}
           showTools={props.filters.toolActivity}
@@ -344,8 +328,8 @@ function renderTranscriptMessage(
     case "user":
       return (
         <ConversationTranscriptMessage
-          message={props.message}
           onFork={props.onForkMessage}
+          message={props.message}
         />
       );
   }
@@ -416,9 +400,33 @@ export function SessionTranscript(props: {
     () => props.tools,
   );
   const counts = (): SessionTranscriptCounts => props.counts ?? localCounts();
-  const serializedTools = createMemo(() =>
-    JSON.stringify(selectedAgentTools(props.tools), null, 2),
+  const transcriptToolSettings = createMemo(
+    () => props.turns?.at(-1)?.toolSettings,
   );
+  const turnToolSettings = createMemo(
+    () =>
+      new Map(
+        (props.turns ?? []).map(
+          (turn) => [turn.id, turn.toolSettings] as const,
+        ),
+      ),
+  );
+  const messageToolSettings = (
+    message: AgentSessionMessage,
+  ): ToolSettings | undefined =>
+    // Stream rows may not have a persisted, ended turn yet; current settings win.
+    isStreamedMessage(message)
+      ? transcriptToolSettings()
+      : turnToolSettings().get(message.turnId ?? "");
+  const serializedTools = createMemo(() => {
+    const settings = transcriptToolSettings();
+    return settings === undefined
+      ? JSON.stringify({
+          settings: "Tool limits for this transcript are unavailable.",
+          tools: props.tools,
+        })
+      : JSON.stringify(selectedAgentTools(props.tools, settings), null, 2);
+  });
   const stepTiming = createSessionStepTiming(
     () => props.messages,
     () => props.status ?? "idle",
@@ -455,34 +463,38 @@ export function SessionTranscript(props: {
   const renderStreamedMessage: StreamedMessageRenderer = (
     message,
     liveToolStreams,
-  ) => (
-    <>
-      <Show when={transcriptMessageIsVisible(message(), props.filters)}>
-        <TranscriptMessage
-          callArguments={() => counts().toolCallArguments}
-          filters={props.filters}
-          liveToolStreams={liveToolStreams()}
-          message={message()}
-          nestedScrollKey={
-            messageNestedScrollKeys().byMessageId.get(message().id) ??
-            message().id
-          }
-          onForkMessage={props.onFork}
-          streamEntries={toolStreamsByCallId}
-        />
-      </Show>
-      <Show when={stepTiming().completedTimings.get(message().id)}>
-        {(timing) => (
-          <TranscriptStepTiming
-            endedAt={timing().endedAt}
-            previousInputTokens={timing().previousInputTokens}
-            startedAt={timing().startedAt}
-            tokenUsage={timing().tokenUsage}
+  ) => {
+    const settings = createMemo(() => messageToolSettings(message()));
+    return (
+      <>
+        <Show when={transcriptMessageIsVisible(message(), props.filters)}>
+          <TranscriptMessage
+            callArguments={() => counts().toolCallArguments}
+            filters={props.filters}
+            liveToolStreams={liveToolStreams()}
+            message={message()}
+            settings={settings}
+            nestedScrollKey={
+              messageNestedScrollKeys().byMessageId.get(message().id) ??
+              message().id
+            }
+            onForkMessage={props.onFork}
+            streamEntries={toolStreamsByCallId}
           />
-        )}
-      </Show>
-    </>
-  );
+        </Show>
+        <Show when={stepTiming().completedTimings.get(message().id)}>
+          {(timing) => (
+            <TranscriptStepTiming
+              endedAt={timing().endedAt}
+              previousInputTokens={timing().previousInputTokens}
+              startedAt={timing().startedAt}
+              tokenUsage={timing().tokenUsage}
+            />
+          )}
+        </Show>
+      </>
+    );
+  };
   const renderMessage = (message: AgentSessionMessage): JSX.Element =>
     renderStreamedMessage(
       () => message,
@@ -491,11 +503,26 @@ export function SessionTranscript(props: {
   return (
     <>
       <Show when={props.filters.systemPrompt}>
-        {renderTranscriptInstruction({
-          boundaryKey: "system-prompt",
-          content: createAgentSystemPrompt(null, props.executionEnvironment),
-          label: "System prompt",
-        })}
+        <Show
+          fallback={renderTranscriptInstruction({
+            boundaryKey: "system-prompt",
+            content: "Tool limits for this transcript are unavailable.",
+            label: "System prompt",
+          })}
+          when={transcriptToolSettings()}
+        >
+          {(settings) =>
+            renderTranscriptInstruction({
+              boundaryKey: "system-prompt",
+              content: createAgentSystemPrompt(
+                null,
+                props.executionEnvironment,
+                settings(),
+              ),
+              label: "System prompt",
+            })
+          }
+        </Show>
       </Show>
       <Show when={props.filters.agentInstructions && props.agentFile !== null}>
         {renderTranscriptInstruction({
@@ -520,6 +547,7 @@ export function SessionTranscript(props: {
       >
         {(startedAt) => (
           <ActiveStepAnchor
+            settings={transcriptToolSettings()}
             messages={activeMessages()}
             render={renderStreamedMessage}
             timing={

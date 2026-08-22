@@ -147,6 +147,10 @@ export interface AgentLoopOptions {
   readonly executeTool: (
     call: ParsedAgentToolCall,
   ) => Promise<RunnerCommandResult | string>;
+  readonly finalizeToolResult?: (
+    result: RunnerCommandResult,
+    toolName: string,
+  ) => Promise<RunnerCommandResult> | RunnerCommandResult;
   readonly handoffRequested?: () => boolean;
   readonly initialMessages: readonly AgentConversationMessage[];
   readonly model: AgentModel;
@@ -179,6 +183,8 @@ const INVALID_ARGUMENTS_MESSAGE =
 
 export function throwIfAgentAborted(signal: AbortSignal | undefined): void {
   if (signal?.aborted === true) {
+    const reason: unknown = signal.reason;
+    if (reason instanceof DOMException) throw reason;
     throw new DOMException("The agent session was stopped", "AbortError");
   }
 }
@@ -367,6 +373,8 @@ export async function runAgentLoop(
         throw error;
       }
       throwIfAgentAborted(options.signal);
+      result =
+        (await options.finalizeToolResult?.(result, call.name)) ?? result;
       const toolMessage: AgentConversationMessage = {
         content: result.output,
         role: "tool",

@@ -139,6 +139,8 @@ export class SessionPendingInputController {
       sending: true,
     });
     this.#options.loader.noteMutationStarted();
+    const sessionId = this.#options.view.value.selectedId;
+    if (sessionId !== undefined) this.#options.realtime.rebaseStream(sessionId);
     return revision;
   }
 
@@ -202,17 +204,14 @@ export class SessionPendingInputController {
       }
       const authoritative = readSessionDetail(value["detail"]);
       const input = readSessionPendingInput(value["input"]);
-      if (
-        input.id !== inputId ||
-        !this.#options.view.patchCurrent(revision, {
-          followUp: input.content,
-          followUpImages: input.images,
-          sending: false,
-        })
-      ) {
+      if (input.id !== inputId || !this.#options.view.isCurrent(revision)) {
         return;
       }
-      this.#options.realtime.applyDetail(authoritative);
+      this.#applyAuthoritative(revision, authoritative, {
+        followUp: input.content,
+        followUpImages: input.images,
+        sending: false,
+      });
     } catch (error) {
       this.#options.view.patchCurrent(revision, {
         sending: false,
@@ -224,6 +223,15 @@ export class SessionPendingInputController {
     } finally {
       this.#finishMutation();
     }
+  }
+
+  #applyAuthoritative(
+    revision: number,
+    detail: AgentSessionDetail,
+    patch: Partial<SessionViewState>,
+  ): void {
+    this.#options.realtime.applyDetail(detail);
+    this.#options.view.patchCurrent(revision, patch);
   }
 
   async #sendAttempt(
@@ -260,8 +268,7 @@ export class SessionPendingInputController {
       }
       const authoritative = readSessionDetail(await pending.result);
       if (this.#options.view.isCurrent(revision)) {
-        this.#options.realtime.applyDetail(authoritative);
-        this.#options.view.patchCurrent(revision, {
+        this.#applyAuthoritative(revision, authoritative, {
           optimisticPendingInputs: this.#withoutAttempt(attempt),
           sending: false,
         });

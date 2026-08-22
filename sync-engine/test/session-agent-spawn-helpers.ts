@@ -1,7 +1,6 @@
 import { isRecord } from "../../shared/auth-model.ts";
-import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
-  completedParentDetail,
+  completedParentToolResult,
   toolCall,
   type startToolSession,
 } from "./session-agent-tool-setup.ts";
@@ -47,11 +46,16 @@ async function waitForRunnerSession(
   );
 }
 
+export async function failedSpawnOutput(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+): Promise<string> {
+  return (await completedParentToolResult(setup, "spawn_session")) ?? "";
+}
+
 export async function childSessionId(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): Promise<string> {
-  const parent = await completedParentDetail(setup, "idle");
-  const output = findToolResultContent(parent, "spawn_session");
+  const output = await completedParentToolResult(setup, "spawn_session");
   const parsed: unknown = JSON.parse(output ?? "null");
   if (!isRecord(parsed) || typeof parsed["sessionId"] !== "string") {
     throw new TypeError("The spawn tool did not return a session ID");

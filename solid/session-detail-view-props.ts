@@ -1,5 +1,6 @@
 import type { SessionForkSelection } from "../shared/session-fork.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
+import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { SessionCredentialOption } from "./session-credential-option.ts";
 import type { SessionRunnerViewProps } from "./session-runner-view-props.ts";
 
@@ -17,6 +18,7 @@ export interface SessionDetailViewProps extends Omit<
   readonly controller: SessionDetailForkController;
   readonly credentialAvailable?: boolean | undefined;
   readonly credentials: readonly SessionCredentialOption[];
+  readonly toolSettings?: ToolSettings | undefined;
 }
 
 export interface LoadedSessionDetailViewProps extends Omit<

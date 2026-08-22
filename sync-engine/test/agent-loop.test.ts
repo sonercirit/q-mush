@@ -5,7 +5,10 @@ import {
   type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
-import { createParallelToolUses } from "../../shared/test/parallel-fixtures.ts";
+import {
+  createParallelToolUses,
+  expectCompleteParallelPayload,
+} from "../../shared/test/parallel-fixtures.ts";
 import { createAgentSkills } from "../../sync-engine/agent-skills.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
@@ -561,7 +564,7 @@ describe("first-party agent loop", () => {
     });
   });
 
-  test("bounds parallel skill output without dropping the final result", async () => {
+  test("keeps complete parallel skill output for the shared final bound", async () => {
     const skills = testSkills({
       braveSearch: () => Promise.resolve("x".repeat(60 * 1_024)),
       executeTool: () => Promise.resolve("x".repeat(60 * 1_024)),
@@ -571,10 +574,8 @@ describe("first-party agent loop", () => {
       tool_uses: mixedIndexedCalls(20),
     });
 
-    expect(Buffer.byteLength(output ?? "", "utf8")).toBeLessThanOrEqual(
-      256 * 1_024,
-    );
-    expect(output).toContain("[parallel output truncated]");
+    const largePayload = "x".repeat(60 * 1_024);
+    expectCompleteParallelPayload(output ?? "", largePayload);
     const results: unknown = JSON.parse(output ?? "null");
     expect(Array.isArray(results) ? results.at(-1) : undefined).toMatchObject({
       recipient_name: "brave_search",
