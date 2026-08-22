@@ -46,9 +46,11 @@ function testSkills(options: {
 }
 
 export function registerParallelSkillExecutionTests(
+  suiteName: string | null,
   assertLargeOutput: (output: string) => void,
+  largeOutputTestName = "bounds parallel skill output without dropping the final result",
 ) {
-  describe("agent parallel skill execution", () => {
+  const registerTests = () => {
     test("executes mixed parallel tools and skills without dispatching the wrapper", async () => {
       const searchCalls: Readonly<Record<string, unknown>>[] = [];
       const runnerCalls: string[] = [];
@@ -175,7 +177,7 @@ export function registerParallelSkillExecutionTests(
       });
     });
 
-    test("bounds parallel skill output without dropping the final result", async () => {
+    test(largeOutputTestName, async () => {
       const skills = testSkills({
         braveSearch: () => Promise.resolve("x".repeat(60 * 1_024)),
         executeTool: () => Promise.resolve("x".repeat(60 * 1_024)),
@@ -273,5 +275,7 @@ export function registerParallelSkillExecutionTests(
         },
       ]);
     });
-  });
+  };
+  if (suiteName === null) registerTests();
+  else describe(suiteName, registerTests);
 }

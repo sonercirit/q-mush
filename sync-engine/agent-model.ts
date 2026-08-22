@@ -570,7 +570,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
     return protocol === "anthropic"
       ? validateAnthropicStepContinuation(
           step,
-          this.#anthropicReplayIdentity(resolvedModel),
+          this.#anthropicReplayIdentity(
+            resolvedModel ?? step.providerReplay?.model,
+          ),
         )
       : step;
   }

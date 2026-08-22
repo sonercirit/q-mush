@@ -238,7 +238,7 @@ function replayTool(caller?: AnthropicReplayObject): AnthropicReplayObject {
 }
 
 describe("Anthropic response replay", () => {
-  test("streams ordered thinking, redaction, text, and tool blocks", async () => {
+  test("streams tool calls and thinking from Messages events", async () => {
     const deltas: string[] = [];
     const harness = anthropicHarness(
       [
@@ -628,7 +628,7 @@ describe("Anthropic response replay", () => {
     expect(await completedTruncation(stopped)).toBe("max_tokens");
   });
 
-  test("parses omitted thinking and redaction from a JSON response", async () => {
+  test("parses a non-streaming JSON message response", async () => {
     const harness = anthropicHarness([
       Response.json({
         content: JSON_RESPONSE_REPLAY_BLOCKS,

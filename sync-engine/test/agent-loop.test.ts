@@ -5,8 +5,10 @@ import {
   type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
+import { expectCompleteParallelPayload } from "../../shared/test/parallel-fixtures.ts";
 import { createAgentSkills } from "../../sync-engine/agent-skills.ts";
-import { testBraveSearchSkill as braveSearchSkill } from "./agent-skill-test-helpers.ts";
+import { registerParallelSkillExecutionTests } from "./agent-parallel-skill-test-suite.ts";
+import { testBraveSearchSkill } from "./agent-skill-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
@@ -343,7 +345,7 @@ describe("first-party agent loop", () => {
     const searchCalls: Readonly<Record<string, unknown>>[] = [];
 
     const skills = createAgentSkills({
-      braveSearch: braveSearchSkill((arguments_) => {
+      braveSearch: testBraveSearchSkill((arguments_) => {
         searchCalls.push(arguments_);
         return Promise.resolve('{"results":[]}');
       }),
@@ -382,4 +384,12 @@ describe("first-party agent loop", () => {
     expect(searchCalls).toEqual([{ query: "Bun documentation" }]);
     expect(runnerCalls).toEqual([]);
   });
+
+  registerParallelSkillExecutionTests(
+    null,
+    (output) => {
+      expectCompleteParallelPayload(output, "x".repeat(60 * 1_024));
+    },
+    "keeps complete parallel skill output for the shared final bound",
+  );
 });

@@ -1,6 +1,8 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModelRequestOptions } from "../agent-model-options.ts";
-import { agentCredentialFingerprint } from "../agent-model-options.ts";
+import {
+  agentCredentialFingerprint,
+  type AgentModelRequestOptions,
+} from "../agent-model-options.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { anthropicReplayIdentityFrom } from "../anthropic-replay-identity.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";

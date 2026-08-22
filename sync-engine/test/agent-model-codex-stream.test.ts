@@ -8,7 +8,7 @@ import {
 } from "./codex-response-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
-describe("Codex streamed responses", () => {
+describe("chat completions agent model", () => {
   test("uses streamed Codex output when the completed response omits it", async () => {
     const model = new ChatCompletionsAgentModel(
       codexModelOptions({
