@@ -17,7 +17,6 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import { createServerWebSocket } from "../shared/server-websocket.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
 import {
   completionMessages,
@@ -33,6 +32,11 @@ import {
   type AgentProviderCredential,
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
+import {
+  defaultAgentModelWebSocket,
+  emptyOutputDelta,
+  headersRecord,
+} from "./agent-model-transport.ts";
 import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
 import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
@@ -216,21 +220,6 @@ function completionInput(
   };
 }
 
-function headersRecord(headers: Headers): Readonly<Record<string, string>> {
-  return Object.fromEntries(headers.entries());
-}
-
-function defaultWebSocket(
-  url: string,
-  options: { readonly headers: Readonly<Record<string, string>> },
-) {
-  return createServerWebSocket(url, options.headers);
-}
-
-function emptyOutputDelta(): ProviderTextDelta {
-  return { content: "", reset: true, thinking: "" };
-}
-
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
   #credential: AgentProviderCredential;
@@ -286,7 +275,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
       options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
     );
-    this.#webSocket = options.webSocket ?? defaultWebSocket;
+    this.#webSocket = options.webSocket ?? defaultAgentModelWebSocket;
   }
 
   readonly startStep = (): void => {
