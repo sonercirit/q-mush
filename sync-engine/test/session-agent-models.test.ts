@@ -163,10 +163,11 @@ describe("session agent models", () => {
 
   test("constructs one runtime refresher and shares it with agent, compactor, and native attachment models", () => {
     const { factory, selections } = modelSelections();
-    const refreshCredential = async () => ({
-      ...CREDENTIAL,
-      source: "oauth" as const,
-    });
+    const refreshCredential = () =>
+      Promise.resolve({
+        ...CREDENTIAL,
+        source: "oauth" as const,
+      });
     const models = createSessionAgentModels({
       agentFile: null,
       credential: { ...CREDENTIAL, source: "oauth" },
