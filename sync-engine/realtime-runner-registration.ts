@@ -196,12 +196,13 @@ function releaseInMemoryRestart(
   gate: RegistrationGate,
 ): void {
   const runnerId = pending.committed?.id;
+  const restart = gate.inMemoryRestart;
   if (
     runnerId !== undefined &&
     gate.restartGateRequired &&
     gate.lifecycle === "restart" &&
-    gate.inMemoryRestart !== undefined &&
-    runnerRestarts.get(runnerId) === gate.inMemoryRestart
+    restart?.settled === true &&
+    runnerRestarts.get(runnerId) === restart
   ) {
     runnerRestarts.delete(runnerId);
   }

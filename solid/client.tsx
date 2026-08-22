@@ -38,11 +38,13 @@ import {
   RenderDebugToggle,
   RenderDebugView,
 } from "./render-debug.tsx";
+import { restartProgressNotice } from "./restart-progress.ts";
 import { RunnerController } from "./runner-controller.ts";
 import { SessionController } from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
+import { ToolSettingsController } from "./tool-settings-controller.ts";
 import { WorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
 
@@ -274,6 +276,8 @@ function SignIn(props: {
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
+  const [restartProgress, setRestartProgress] =
+    createSignal<Parameters<typeof restartProgressNotice>[0]>();
   const [storageHealth, setStorageHealth] =
     createSignal<EngineHealthSnapshot>();
   const [session, setSession] = createSignal<AuthSession>();
@@ -285,51 +289,65 @@ function App(): JSX.Element {
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = new PromptController();
   const runners = new RunnerController();
-  const realtime = new RealtimeConnection((event) => {
-    switch (event.type) {
-      case "health":
-        setStorageHealth(event.health);
-        break;
-      case "runners":
-        runners.applyRealtime(event.runners);
-        break;
-      case "sessions":
-        agentSessions.applyRealtime(event.sessions);
-        break;
-      case "session":
-        agentSessions.applyDetail(event.session);
-        break;
-      case "session_questions":
-        agentSessions.applyQuestions(event);
-        break;
-      case "sessions_changed":
-        void agentSessions.refresh();
-        break;
-      case "session_compaction_request":
-      case "session_compaction_settled":
-        agentSessions.applyCompaction(event);
-        break;
-      case "session_delta":
-        agentSessions.applyDelta(event);
-        break;
-      case "tool_stream":
-        agentSessions.applyToolDelta(event);
-        break;
-      case "tool_stream_snapshot":
-        agentSessions.applyToolSnapshot(event);
-        break;
-      case "command_error":
-      case "command_success":
-      case "ready":
-        break;
-    }
-  });
-  const agentSessions = new SessionController(undefined, undefined, undefined, {
-    command: (operation, payload, idempotencyKey) =>
-      realtime.command(operation, payload, idempotencyKey),
-    onReconnect: (listener) => realtime.onReconnect(listener),
-    yieldToStateApplication: () => realtime.yieldToStateApplication(),
-  });
+  const toolSettings = new ToolSettingsController();
+  const realtime: RealtimeConnection = new RealtimeConnection(
+    (event) => {
+      switch (event.type) {
+        case "health":
+          setStorageHealth(event.health);
+          break;
+        case "development_restart_progress":
+          setRestartProgress(event.progress);
+          break;
+        case "runners":
+          runners.applyRealtime(event.runners);
+          break;
+        case "tool_settings":
+          toolSettings.apply(event.settings);
+          break;
+        case "sessions":
+          agentSessions.applyRealtime(event.sessions);
+          break;
+        case "session":
+          agentSessions.applyDetail(event.session);
+          break;
+        case "session_questions":
+          agentSessions.applyQuestions(event);
+          break;
+        case "sessions_changed":
+          void agentSessions.refresh();
+          break;
+        case "session_compaction_request":
+        case "session_compaction_settled":
+          agentSessions.applyCompaction(event);
+          break;
+        case "stream_batch":
+          agentSessions.applyStreamBatch(event);
+          break;
+        case "tool_stream_snapshot":
+          agentSessions.applyToolSnapshot(event);
+          break;
+        case "command_error":
+        case "command_success":
+        case "ready":
+          break;
+      }
+    },
+    {
+      selectedSession: (): string | undefined => agentSessions.state.selectedId,
+    },
+  );
+  const agentSessions: SessionController = new SessionController(
+    undefined,
+    undefined,
+    undefined,
+    {
+      command: (operation, payload, idempotencyKey) =>
+        realtime.command(operation, payload, idempotencyKey),
+      onReconnect: (listener) => realtime.onReconnect(listener),
+      yieldToStateApplication: () => realtime.yieldToStateApplication(),
+    },
+  );
   const providerControllers = [
     openAi,
     openRouter,
@@ -339,6 +357,7 @@ function App(): JSX.Element {
   let scopedLoadRevision = 0;
   const reloadScopedData = (workspaceId: string): void => {
     const revision = ++scopedLoadRevision;
+    setRestartProgress(undefined);
     realtime.stop();
     agentSessions.setWorkspace(workspaceId);
     runners.setWorkspace(workspaceId);
@@ -379,6 +398,7 @@ function App(): JSX.Element {
     workspaces.reset();
     prompts.reset();
     runners.reset();
+    toolSettings.reset();
     for (const controller of providerControllers) {
       controller.reset();
     }
@@ -393,7 +413,11 @@ function App(): JSX.Element {
       const loaded = readAuthSession(await requestJson(AUTH_SESSION_PATH));
       setSession(loaded);
       if (loaded.user !== null) {
-        await Promise.all([prompts.load(), workspaces.load()]);
+        await Promise.all([
+          prompts.load(),
+          toolSettings.load(),
+          workspaces.load(),
+        ]);
       }
     } catch {
       resetWorkspaceConnections();
@@ -456,6 +480,16 @@ function App(): JSX.Element {
             <p class="mt-5 max-w-2xl text-lg leading-8 text-slate-400">
               Coordinate your local swarm from one authenticated workspace.
             </p>
+            <Show when={restartProgressNotice(restartProgress())}>
+              {(notice) => (
+                <p
+                  class="mt-8 rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-sm text-cyan-100"
+                  role="status"
+                >
+                  {notice()}
+                </p>
+              )}
+            </Show>
             <Show when={storageHealthWarning(storageHealth())}>
               {(warning) => (
                 <p
@@ -507,6 +541,7 @@ function App(): JSX.Element {
                           openRouter={openRouter}
                           prompts={prompts}
                           runners={runners}
+                          toolSettings={toolSettings}
                           user={user()}
                           workspaces={workspaces}
                         />

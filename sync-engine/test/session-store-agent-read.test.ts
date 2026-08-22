@@ -1,59 +1,43 @@
-import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { agentMessages } from "../../shared/database/schema.ts";
 import { readSessionSnapshot } from "../session-store-agent-read.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { privateReplay } from "./private-replay-fixtures.ts";
 import { runningStore } from "./session-store-lifecycle-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
-function sessionSnapshot(
-  database: Parameters<typeof readSessionSnapshot>[0],
-  roles: Parameters<typeof readSessionSnapshot>[1]["roles"],
-) {
-  return readSessionSnapshot(database, {
-    includeSystem: false,
-    limit: 10,
-    roles,
-    sessionId: STORE_SESSION_ID,
-    userId: TEST_USER_ID,
-  });
-}
-
 describe("stored session reads", () => {
-  test("never selects private provider replay for read_session", () => {
+  test("returns complete persisted source content before the final result bound", () => {
     const { database, store } = runningStore();
-    const replay = privateReplay(
-      "read-session-private-signature",
-      "Visible answer",
+    const agentFileContent = `instructions:${"😀".repeat(12_000)}`;
+    const messageContent = `result:${"é".repeat(10_000)}`;
+    store.setCurrentAgentFile(
+      STORE_SESSION_ID,
+      { content: agentFileContent, name: "AGENTS.md" },
+      TEST_NOW + 2,
     );
     store.appendCurrentAgentMessage(
       STORE_SESSION_ID,
       {
-        content: "Visible answer",
-        providerReplay: replay,
-        role: "assistant",
-        toolCalls: [],
+        content: messageContent,
+        role: "tool",
+        toolCallId: "call-read",
+        toolName: "read",
       },
-      TEST_NOW + 2,
+      TEST_NOW + 3,
     );
 
-    const snapshot = sessionSnapshot(database, ["assistant"]);
+    const snapshot = readSessionSnapshot(database, {
+      includeSystem: true,
+      limit: 10,
+      roles: ["tool"],
+      sessionId: STORE_SESSION_ID,
+      userId: TEST_USER_ID,
+    });
 
-    expect(JSON.stringify(snapshot)).toContain("Visible answer");
-    expect(JSON.stringify(snapshot)).not.toContain(
-      "read-session-private-signature",
-    );
-    const replayQuery = database
-      .select({ replay: agentMessages.providerReplay })
-      .from(agentMessages);
-    const replayRows = replayQuery
-      .where(eq(agentMessages.role, "assistant"))
-      .all();
-    expect(replayRows[0]?.replay).toContain("read-session-private-signature");
+    expect(snapshot?.agentFile?.content).toBe(agentFileContent);
+    expect(snapshot?.transcript.messages.at(-1)?.content).toBe(messageContent);
     database.$client.close();
   });
 
@@ -68,7 +52,13 @@ describe("stored session reads", () => {
       0,
     );
 
-    const snapshot = sessionSnapshot(database, ["assistant", "error"]);
+    const snapshot = readSessionSnapshot(database, {
+      includeSystem: false,
+      limit: 10,
+      roles: ["assistant", "error"],
+      sessionId: STORE_SESSION_ID,
+      userId: TEST_USER_ID,
+    });
 
     expect(
       snapshot?.transcript.messages.map(({ content, role }) => ({

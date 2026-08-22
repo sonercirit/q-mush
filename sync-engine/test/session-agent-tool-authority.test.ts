@@ -7,8 +7,10 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
+  completedRunToolOutputs,
   completingTestBroker,
   IDLE_RUNTIME_SIGNALS,
+  runtimeTestCredential,
 } from "./session-agent-runtime-test-helpers.ts";
 import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
 import {
@@ -16,7 +18,6 @@ import {
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
-import { TEST_REPLAY_IDENTITY } from "./session-replay-test-helpers.ts";
 
 function currentExecution(
   store: ReturnType<typeof runningCompactionStore>["store"],
@@ -71,42 +72,38 @@ describe("session agent tool authority", () => {
     let toolReads = 0;
     let now = TEST_NOW + 2;
 
-    await expect(
-      runSessionAgent({
-        braveSearch: { execute: () => Promise.resolve("unused search") },
-        broker,
-        credential: {
-          accountId: null,
-          id: detail.credentialId,
-          isDefault: true,
-          label: "Tool authority credential",
-          secret: "provider-secret",
-          source: "api_key",
-        },
-        currentTools: () => {
-          toolReads += 1;
-          return toolReads === 1 ? detail.tools : [];
-        },
-        detail,
-        ...IDLE_RUNTIME_SIGNALS,
-        isCurrent: () =>
-          currentExecution(setup.store, detail.id, detail.generation),
-        modelFactory: () => model,
-        now: () => (now += 1),
-        sessionTools: unusedSessionToolActions({
-          listRunners: () => "runners remain enabled",
-          listSessions: () => "sessions remain enabled",
-        }),
-        signal: new AbortController().signal,
-        store: setup.store,
-        userId: TEST_USER_ID,
+    const authorityRun = runSessionAgent({
+      braveSearch: { execute: () => Promise.resolve("unused search") },
+      broker,
+      pendingComponent: () => undefined,
+      credential: runtimeTestCredential(
+        detail.credentialId,
+        "Tool authority credential",
+      ),
+      currentTools: () => {
+        toolReads += 1;
+        return toolReads === 1 ? detail.tools : [];
+      },
+      detail,
+      ...IDLE_RUNTIME_SIGNALS,
+      isCurrent: () =>
+        currentExecution(setup.store, detail.id, detail.generation),
+      modelFactory: () => model,
+      now: () => (now += 1),
+      sessionTools: unusedSessionToolActions({
+        listRunners: () => "runners remain enabled",
+        listSessions: () => "sessions remain enabled",
       }),
-    ).resolves.toBe("complete");
+      signal: new AbortController().signal,
+      store: setup.store,
+      userId: TEST_USER_ID,
+    });
 
-    const outputs = setup.store
-      .conversation(detail.id, TEST_REPLAY_IDENTITY)
-      .filter(({ role }) => role === "tool")
-      .map(({ content }) => content);
+    const outputs = await completedRunToolOutputs(
+      authorityRun,
+      setup.store,
+      detail.id,
+    );
     expect(outputs).toHaveLength(2);
     expect(outputs[0]).toBe("sessions remain enabled");
     expect(outputs[1]).toContain("sessions remain enabled");

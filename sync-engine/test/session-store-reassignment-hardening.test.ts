@@ -81,14 +81,33 @@ function pauseRunningSessionForRestart(store: SessionStore): void {
   ).toBe(true);
 }
 
+function removeRunner(
+  database: Parameters<typeof removeTestRunner>[0]["database"],
+  store: SessionStore,
+): void {
+  expect(removeTestRunner({ database, store }, RUNNER_ID, TEST_NOW + 4)).toBe(
+    true,
+  );
+}
+
+function setSessionFields(
+  database: Parameters<typeof removeTestRunner>[0]["database"],
+  values: Partial<typeof agentSessions.$inferInsert>,
+): void {
+  const sessionIdCondition = eq(agentSessions.id, SESSION_ID);
+  database
+    .update(agentSessions)
+    .set({ ...values })
+    .where(sessionIdCondition)
+    .run();
+}
+
 describe("session store runner reassignment", () => {
   test("reassigns only an owned runner-required session with a new path", () => {
     const { database, store } = runningStore();
     const replacementId = "018bcfe5-6800-7000-8000-000000000099";
     addReplacementRunner(database, replacementId);
-    expect(removeTestRunner({ database, store }, RUNNER_ID, TEST_NOW + 4)).toBe(
-      true,
-    );
+    removeRunner(database, store);
 
     const before = store.get(TEST_USER_ID, SESSION_ID);
     expect(before?.turns).toHaveLength(1);
@@ -122,14 +141,40 @@ describe("session store runner reassignment", () => {
     closeHardeningDatabase({ database, store });
   });
 
+  test("preserves stable spawned lineage while reassignment advances the child", () => {
+    const { database, store } = runningStore();
+    const parentId = "018bcfe5-6800-7000-8000-000000000098";
+    const replacementId = "018bcfe5-6800-7000-8000-000000000099";
+    addReplacementRunner(database, replacementId);
+    setSessionFields(database, {
+      parentCallbackGeneration: null,
+      parentExecutionGeneration: 7,
+      parentSessionId: parentId,
+    });
+    removeRunner(database, store);
+
+    const reassigned = reassignSession(
+      store,
+      replacementId,
+      "/replacement/project",
+    );
+
+    expect(reassigned).toMatchObject({
+      detail: {
+        generation: 2,
+        parentExecutionGeneration: 7,
+        parentSessionId: parentId,
+        status: "idle",
+      },
+      status: "reassigned",
+    });
+    closeHardeningDatabase({ database, store });
+  });
+
   test("rejects reassignment while a restart handoff is paused", () => {
     const { database, store } = runningStore();
     pauseRunningSessionForRestart(store);
-    database
-      .update(agentSessions)
-      .set({ runnerRequired: true })
-      .where(eq(agentSessions.id, SESSION_ID))
-      .run();
+    setSessionFields(database, { runnerRequired: true });
     const replacementId = "018bcfe5-6800-7000-8000-000000000099";
     addReplacementRunner(database, replacementId);
     const paused = requireSession(store, SESSION_ID);

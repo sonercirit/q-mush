@@ -67,6 +67,31 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
   expect(second.messages).toHaveLength(2);
 });
 
+test("publishes user-wide settings to every owned workspace without cross-user leakage", () => {
+  const hub = new RealtimeHub();
+  const firstWorkspace = new RecordingRealtimeSocket();
+  const secondWorkspace = new RecordingRealtimeSocket();
+  const global = new RecordingRealtimeSocket();
+  const otherUser = new RecordingRealtimeSocket();
+  hub.setUser("user-1", firstWorkspace, true, "workspace-1");
+  hub.setUser("user-1", secondWorkspace, true, "workspace-2");
+  hub.setUser("user-1", global, true);
+  hub.setUser("user-2", otherUser, true, "workspace-1");
+
+  hub.publishUserAllWorkspaces("user-1", {
+    settings: { executionLimitMinutes: 7, outputLimitCharacters: 12_345 },
+    type: "tool_settings",
+  });
+
+  const expected = [
+    '{"settings":{"executionLimitMinutes":7,"outputLimitCharacters":12345},"type":"tool_settings"}',
+  ];
+  expect(firstWorkspace.messages).toEqual(expected);
+  expect(secondWorkspace.messages).toEqual(expected);
+  expect(global.messages).toEqual(expected);
+  expect(otherUser.messages).toEqual([]);
+});
+
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
   const hub = new RealtimeHub();
 

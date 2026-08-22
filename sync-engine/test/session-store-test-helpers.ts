@@ -1,3 +1,5 @@
+import type { AppDatabase } from "../../shared/database.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -6,7 +8,10 @@ import {
 import { takeValue } from "./oauth-test-helpers.ts";
 import { createRunningTestSession } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
-import { testSessionInput } from "./session-store-test-fixtures.ts";
+import {
+  emptyRuntimes,
+  testSessionInput,
+} from "./session-store-test-fixtures.ts";
 
 const RUNNER_ID = "018bcfe5-6800-7000-8000-000000000041";
 const CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000042";
@@ -29,10 +34,13 @@ function storeWithRunner() {
   ];
   const generateId = () =>
     takeValue(credentialIds, "The hardening test ran out of IDs");
-  return {
+  const store = new SessionStore(
     database,
-    store: new SessionStore(database, generateId),
-  };
+    generateId,
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
+  );
+  return { database, store };
 }
 
 export function createSessionStoreTestSetup() {
@@ -48,4 +56,17 @@ export function createSessionStoreTestSetup() {
     SESSION_ID,
   );
   return setup;
+}
+
+export function testStoreReadResources(
+  database: AppDatabase,
+  store: SessionStore,
+) {
+  return {
+    database,
+    generateId: () => crypto.randomUUID(),
+    toolSettings: () => DEFAULT_TOOL_SETTINGS,
+    read: (userId: string, sessionId: string, workspaceId?: string) =>
+      store.get(userId, sessionId, workspaceId),
+  };
 }

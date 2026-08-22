@@ -15,6 +15,7 @@ import {
 } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   insertStoredMessage,
   recordedMessageValues,
@@ -162,6 +163,7 @@ function storedSessionValues(
   options: Readonly<{
     parentExecutionGeneration: number | null;
     parentSessionId: string | null;
+    spawnPreparationPending: boolean;
     status: "idle" | "queued";
     title: string;
   }>,
@@ -180,7 +182,10 @@ function storedSessionValues(
     model: input.model,
     openRouterProviderTag: input.openRouterProviderTag,
     parentExecutionGeneration: options.parentExecutionGeneration,
+    parentCallbackGeneration: options.parentExecutionGeneration,
+    parentReportedGeneration: -1,
     parentSessionId: options.parentSessionId,
+    spawnPreparationPending: options.spawnPreparationPending,
     provider: input.provider,
     providerCredentialId: input.credentialId,
     providerPricing: serializeProviderPricing(input.providerPricing),
@@ -233,18 +238,15 @@ export function createStoredSession(
       parentGeneration !== undefined &&
       input.parentUserInitiated === true
     ) {
-      const parent = transaction
-        .select({ generation: agentSessions.executionGeneration })
-        .from(agentSessions)
-        .where(
-          runnerReadySessionCondition({
-            id: parentSessionId,
-            userId: input.userId,
-            workspaceId: input.workspaceId,
-          }),
-        )
-        .get();
-      if (parent?.generation !== parentGeneration) {
+      const parentGenerationAtCreation = readStoredSessionGeneration({
+        condition: runnerReadySessionCondition({
+          id: parentSessionId,
+          userId: input.userId,
+          workspaceId: input.workspaceId,
+        }),
+        database: transaction,
+      });
+      if (parentGenerationAtCreation !== parentGeneration) {
         return "parent_stale" as const;
       }
     }
@@ -268,6 +270,9 @@ export function createStoredSession(
       storedSessionValues({ ...input, runnerRequired: false }, sessionId, now, {
         parentExecutionGeneration: input.parentGeneration ?? null,
         parentSessionId: input.parentSessionId ?? null,
+        spawnPreparationPending:
+          input.parentSessionId !== undefined &&
+          input.parentUserInitiated !== true,
         status: "queued",
         title: titleFromPrompt(input.prompt),
       }),
@@ -280,6 +285,7 @@ export function createStoredSession(
       now,
       segment: 0,
       sessionId,
+      toolSettings: resources.toolSettings(input.userId),
       userId: input.userId,
     });
     const activeTurnId = activeSessionTurnId(transaction, sessionId);
@@ -371,6 +377,7 @@ export function forkStoredSession(
       storedSessionValues(session, sessionId, now, {
         parentExecutionGeneration: null,
         parentSessionId: null,
+        spawnPreparationPending: false,
         status: "idle",
         title: `Fork of ${input.source.title}`.slice(0, 80),
       }),

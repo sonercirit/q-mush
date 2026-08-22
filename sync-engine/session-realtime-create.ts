@@ -19,11 +19,13 @@ import {
   requireJsonResponse,
   successfulCredentialAttempt,
 } from "./session-realtime-errors.ts";
+import { captureRestartSignal } from "./session-restart-gate.ts";
 import type { SessionRunnerAvailability } from "./session-runner-availability.ts";
 
 interface BalancedSessionCreationDependencies extends SessionCreationDependencies {
   readonly modelCredentialPool: ModelCredentialPool;
   readonly readCredential: SessionCreationCredentialReader;
+  readonly restartSignal: () => AbortSignal;
   readonly runnerIsAvailable: SessionRunnerAvailability;
 }
 
@@ -39,6 +41,13 @@ export async function createSessionWithCredentialPool(
 ): SessionRealtimeActionResult {
   const { dependencies, input, user, workspaceId } = options;
   const scopedInput = { ...input, workspaceId };
+  const { signal: restartSignal } = captureRestartSignal(
+    dependencies.restartSignal,
+  );
+  const restarting = (): boolean => restartSignal.aborted;
+  if (restarting()) {
+    throw new RealtimeCommandError("server_restarting");
+  }
   if (!dependencies.runnerIsAvailable(user.id, input.runnerId, workspaceId)) {
     throw new RealtimeCommandError("runner_unavailable");
   }
@@ -46,6 +55,9 @@ export async function createSessionWithCredentialPool(
   const credentials = balanced
     ? await dependencies.modelCredentialPool.candidates(user.id, scopedInput)
     : [await dependencies.readCredential(user.id, scopedInput)];
+  if (restarting()) {
+    throw new RealtimeCommandError("server_restarting");
+  }
   requireCredentialCandidates(credentials);
   return successfulCredentialAttempt(
     attemptBalancedCredentials<AgentSessionDetail, typeof scopedInput>({
@@ -57,9 +69,12 @@ export async function createSessionWithCredentialPool(
               ...dependencies,
               rejectCredentialErrors: balanced,
             },
-            user,
-            resolvedInput,
-            credential,
+            {
+              credential,
+              input: resolvedInput,
+              restartSignal,
+              user,
+            },
           );
           if ("error" in metadata) {
             await requireJsonResponse(sessionMetadataErrorResponse(metadata));
@@ -77,6 +92,7 @@ export async function createSessionWithCredentialPool(
             resolvedInput,
             credential,
             metadata,
+            restartSignal,
           );
           await requireJsonResponse(response);
           if (created.detail === undefined) {

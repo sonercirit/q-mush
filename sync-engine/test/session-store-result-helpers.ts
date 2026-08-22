@@ -4,10 +4,11 @@ import type { CreateSessionResult } from "../../sync-engine/session-store-create
 
 export function requireCreatedSession(
   created: CreateSessionResult,
+  unavailable = "The test session runner is unavailable",
 ): AgentSessionDetail {
   expect(created.status).toBe("created");
   if (created.status !== "created") {
-    throw new Error("The test session runner is unavailable");
+    throw new Error(unavailable);
   }
   return created.detail;
 }

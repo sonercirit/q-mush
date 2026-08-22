@@ -69,12 +69,21 @@ function rawInterruptedMarker(setup: RestartStoreSetup): string | null {
   );
 }
 
+function requiredProjectedSession(
+  setup: RestartStoreSetup,
+  message: string,
+): NonNullable<ReturnType<typeof projectedSession>> {
+  const session = projectedSession(setup);
+  if (session === undefined) throw new Error(message);
+  return session;
+}
+
 test("restores a running session from a durable shutdown interruption marker", () => {
   const setup = runningRestartStore();
-  const running = projectedSession(setup);
-  if (running === undefined) {
-    throw new Error("The shutdown interruption session is unavailable");
-  }
+  const running = requiredProjectedSession(
+    setup,
+    "The shutdown interruption session is unavailable",
+  );
   const interrupted = interruptedStore(setup);
 
   expect(
@@ -105,6 +114,35 @@ test("restores a running session from a durable shutdown interruption marker", (
   expect(rawInterruptedMarker(setup)).toBeNull();
   expect(recovered).not.toMatchObject({ status: "failed" });
   expect(setup.store.failInterrupted(TEST_NOW + 4)).toHaveLength(0);
+  closeCompactionStore(setup);
+});
+
+test("retains the run settings across shutdown recovery", () => {
+  const setup = runningRestartStore();
+  const running = requiredProjectedSession(
+    setup,
+    "The shutdown settings session is unavailable",
+  );
+  const snapshot = setup.store.toolSettings(running.id, running.generation);
+  const interrupted = new ShutdownInterruptedSessionStore({
+    database: setup.database,
+    generateId: () => `shutdown-settings-${crypto.randomUUID()}`,
+  });
+
+  expect(
+    interrupted.mark(
+      running.id,
+      running.generation,
+      "settings-shutdown",
+      "agent",
+      TEST_NOW + 2,
+    ),
+  ).toBe(true);
+  interrupted.restore(TEST_NOW + 3);
+
+  expect(setup.store.toolSettings(running.id, running.generation + 1)).toEqual(
+    snapshot,
+  );
   closeCompactionStore(setup);
 });
 

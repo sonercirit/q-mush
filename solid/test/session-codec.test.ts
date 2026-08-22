@@ -61,6 +61,24 @@ test("projects session details to summary-only fields", () => {
   expect(summary.adaptiveThinking).toBe(DETAIL.adaptiveThinking);
 });
 
+test("reads and validates persisted message turn identities", () => {
+  const persisted = {
+    ...testUserImageMessage("message-turn", "Durable output"),
+    images: [],
+    turnId: "turn-120-minutes",
+  };
+
+  expect(
+    readSessionDetail({ ...DETAIL, messages: [persisted] }).messages[0]?.turnId,
+  ).toBe("turn-120-minutes");
+  expect(() =>
+    readSessionDetail({
+      ...DETAIL,
+      messages: [{ ...persisted, turnId: 42 }],
+    }),
+  ).toThrow("invalid session message");
+});
+
 test("reads message image metadata from the server", () => {
   const detail = {
     ...DETAIL,
@@ -105,6 +123,39 @@ test("reads generic provider sessions", () => {
   expect(readSessionDetail({ ...DETAIL, provider: "generic" }).provider).toBe(
     "generic",
   );
+});
+
+test("reads and validates a running session pending component", () => {
+  const pending = { component: "provider_admission" as const, since: 7 };
+  expect(
+    readSessionDetail({
+      ...DETAIL,
+      runtimePending: pending,
+      status: "running",
+    }).runtimePending,
+  ).toEqual(pending);
+  for (const invalid of [
+    { ...DETAIL, runtimePending: undefined },
+    { ...DETAIL, runtimePending: pending },
+    {
+      ...DETAIL,
+      runtimePending: { component: "unknown", since: 7 },
+      status: "running",
+    },
+    {
+      ...DETAIL,
+      runtimePending: { component: "provider_request", since: 1.5 },
+      status: "running",
+    },
+    // Keep this construction distinct from the adjacent fractional-value case
+    // so the zero-threshold CPD check does not conflate separate codec bounds.
+    Object.assign({}, DETAIL, {
+      runtimePending: { component: "provider_request", since: -1 },
+      status: "running",
+    }),
+  ]) {
+    expectInvalidSession(invalid);
+  }
 });
 
 test("reads persisted session error messages", () => {

@@ -4,9 +4,10 @@ import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { SessionForkInput } from "../../shared/session-fork.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { AgentModelDiscoveryError } from "../agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
+import { SessionRestartAbort } from "../session-restart-abort.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -15,6 +16,8 @@ import {
   TEST_NOW,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+
+import { restartCanceledDiscovery } from "./session-restart-gate-fixtures.ts";
 
 const FIRST_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000091";
 const SECOND_CREDENTIAL_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -79,6 +82,7 @@ function forkDependencies(
     modelCredentialPool: modelCredentialPool ?? singleCredentialPool(),
     notify: vi.fn(),
     now: () => TEST_NOW,
+    restartSignal: () => new AbortController().signal,
     store: { fork: storeFork },
   };
 }
@@ -153,6 +157,22 @@ describe("balanced session forks", () => {
     setup.database.$client.close();
   });
 
+  test("returns server_restarting without writing when discovery is canceled", async () => {
+    const canceled = restartCanceledDiscovery();
+    const storeFork = vi.fn(() => FORKED_RESULT);
+    const dependencies = forkDependencies(
+      canceled.discover,
+      undefined,
+      storeFork,
+    );
+    dependencies.restartSignal = () => canceled.controller.signal;
+
+    await expect(fork(dependencies)).rejects.toMatchObject({
+      code: "server_restarting",
+    });
+    expect(storeFork).not.toHaveBeenCalled();
+  });
+
   test("preserves explicit credential metadata fallback", async () => {
     const storeFork = vi.fn(() => FORKED_RESULT);
     const dependencies = forkDependencies(
@@ -176,4 +196,30 @@ describe("balanced session forks", () => {
       }),
     );
   });
+});
+
+test("recovery replacement cannot fork after credential candidates resolve", async () => {
+  const restart = new SessionRestartAbort();
+  const storeFork = vi.fn(() => FORKED_RESULT);
+  const pool = singleCredentialPool();
+  const dependencies = forkDependencies(
+    () => Promise.resolve(catalog()),
+    undefined,
+    storeFork,
+  );
+  dependencies.modelCredentialPool = {
+    ...pool,
+    candidates: () => {
+      restart.abort("restart");
+      restart.restore();
+      return pool.candidates();
+    },
+  };
+  dependencies.restartSignal = () => restart.signal;
+
+  await expect(fork(dependencies)).rejects.toHaveProperty(
+    "code",
+    "server_restarting",
+  );
+  expect(storeFork).toHaveBeenCalledTimes(0);
 });

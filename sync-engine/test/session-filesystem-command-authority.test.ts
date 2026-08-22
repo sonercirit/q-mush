@@ -7,6 +7,7 @@ import {
 } from "../../shared/runner-directory-model.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { loadSessionAgentFile } from "../../sync-engine/session-agent-file.ts";
 import {
@@ -21,8 +22,9 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import {
   EMPTY_SESSION_REQUEST_MODEL_METADATA,
-  sessionAgentActionDefaults,
+  inactiveSessionAgentActionDefaults,
 } from "./session-race-test-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
 const RUNNER_ID = "runner-filesystem";
 const SESSION_ID = "session-filesystem";
@@ -185,7 +187,7 @@ test("passes a custom agent file path to the runner", async () => {
   await expect(result).resolves.toBeNull();
 });
 
-test("cancellation uses the parent session identity for agent-file and directory commands", async () => {
+test("broker cancellation reaches a directory request", async () => {
   const broker = queuedBroker();
   const setup = helpers(broker);
   const signal = new AbortController().signal;
@@ -205,12 +207,30 @@ test("cancellation uses the parent session identity for agent-file and directory
 
 function actionDefaults() {
   return {
-    ...sessionAgentActionDefaults(),
-    abortSession: () => undefined,
-    activeSession: () => false,
+    ...inactiveSessionAgentActionDefaults(),
     notify: () => undefined,
   };
 }
+
+test("a directory deadline retains its abort reason", async () => {
+  const controller = new AbortController();
+  const broker = queuedBroker();
+  const setup = helpers(broker);
+  const result = setup.requests.browseDirectories(
+    directoryRequest(() => true),
+    controller.signal,
+  );
+  const reason = new DOMException("Directory deadline", "TimeoutError");
+
+  controller.abort(reason);
+
+  const failure = await result.catch((error: unknown) => error);
+  expect(failure).toMatchObject({
+    message: "Directory deadline",
+    name: "TimeoutError",
+  });
+  setup.close();
+});
 
 test("agent directory browsing passes parent identity, authorization, and signal", async () => {
   const signal = new AbortController().signal;
@@ -231,7 +251,12 @@ test("agent directory browsing passes parent identity, authorization, and signal
     },
   );
   const database = createAuthenticatedTestDatabase();
-  const store = new CurrentSessionStore(database);
+  const store = new CurrentSessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
+  );
   const session = testSession();
   const actions = new SessionAgentActions({
     ...actionDefaults(),
@@ -239,7 +264,6 @@ test("agent directory browsing passes parent identity, authorization, and signal
     database,
     discoverSessionMetadata: () =>
       Promise.resolve(EMPTY_SESSION_REQUEST_MODEL_METADATA),
-    draining: () => false,
     launchSession: () => true,
     listOnlineRunners: () => [
       {
@@ -259,11 +283,51 @@ test("agent directory browsing passes parent identity, authorization, and signal
     readCredential: () => Promise.resolve(undefined),
     store,
     withCredential: () => Promise.resolve(new Response()),
-  }).actions(session.id, TEST_USER_ID, session.generation, signal);
+  }).actions(
+    session.id,
+    TEST_USER_ID,
+    session.generation,
+    DEFAULT_TOOL_SETTINGS,
+  );
 
   await expect(
-    actions.browseRunnerDirectories(RUNNER_ID, WORKING_DIRECTORY),
+    actions.browseRunnerDirectories(
+      RUNNER_ID,
+      WORKING_DIRECTORY,
+      new AbortController().signal,
+    ),
   ).resolves.toContain(`"path": "${WORKING_DIRECTORY}"`);
   expect(browse).toHaveBeenCalledOnce();
+
+  // The action layer forwards the per-call deadline directly; it no longer
+  // composes a redundant session signal.
+  const deadline = new AbortController();
+  const combinedSignals: AbortSignal[] = [];
+  browse.mockImplementation((_request, receivedSignal) => {
+    combinedSignals.push(receivedSignal);
+    return Promise.resolve({
+      listing: {
+        directories: [],
+        parent: null,
+        path: WORKING_DIRECTORY,
+        truncated: false,
+      },
+      status: "listed" as const,
+    });
+  });
+  await actions.browseRunnerDirectories(
+    RUNNER_ID,
+    WORKING_DIRECTORY,
+    deadline.signal,
+  );
+  const combined = combinedSignals[0];
+  if (combined === undefined) {
+    throw new Error("The combined browse signal is unavailable");
+  }
+  expect(combined).toBe(deadline.signal);
+  expect(combined.aborted).toBe(false);
+  deadline.abort(new Error("Deadline reached"));
+  expect(combined.aborted).toBe(true);
+  expect(signal.aborted).toBe(false);
   database.$client.close();
 });

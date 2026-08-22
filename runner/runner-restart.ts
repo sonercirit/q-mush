@@ -21,7 +21,10 @@ interface RestartAttempt {
 
 interface PendingRestart {
   attempt: RestartAttempt | undefined;
+  operational: boolean;
+  ready: boolean;
   readonly restartId: string;
+  sent: boolean;
 }
 
 function restartAcknowledgement(message: string, restartId: string): boolean {
@@ -48,12 +51,45 @@ export class RunnerRestartCoordinator {
     this.#restartId = options.restartId;
   }
 
+  restore(restartId: string): void {
+    if (restartId.length === 0 || restartId.length > 200) {
+      throw new Error("The runner restart ID is invalid");
+    }
+    if (this.#pending !== undefined && this.#pending.restartId !== restartId) {
+      throw new Error("A different runner restart is already pending");
+    }
+    this.#pending ??= {
+      attempt: undefined,
+      operational: false,
+      ready: true,
+      restartId,
+      sent: true,
+    };
+  }
+
   get pending(): boolean {
     return this.#pending !== undefined;
   }
 
   get pendingRestartId(): string | undefined {
     return this.#pending?.restartId;
+  }
+
+  connectionContext<Context extends { readonly restartId?: string }>(
+    current: Context,
+  ): Context {
+    return this.#pending?.sent === true
+      ? { ...current, restartId: this.#pending.restartId }
+      : current;
+  }
+
+  operational(restartId: string | undefined): boolean {
+    const pending = this.#pending;
+    if (restartId === undefined) return pending === undefined;
+    if (pending?.restartId !== restartId) return false;
+    pending.operational = true;
+    this.#complete(pending);
+    return true;
   }
 
   request(socket: RunnerRestartSocket): Promise<string> {
@@ -68,10 +104,32 @@ export class RunnerRestartCoordinator {
       if (restartId.length === 0 || restartId.length > 200) {
         return Promise.reject(new Error("The runner restart ID is invalid"));
       }
-      pending = { attempt: undefined, restartId };
+      pending = {
+        attempt: undefined,
+        operational: false,
+        ready: false,
+        restartId,
+        sent: false,
+      };
       this.#pending = pending;
     }
     if (pending.attempt?.socket === socket) {
+      try {
+        socket.send(
+          JSON.stringify({
+            restartId: pending.restartId,
+            type: "restart_escalate",
+          }),
+        );
+      } catch (error) {
+        this.#fail(
+          pending,
+          pending.attempt,
+          error instanceof Error
+            ? error
+            : new Error("The runner restart request could not be sent"),
+        );
+      }
       return pending.attempt.promise;
     }
     pending.attempt?.reject(
@@ -107,7 +165,9 @@ export class RunnerRestartCoordinator {
         restartAcknowledgement(rawEvent.data, pending.restartId)
       ) {
         pending.attempt = undefined;
+        pending.ready = true;
         attempt.resolve(pending.restartId);
+        this.#complete(pending);
       }
     });
     const failOnSocketEvent = (
@@ -131,9 +191,14 @@ export class RunnerRestartCoordinator {
       "The runner disconnected before restart was safe",
     );
     try {
+      const type = pending.sent ? "restart_escalate" : "restart";
       socket.send(
-        JSON.stringify({ restartId: pending.restartId, type: "restart" }),
+        JSON.stringify({
+          restartId: pending.restartId,
+          type,
+        }),
       );
+      pending.sent = true;
     } catch (error) {
       this.#fail(
         pending,
@@ -142,6 +207,17 @@ export class RunnerRestartCoordinator {
           ? error
           : new Error("The runner restart request could not be sent"),
       );
+    }
+  }
+
+  #complete(pending: PendingRestart): void {
+    if (
+      this.#pending === pending &&
+      pending.operational &&
+      pending.ready &&
+      pending.attempt === undefined
+    ) {
+      this.#pending = undefined;
     }
   }
 

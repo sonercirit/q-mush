@@ -4,6 +4,7 @@ import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { TEST_CREDENTIAL_FINGERPRINT } from "./agent-model-credential-fixtures.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
+  acknowledgeProviderSocket,
   COMPLETED_EVENT,
   FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
@@ -18,7 +19,11 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
     maxOutputTokens: null,
     model: "gpt-5-codex",
     provider: "openai",
-    tools: ["read", "parallel"],
+    toolSettings: {
+      executionLimitMinutes: 7,
+      outputLimitCharacters: 1_234,
+    },
+    tools: ["read", "bash", "parallel"],
     webSocket: sockets.create,
   });
 
@@ -37,13 +42,24 @@ test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async 
       mode: "auto",
       tools: [
         { name: "read", type: "function" },
+        { name: "bash", type: "function" },
         { name: "parallel", type: "function" },
       ],
       type: "allowed_tools",
     },
   });
   const tools = isRecord(body) ? body["tools"] : undefined;
-  expect(Array.isArray(tools) ? tools.length : 0).toBeGreaterThan(2);
+  if (!Array.isArray(tools)) {
+    throw new TypeError("tools missing");
+  }
+  expect(tools.length).toBeGreaterThan(3);
+  const bash: unknown = tools.find(
+    (tool: unknown) => isRecord(tool) && tool["name"] === "bash",
+  );
+  expect(bash).toMatchObject({
+    parameters: { properties: { timeout: { maximum: 420 } } },
+  });
+  acknowledgeProviderSocket(socket);
   socket.receive(COMPLETED_EVENT);
   await expect(pending).resolves.toMatchObject({ content: "Done." });
 });

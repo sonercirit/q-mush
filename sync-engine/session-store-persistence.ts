@@ -90,15 +90,15 @@ export function sessionGenerationCondition(
   return storedSessionCondition({ ...filter, generation });
 }
 
-export function storedParentExecutionGeneration(
+export function storedParentCallbackGeneration(
   ...parameters: readonly [Pick<AppDatabase, "select">, SQL | undefined]
 ): number | null | undefined {
   const [database, condition] = parameters;
   const selection = {
-    parentExecutionGeneration: agentSessions.parentExecutionGeneration,
+    parentCallbackGeneration: agentSessions.parentCallbackGeneration,
   };
   const query = database.select(selection).from(agentSessions);
-  return query.where(condition).get()?.parentExecutionGeneration;
+  return query.where(condition).get()?.parentCallbackGeneration;
 }
 
 export function runningCondition(
@@ -201,7 +201,7 @@ export function sessionTimingUpdate(
   };
 }
 
-type StoredSessionUpdate = Omit<
+export type StoredSessionUpdate = Omit<
   Partial<typeof agentSessions.$inferInsert>,
   "currentSegment" | "executionGeneration"
 > & {

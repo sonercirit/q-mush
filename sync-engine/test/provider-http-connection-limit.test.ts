@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
@@ -40,6 +41,7 @@ describe("provider HTTP connection-limit classification", () => {
       maxOutputTokens: null,
       model: "openai/gpt-4.1-mini",
       provider: "openrouter",
+      toolSettings: DEFAULT_TOOL_SETTINGS,
       sleep: (milliseconds) => {
         delays.push(milliseconds);
         return Promise.resolve();

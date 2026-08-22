@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { expect } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
@@ -109,6 +110,16 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
       "ALTER TABLE agent_sessions ADD COLUMN agent_file_path text",
     );
   }
+  if (
+    !sessionColumns.some(({ name }) => name === "parent_reported_generation")
+  ) {
+    database.$client.run(
+      "ALTER TABLE agent_sessions ADD COLUMN parent_reported_generation integer NOT NULL DEFAULT -1",
+    );
+  }
+  database.$client.run(
+    "CREATE INDEX IF NOT EXISTS agent_sessions_parent_report_index ON agent_sessions(status, parent_session_id, parent_execution_generation, parent_reported_generation)",
+  );
   if (!sessionColumns.some(({ name }) => name === "workspace_id")) {
     database.$client.run(
       "ALTER TABLE agent_sessions ADD COLUMN workspace_id text REFERENCES workspaces(id) ON DELETE restrict",
@@ -168,11 +179,6 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
   }
   if (!messageColumns.some(({ name }) => name === "turn_id")) {
     database.$client.run("ALTER TABLE agent_messages ADD COLUMN turn_id text");
-  }
-  if (!messageColumns.some(({ name }) => name === "provider_replay")) {
-    database.$client.run(
-      "ALTER TABLE agent_messages ADD COLUMN provider_replay text",
-    );
   }
   database.$client.run(`
     CREATE TABLE IF NOT EXISTS agent_question_requests (
@@ -345,18 +351,28 @@ export function ensureWaveOneColumns(database: AppDatabase): void {
   );
 }
 
-export function createSchemaCompatibleTestDatabase(
-  path = ":memory:",
-): AppDatabase {
-  const database = createDatabase(path);
+export function createSchemaCompatibleTestDatabase(): AppDatabase {
+  const database = createDatabase(":memory:");
   ensureWaveOneColumns(database);
   return database;
 }
 
 export function createAuthenticatedTestDatabase(
-  path = ":memory:",
+  options: { expiresAt?: number; path?: string } = {},
 ): AppDatabase {
-  const database = createSchemaCompatibleTestDatabase(path);
+  const { expiresAt = TEST_NOW + 60_000, path } = options;
+  const database =
+    path === undefined
+      ? createSchemaCompatibleTestDatabase()
+      : createDatabase(path);
+  if (path !== undefined) ensureWaveOneColumns(database);
+  // A reopened fixture already has its stable authenticated user/session rows.
+  const fixtureAlreadyInitialized = database
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.id, TEST_USER_ID))
+    .get();
+  if (fixtureAlreadyInitialized !== undefined) return database;
 
   database
     .insert(users)
@@ -372,7 +388,7 @@ export function createAuthenticatedTestDatabase(
     .insert(sessions)
     .values({
       ...testAuditFields(),
-      expiresAt: new Date(TEST_NOW + 60_000),
+      expiresAt: new Date(expiresAt),
       id: SESSION_ID,
       token: SESSION_TOKEN,
       userId: TEST_USER_ID,

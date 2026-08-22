@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { createReactiveState } from "../reactive-state.ts";
-import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { SessionViewState } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
 import { SessionPendingInputs } from "../session-pending-client.tsx";
@@ -115,7 +115,7 @@ test("acknowledges a send locally without waiting for persistence, echo, or comm
     renderedAt: undefined,
     respondedAt: undefined,
   };
-  const receive: { current?: (event: RealtimeServerEvent) => void } = {};
+  const receive: { current?: (event: RealtimeClientEvent) => void } = {};
   const setup = realtimeTestSetup({
     listener(event) {
       receive.current?.(event);

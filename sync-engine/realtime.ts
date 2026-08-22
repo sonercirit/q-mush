@@ -14,6 +14,7 @@ import type { RealtimeSocket } from "./realtime-hub.ts";
 import { readRunnerClientMessage } from "./realtime-protocol.ts";
 import { handleRunnerRegistrationAcknowledgement } from "./realtime-runner-acknowledgement.ts";
 import { createRunnerRegistrationCoordinator } from "./realtime-runner-registration.ts";
+import { handleRunnerRestartRequest } from "./realtime-runner-restart.ts";
 import {
   closeServerError,
   safeSend,
@@ -156,34 +157,6 @@ function stopRegisteredRunner(
   options.runners.disconnected(runner);
   publishRunners(runner.userId);
   return true;
-}
-
-function sendRunnerRestartReady(
-  options: RealtimeIntegrationOptions,
-  runnerRestarts: Map<string, RunnerRestartState>,
-  socket: RealtimeSocket,
-  runnerId: string,
-  restart: RunnerRestartState,
-): void {
-  if (
-    !restart.settled ||
-    runnerRestarts.get(runnerId) !== restart ||
-    !options.hub.runnerIsCurrent(runnerId, socket) ||
-    options.hub.currentRunner(runnerId) !== socket
-  ) {
-    return;
-  }
-  if (
-    !safeSend(
-      socket,
-      JSON.stringify({
-        restartId: restart.restartId,
-        type: "restart_ready",
-      }),
-    )
-  ) {
-    closeServerError(socket, "Runner restart acknowledgement failed");
-  }
 }
 
 export function createRealtimeIntegration(
@@ -405,52 +378,18 @@ export function createRealtimeIntegration(
               event.commandId,
               event,
             );
-          } else if (event.type === "restart") {
-            const current = runnerRestarts.get(connectedRunner.id);
-            if (
-              current?.restartId !== undefined &&
-              current.restartId !== event.restartId
-            ) {
-              socket.close(1008, "Conflicting runner restart ID");
-              return;
-            }
-            const restart =
-              current ??
-              (() => {
-                const promise = options.sessions.drainRunner(
-                  connectedRunner.id,
-                  event.restartId,
-                );
-                const created = {
-                  promise,
-                  restartId: event.restartId,
-                  settled: false,
-                };
-                runnerRestarts.set(connectedRunner.id, created);
-                return created;
-              })();
-            void restart.promise.then(
-              () => {
-                restart.settled = true;
-                const activeSocket = options.hub.currentRunner(
-                  connectedRunner.id,
-                );
-                if (activeSocket !== undefined) {
-                  sendRunnerRestartReady(
-                    options,
-                    runnerRestarts,
-                    activeSocket,
-                    connectedRunner.id,
-                    restart,
-                  );
-                }
+          } else if (
+            event.type === "restart" ||
+            event.type === "restart_escalate"
+          ) {
+            handleRunnerRestartRequest(
+              {
+                options,
+                restarts: runnerRestarts,
+                runnerId: connectedRunner.id,
+                socket,
               },
-              () => {
-                if (runnerRestarts.get(connectedRunner.id) === restart) {
-                  runnerRestarts.delete(connectedRunner.id);
-                  closeServerError(socket, "Runner restart handoff failed");
-                }
-              },
+              event,
             );
           }
           return;

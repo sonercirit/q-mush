@@ -42,6 +42,13 @@ function runDurationText(container: ParentNode): string | undefined {
   );
 }
 
+function pendingComponentText(container: ParentNode): string | undefined {
+  return (
+    container.querySelector("[data-session-pending-component='true']")
+      ?.textContent ?? undefined
+  );
+}
+
 function stepDurationText(container: ParentNode): string | undefined {
   return (
     container.querySelector("[data-session-step-duration='true']")
@@ -99,17 +106,43 @@ test("a running session shows and ticks its current step duration", () => {
   expect(stepDurationText(container)).toBe("Step: 1s");
   expect(runDurationText(container)).toBe("Run: 4s");
 
+  controller.applyDetail({
+    ...running,
+    stepStartedAt: null,
+    updatedAt: running.updatedAt + 2,
+  });
+
+  expect(stepDurationText(container)).toBeUndefined();
+
   // A stale step timestamp without an active run must render nothing.
   controller.applyDetail({
     ...running,
     activeStartedAt: null,
     status: "idle",
     stepStartedAt: Date.now(),
-    updatedAt: running.updatedAt + 2,
+    updatedAt: running.updatedAt + 3,
   });
 
   expect(stepDurationText(container)).toBeUndefined();
   expect(runDurationText(container)).toBeUndefined();
+});
+
+test("a running session identifies its pending runtime component", () => {
+  const { container, controller, queued } = mountQueuedSession(30_000);
+
+  const pendingSince = Date.now();
+  controller.applyDetail({
+    ...queued,
+    activeStartedAt: pendingSince,
+    runtimePending: { component: "provider_admission", since: pendingSince },
+    status: "running",
+    updatedAt: queued.updatedAt + 1,
+  });
+
+  expect(pendingComponentText(container)).toBe("Pending: provider admission");
+  expect(container.textContent).not.toContain(
+    new Date(pendingSince).toISOString(),
+  );
 });
 
 test("a retained sidebar row keeps ticking its run duration", () => {

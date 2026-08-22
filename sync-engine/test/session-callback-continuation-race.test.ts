@@ -1,11 +1,14 @@
 import { expect, test } from "vitest";
-import type { SessionAgentActionDependencies } from "../session-agent-action-helpers.ts";
-import { reportSpawnedSessionCompletion } from "../session-child-lifecycle.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  closeSpawnedChildSetup,
+  completeSpawnedChildGeneration,
+  deliverSpawnedChildCallback,
+  expectPendingSpawnedSessionCount,
+  parentLink,
   spawnedChildSetup,
   type SpawnedChildReference,
 } from "./session-store-spawn-test-helpers.ts";
@@ -36,57 +39,21 @@ function requireChildCallback(setup: SpawnedChildReference) {
 
 function finisherCallbackContent(): string {
   const setup = spawnedChildSetup();
-  const detail = setup.store.get(TEST_USER_ID, setup.childId);
-  if (detail === undefined) {
-    throw new Error("The spawned child is unavailable");
-  }
-  const dependencies: SessionAgentActionDependencies = {
-    database: setup.database,
-    discoverModels: () =>
-      Promise.reject(new Error("Unexpected model discovery")),
-    discoverSessionMetadata: () =>
-      Promise.reject(new Error("Unexpected metadata discovery")),
-    draining: () => false,
-    launchSession: () => false,
-    notify: () => undefined,
-    now: () => TEST_NOW + 5,
-    pendingRestart: () => undefined,
-    readCredential: () => Promise.resolve(undefined),
-    runnerIsAvailable: () => true,
-    store: setup.store,
-    withCredential: () =>
-      Promise.reject(new Error("Unexpected credential access")),
-  };
-
-  expect(
-    reportSpawnedSessionCompletion(dependencies, detail, TEST_USER_ID),
-  ).toMatchObject({ disposition: "promoted", parentId: setup.parentId });
+  expect(deliverSpawnedChildCallback(setup)).toMatchObject({
+    disposition: "promoted",
+    parentId: setup.parentId,
+  });
   const content = requireChildCallback(setup).content;
-  setup.database.$client.close();
+  closeSpawnedChildSetup(setup);
   return content;
 }
 
 function continueChild(setup: SpawnedChildReference): void {
-  expect(
-    setup.store.transitionRuntime(
-      setup.childId,
-      "running",
-      TEST_NOW + 7,
-      setup.childGeneration + 1,
-    ),
-  ).toBe(true);
-  setup.store.commitRuntimeTerminal(
-    setup.childId,
-    [
-      {
-        content: "Continued child result",
-        role: "assistant",
-        toolCalls: [],
-      },
-    ],
-    TEST_NOW + 8,
+  completeSpawnedChildGeneration(
+    setup,
     setup.childGeneration + 1,
-    null,
+    "Continued child result",
+    TEST_NOW + 7,
   );
 }
 
@@ -118,15 +85,17 @@ test("manual continuation claims a completed child's pending callback", () => {
   expect(callback.content).toContain("Child terminal assistant message");
   expect(callback.content).toContain('"role": "assistant"');
   expect(callback.content).toBe(finisherCallbackContent());
-  expect(setup.store.spawnedSessionLink(TEST_USER_ID, setup.childId)).toBe(
-    undefined,
+  const preservedLink = setup.store.spawnedSessionLink(
+    TEST_USER_ID,
+    setup.childId,
   );
+  expect(preservedLink).toEqual(parentLink(setup));
   expect(deliverLateCallback(setup)).toBeUndefined();
   expect(childCallbackCount(setup)).toBe(1);
   expect(queued).toMatchObject({
     detail: {
       generation: setup.childGeneration + 1,
-      parentExecutionGeneration: null,
+      parentExecutionGeneration: setup.parentGeneration,
       status: "queued",
     },
   });
@@ -136,8 +105,8 @@ test("manual continuation claims a completed child's pending callback", () => {
   const continued = setup.store.get(TEST_USER_ID, setup.childId);
   expect(continued).toMatchObject({
     generation: setup.childGeneration + 1,
-    parentExecutionGeneration: null,
-    status: "idle",
+    parentExecutionGeneration: setup.parentGeneration,
+    status: "completed",
   });
   expect(
     continued?.messages.some(
@@ -145,6 +114,6 @@ test("manual continuation claims a completed child's pending callback", () => {
     ),
   ).toBe(true);
   expect(childCallbackCount(setup)).toBe(1);
-  const client = setup.database.$client;
-  client.close();
+  expectPendingSpawnedSessionCount(setup, 1);
+  closeSpawnedChildSetup(setup);
 });

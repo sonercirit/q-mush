@@ -1,10 +1,8 @@
 import { createCredentialCipher } from "../shared/credential-cipher.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
 import { PROVIDER_API_FORMATS } from "../shared/provider-id.ts";
-import {
-  AgentModelDiscoveryError,
-  discoverAgentModelsWithFetch,
-} from "./agent-model-discovery.ts";
+import { AgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
+import { discoverAgentModelsWithFetch } from "./agent-model-discovery.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { normalizeGenericProviderBaseUrl } from "./generic-provider-url.ts";
 import {

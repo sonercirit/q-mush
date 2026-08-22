@@ -8,12 +8,17 @@ import {
 } from "../shared/database/schema.ts";
 import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import type { AgentSessionTurn } from "../shared/session-model.ts";
+import { readToolSettings, type ToolSettings } from "../shared/tool-limits.ts";
 import { retireManualCompactionOperations } from "./session-manual-compaction-query.ts";
 import {
   storedSessionSnapshotCondition,
   updateStoredSessions,
   type StoredSessionSnapshot,
 } from "./session-store-persistence.ts";
+import {
+  STORED_SESSION_TURN_SELECTION,
+  summarizeStoredTurn,
+} from "./session-turn-read.ts";
 
 function activeTurnCondition(sessionId: string) {
   return and(
@@ -48,6 +53,7 @@ interface SessionTurnInsertOptions {
   readonly segment: number;
   readonly sessionId: string;
   readonly startedAt?: number;
+  readonly toolSettings: ToolSettings;
   readonly userId: string;
 }
 
@@ -64,6 +70,8 @@ export function insertSessionTurn(options: SessionTurnInsertOptions): string {
       startedAt: new Date(
         Math.min(options.startedAt ?? options.now, options.now),
       ),
+      toolExecutionLimitMinutes: options.toolSettings.executionLimitMinutes,
+      toolOutputLimitCharacters: options.toolSettings.outputLimitCharacters,
       userId: options.userId,
     })
     .run();
@@ -194,20 +202,61 @@ export function updateStoredSnapshotAndEndGenerationTurn(
   });
 }
 
-type SessionTurnRotationOptions = Omit<SessionTurnInsertOptions, "database"> & {
+type SessionTurnRotationOptions = Omit<
+  SessionTurnInsertOptions,
+  "database" | "toolSettings"
+> & {
   readonly database: Pick<AppDatabase, "insert" | "select" | "update">;
   readonly previousExecutionGeneration: number;
+  readonly toolSettings: ToolSettings | "inherit";
 };
+
+// Turn-column defaults derive from DEFAULT_TOOL_SETTINGS in the database schema.
+function selectedToolSettingsColumns() {
+  return {
+    executionLimitMinutes: agentSessionTurns.toolExecutionLimitMinutes,
+    outputLimitCharacters: agentSessionTurns.toolOutputLimitCharacters,
+  };
+}
+
+function requiredToolSettings(settings: unknown): ToolSettings {
+  const parsed = readToolSettings(settings);
+  if (parsed === undefined) {
+    throw new Error("The session turn tool settings snapshot is invalid");
+  }
+  return parsed;
+}
+
+export function activeSessionToolSettings(
+  database: Pick<AppDatabase, "select">,
+  sessionId: string,
+  executionGeneration: number,
+): ToolSettings {
+  const turn = database
+    .select(selectedToolSettingsColumns())
+    .from(agentSessionTurns)
+    .where(currentTurnCondition(sessionId, executionGeneration))
+    .get();
+  return requiredToolSettings(turn);
+}
 
 export function rotateSessionTurn(options: SessionTurnRotationOptions): string {
   const startedAt = Math.min(options.startedAt ?? options.now, options.now);
+  const toolSettings =
+    options.toolSettings === "inherit"
+      ? activeSessionToolSettings(
+          options.database,
+          options.sessionId,
+          options.previousExecutionGeneration,
+        )
+      : options.toolSettings;
   endGenerationSessionTurn(
     options.database,
     options.sessionId,
     options.previousExecutionGeneration,
     startedAt,
   );
-  return insertSessionTurn({ ...options, startedAt });
+  return insertSessionTurn({ ...options, startedAt, toolSettings });
 }
 
 export function readSessionTurns(
@@ -215,13 +264,7 @@ export function readSessionTurns(
   sessionId: string,
 ): readonly AgentSessionTurn[] {
   return database
-    .select({
-      boundaryMessageId: agentSessionTurns.boundaryMessageId,
-      endedAt: agentSessionTurns.endedAt,
-      executionGeneration: agentSessionTurns.executionGeneration,
-      id: agentSessionTurns.id,
-      startedAt: agentSessionTurns.startedAt,
-    })
+    .select(STORED_SESSION_TURN_SELECTION)
     .from(agentSessionTurns)
     .where(
       and(
@@ -237,9 +280,5 @@ export function readSessionTurns(
     )
     .orderBy(agentSessionTurns.startedAt, agentSessionTurns.id)
     .all()
-    .map((turn) => ({
-      ...turn,
-      endedAt: turn.endedAt?.getTime() ?? null,
-      startedAt: turn.startedAt.getTime(),
-    }));
+    .map(summarizeStoredTurn);
 }

@@ -1,5 +1,7 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
+import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../shared/development-shutdown.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
@@ -26,13 +28,18 @@ import { openRouterProvidersForUser } from "./session-provider-selection.ts";
 import { recoverAnsweredQuestions } from "./session-question-actions.ts";
 import { reassignSessionRequest } from "./session-reassignment-request.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
-import type { SessionRestartControl } from "./session-restart-control.ts";
+import type { SessionRestartAbort } from "./session-restart-abort.ts";
+import type {
+  RestartDrainSessionProgress,
+  SessionRestartControl,
+} from "./session-restart-control.ts";
 import type {
   DurableRunnerRestartGate,
   SessionRestartCoordinator,
 } from "./session-restart-coordinator.ts";
 import type { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
+import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import { readSessionStopInput } from "./session-stop-input.ts";
 import type { SessionStore } from "./session-store.ts";
 import { forRequestWorkspace } from "./session-workspace-request.ts";
@@ -84,11 +91,16 @@ export interface SessionIntegrationApiResources {
   ) => Promise<Response>;
   readonly requests: SessionRequestHelpers;
   readonly restart: SessionRestartControl;
+  readonly restartController: SessionRestartAbort;
   readonly restartCoordinator: SessionRestartCoordinator;
   readonly runnerRemoval: RunnerRemovalCoordinator;
   readonly runtimes: SessionRuntimes;
   readonly stopChildren: (detail: AgentSessionDetail, userId: string) => void;
   readonly stopLivenessScans: () => void;
+  readonly shutdownInterrupted: Pick<
+    ShutdownInterruptedSessionStore,
+    "beginLiveDrain" | "enableRecovery"
+  >;
   readonly store: SessionStore;
   readonly withCredentialAccess: Parameters<
     typeof openRouterProvidersForUser
@@ -237,19 +249,78 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
   }
 
-  drain(): Promise<void> {
-    return this.resources.restart.drainServer().then(async () => {
-      await Promise.allSettled(this.resources.executionCleanup.pending);
-    });
+  async drain(
+    deadline = new RestartDeadline(
+      this.resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
+      this.resources.now,
+    ),
+  ): Promise<void> {
+    this.resources.restartController.abort(
+      new DOMException("The server is restarting", "RestartHandoff"),
+    );
+    this.resources.shutdownInterrupted.beginLiveDrain();
+    await this.resources.restart.drainServer(deadline);
+    await this.resources.executionCleanup.drainPending(deadline);
   }
 
-  prepareFinalShutdown(): Promise<void> {
+  async drainFinal(): Promise<void> {
+    await this.resources.restart.drainServerFinal();
+    await Promise.allSettled(this.resources.executionCleanup.pending);
+  }
+
+  escalateDrain(): boolean {
+    return this.resources.restart.escalateServerDrain();
+  }
+
+  drainProgress(
+    userId?: string,
+    workspaceId?: string,
+  ): readonly RestartDrainSessionProgress[] {
+    if (userId === undefined) return this.resources.restart.drainProgress();
+    return this.drainProgressForSessions(
+      new Set(
+        this.resources.store.list(userId, workspaceId).map(({ id }) => id),
+      ),
+    );
+  }
+
+  drainProgressForSessions(
+    sessionIds: ReadonlySet<string>,
+  ): readonly RestartDrainSessionProgress[] {
+    return this.resources.restart.drainProgress(undefined, (sessionId) =>
+      sessionIds.has(sessionId),
+    );
+  }
+
+  restoreDevelopmentDrainRecovery(): void {
+    this.resources.shutdownInterrupted.enableRecovery();
+    this.resources.restart.restoreServerDrain();
+    this.resources.restartController.restore();
+    // Sessions the abandoned drain already parked into durable handoffs, and
+    // work queued while the gate was closed, only resume when recovery and
+    // the queued launcher run again.
+    this.#resumeParkedAndQueued();
+  }
+
+  #resumeParkedAndQueued(runnerId?: string): void {
+    this.resources.restartCoordinator.recover(runnerId);
+    for (const userId of this.resources.store.queuedSessionOwnerIds()) {
+      this.resources.launchQueuedSessions(userId);
+    }
+  }
+
+  async prepareFinalShutdown(): Promise<void> {
     this.resources.stopLivenessScans();
-    return this.resources.restart.prepareServerShutdown();
+    this.resources.shutdownInterrupted.enableRecovery();
+    await this.resources.restart.prepareServerShutdown();
   }
 
   drainRunner(runnerId: string, restartId: string): Promise<void> {
     return this.resources.restart.drainRunner(runnerId, restartId);
+  }
+
+  escalateRunnerDrain(runnerId: string, restartId: string): boolean {
+    return this.resources.restart.escalateRunnerDrain(runnerId, restartId);
   }
 
   #authenticatedWorkspace(
@@ -337,6 +408,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
         discover: this.resources.discoverOpenRouterProviders,
         pool: this.resources.modelCredentialPool,
         request,
+        signal: this.resources.restartController.signal,
         user,
         withCredential: this.resources.withCredentialAccess,
       }),
@@ -383,11 +455,8 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   runnerConnected(runnerId: string): void {
-    this.resources.restartCoordinator.recover(runnerId);
+    this.#resumeParkedAndQueued(runnerId);
     void recoverAnsweredQuestions(this.resources.questionActions, runnerId);
-    for (const userId of this.resources.store.queuedSessionOwnerIds()) {
-      this.resources.launchQueuedSessions(userId);
-    }
   }
 
   runnerDisconnected(runnerId: string): void {
@@ -470,7 +539,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
             workspaceId,
             async (existing) => {
               this.resources.runtimes.abort(sessionId);
-              this.resources.broker.cancelSession(sessionId);
+              this.resources.broker.cancelSessionCommands(sessionId);
               await this.resources.runtimes.cleared(sessionId);
               if (existing.status !== "stopped") {
                 this.resources.store.stop(

@@ -2,7 +2,9 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
+  SessionRuntimePendingComponent,
 } from "../shared/session-model.ts";
+import type { ActiveSessionTools } from "./active-session-tools.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
@@ -24,6 +26,7 @@ export type FinishSession = (
 ) => void;
 
 interface SessionLauncherDependencies {
+  readonly activeTools: ActiveSessionTools;
   readonly actions: SessionAgentActions;
   readonly attachmentFallbacks?: SessionModelRuntimeResources["attachmentFallbacks"];
   readonly braveSearch: Pick<BraveSearchSkill, "execute">;
@@ -44,6 +47,9 @@ interface SessionLauncherDependencies {
     ShutdownInterruptedSessionStore,
     "clear" | "mark"
   >;
+  readonly shouldPersistRestartMarker?: (request: {
+    readonly requestedBy: "runner" | "server";
+  }) => boolean;
   readonly store: SessionStore;
 }
 
@@ -72,7 +78,34 @@ export class SessionLauncher {
       detail.runnerId,
       detail.generation,
       operation === "agent" ? "step" : "handoff",
-      async ({ controller, restartRequest, settled }) => {
+      async ({ controller, pendingComponent, restartRequest, settled }) => {
+        const reportPending = (
+          component: SessionRuntimePendingComponent,
+        ): void => {
+          // Repeated provider admission reports refresh watchdog liveness and
+          // intentionally publish each bounded retry to realtime clients.
+          if (!pendingComponent(component)) {
+            return;
+          }
+          try {
+            if (
+              this.#dependencies.store.executionIsCurrent(
+                userId,
+                detail.id,
+                detail.generation,
+              )
+            ) {
+              this.#dependencies.notify(userId, detail.id);
+            }
+          } catch (error) {
+            // Diagnostic publication must not interrupt the model request, but
+            // unexpected persistence failures must remain observable.
+            console.warn(
+              `Session ${detail.id} pending diagnostic publication failed`,
+              error,
+            );
+          }
+        };
         const restartPersistence: DurableRestartPersistence = {
           clear: clearShutdownMarker,
           operation: () =>
@@ -82,8 +115,13 @@ export class SessionLauncher {
             )
               ? "compact_and_continue"
               : operation,
-          persist: (request, durable) => {
-            if (durable) {
+          persist: (request, durable, forcePark = false) => {
+            if (
+              durable &&
+              (forcePark ||
+                (this.#dependencies.shouldPersistRestartMarker?.(request) ??
+                  request.requestedBy === "server"))
+            ) {
               this.#dependencies.shutdownInterrupted.mark(
                 detail.id,
                 detail.generation,
@@ -105,7 +143,9 @@ export class SessionLauncher {
           notify: this.#dependencies.notify,
           now: this.#dependencies.now,
           operation,
+          pendingComponent: reportPending,
           resources: {
+            activeTools: this.#dependencies.activeTools,
             actions: this.#dependencies.actions,
             ...(this.#dependencies.attachmentFallbacks === undefined
               ? {}

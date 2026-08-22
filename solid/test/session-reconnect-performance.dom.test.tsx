@@ -8,7 +8,10 @@ import {
   createProviderViewState,
   type ProviderCredential,
 } from "../provider-credential-model.ts";
-import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import {
+  RealtimeStreamBuffer,
+  type RealtimeClientEvent,
+} from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
@@ -80,39 +83,9 @@ function mountRealSessionPanel(detail: AgentSessionDetail) {
   return { container, controller };
 }
 
-function toolDelta(
-  sessionId: string,
-  sequence: number,
-): Extract<RealtimeServerEvent, { type: "tool_stream" }> {
-  return sequence === 0
-    ? {
-        callId: "call-typing-profile",
-        index: 0,
-        sequence,
-        sessionId,
-        state: "preparing",
-        streamId: "stream-typing-profile",
-        type: "tool_stream",
-      }
-    : {
-        callId: "call-typing-profile",
-        ...(sequence === 2
-          ? { state: "running" as const }
-          : {
-              channel: sequence === 1 ? ("name" as const) : ("stdout" as const),
-              content: sequence === 1 ? "bash" : "x",
-            }),
-        index: 0,
-        sequence,
-        sessionId,
-        streamId: "stream-typing-profile",
-        type: "tool_stream",
-      };
-}
-
 function applySessionEvent(
   controller: SessionController,
-  event: RealtimeServerEvent,
+  event: RealtimeClientEvent,
 ): boolean {
   if (event.type === "session") {
     controller.applyDetail(event.session);
@@ -261,9 +234,29 @@ test("streaming tool updates do not invalidate the controlled new-session input"
   });
   draftReads = 0;
 
+  const buffer = new RealtimeStreamBuffer();
   for (let sequence = 0; sequence < 40; sequence += 1) {
-    controller.applyToolDelta(toolDelta(detail.id, sequence));
+    buffer.queue({
+      callId: "call-typing-profile",
+      ...(sequence === 0
+        ? { state: "preparing" as const }
+        : sequence === 1
+          ? { channel: "name" as const, content: "bash" }
+          : sequence === 2
+            ? { state: "running" as const }
+            : { channel: "stdout" as const, content: "x" }),
+      index: 0,
+      sequence,
+      sessionId: detail.id,
+      streamId: "stream-typing-profile",
+      type: "tool_stream",
+    });
   }
+  const batch = buffer.takeNext(40);
+  if (batch === undefined) throw new TypeError("Expected buffered tool output");
+  controller.applyStreamBatch(batch);
+  const remaining = buffer.takeNext(40);
+  if (remaining !== undefined) controller.applyStreamBatch(remaining);
 
   expect(controller.state.toolStreams).toEqual([
     {

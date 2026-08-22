@@ -1,6 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   applySessionToolUpdate,
@@ -15,12 +16,19 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { createSessionInput } from "./session-store-create-hardening-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
+import { emptyRuntimes } from "./session-store-test-fixtures.ts";
+import { testStoreReadResources } from "./session-store-test-helpers.ts";
 
 function setup() {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "tool-update-machine", "runner-1");
   addTestProviderCredential(database, "credential-1");
-  const store = new SessionStore(database);
+  const store = new SessionStore(
+    database,
+    undefined,
+    () => DEFAULT_TOOL_SETTINGS,
+    emptyRuntimes,
+  );
   const created = store.create(
     {
       ...createSessionInput({
@@ -45,11 +53,7 @@ function setup() {
     now: () => 2,
     readCredentialSource: () => Promise.resolve("oauth" as const),
     runtimes: { abortForGeneration },
-    store: {
-      database,
-      read: (userId: string, sessionId: string, workspaceId: string) =>
-        store.get(userId, sessionId, workspaceId),
-    },
+    store: testStoreReadResources(database, store),
   };
   return {
     abortForGeneration,
@@ -140,11 +144,13 @@ describe("session tool update", () => {
       ),
     ).rejects.toMatchObject({ code: "stale_generation" });
     expect(
-      new SessionStore(setupValue.database).get(
-        TEST_USER_ID,
-        setupValue.created.detail.id,
-        TEST_WORKSPACE_ID,
-      )?.tools,
+      new SessionStore(
+        setupValue.database,
+        undefined,
+        () => DEFAULT_TOOL_SETTINGS,
+        emptyRuntimes,
+      ).get(TEST_USER_ID, setupValue.created.detail.id, TEST_WORKSPACE_ID)
+        ?.tools,
     ).toEqual(["read", "bash"]);
   });
 

@@ -2,9 +2,15 @@ import { count, type SQL } from "drizzle-orm";
 import type { AnySQLiteColumn, SQLiteTable } from "drizzle-orm/sqlite-core";
 import type { AppDatabase } from "../shared/database.ts";
 
-interface SelectedIdentifier {
+interface SelectedValue {
   readonly column: AnySQLiteColumn;
   readonly table: SQLiteTable;
+}
+
+interface SelectedValueOptions {
+  readonly condition: SQL | undefined;
+  readonly database: Pick<AppDatabase, "select">;
+  readonly selected: SelectedValue;
 }
 
 export function countSelectedRows(
@@ -22,25 +28,17 @@ export function countSelectedRows(
 
 export function selectedString(
   database: Pick<AppDatabase, "select">,
-  selected: SelectedIdentifier,
+  selected: SelectedValue,
   condition: SQL | undefined,
 ): string | undefined {
-  return selectedStringValue({ condition, database, selected });
+  const value = selectedValue({ condition, database, selected });
+  return typeof value === "string" ? value : undefined;
 }
 
-interface SelectedStringOptions {
-  readonly condition: SQL | undefined;
-  readonly database: Pick<AppDatabase, "select">;
-  readonly selected: SelectedIdentifier;
-}
-
-function selectedStringValue(
-  options: SelectedStringOptions,
-): string | undefined {
-  const row = options.database
+export function selectedValue(options: SelectedValueOptions): unknown {
+  return options.database
     .select({ value: options.selected.column })
     .from(options.selected.table)
     .where(options.condition)
-    .get();
-  return typeof row?.value === "string" ? row.value : undefined;
+    .get()?.value;
 }
