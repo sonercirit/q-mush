@@ -22,6 +22,39 @@ function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
   return continueSpawnedChild(setup, TEST_NOW + 6);
 }
 
+function deferredReportSetup(
+  overrides: Parameters<typeof terminalEventActions>[3] = {},
+) {
+  const setup = spawnedChildSetup();
+  const delivery = terminalEventActions(
+    setup.store,
+    setup.database,
+    vi.fn(),
+    overrides,
+  );
+  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+  return { delivery, setup };
+}
+
+async function deliverDeferredReport(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+) {
+  delivery.actions.reportedParent(
+    { disposition: "deferred", parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+  await Promise.resolve();
+}
+
+function expectDurableReport(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+) {
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  expect(reportCount(setup.store, setup.parentId)).toBe(1);
+}
+
 test("stopping a child wakes a runnable idle parent and consumes its report", async () => {
   const setup = spawnedChildSetup();
   const continued = continueChild(setup);
@@ -64,19 +97,12 @@ test("stopping children notifies the parent after delivering the stop report", (
 test.each(["paused", "stopped", "failed"] as const)(
   "a deferred report does not launch a %s parent and remains durable",
   async (status) => {
-    const setup = spawnedChildSetup();
-    const delivery = terminalEventActions(setup.store, setup.database);
-    delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+    const { delivery, setup } = deferredReportSetup();
     setChildStatus({ ...setup, childId: setup.parentId }, status);
 
-    delivery.actions.reportedParent(
-      { disposition: "deferred", parentId: setup.parentId },
-      TEST_USER_ID,
-    );
-    await Promise.resolve();
+    await deliverDeferredReport(setup, delivery);
 
-    expect(delivery.launchSession).not.toHaveBeenCalled();
-    expect(reportCount(setup.store, setup.parentId)).toBe(1);
+    expectDurableReport(setup, delivery);
     expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe(status);
   },
 );
@@ -87,24 +113,12 @@ test.each([
 ] as const)(
   "a deferred report does not launch an idle parent with %s",
   async (_state, overrides) => {
-    const setup = spawnedChildSetup();
-    const delivery = terminalEventActions(
-      setup.store,
-      setup.database,
-      vi.fn(),
-      overrides,
-    );
-    delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+    const { delivery, setup } = deferredReportSetup(overrides);
     idleParent(setup);
 
-    delivery.actions.reportedParent(
-      { disposition: "deferred", parentId: setup.parentId },
-      TEST_USER_ID,
-    );
-    await Promise.resolve();
+    await deliverDeferredReport(setup, delivery);
 
-    expect(delivery.launchSession).not.toHaveBeenCalled();
-    expect(reportCount(setup.store, setup.parentId)).toBe(1);
+    expectDurableReport(setup, delivery);
     expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
       generation: setup.parentGeneration,
       status: "idle",
@@ -138,9 +152,7 @@ test("a manual resume racing the deferred wake consumes one report in one attemp
 });
 
 test("a deferred report does not launch a restart-draining parent", async () => {
-  const setup = spawnedChildSetup();
-  const delivery = terminalEventActions(setup.store, setup.database);
-  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+  const { delivery, setup } = deferredReportSetup();
   setup.database.$client
     .query(
       "UPDATE agent_sessions SET status = 'idle', restart_handoff = ? WHERE id = ?",
@@ -156,23 +168,16 @@ test("a deferred report does not launch a restart-draining parent", async () => 
       setup.parentId,
     );
 
-  delivery.actions.reportedParent(
-    { disposition: "deferred", parentId: setup.parentId },
-    TEST_USER_ID,
-  );
-  await Promise.resolve();
+  await deliverDeferredReport(setup, delivery);
 
-  expect(delivery.launchSession).not.toHaveBeenCalled();
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
+  expectDurableReport(setup, delivery);
   expect(
     setup.store.get(TEST_USER_ID, setup.parentId)?.restartHandoff,
   ).not.toBeNull();
 });
 
 test("a deferred report does not consume the event while the parent awaits input", async () => {
-  const setup = spawnedChildSetup();
-  const delivery = terminalEventActions(setup.store, setup.database);
-  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+  const { delivery, setup } = deferredReportSetup();
   const parent = setup.store.get(TEST_USER_ID, setup.parentId);
   if (parent === undefined) throw new Error("Question parent unavailable");
   const pending = setup.store
@@ -187,14 +192,9 @@ test("a deferred report does not consume the event while the parent awaits input
     );
   idleParent(setup);
 
-  delivery.actions.reportedParent(
-    { disposition: "deferred", parentId: setup.parentId },
-    TEST_USER_ID,
-  );
-  await Promise.resolve();
+  await deliverDeferredReport(setup, delivery);
 
-  expect(delivery.launchSession).not.toHaveBeenCalled();
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
+  expectDurableReport(setup, delivery);
   expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
     pendingQuestions: { id: pending.id },
     status: "idle",
