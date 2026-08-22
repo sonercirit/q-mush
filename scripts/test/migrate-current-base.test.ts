@@ -127,8 +127,8 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
-    CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP,
     PROVIDER_REPLAY_MIGRATION_TIMESTAMP,
+    CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP,
     1_787_359_766_762,
     PARENT_REPORT_MIGRATION_TIMESTAMP,
     TOOL_SETTINGS_MIGRATION_TIMESTAMP,
