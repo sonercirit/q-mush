@@ -126,15 +126,6 @@ async function captureOpenAiFormatReplayRequest(
   return body;
 }
 
-function expectAbsentProperties(
-  body: unknown,
-  properties: readonly string[],
-): void {
-  for (const property of properties) {
-    expect(body).not.toHaveProperty(property);
-  }
-}
-
 function expectUnsignedReplay(content: unknown): void {
   const serialized = JSON.stringify(content);
   for (const privateField of ["caller", "omitted-signature", "redacted-data"]) {
@@ -147,29 +138,8 @@ async function requestRecord(
   index: number,
 ): Promise<Readonly<Record<string, unknown>>> {
   const body = await harness.requestBody(index);
-  if (!isRecord(body)) {
-    throw new Error("The captured body was not a record");
-  }
-  return body;
-}
-
-async function effortRequestBody(
-  effort: "minimal" | "none" | "xhigh",
-  adaptiveThinking: boolean | null = true,
-): Promise<unknown> {
-  const harness = anthropicHarness([doneAnthropicEvents()], {
-    adaptiveThinking,
-    reasoningEffort: effort,
-  });
-  await harness.complete();
-  return harness.requestBody(0);
-}
-
-function officialAnthropicCredential() {
-  return {
-    ...ANTHROPIC_TEST_CREDENTIAL,
-    baseUrl: "https://api.anthropic.com/v1",
-  };
+  if (isRecord(body)) return body;
+  throw new TypeError("Expected a record request body");
 }
 
 async function expectReplayOutcome(
@@ -232,16 +202,6 @@ async function replayContentForIdentity(
     { content: "Continue", role: "user" },
   ]);
   return assistantContent(harness);
-}
-
-function invalidRequestResponse(message: string): Response {
-  return new Response(
-    JSON.stringify({
-      error: { message, type: "invalid_request_error" },
-      type: "error",
-    }),
-    { status: 400 },
-  );
 }
 
 describe("anthropic-format generic provider", () => {
