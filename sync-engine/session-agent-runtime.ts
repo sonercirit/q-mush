@@ -426,6 +426,7 @@ export async function runSessionAgent(
           },
           prompt: typeof promptValue === "string" ? promptValue : null,
           resources: runtime,
+          restartRequested: runtime.restartHandoffRequested,
           toolSettings: runtime.toolSettings,
           userId: runtime.userId,
           workspaceId: runtime.detail.workspaceId,

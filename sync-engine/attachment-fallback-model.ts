@@ -14,6 +14,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
+import type { AgentModelRequestOptions } from "./agent-model-options.ts";
 import {
   createFallbackModel,
   type AgentModelFactory,
@@ -28,6 +29,17 @@ export interface AttachmentExplanation {
   readonly usage: Pick<AgentModelStep, "costUsd" | "tokenUsage">;
 }
 
+function throwIfAttachmentRestartRequested(
+  restartRequested: (() => boolean) | undefined,
+): void {
+  if (restartRequested?.() === true) {
+    throw new DOMException(
+      "The restart began before the attachment explanation model request",
+      "RestartHandoff",
+    );
+  }
+}
+
 export async function explainAttachment(
   options: {
     readonly attachment: AgentAttachment;
@@ -39,7 +51,9 @@ export async function explainAttachment(
     readonly currentProviderTag: string | null;
     readonly currentResolvedModel?: string | null;
     readonly factory: AgentModelFactory;
+    readonly onRequestState?: AgentModelRequestOptions["onRequestState"];
     readonly onStepStart?: () => void;
+    readonly restartRequested?: () => boolean;
     readonly prompt: string | null;
     readonly resources: AttachmentFallbackRuntimeResources;
     readonly toolSettings: ToolSettings;
@@ -70,6 +84,7 @@ export async function explainAttachment(
           ...selection,
           workspaceId: options.workspaceId,
         });
+  throwIfAttachmentRestartRequested(options.restartRequested);
   if (credential === undefined) {
     throw new Error(
       `The global ${modality} fallback credential is unavailable`,
@@ -82,6 +97,7 @@ export async function explainAttachment(
       credential,
       signal,
     );
+    throwIfAttachmentRestartRequested(options.restartRequested);
     const fallbackModel = catalog?.models.find(
       ({ id }) => id === selection.model,
     );
@@ -96,6 +112,7 @@ export async function explainAttachment(
     selection === undefined
       ? options.currentProviderPricing
       : selectedModel.pricing;
+  throwIfAttachmentRestartRequested(options.restartRequested);
   const resolvedModel =
     selection === undefined ? options.currentResolvedModel : selectedModel.id;
   const model = createFallbackModel(options.factory, {
@@ -103,6 +120,7 @@ export async function explainAttachment(
     credential,
     maxOutputTokens: selectedModel.maxOutputTokens,
     model: selectedModelId,
+    onRequestState: options.onRequestState,
     openRouterProviderTag:
       selection?.openRouterProviderTag ?? options.currentProviderTag,
     prompt: options.prompt,
@@ -115,6 +133,7 @@ export async function explainAttachment(
   try {
     // The explanation is its own model request: restart the visible step
     // clock so a slow fallback does not extend the preceding agent step.
+    throwIfAttachmentRestartRequested(options.restartRequested);
     options.onStepStart?.();
     step = await model.complete(
       [{ attachments: [options.attachment], content: "", role: "user" }],

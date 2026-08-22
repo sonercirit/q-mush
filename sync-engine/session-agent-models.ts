@@ -60,6 +60,7 @@ export function createFallbackModel(
     readonly credential: ProviderCredentialAccess;
     readonly maxOutputTokens: number | null;
     readonly model: string;
+    readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
     readonly openRouterProviderTag?: string | null;
     readonly prompt: string | null;
     readonly provider: ProviderId;
@@ -77,6 +78,9 @@ export function createFallbackModel(
       : { toolSettings: selection.toolSettings }),
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
+    ...(selection.onRequestState === undefined
+      ? {}
+      : { onRequestState: selection.onRequestState }),
     ...agentModelRoutingOptions(selection.openRouterProviderTag),
     provider: selection.provider,
     providerPricing: selection.providerPricing,
