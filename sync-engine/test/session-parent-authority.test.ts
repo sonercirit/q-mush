@@ -3,7 +3,9 @@ import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -32,6 +34,12 @@ import { createSessionInput } from "./session-store-create-hardening-helpers.ts"
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
+
+class RejectingModelCredentialPool extends ModelCredentialPool {
+  override candidates(): Promise<never> {
+    return Promise.reject(new Error("candidate boom"));
+  }
+}
 
 const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
 const CHILD_SESSION_ID = "018bcfe5-6800-7000-8000-000000000092";
@@ -91,6 +99,8 @@ function authoritySetup(options: {
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
   readonly draining?: boolean;
+  readonly rejectCandidates?: boolean;
+  readonly rejectCredential?: boolean;
   readonly runningTarget?: boolean;
   readonly withTarget?: boolean;
 }): AuthoritySetup {
@@ -175,6 +185,14 @@ function authoritySetup(options: {
     },
     ...(options.draining === true ? { draining: () => true } : {}),
     launchSession: launch,
+    ...(options.rejectCandidates === true
+      ? {
+          modelCredentialPool: new RejectingModelCredentialPool({
+            database,
+            readCredential: () => Promise.resolve(undefined),
+          }),
+        }
+      : {}),
     notify,
     now: () => TEST_NOW + 3,
     readCredential: () => Promise.resolve(credential),
@@ -184,6 +202,7 @@ function authoritySetup(options: {
       if (options.gateCredential === true) {
         await credentialGate.wait();
       }
+      if (options.rejectCredential === true) throw new Error("credential boom");
       return action(credential);
     },
   }).actions(
@@ -614,24 +633,82 @@ describe("cross-session parent execution authority", () => {
     },
   );
 
-  test.each([
-    { draining: false, path: "launch" },
-    { draining: true, path: "restart queue" },
-  ])("rejects a stale parent at the pre-$path claim", async ({ draining }) => {
-    const setup = authoritySetup({ draining, fenceOnNotify: true });
-
+  test("queues a prepared child while draining without launching it", async () => {
+    const setup = authoritySetup({ draining: true });
     expect(
       await setup.actions.spawnSession(
         spawnInput(),
         new AbortController().signal,
       ),
-    ).toContain("parent_stale");
+    ).toContain('"status": "queued"');
     expect(setup.launch).not.toHaveBeenCalled();
-    expect(
-      setup.store.list(TEST_USER_ID).some(({ status }) => status === "failed"),
-    ).toBe(true);
-    closeSetup(setup);
+    expect(setup.store.list(TEST_USER_ID)).toHaveLength(2);
+    setup.close();
   });
+
+  test("rejects a requested credential the user does not own", async () => {
+    const setup = authoritySetup({});
+    expect(
+      await setup.actions.spawnSession(
+        { ...spawnInput(), credentialId: "unknown-credential" },
+        new AbortController().signal,
+      ),
+    ).toContain("credential_unavailable");
+    expectOnlyParentSession(setup);
+  });
+
+  test.each([
+    {
+      balanced: false,
+      option: { rejectCredential: true },
+      error: "credential boom",
+    },
+    {
+      balanced: true,
+      option: { rejectCandidates: true },
+      error: "candidate boom",
+    },
+  ])(
+    "discards the reservation when credential access rejects ($error)",
+    async ({ balanced, option, error }) => {
+      const setup = authoritySetup(option);
+      await expect(
+        setup.actions.spawnSession(
+          {
+            ...spawnInput(),
+            credentialId: balanced
+              ? balancedCredentialId("openai")
+              : CREDENTIAL_ID,
+          },
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(error);
+      expect(setup.store.list(TEST_USER_ID)).toHaveLength(1);
+      expect(setup.launch).not.toHaveBeenCalled();
+      setup.close();
+    },
+  );
+
+  test.each([{ draining: true, path: "restart queue" }])(
+    "rejects a stale parent at the pre-$path claim",
+    async ({ draining }) => {
+      const setup = authoritySetup({ draining, fenceOnNotify: true });
+
+      expect(
+        await setup.actions.spawnSession(
+          spawnInput(),
+          new AbortController().signal,
+        ),
+      ).toContain("parent_stale");
+      expect(setup.launch).not.toHaveBeenCalled();
+      expect(
+        setup.store
+          .list(TEST_USER_ID)
+          .some(({ status }) => status === "failed"),
+      ).toBe(true);
+      closeSetup(setup);
+    },
+  );
 
   test("does not create a child when the parent is fenced during credential access", async () => {
     const setup = authoritySetup({ gateCredential: true });

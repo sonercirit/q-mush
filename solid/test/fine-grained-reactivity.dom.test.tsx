@@ -29,7 +29,6 @@ import {
   disposeTestViews,
   expectTestText,
   mountTestView,
-  queryTestElement,
   queryTestTranscript,
 } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
@@ -43,6 +42,12 @@ import {
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
+  mountedSessionList,
+  parentSession,
+  query,
+  relatedChildren,
+} from "./session-list-test-helpers.tsx";
+import {
   runningSessionDetail,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
@@ -51,35 +56,6 @@ const disposals: (() => void)[] = [];
 
 function mount(renderView: () => JSX.Element): HTMLDivElement {
   return mountTestView(renderView, disposals);
-}
-
-interface MountedSessionList {
-  readonly container: HTMLDivElement;
-  readonly controller: SessionController;
-  readonly select: (sessionId: string) => void;
-}
-
-export function mountedSessionList(
-  sessions: readonly ReturnType<typeof summaryFromDetail>[],
-  selectedId?: string,
-): MountedSessionList {
-  const state = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    selectedId,
-    sessions,
-  });
-  const controller = new SessionController(state);
-  return {
-    container: mount(() => <SessionList controller={controller} />),
-    controller,
-    select: (sessionId: string) => {
-      state.setState((current) => ({ ...current, selectedId: sessionId }));
-    },
-  };
-}
-
-export function query(container: ParentNode, selector: string): Element {
-  return queryTestElement(container, selector);
 }
 
 function credential(id: string, label: string): ProviderCredential {
@@ -247,14 +223,6 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   expectScrollLock(toggle, false);
 });
 
-export function parentSession() {
-  return {
-    ...summaryFromDetail(TEST_SESSION_DETAIL),
-    id: "parent-session",
-    title: "Parent task",
-  };
-}
-
 function relatedSession(
   parent: AgentSessionSummary,
   id: string,
@@ -262,19 +230,6 @@ function relatedSession(
   parentSessionId: string | null = parent.id,
 ): AgentSessionSummary {
   return { ...parent, id, parentSessionId, title };
-}
-
-export function relatedChildren(
-  parent: AgentSessionSummary,
-  prefix: string,
-): readonly AgentSessionSummary[] {
-  return Array.from({ length: 24 }, (_, index) =>
-    relatedSession(
-      parent,
-      `${prefix}-${String(index + 1)}`,
-      `Child ${String(index + 1)}`,
-    ),
-  );
 }
 
 function expectSessionDepth(

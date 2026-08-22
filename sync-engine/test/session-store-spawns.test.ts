@@ -5,6 +5,7 @@ import { advanceStoredSessionGeneration } from "../session-generation-advance.ts
 import {
   claimSpawnedSessionReservation,
   failSpawnedSessionReservation,
+  prepareSpawnedSessionReservation,
 } from "../session-spawn-reservation-store.ts";
 import {
   TEST_NOW,
@@ -227,11 +228,61 @@ describe("spawned session report generation fencing", () => {
 
   test("hides reservations from both queued-session launch queries", () => {
     const setup = spawnedRunningChildSetup("Hidden reservation");
+    updateSession(setup, setup.childId, {
+      activeStartedAt: null,
+      spawnPreparationPending: false,
+      status: "queued",
+    });
+    expect(
+      setup.store.queuedSessions(TEST_USER_ID).map(({ id }) => id),
+    ).toEqual([setup.childId]);
+    expect(setup.store.queuedSessionOwnerIds()).toEqual([TEST_USER_ID]);
     updateSession(setup, setup.childId, { spawnPreparationPending: true });
-
     expect(setup.store.queuedSessions(TEST_USER_ID)).toEqual([]);
     expect(setup.store.queuedSessionOwnerIds()).toEqual([]);
+    setup.database.$client.close();
+  });
 
+  test("does not prepare a reservation that was already claimed", () => {
+    const setup = createStore();
+    const parent = createTestSession(setup.store);
+    const child = createTestSession(setup.store, TEST_NOW + 1);
+    expect(
+      setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 2),
+    ).toBe(true);
+    updateSession(
+      Object.assign(setup, {
+        childGeneration: child.generation,
+        childId: child.id,
+        parentGeneration: parent.generation,
+        parentId: parent.id,
+      }),
+      child.id,
+      {
+        parentExecutionGeneration: parent.generation,
+        parentSessionId: parent.id,
+        spawnPreparationPending: false,
+      },
+    );
+    expect(
+      prepareSpawnedSessionReservation({
+        authority: { generation: parent.generation, sessionId: parent.id },
+        database: setup.database,
+        identity: {
+          generation: child.generation,
+          sessionId: child.id,
+          userId: TEST_USER_ID,
+        },
+        metadata: {
+          adaptiveThinking: null,
+          credentialId: "018bcfe5-6800-7000-8000-000000000001",
+          maxContextTokens: null,
+          maxOutputTokens: null,
+          providerPricing: null,
+        },
+        now: TEST_NOW + 4,
+      }),
+    ).toBe("parent_stale");
     setup.database.$client.close();
   });
 

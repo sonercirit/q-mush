@@ -4,7 +4,7 @@ import {
   parentSession,
   query,
   relatedChildren,
-} from "./fine-grained-reactivity.dom.test.tsx";
+} from "./session-list-test-helpers.tsx";
 
 test("loads the next child page without changing the root page", () => {
   const roots = Array.from({ length: 14 }, (_, index) => ({
@@ -37,4 +37,78 @@ test("loads the next child page without changing the root page", () => {
 
   expect(container.querySelectorAll(childRows)).toHaveLength(20);
   expect(container.querySelectorAll(rootRows)).toHaveLength(rootCount);
+});
+
+test("hides the child pager after every child is visible", () => {
+  const parent = parentSession();
+  const children = relatedChildren(parent, "all-child").slice(0, 10);
+  const { container } = mountedSessionList([parent, ...children]);
+  const toggle = query(
+    container,
+    "button[aria-label='Expand child sessions for Parent task']",
+  );
+  if (!(toggle instanceof HTMLButtonElement))
+    throw new TypeError("Missing toggle");
+  toggle.click();
+
+  expect(container.querySelectorAll("[data-session-depth='1']")).toHaveLength(
+    10,
+  );
+  expect(container.querySelector("[data-load-more-children]")).toBeNull();
+});
+
+test("resets child pagination when the root list identity changes", () => {
+  const parent = parentSession();
+  const children = relatedChildren(parent, "old-child");
+  const mounted = mountedSessionList([parent, ...children]);
+  const toggle = query(
+    mounted.container,
+    "button[aria-label='Expand child sessions for Parent task']",
+  );
+  if (!(toggle instanceof HTMLButtonElement))
+    throw new TypeError("Missing toggle");
+  toggle.click();
+  const pager = query(mounted.container, "[data-load-more-children]");
+  if (!(pager instanceof HTMLButtonElement))
+    throw new TypeError("Missing pager");
+  pager.click();
+  expect(
+    mounted.container.querySelectorAll("[data-session-depth='1']"),
+  ).toHaveLength(20);
+
+  const replacement = {
+    ...parent,
+    id: "replacement-root",
+    title: "Replacement",
+  };
+  mounted.controller.applyRealtime([
+    replacement,
+    ...relatedChildren(replacement, "new-child"),
+  ]);
+  const replacementToggle = query(
+    mounted.container,
+    "button[aria-label='Expand child sessions for Replacement']",
+  );
+  if (!(replacementToggle instanceof HTMLButtonElement))
+    throw new TypeError("Missing replacement toggle");
+  replacementToggle.click();
+  expect(
+    mounted.container.querySelectorAll("[data-session-depth='1']"),
+  ).toHaveLength(10);
+});
+
+test("clamps repeated root pagination at the available roots", () => {
+  const roots = Array.from({ length: 11 }, (_, index) => ({
+    ...parentSession(),
+    id: `bounded-root-${String(index)}`,
+  }));
+  const { container } = mountedSessionList(roots);
+  const pager = query(container, "[data-load-more-sessions='true']");
+  if (!(pager instanceof HTMLButtonElement))
+    throw new TypeError("Missing root pager");
+  pager.click();
+  pager.click();
+  expect(container.querySelectorAll("[data-session-depth='0']")).toHaveLength(
+    11,
+  );
 });
