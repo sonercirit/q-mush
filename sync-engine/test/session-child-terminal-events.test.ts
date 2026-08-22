@@ -79,7 +79,7 @@ export function idleParent(setup: ReturnType<typeof spawnedChildSetup>): void {
     .run(setup.parentId);
 }
 
-async function expectParentWake(
+export async function expectParentWake(
   setup: ReturnType<typeof spawnedChildSetup>,
   delivery: ReturnType<typeof terminalEventActions>,
 ): Promise<void> {

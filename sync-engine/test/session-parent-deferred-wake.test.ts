@@ -11,11 +11,16 @@ import {
   setChildStatus,
   terminalEventActions,
 } from "./session-child-terminal-events.test.ts";
-import { requireSpawnedChild } from "./session-store-result-helpers.ts";
 import {
+  continueSpawnedChild,
+  requireSpawnedChild,
   spawnedChildSetup,
   transitionSpawnedChild,
 } from "./session-store-spawn-test-helpers.ts";
+
+function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
+  return continueSpawnedChild(setup, TEST_NOW + 6);
+}
 
 test("stopping a child wakes a runnable idle parent and consumes its report", async () => {
   const setup = spawnedChildSetup();
