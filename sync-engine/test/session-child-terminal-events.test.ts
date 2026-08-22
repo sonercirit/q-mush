@@ -316,7 +316,7 @@ test("idle parents persist sibling events and surface them on next resume", () =
 
   const reports = parentReports(setup.store, setup.parentId);
   const joinedReports = reports.join("\n");
-  expect(parentReports(setup.store, setup.parentId)).toHaveLength(2);
+  expectConsumedReportCount(setup, 2);
   expect(joinedReports).toContain(setup.childId);
   expect(joinedReports).toContain(siblingId);
   expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
