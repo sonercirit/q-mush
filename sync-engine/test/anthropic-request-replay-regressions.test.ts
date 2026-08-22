@@ -83,10 +83,14 @@ function thinkingOnlyReplay() {
 
 async function replayOnlyMessages(
   messages: readonly AgentConversationMessage[],
-): Promise<unknown> {
+): Promise<readonly unknown[]> {
   const harness = signedReplayHarness();
   await harness.complete(messages);
-  return (await capturedRequestRecord(harness, 0))["messages"];
+  const captured = (await capturedRequestRecord(harness, 0))["messages"];
+  if (!Array.isArray(captured)) {
+    throw new Error("The captured messages were not an array");
+  }
+  return Array.from<unknown>(captured);
 }
 
 async function completeReplayRequest(options: {
@@ -268,6 +272,37 @@ describe("anthropic-format generic provider", () => {
       replay.blocks[2],
       replay.blocks[3],
     ]);
+  });
+
+  test("leaves an all-ineligible replay breakpoint byte-for-byte unchanged", async () => {
+    const baseReplay = thinkingOnlyReplay();
+    const [thinking, redactedThinking] = baseReplay.blocks;
+    if (thinking?.type !== "thinking" || redactedThinking === undefined) {
+      throw new Error("The thinking replay fixture was incomplete");
+    }
+    const replay = {
+      ...baseReplay,
+      blocks: [
+        { text: " ", type: "text" as const },
+        { ...thinking, thinking: "Thinking." },
+        redactedThinking,
+      ],
+    };
+    const messages = await replayOnlyMessages([
+      { ...thinkingOnlyAssistant(replay), content: " " },
+      { content: "Middle", role: "user" },
+      replayTextAssistant(),
+    ]);
+
+    expect(messages[0]).toEqual({
+      content: replay.blocks.slice(1),
+      role: "assistant",
+    });
+    expect(messages.at(1)).toEqual(cachedTextMessage("user", "Middle"));
+    expect(messages.at(2)).toEqual({
+      content: replayWithoutClientTool().blocks,
+      role: "assistant",
+    });
   });
 
   test("keeps a thinking-only replay through completion sanitization", async () => {
