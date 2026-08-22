@@ -7,12 +7,17 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { childSessionId, spawnCall } from "./session-agent-spawn-helpers.ts";
+import {
+  childSessionId,
+  completeRunnerCommand,
+  completeWokenParent,
+  spawnCall,
+} from "./session-agent-spawn-helpers.ts";
 import {
   startToolSession,
   waitForSessionContent,
 } from "./session-agent-tool-setup.ts";
-import { RUNNER_ID, SESSION_ID } from "./session-integration-fixtures.ts";
+import { SESSION_ID } from "./session-integration-fixtures.ts";
 import {
   hasSessionStatus,
   waitForSessionValue,
@@ -45,21 +50,6 @@ class ParentGenerationDeliveryModel implements AgentModel {
       providerStep(step.content, { toolCalls: step.toolCalls }),
     );
   }
-}
-
-function completeRunnerCommand(
-  setup: Awaited<ReturnType<typeof startToolSession>>,
-  command: { readonly id: string },
-): void {
-  const completed = setup.sessions.completeRunnerCommand(
-    RUNNER_ID,
-    command.id,
-    {
-      output: "null",
-      state: "completed",
-    },
-  );
-  expect(completed).toBe(true);
 }
 
 function isRunnerCommand(value: unknown): value is RunnerToolCommand {
@@ -129,26 +119,8 @@ test("delivers and runs an idle parent after its generation advances", async () 
   expect(childStatus(completedChild)).toBe(true);
 
   await waitForTerminalParentNote(setup.sessions, childId);
-  const deliveryCommand = await latestCommandFor(
-    setup,
-    SESSION_ID,
-    interveningCommand.id,
-  );
-  completeRunnerCommand(setup, deliveryCommand);
-  await waitForSessionContent(
-    setup,
-    "The advanced parent received the child report.",
-  );
-  const resumedParent = await waitForSessionValue(
-    () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value): value is NonNullable<typeof value> =>
-      typeof value === "object" &&
-      value !== null &&
-      "generation" in value &&
-      value.generation === 2 &&
-      "status" in value &&
-      value.status === "idle",
-  );
+  await completeWokenParent(setup);
+  const resumedParent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
   expect(resumedParent).toMatchObject({
     generation: 2,
     status: "idle",

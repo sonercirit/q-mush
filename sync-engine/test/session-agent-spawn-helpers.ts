@@ -48,21 +48,46 @@ async function waitForRunnerSession(
   );
 }
 
+export function completeRunnerCommand(
+  setup: Awaited<ReturnType<typeof startToolSession>>,
+  command: { readonly id: string },
+): void {
+  const completed = setup.sessions.completeRunnerCommand(
+    RUNNER_ID,
+    command.id,
+    {
+      output: "null",
+      state: "completed",
+    },
+  );
+  if (!completed) {
+    throw new Error("The runner command was not completed");
+  }
+}
+
+function advancedParent(
+  value: unknown,
+): value is NonNullable<
+  ReturnType<
+    Awaited<ReturnType<typeof startToolSession>>["sessions"]["detailForUser"]
+  >
+> {
+  return (
+    isRecord(value) &&
+    typeof value["generation"] === "number" &&
+    value["generation"] > 0 &&
+    (value["status"] === "idle" ||
+      value["status"] === "failed" ||
+      value["status"] === "running")
+  );
+}
+
 export async function completeWokenParent(
   setup: Awaited<ReturnType<typeof startToolSession>>,
 ): Promise<void> {
   const parent = await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value): value is NonNullable<typeof value> =>
-      typeof value === "object" &&
-      value !== null &&
-      "generation" in value &&
-      typeof value.generation === "number" &&
-      value.generation > 0 &&
-      "status" in value &&
-      (value.status === "idle" ||
-        value.status === "failed" ||
-        value.status === "running"),
+    advancedParent,
   );
   if (
     !isRecord(parent) ||
@@ -78,27 +103,12 @@ export async function completeWokenParent(
   if (command === undefined || command.sessionId !== SESSION_ID) {
     throw new Error("The woken parent command is unavailable");
   }
-  const completed = setup.sessions.completeRunnerCommand(
-    RUNNER_ID,
-    command.id,
-    {
-      output: "null",
-      state: "completed",
-    },
-  );
-  if (!completed) {
-    throw new Error("The woken parent command was not completed");
-  }
+  completeRunnerCommand(setup, command);
   await waitForSessionValue(
     () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
-    (value): value is NonNullable<typeof value> =>
-      typeof value === "object" &&
-      value !== null &&
-      "generation" in value &&
-      typeof value.generation === "number" &&
-      value.generation > 0 &&
-      "status" in value &&
-      (value.status === "idle" || value.status === "failed"),
+    (value) =>
+      advancedParent(value) &&
+      (value["status"] === "idle" || value["status"] === "failed"),
   );
 }
 
