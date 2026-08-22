@@ -299,13 +299,13 @@ export class ProviderCredentialStore {
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
-    const fingerprinted =
+    const value =
       details.apiFormat === "anthropic"
         ? `${credential}\n${details.apiFormat}`
         : credential;
     const fingerprint = fingerprintCredential(
       details.baseUrl === undefined
-        ? fingerprinted
+        ? value
         : `${details.baseUrl}\n${fingerprinted}`,
     );
     const existing = this.#database
