@@ -12,6 +12,7 @@ import {
 } from "./connection-scopes.ts";
 import {
   fingerprintCredential,
+  fingerprintProviderCredential,
   type CredentialCipher,
 } from "./credential-cipher.ts";
 import { escapedLikePattern, lowerLike } from "./database-search.ts";
@@ -654,6 +655,24 @@ export class ProviderCredentialStore {
     secret: string,
     now: number,
   ): boolean {
+    const stored = this.#database
+      .select({
+        apiFormat: providerCredentials.apiFormat,
+        baseUrl: providerCredentials.baseUrl,
+      })
+      .from(providerCredentials)
+      .where(activeCredentialCondition(this.#provider, userId, credentialId))
+      .get();
+    if (stored === undefined) return false;
+    const fingerprint = fingerprintProviderCredential(secret, stored);
+    const collision = this.#database
+      .select({ id: providerCredentials.id })
+      .from(providerCredentials)
+      .where(fingerprintCondition(this.#provider, userId, fingerprint))
+      .get();
+    if (collision !== undefined && collision.id !== credentialId) {
+      throw new DuplicateProviderCredentialError();
+    }
     const updated = this.#database
       .update(providerCredentials)
       .set({
@@ -661,6 +680,7 @@ export class ProviderCredentialStore {
           secret,
           encryptionContext(userId, credentialId),
         ),
+        credentialFingerprint: fingerprint,
         ...updatedAuditFields(SYSTEM_ID, now),
       })
       .where(activeCredentialCondition(this.#provider, userId, credentialId))
