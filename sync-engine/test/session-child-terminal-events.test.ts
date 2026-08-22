@@ -383,8 +383,10 @@ test("runner parent reports notify and wake the delivered parent", async () => {
       expect.objectContaining({ id: setup.parentId }),
       TEST_USER_ID,
     );
+    expect(delivery.notify).toHaveBeenCalledTimes(2);
+    const queuedParent = setup.store.get(TEST_USER_ID, setup.parentId);
+    expect(queuedParent).toMatchObject({ status: "queued" });
   });
-  closeSpawnedChildSetup(setup);
 });
 
 test("a report to a terminal parent notifies the child route", () => {

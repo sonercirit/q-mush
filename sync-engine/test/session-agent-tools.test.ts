@@ -16,6 +16,7 @@ import {
 import {
   childSessionId,
   completeChildAgentFile,
+  completeWokenParent,
   spawnCall,
   waitForChildRunnerTool,
 } from "./session-agent-spawn-helpers.ts";
@@ -102,13 +103,18 @@ class SelfStoppingChildModel implements AgentModel {
           }
         : this.#step === 2
           ? { content: "Parent work is complete.", toolCalls: [] }
-          : childSessionId === undefined
-            ? undefined
+          : this.#step === 3
+            ? childSessionId === undefined
+              ? undefined
+              : {
+                  content: "Stopping the delegated session.",
+                  toolCalls: [
+                    toolCall("stop_session", { sessionId: childSessionId }),
+                  ],
+                }
             : {
-                content: "Stopping the delegated session.",
-                toolCalls: [
-                  toolCall("stop_session", { sessionId: childSessionId }),
-                ],
+                content: "The stopped child report was received.",
+                toolCalls: [],
               };
     if (step === undefined) {
       throw new Error("The child session ID is not available");
@@ -210,8 +216,8 @@ async function completePausedChild(
   );
 }
 
-describe("session agent tools", () => {
-  test("lists and reads only the spawning user's sessions", async () => {
+describe("agent tools", () => {
+  test("lists and reads owned sessions", async () => {
     const model = scriptedModel([
       {
         content: "Read this session after listing it.",
@@ -239,7 +245,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(readSetup.database);
   });
 
-  test("routes more than eight mixed session and runner recipients through parallel", async () => {
+  test("routes mixed recipients", async () => {
     const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
         ? { parameters: {}, recipient_name: "list_sessions" }
@@ -269,7 +275,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("routes session recipients in parallel without sending them to the runner", async () => {
+  test("keeps session recipients off the runner", async () => {
     const model = scriptedModel([
       {
         content: "Inspecting sessions in parallel.",
@@ -299,7 +305,7 @@ describe("session agent tools", () => {
     closeToolSession(parallelSetup);
   });
 
-  test("sends to, continues, and stops owned sessions", async () => {
+  test("controls owned sessions", async () => {
     const model = scriptedModel([
       {
         content: "Sending an instruction.",
@@ -337,7 +343,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(controlSetup.database);
   });
 
-  test("accepts an absolute model agent-file path", async () => {
+  test("accepts an absolute agent file", async () => {
     const agentFilePath = "/outside/child-instructions.md";
     const model = scriptedModel([
       {
@@ -356,7 +362,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("rejects a spawn without access to its credential", async () => {
+  test("rejects inaccessible spawn credentials", async () => {
     const model = scriptedModel([
       {
         content: "Trying another credential.",
@@ -373,7 +379,7 @@ describe("session agent tools", () => {
     );
   });
 
-  test("queues a prepared child when the restart signal is already aborted", async () => {
+  test("queues a child during an aborted restart", async () => {
     const model = scriptedModel([
       {
         content: "Delegate at the restart boundary.",
@@ -404,7 +410,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("hands off a parent at the step boundary when spawn races with draining", async () => {
+  test("hands off a parent when spawn races with draining", async () => {
     const model = scriptedModel([
       {
         content: "Delegate during restart; it must not launch.",
@@ -449,7 +455,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("spawns without blocking and reports the child final message later", async () => {
+  test("reports a spawned child later", async () => {
     const model = scriptedModel([
       {
         content: "Delegating now.",
@@ -457,6 +463,7 @@ describe("session agent tools", () => {
       },
       { content: "I can keep working immediately.", toolCalls: [] },
       { content: "Delegated task done.", toolCalls: [] },
+      { content: "I received the delegated result.", toolCalls: [] },
     ]);
     const spawnSetup = await startToolSession(model);
     const parent = await completedParentDetail(spawnSetup, "idle");
@@ -477,19 +484,20 @@ describe("session agent tools", () => {
       hasSessionStatus("completed"),
     );
     await waitForTerminalParentNote(spawnSetup.sessions, childId);
+    await completeWokenParent(spawnSetup);
     const child = spawnSetup.sessions.detailForUser(TEST_USER_ID, childId);
     expect(JSON.stringify(child)).toContain("Delegated task done.");
     expect(JSON.stringify(await sessionDetail(spawnSetup.sessions))).toContain(
       "Delegated task done.",
     );
     expect(await sessionDetail(spawnSetup.sessions)).toMatchObject({
-      generation: 0,
+      generation: 1,
       status: "idle",
     });
     closeSessionTestDatabase(spawnSetup.database);
   });
 
-  test("consumes steering at the boundary after concurrent child completion", async () => {
+  test("consumes steering after concurrent child completion", async () => {
     const running = await pausedChildSetup();
     const { childId, model, setup } = running;
     await completePausedChild(setup, childId);
@@ -511,7 +519,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("does not wake a completed parent when its spawned child completes", async () => {
+  test("does not wake a completed parent", async () => {
     const model = scriptedModel([
       {
         content: "Delegating before waiting.",
@@ -522,14 +530,15 @@ describe("session agent tools", () => {
       { content: "I received the child report.", toolCalls: [] },
     ]);
     const { setup } = await completedChildTerminalParent(model);
+    await completeWokenParent(setup);
 
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
-    expect(parent).toMatchObject({ generation: 0, status: "idle" });
+    expect(parent).toMatchObject({ generation: 1, status: "idle" });
     expect(JSON.stringify(parent)).toContain("Child work is complete.");
     closeSessionTestDatabase(setup.database);
   });
 
-  test("does not report a runner-required spawned child as completed", async () => {
+  test("does not report a runner-required child", async () => {
     const model = scriptedModel([
       {
         content: "Delegating work.",
@@ -571,17 +580,18 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("reports when a spawned child stops itself", async () => {
+  test("reports a self-stopping child", async () => {
     const model = new SelfStoppingChildModel();
     const { setup } = await completedChildTerminalParent(model, (childId) => {
       model.childSessionId = childId;
     });
+    await completeWokenParent(setup);
 
     const updatedParent = setup.sessions.detailForUser(
       TEST_USER_ID,
       SESSION_ID,
     );
-    expect(updatedParent?.generation).toBe(0);
+    expect(updatedParent?.generation).toBe(1);
     expect(updatedParent?.status).toBe("idle");
     expect(JSON.stringify(updatedParent)).toContain(
       '\\"status\\": \\"stopped\\"',
