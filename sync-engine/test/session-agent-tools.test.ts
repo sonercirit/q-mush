@@ -48,7 +48,6 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
-
 class PausedParentChildModel implements AgentModel {
   #requestCount = 0;
   #releaseParent: (() => void) | undefined;
@@ -56,11 +55,9 @@ class PausedParentChildModel implements AgentModel {
   readonly parentPaused = new Promise<void>((resolve) => {
     this.#releaseParent = resolve;
   });
-
   resumeParent(): void {
     this.#resumeParent.resolve(undefined);
   }
-
   async complete(): Promise<AgentModelStep> {
     this.#requestCount += 1;
     let content: string;
@@ -83,11 +80,9 @@ class PausedParentChildModel implements AgentModel {
     return providerStep(content, { toolCalls });
   }
 }
-
 class SelfStoppingChildModel implements AgentModel {
   childSessionId: string | undefined;
   #step = 0;
-
   complete(): Promise<AgentModelStep> {
     this.#step += 1;
     const childSessionId = this.childSessionId;
@@ -102,18 +97,18 @@ class SelfStoppingChildModel implements AgentModel {
             ],
           }
         : this.#step === 2
-          ? { content: "Parent work is complete.", toolCalls: [] }
+          ? { content: "Parent complete.", toolCalls: [] }
           : this.#step === 3
             ? childSessionId === undefined
               ? undefined
               : {
-                  content: "Stopping the delegated session.",
+                  content: "Stopping child.",
                   toolCalls: [
                     toolCall("stop_session", { sessionId: childSessionId }),
                   ],
                 }
             : {
-                content: "The stopped child report was received.",
+                content: "Stop report received.",
                 toolCalls: [],
               };
     if (step === undefined) {
@@ -128,12 +123,10 @@ class SelfStoppingChildModel implements AgentModel {
     });
   }
 }
-
 interface CompletedToolOutput {
   readonly output: string | undefined;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
 }
-
 async function completedToolOutput(
   model: AgentModel,
   name: string,
@@ -141,24 +134,20 @@ async function completedToolOutput(
   const { outputs, setup } = await completedParentToolOutputs(model, name);
   return { output: outputs[0], setup };
 }
-
 async function expectRejectedSpawn(
   model: AgentModel,
   expectedError: string,
   userId = TEST_USER_ID,
 ): Promise<void> {
   const { output, setup } = await completedToolOutput(model, "spawn_session");
-
   expect(output).toContain(expectedError);
   expect(setup.sessions.listForUser(userId)).toHaveLength(1);
   closeSessionTestDatabase(setup.database);
 }
-
 type StartedChild = Readonly<{
   childId: string;
   setup: Awaited<ReturnType<typeof startToolSession>>;
 }>;
-
 async function completedChildTerminalParent(
   model: AgentModel,
   onChild?: (childId: string) => void,
@@ -169,13 +158,11 @@ async function completedChildTerminalParent(
   await waitForTerminalParentNote(started.setup.sessions, started.childId);
   return started;
 }
-
 async function startedChild(model: AgentModel): Promise<StartedChild> {
   const setup = await startToolSession(model);
   const childId = await childSessionId(setup);
   return { childId, setup };
 }
-
 async function pausedChildSetup(): Promise<{
   readonly childId: string;
   readonly model: PausedParentChildModel;
@@ -192,7 +179,6 @@ async function pausedChildSetup(): Promise<{
   }
   return { childId: child.id, model, setup };
 }
-
 function queuedChildren(
   setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
 ) {
@@ -203,7 +189,6 @@ function queuedChildren(
         parentSessionId === SESSION_ID && status === "queued",
     );
 }
-
 async function completePausedChild(
   setup: Awaited<ReturnType<typeof startToolSession>>,
   childId: string,
@@ -215,7 +200,6 @@ async function completePausedChild(
     hasSessionStatus("completed"),
   );
 }
-
 describe("agent tools", () => {
   test("lists and reads only the spawning user's sessions", async () => {
     const model = scriptedModel([
@@ -231,7 +215,6 @@ describe("agent tools", () => {
     const readSetup = await startToolSession(model);
     const readDetail = await completedParentDetail(readSetup, "idle");
     expect(isRecord(readDetail)).toBe(true);
-
     const listed = findToolResultContent(readDetail, "list_sessions");
     expect(listed).toContain(SESSION_ID);
     const read = findToolResultContent(readDetail, "read_session");
@@ -244,7 +227,6 @@ describe("agent tools", () => {
     );
     closeSessionTestDatabase(readSetup.database);
   });
-
   test("routes more than eight mixed session and runner recipients through parallel", async () => {
     const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
@@ -263,7 +245,6 @@ describe("agent tools", () => {
     ]);
     const { output, setup } = await completedToolOutput(model, "parallel");
     const results: unknown = JSON.parse(output ?? "null");
-
     expect(results).toHaveLength(10);
     expect(Array.isArray(results) ? results[0] : undefined).toMatchObject({
       recipient_name: "list_sessions",
@@ -274,11 +255,10 @@ describe("agent tools", () => {
     expect(setup.runnerCommands.length).toBe(0);
     closeSessionTestDatabase(setup.database);
   });
-
   test("keeps session recipients off the runner", async () => {
     const model = scriptedModel([
       {
-        content: "Inspecting sessions in parallel.",
+        content: "Inspecting sessions.",
         toolCalls: [
           toolCall("parallel", {
             tool_uses: [
@@ -297,14 +277,12 @@ describe("agent tools", () => {
       model,
       "parallel",
     );
-
     expect(output).toContain("list_sessions");
     expect(output).toContain("read_session");
     expect(output).toContain('\\"role\\": \\"user\\"');
     expect(output).toContain("Inspect README.md");
     closeToolSession(parallelSetup);
   });
-
   test("controls owned sessions", async () => {
     const model = scriptedModel([
       {
@@ -330,7 +308,6 @@ describe("agent tools", () => {
     ]);
     const controlSetup = await startToolSession(model);
     const detail = await completedParentDetail(controlSetup, "stopped");
-
     expect(findToolResultContent(detail, "send_to_session")).toContain(
       "Session not found",
     );
@@ -342,7 +319,6 @@ describe("agent tools", () => {
     );
     closeSessionTestDatabase(controlSetup.database);
   });
-
   test("accepts an absolute agent file", async () => {
     const agentFilePath = "/outside/child-instructions.md";
     const model = scriptedModel([
@@ -355,13 +331,11 @@ describe("agent tools", () => {
       { content: "Spawned.", toolCalls: [] },
     ]);
     const { childId, setup } = await startedChild(model);
-
     expect(
       setup.sessions.detailForUser(TEST_USER_ID, childId)?.agentFilePath,
     ).toBe(agentFilePath);
     closeSessionTestDatabase(setup.database);
   });
-
   test("rejects inaccessible spawn credentials", async () => {
     const model = scriptedModel([
       {
@@ -378,7 +352,6 @@ describe("agent tools", () => {
       "018bcfe5-6800-7000-8000-000000000021",
     );
   });
-
   test("queues a child during an aborted restart", async () => {
     const model = scriptedModel([
       {
@@ -399,7 +372,6 @@ describe("agent tools", () => {
     });
     await startToolSessionSetup(setup);
     const detail = await completedParentDetail(setup, "idle");
-
     expect(
       jsonRecord(findToolResultContent(detail, "spawn_session") ?? "null"),
     ).toMatchObject({ status: "queued" });
@@ -409,7 +381,6 @@ describe("agent tools", () => {
     expect(model.requests).toHaveLength(2);
     closeSessionTestDatabase(setup.database);
   });
-
   test("hands off a parent at the step boundary when spawn races with draining", async () => {
     const model = scriptedModel([
       {
@@ -444,7 +415,6 @@ describe("agent tools", () => {
         "status" in session &&
         session.status === "paused",
     );
-
     expect(detail).toMatchObject({
       restartHandoff: { requestedBy: "server" },
       status: "paused",
@@ -454,22 +424,20 @@ describe("agent tools", () => {
     await draining;
     closeSessionTestDatabase(setup.database);
   });
-
   test("reports a spawned child later", async () => {
     const model = scriptedModel([
       {
         content: "Delegating now.",
         toolCalls: [spawnCall("Do the delegated task", "high")],
       },
-      { content: "I can keep working immediately.", toolCalls: [] },
+      { content: "Continuing immediately.", toolCalls: [] },
       { content: "Delegated task done.", toolCalls: [] },
-      { content: "I received the delegated result.", toolCalls: [] },
+      { content: "Result received.", toolCalls: [] },
     ]);
     const spawnSetup = await startToolSession(model);
     const parent = await completedParentDetail(spawnSetup, "idle");
     const spawnOutput = findToolResultContent(parent, "spawn_session");
     expect(spawnOutput).toBeDefined();
-
     expect(spawnOutput).toContain("sessionId");
     expect(spawnOutput).toContain("spawned");
     const childId = await childSessionId(spawnSetup);
@@ -496,7 +464,6 @@ describe("agent tools", () => {
     });
     closeSessionTestDatabase(spawnSetup.database);
   });
-
   test("consumes steering after concurrent child completion", async () => {
     const running = await pausedChildSetup();
     const { childId, model, setup } = running;
@@ -506,7 +473,6 @@ describe("agent tools", () => {
     expect(parent?.pendingInputs).toHaveLength(1);
     expect(parent?.pendingInputs[0]?.content).toContain("Child final result.");
     expect(parent?.pendingInputs[0]?.kind).toBe("steer");
-
     model.resumeParent();
     const resumed = await waitForSessionValue(
       () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
@@ -518,7 +484,6 @@ describe("agent tools", () => {
     expect(pending?.pendingInputs[0]?.content).toContain("Spawned session");
     closeSessionTestDatabase(setup.database);
   });
-
   test("does not wake a completed parent", async () => {
     const model = scriptedModel([
       {
@@ -531,13 +496,11 @@ describe("agent tools", () => {
     ]);
     const { setup } = await completedChildTerminalParent(model);
     await completeWokenParent(setup);
-
     const parent = setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID);
     expect(parent).toMatchObject({ generation: 1, status: "idle" });
     expect(JSON.stringify(parent)).toContain("Child work is complete.");
     closeSessionTestDatabase(setup.database);
   });
-
   test("does not report a runner-required child", async () => {
     const model = scriptedModel([
       {
@@ -553,7 +516,6 @@ describe("agent tools", () => {
     const { childId, setup } = await startedChild(model);
     completeChildAgentFile(setup);
     await waitForChildRunnerTool(setup, childId, "bash");
-
     await setup.runners.remove(
       createAuthenticatedRequest(
         `/api/runners/${RUNNER_ID}`,
@@ -562,7 +524,6 @@ describe("agent tools", () => {
       ),
       RUNNER_ID,
     );
-
     const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
     expectRunnerRequired(child);
     await expectTranscriptExcludes(setup, "Spawned session completed");
@@ -579,14 +540,12 @@ describe("agent tools", () => {
     });
     closeSessionTestDatabase(setup.database);
   });
-
   test("reports a self-stopping child", async () => {
     const model = new SelfStoppingChildModel();
     const { setup } = await completedChildTerminalParent(model, (childId) => {
       model.childSessionId = childId;
     });
     await completeWokenParent(setup);
-
     const updatedParent = setup.sessions.detailForUser(
       TEST_USER_ID,
       SESSION_ID,
