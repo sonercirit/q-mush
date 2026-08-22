@@ -121,7 +121,7 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
-    1_787_002_132_470,
+    1_787_359_766_762,
     PARENT_REPORT_MIGRATION_TIMESTAMP,
     TOOL_SETTINGS_MIGRATION_TIMESTAMP,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,

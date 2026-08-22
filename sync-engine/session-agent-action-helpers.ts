@@ -306,9 +306,9 @@ export async function spawnAgentSession(options: {
     );
     return await response.text();
   } catch (error) {
-    if (error instanceof Error && error.name === "SessionLaunchError") {
-      throw error;
-    }
+    const launchFailure =
+      error instanceof Error && error.name === "SessionLaunchError";
+    if (launchFailure) throw error;
     return fail("credential_unavailable");
   }
 }
