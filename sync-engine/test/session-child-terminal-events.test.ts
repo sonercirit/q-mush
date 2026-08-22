@@ -14,7 +14,6 @@ import {
 } from "./session-race-test-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import {
-  closeSpawnedChildSetup,
   completeSpawnedChildGeneration,
   continueSpawnedChild,
   expectNoPendingSpawnedSessions,
@@ -149,7 +148,6 @@ function expectAttemptFilteredFromParentReports(
   reportAllPending(setup, actions);
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
   expect(reportCount(setup.store, setup.parentId)).toBe(0);
-  closeSpawnedChildSetup(setup);
 }
 
 function completeSibling(
@@ -226,7 +224,6 @@ test("runtime terminal settlement uses the callback generation independently", (
     parentExecutionGeneration: setup.parentGeneration,
     status: "idle",
   });
-  closeSpawnedChildSetup(setup);
 });
 
 test("continued child generations retain the parent delivery route", () => {
@@ -251,7 +248,6 @@ test("continued child generations retain the parent delivery route", () => {
       userId: TEST_USER_ID,
     },
   ]);
-  closeSpawnedChildSetup(setup);
 });
 
 test("durable generation events survive recreation, compaction, and duplicate scans", () => {
@@ -311,7 +307,6 @@ test("durable generation events survive recreation, compaction, and duplicate sc
   expect(notify).toHaveBeenCalledTimes(1);
   expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   expect(launchSession).not.toHaveBeenCalled();
-  closeSpawnedChildSetup(setup);
 });
 
 test("idle parents persist sibling events and surface them on next resume", () => {
@@ -361,7 +356,6 @@ test("idle parents persist sibling events and surface them on next resume", () =
   expect(joinedReports).toContain(siblingId);
   expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
   expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe("queued");
-  closeSpawnedChildSetup(setup);
 });
 
 test("runner parent reports notify and wake the delivered parent", async () => {
@@ -413,7 +407,6 @@ test("a report to a terminal parent notifies the child route", () => {
     TEST_USER_ID,
     setup.parentId,
   );
-  closeSpawnedChildSetup(setup);
 });
 
 test("stopping children notifies the parent after delivering the stop report", () => {
@@ -437,7 +430,6 @@ test("stopping children notifies the parent after delivering the stop report", (
   );
   expect(delivery.launchSession.mock.calls).toEqual([]);
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
-  closeSpawnedChildSetup(setup);
 });
 
 test.each(["completed", "failed", "idle", "stopped"] as const)(
@@ -460,7 +452,6 @@ test.each(["completed", "failed", "idle", "stopped"] as const)(
     expect(parentEvent).toContain(`"status": "${status}"`);
     expect(notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
     expectNoPendingSpawnedSessions(setup);
-    closeSpawnedChildSetup(setup);
   },
 );
 
@@ -485,7 +476,6 @@ test("foreign owners cannot discover or claim a child event", () => {
   expect(parentReports(setup.store, setup.parentId)).not.toContain(
     "foreign event",
   );
-  closeSpawnedChildSetup(setup);
 });
 
 test("continued idle child attempts each deliver exactly once", () => {
@@ -520,7 +510,6 @@ test("continued idle child attempts each deliver exactly once", () => {
 
   expectReportTotals(setup, eventActions.notify, 2);
   expect(joinedParentReports(setup)).toContain("later idle final");
-  closeSpawnedChildSetup(setup);
 });
 
 test("an idle generation lacking its final assistant response stays unreported", () => {
@@ -578,5 +567,4 @@ test("idle child attempts waiting for question input are not final", () => {
     status: "idle",
   });
   expectNoParentReport(setup, 0);
-  closeSpawnedChildSetup(setup);
 });
