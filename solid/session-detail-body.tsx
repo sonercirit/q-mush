@@ -339,8 +339,6 @@ export function SessionDetailBody(props: {
           const element = event.currentTarget;
           const programmatic = element.scrollTop === programmaticScrollTop;
           programmaticScrollTop = undefined;
-          // A scroll from our last write can arrive after streamed layout grows.
-          // Preserve the lock for that event; user scrolling still uses proximity.
           const locked = programmatic
             ? scrollLockEnabled()
             : isAtScrollEnd(element);
