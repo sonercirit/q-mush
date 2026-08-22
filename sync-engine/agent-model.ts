@@ -565,12 +565,17 @@ export class ChatCompletionsAgentModel implements AgentModel {
       },
       signal,
     );
-    return protocol === "anthropic"
-      ? validateAnthropicStepContinuation(
-          step,
-          this.#anthropicReplayIdentity(resolvedModel),
-        )
-      : step;
+    if (protocol !== "anthropic") return step;
+    const continuationModel =
+      resolvedModel === undefined &&
+      (step.toolCalls.length > 0 ||
+        step.providerContinuation === "anthropic_pause_turn")
+        ? await this.#anthropicResolvedModel(signal)
+        : resolvedModel;
+    return validateAnthropicStepContinuation(
+      step,
+      this.#anthropicReplayIdentity(continuationModel),
+    );
   }
 
   async #completeHttp(
