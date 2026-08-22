@@ -150,18 +150,17 @@ const deferredParentCases: DeferredParentCase[] = [
   },
 ];
 
-test.each(deferredParentCases)(
-  "$name",
-  async ({ arrange, assertParent, overrides }) => {
-    const context = deferredReportSetup(overrides);
-    const arranged = arrange(context);
+test.each(
+  deferredParentCases.map((testCase) => [testCase.name, testCase] as const),
+)("%s", async (_name, { arrange, assertParent, overrides }) => {
+  const context = deferredReportSetup(overrides);
+  const arranged = arrange(context);
 
-    await deliverDeferredReport(context.setup, context.delivery);
+  await deliverDeferredReport(context.setup, context.delivery);
 
-    expectDurableReport(context.setup, context.delivery);
-    assertParent(context, arranged);
-  },
-);
+  expectDurableReport(context.setup, context.delivery);
+  assertParent(context, arranged);
+});
 
 test("a manual resume racing the deferred wake consumes one report in one attempt", async () => {
   const { delivery, setup } = idleParentDeliverySetup();
