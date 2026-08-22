@@ -1,4 +1,4 @@
-import { afterEach } from "vitest";
+import { expect } from "vitest";
 import type { AgentSessionSummary } from "../../shared/session-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
@@ -6,18 +6,11 @@ import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
-import {
-  disposeTestViews,
-  mountTestView,
-  queryTestElement,
-} from "./dom-test-helpers.ts";
+import { mountTestView, queryTestElement } from "./dom-test-helpers.ts";
+import { trackedDisposals } from "./nested-scroll-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
-const disposals: (() => void)[] = [];
-
-afterEach(() => {
-  disposeTestViews(disposals);
-});
+const disposals = trackedDisposals();
 
 export function mountedSessionList(
   sessions: readonly ReturnType<typeof summaryFromDetail>[],
@@ -43,6 +36,23 @@ export function mountedSessionList(
 
 export function query(container: ParentNode, selector: string): Element {
   return queryTestElement(container, selector);
+}
+
+export function clickButton(container: ParentNode, selector: string): void {
+  const button = queryTestElement(container, selector);
+  if (!(button instanceof HTMLButtonElement))
+    throw new TypeError(`Missing button: ${selector}`);
+  button.click();
+}
+
+export function expectDepthCount(
+  container: ParentNode,
+  depth: number,
+  count: number,
+): void {
+  expect(
+    container.querySelectorAll(`[data-session-depth='${String(depth)}']`),
+  ).toHaveLength(count);
 }
 
 export function parentSession() {

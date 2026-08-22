@@ -155,13 +155,66 @@ function runningSpawnParent() {
   return { parent, setup };
 }
 
-export function spawnedRunningChildSetup(prompt: string) {
+function childForRunningParent(
+  setup: ReturnType<typeof createStore>,
+  parent: AgentSessionDetail,
+  now: number,
+  input?: Parameters<typeof createTestSession>[2],
+) {
+  return linkedChildResult(
+    setup,
+    parent,
+    createTestSession(setup.store, now, input),
+  );
+}
+
+function storedChild(
+  reservation: SpawnedChildReference,
+  message: string,
+): AgentSessionDetail {
+  const child = reservation.store.get(TEST_USER_ID, reservation.childId);
+  if (child === undefined) throw new Error(message);
+  return child;
+}
+
+function reservationWithNewChild(
+  now: number,
+  input?: (
+    parent: AgentSessionDetail,
+  ) => Parameters<typeof createTestSession>[2],
+) {
   const { parent, setup } = runningSpawnParent();
-  const child = createTestSession(setup.store, TEST_NOW + 2, {
+  return {
+    parent,
+    reservation: childForRunningParent(setup, parent, now, input?.(parent)),
+    setup,
+  };
+}
+
+export function pendingReservationSetup() {
+  const { parent, reservation, setup } = reservationWithNewChild(TEST_NOW + 1);
+  const child = storedChild(reservation, "Missing reserved child");
+  return {
+    child,
+    identity: {
+      generation: child.generation,
+      sessionId: child.id,
+      userId: TEST_USER_ID,
+    },
+    parent,
+    reservation,
+    setup,
+  };
+}
+
+export function spawnedRunningChildSetup(prompt: string) {
+  const base = reservationWithNewChild(TEST_NOW + 2, (parent) => ({
     parentGeneration: parent.generation,
     parentSessionId: parent.id,
     prompt,
-  });
+  }));
+  const { reservation, setup } = base;
+  const child = storedChild(reservation, "Missing running child");
   expect(
     setup.store.transitionRuntime(
       child.id,
@@ -182,7 +235,7 @@ export function spawnedRunningChildSetup(prompt: string) {
       "UPDATE agent_sessions SET status = 'running', active_started_at = ? WHERE id = ?",
     )
     .run(TEST_NOW + 5, child.id);
-  return linkedChildResult(setup, parent, child);
+  return reservation;
 }
 
 export function spawnedChildSetup() {

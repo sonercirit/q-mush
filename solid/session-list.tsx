@@ -472,6 +472,7 @@ export function SessionList(props: {
     >
       <ul
         class="session-list-items min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain pr-0.5"
+        data-visible-root-count={visibleRootCount()}
         onScroll={loadMoreOnScroll}
       >
         <For each={groups()}>

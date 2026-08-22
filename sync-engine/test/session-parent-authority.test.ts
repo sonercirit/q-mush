@@ -302,6 +302,18 @@ function targetDetail(setup: AuthoritySetup) {
   return target;
 }
 
+async function expectSpawnWithoutLaunch(
+  setup: AuthoritySetup,
+  input = spawnInput(),
+): Promise<string> {
+  const result = await setup.actions.spawnSession(
+    input,
+    new AbortController().signal,
+  );
+  expect(setup.launch).not.toHaveBeenCalled();
+  return result;
+}
+
 function closeSetup(setup: AuthoritySetup): void {
   setup.database.$client.close();
 }
@@ -635,13 +647,9 @@ describe("cross-session parent execution authority", () => {
 
   test("queues a prepared child while draining without launching it", async () => {
     const setup = authoritySetup({ draining: true });
-    expect(
-      await setup.actions.spawnSession(
-        spawnInput(),
-        new AbortController().signal,
-      ),
-    ).toContain('"status": "queued"');
-    expect(setup.launch).not.toHaveBeenCalled();
+    expect(await expectSpawnWithoutLaunch(setup)).toContain(
+      '"status": "queued"',
+    );
     expect(setup.store.list(TEST_USER_ID)).toHaveLength(2);
     setup.close();
   });
@@ -649,10 +657,10 @@ describe("cross-session parent execution authority", () => {
   test("rejects a requested credential the user does not own", async () => {
     const setup = authoritySetup({});
     expect(
-      await setup.actions.spawnSession(
-        { ...spawnInput(), credentialId: "unknown-credential" },
-        new AbortController().signal,
-      ),
+      await expectSpawnWithoutLaunch(setup, {
+        ...spawnInput(),
+        credentialId: "unknown-credential",
+      }),
     ).toContain("credential_unavailable");
     expectOnlyParentSession(setup);
   });
@@ -694,13 +702,7 @@ describe("cross-session parent execution authority", () => {
     async ({ draining }) => {
       const setup = authoritySetup({ draining, fenceOnNotify: true });
 
-      expect(
-        await setup.actions.spawnSession(
-          spawnInput(),
-          new AbortController().signal,
-        ),
-      ).toContain("parent_stale");
-      expect(setup.launch).not.toHaveBeenCalled();
+      expect(await expectSpawnWithoutLaunch(setup)).toContain("parent_stale");
       expect(
         setup.store
           .list(TEST_USER_ID)

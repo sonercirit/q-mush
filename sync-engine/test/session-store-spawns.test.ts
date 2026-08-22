@@ -13,6 +13,7 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import {
   expectParentId,
+  pendingReservationSetup,
   spawnedChildSetup,
   spawnedRunningChildSetup,
   type SpawnedChildReference,
@@ -180,33 +181,23 @@ function expectNoPendingReports(setup: SpawnedChildReference): void {
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 }
 
+function reservationOptions(setup: ReturnType<typeof pendingReservationSetup>) {
+  return {
+    authority: {
+      generation: setup.parent.generation,
+      sessionId: setup.parent.id,
+    },
+    database: setup.setup.database,
+    identity: setup.identity,
+  };
+}
+
 describe("spawned session report generation fencing", () => {
   test("claims a pending reservation once and only allowClaimed can fail it afterward", () => {
-    const setup = createStore();
-    const [parent, child] = [
-      createTestSession(setup.store),
-      createTestSession(setup.store, TEST_NOW + 1),
-    ];
-    expect(
-      setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 2),
-    ).toBe(true);
-    const reservation = Object.assign(setup, {
-      childId: child.id,
-      childGeneration: child.generation,
-      parentId: parent.id,
-      parentGeneration: parent.generation,
-    });
+    const pending = pendingReservationSetup();
+    const { child, identity, reservation, setup } = pending;
     updateSession(reservation, child.id, { spawnPreparationPending: true });
-    const identity = {
-      generation: child.generation,
-      sessionId: child.id,
-      userId: TEST_USER_ID,
-    };
-    const claimOptions = {
-      authority: { generation: parent.generation, sessionId: parent.id },
-      database: setup.database,
-      identity,
-    };
+    const claimOptions = reservationOptions(pending);
 
     expect(claimSpawnedSessionReservation(claimOptions)).toBe(true);
     expect(claimSpawnedSessionReservation(claimOptions)).toBe(false);
@@ -226,53 +217,48 @@ describe("spawned session report generation fencing", () => {
     setup.database.$client.close();
   });
 
-  test("hides reservations from both queued-session launch queries", () => {
+  const expectReservationHidden = (
+    initial: readonly string[],
+    query: (setup: SpawnedChildReference) => readonly string[],
+  ): void => {
     const setup = spawnedRunningChildSetup("Hidden reservation");
     updateSession(setup, setup.childId, {
       activeStartedAt: null,
       spawnPreparationPending: false,
       status: "queued",
     });
-    expect(
-      setup.store.queuedSessions(TEST_USER_ID).map(({ id }) => id),
-    ).toEqual([setup.childId]);
-    expect(setup.store.queuedSessionOwnerIds()).toEqual([TEST_USER_ID]);
+    expect(query(setup)).toEqual(initial);
     updateSession(setup, setup.childId, { spawnPreparationPending: true });
-    expect(setup.store.queuedSessions(TEST_USER_ID)).toEqual([]);
-    expect(setup.store.queuedSessionOwnerIds()).toEqual([]);
+    expect(query(setup)).toEqual([]);
     setup.database.$client.close();
+  };
+
+  test("hides reservations from both queued-session launch queries", () => {
+    const setup = spawnedRunningChildSetup("Expected queued ID");
+    const childId = setup.childId;
+    setup.database.$client.close();
+    expectReservationHidden([childId], (current) =>
+      current.store.queuedSessions(TEST_USER_ID).map(({ id }) => id),
+    );
+  });
+
+  test("hides reservations from queued-session owner IDs", () => {
+    expectReservationHidden([TEST_USER_ID], (setup) =>
+      setup.store.queuedSessionOwnerIds(),
+    );
   });
 
   test("does not prepare a reservation that was already claimed", () => {
-    const setup = createStore();
-    const parent = createTestSession(setup.store);
-    const child = createTestSession(setup.store, TEST_NOW + 1);
-    expect(
-      setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 2),
-    ).toBe(true);
-    updateSession(
-      Object.assign(setup, {
-        childGeneration: child.generation,
-        childId: child.id,
-        parentGeneration: parent.generation,
-        parentId: parent.id,
-      }),
-      child.id,
-      {
-        parentExecutionGeneration: parent.generation,
-        parentSessionId: parent.id,
-        spawnPreparationPending: false,
-      },
-    );
+    const pending = pendingReservationSetup();
+    const { child, parent, reservation, setup } = pending;
+    updateSession(reservation, child.id, {
+      parentExecutionGeneration: parent.generation,
+      parentSessionId: parent.id,
+      spawnPreparationPending: false,
+    });
     expect(
       prepareSpawnedSessionReservation({
-        authority: { generation: parent.generation, sessionId: parent.id },
-        database: setup.database,
-        identity: {
-          generation: child.generation,
-          sessionId: child.id,
-          userId: TEST_USER_ID,
-        },
+        ...reservationOptions(pending),
         metadata: {
           adaptiveThinking: null,
           credentialId: "018bcfe5-6800-7000-8000-000000000001",
