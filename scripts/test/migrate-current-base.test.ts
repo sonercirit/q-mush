@@ -116,7 +116,7 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   );
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 5",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 6",
     )
     .all()
     .map(({ createdAt }) => createdAt);
