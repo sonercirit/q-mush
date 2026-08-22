@@ -295,28 +295,65 @@ test("nests spawned sessions under a collapsed parent", () => {
   }
   parentToggle.click();
 
-  expect(
-    query(
-      container,
-      "button[aria-label='Collapse child sessions for Parent task']",
-    ).textContent,
-  ).toContain("Collapse (1)");
+  const collapseToggle = query(
+    container,
+    "button[aria-label='Collapse child sessions for Parent task']",
+  );
+  expect(collapseToggle.textContent).toContain("Collapse (1)");
   expect(childGroupSession(container, parent.id, child.id)).not.toBeNull();
   expect(
     container.querySelectorAll("[data-session-id='child-session']"),
   ).toHaveLength(1);
   expectSessionDepth(container, child.id, 1);
+
+  if (!(collapseToggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The child session toggle is not a button");
+  }
+  collapseToggle.click();
+  expect(
+    query(
+      container,
+      "button[aria-label='Expand child sessions for Parent task']",
+    ).getAttribute("aria-expanded"),
+  ).toBe("false");
+  expect(
+    container.querySelector("[data-session-id='child-session']"),
+  ).toBeNull();
 });
 
-test("bounds expanded children while revealing the selected child", () => {
+function boundedChildList(prefix: string, selectedIndex: number) {
   const parent = parentSession();
-  const children = relatedChildren(parent, "child");
-  const selected = children.at(-1);
+  const children = relatedChildren(parent, prefix);
+  const selected = children[selectedIndex];
   if (selected === undefined) throw new TypeError("Missing selected child");
-  const { container, select } = mountedSessionList([parent, ...children]);
+  const mounted = mountedSessionList([parent, ...children]);
+  mounted.select(selected.id);
+  return { ...mounted, parent, selected };
+}
 
-  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(1);
-  select(selected.id);
+test.each([
+  { selectedIndex: 0, visible: true },
+  { selectedIndex: 9, visible: true },
+  { selectedIndex: 10, visible: true },
+  { selectedIndex: 23, visible: true },
+] as const)(
+  "bounds expanded children with selected index $selectedIndex",
+  ({ selectedIndex, visible }) => {
+    const { container, selected } = boundedChildList(
+      "boundary-child",
+      selectedIndex,
+    );
+
+    expect(container.querySelectorAll("[data-session-id]")).toHaveLength(11);
+    expect(
+      container.querySelector(`[data-session-id='${selected.id}']`) !== null,
+    ).toBe(visible);
+  },
+);
+
+test("bounds expanded children while revealing the selected child", () => {
+  const { container, selected } = boundedChildList("child", 23);
+
   expect(container.querySelectorAll("[data-session-id]")).toHaveLength(11);
   expect(
     query(

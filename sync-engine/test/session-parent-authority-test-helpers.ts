@@ -97,6 +97,7 @@ export function authoritySetup(options: {
   readonly fenceOnNotify?: boolean;
   readonly gateCredential?: boolean;
   readonly gateMetadata?: boolean;
+  readonly hidePreparedChild?: boolean;
   readonly draining?: boolean;
   readonly rejectCandidates?: boolean;
   readonly rejectCredential?: boolean;
@@ -167,6 +168,21 @@ export function authoritySetup(options: {
     }
   });
   const runtimes = new SessionRuntimes();
+  if (options.hidePreparedChild === true) {
+    const storedGet = store.get.bind(store);
+    let childReads = 0;
+    vi.spyOn(store, "get").mockImplementation((userId, sessionId) => {
+      const detail = storedGet(userId, sessionId);
+      if (
+        detail?.parentSessionId === SESSION_ID &&
+        detail.status === "queued"
+      ) {
+        childReads += 1;
+        if (childReads === 2) return undefined;
+      }
+      return detail;
+    });
+  }
   const actions = new SessionAgentActions({
     ...inactiveSessionAgentActionDefaults(),
     compactSession: startManualSessionCompactionForUserId,

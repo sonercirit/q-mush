@@ -25,6 +25,8 @@ export type DeliverRunnerCommands = (
 ) => boolean;
 
 export interface SessionIntegration extends SessionDetailReader {
+  /** @internal Exposes the configured restart gate to integration tests. */
+  agentActionsDraining?(): boolean;
   attachmentFallbacks?(request: Request): Promise<Response> | Response;
   collection(request: Request): Response | Promise<Response>;
   compact(request: Request, sessionId: string): Promise<Response>;

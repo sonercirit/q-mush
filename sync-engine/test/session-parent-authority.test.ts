@@ -34,6 +34,16 @@ import {
   targetOperation,
 } from "./session-parent-authority-test-helpers.ts";
 
+function expectParentStale(output: string): void {
+  expect(output).toContain("parent_stale");
+}
+
+function expectFailedChild(setup: ReturnType<typeof authoritySetup>): void {
+  expect(
+    setup.store.list(TEST_USER_ID).some(({ status }) => status === "failed"),
+  ).toBe(true);
+}
+
 describe("cross-session parent execution authority", () => {
   test.each(immediateMutationCases())(
     "rejects canceled $name before mutating the target",
@@ -206,6 +216,14 @@ describe("cross-session parent execution authority", () => {
     setup.close();
   });
 
+  test("settles a reservation when its prepared child disappears", async () => {
+    const setup = authoritySetup({ hidePreparedChild: true });
+
+    expectParentStale(await expectSpawnWithoutLaunch(setup));
+    expectFailedChild(setup);
+    setup.close();
+  });
+
   test("rejects a requested credential the user does not own", async () => {
     const setup = authoritySetup({});
     expect(
@@ -255,10 +273,8 @@ describe("cross-session parent execution authority", () => {
   ])("rejects a stale parent at the pre-$path claim", async ({ draining }) => {
     const setup = authoritySetup({ draining, fenceOnNotify: true });
 
-    expect(await expectSpawnWithoutLaunch(setup)).toContain("parent_stale");
-    expect(
-      setup.store.list(TEST_USER_ID).some(({ status }) => status === "failed"),
-    ).toBe(true);
+    expectParentStale(await expectSpawnWithoutLaunch(setup));
+    expectFailedChild(setup);
     closeSetup(setup);
   });
 

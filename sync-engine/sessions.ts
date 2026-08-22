@@ -119,6 +119,11 @@ class DrizzleSessionIntegration
   readonly #toolSettings: Pick<ToolSettingsStore, "read">;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
+
+  /** @internal Exposes the configured restart gate to integration tests. */
+  agentActionsDraining(): boolean {
+    return this.#actions.isDraining();
+  }
   readonly #fallbacks: ReturnType<typeof createAttachmentFallbackIntegration>;
 
   constructor(

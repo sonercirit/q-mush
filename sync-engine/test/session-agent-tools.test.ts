@@ -368,8 +368,24 @@ describe("session agent tools", () => {
       },
       { content: "Restart race handled.", toolCalls: [] },
     ]);
-    const setup = await startToolSession(model);
-    const draining = setup.sessions.drain();
+    let draining: Promise<void> | undefined;
+    const holder: {
+      setup?: Awaited<ReturnType<typeof startToolSession>>;
+    } = {};
+    const setup = await startToolSession(model, {
+      onChange: (userId, sessionId) => {
+        const child = holder.setup?.sessions.detailForUser(userId, sessionId);
+        if (
+          child?.parentSessionId === SESSION_ID &&
+          child.status === "queued" &&
+          !setup.sessions.agentActionsDraining?.()
+        ) {
+          draining = holder.setup?.sessions.drain();
+          expect(holder.setup?.sessions.agentActionsDraining?.()).toBe(true);
+        }
+      },
+    });
+    holder.setup = setup;
     const detail = await waitForSessionValue(
       () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
       (session) =>
@@ -383,6 +399,13 @@ describe("session agent tools", () => {
       restartHandoff: { requestedBy: "server" },
       status: "paused",
     });
+    const children = setup.sessions.listForUser(TEST_USER_ID);
+    expect(
+      children.filter(
+        ({ parentSessionId, status }) =>
+          parentSessionId === SESSION_ID && status === "queued",
+      ),
+    ).toHaveLength(1);
     expect(model.requests.length).toBeLessThanOrEqual(1);
     await draining;
     closeSessionTestDatabase(setup.database);

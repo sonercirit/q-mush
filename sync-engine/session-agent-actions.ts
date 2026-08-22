@@ -52,6 +52,10 @@ export class SessionAgentActions {
     this.#dependencies = dependencies;
   }
 
+  isDraining(): boolean {
+    return this.#dependencies.draining?.() === true;
+  }
+
   actions(
     parentSessionId: string,
     userId: string,
