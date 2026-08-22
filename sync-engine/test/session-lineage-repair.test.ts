@@ -562,6 +562,20 @@ describe("native spawn lineage repair", () => {
     });
     expect(setup.store.recoverSpawnedSessionReservations(TEST_NOW + 5)).toBe(1);
     expectChild(setup, { ...stableLineage(setup), status: "failed" });
+    const failureContent = setup.database.$client
+      .query<{ readonly content: string }, [string]>(
+        "SELECT content FROM agent_messages WHERE session_id = ? AND role = 'error'",
+      )
+      .get(setup.child.id)?.content;
+    expect(failureContent).toBe(
+      "Session failed: the server restarted during child preparation",
+    );
+    const preparationPending = setup.database.$client
+      .query<{ readonly pending: number }, [string]>(
+        "SELECT spawn_preparation_pending AS pending FROM agent_sessions WHERE id = ?",
+      )
+      .get(setup.child.id)?.pending;
+    expect(preparationPending).toBe(0);
     const pending = setup.store.pendingSpawnedSessions();
     expect(pending).toHaveLength(1);
     expect(pending[0]?.userId).toBe(TEST_USER_ID);

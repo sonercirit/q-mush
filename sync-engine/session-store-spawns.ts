@@ -186,12 +186,8 @@ export function spawnedSessionLink(
 ): SpawnedSessionLink | undefined {
   const stored = database
     .select({
-      generation: agentSessions.executionGeneration,
       parentGeneration: agentSessions.parentCallbackGeneration,
       parentId: agentSessions.parentSessionId,
-      reportedGeneration: agentSessions.parentReportedGeneration,
-      runnerRequired: agentSessions.runnerRequired,
-      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(ownedActiveSessionCondition(userId, sessionId))

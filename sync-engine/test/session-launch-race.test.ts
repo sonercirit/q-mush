@@ -543,11 +543,20 @@ test("direct spawn discovery failure settles its reservation", async () => {
     error: "provider_unavailable",
     status: "failed",
   });
-  expect(spawnedSession(setup)).toMatchObject({
+  const failedChild = spawnedSession(setup);
+  expect(failedChild).toMatchObject({
     parentExecutionGeneration: setup.parent.generation,
     parentSessionId: setup.parent.id,
     status: "failed",
   });
+  expect(
+    setup.store.get(TEST_USER_ID, failedChild?.id ?? "")?.messages,
+  ).toContainEqual(
+    expect.objectContaining({
+      content: "Session failed: the child session could not be prepared",
+      role: "error",
+    }),
+  );
   expect(
     setup.database
       .select({ pending: agentSessions.spawnPreparationPending })
