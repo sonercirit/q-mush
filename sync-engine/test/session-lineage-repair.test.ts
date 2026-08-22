@@ -8,6 +8,7 @@ import {
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import type { SessionStore } from "../session-store.ts";
 import { insertWorkspace } from "../workspace-write.ts";
 import {
   addTestUser,
