@@ -5,10 +5,13 @@ import { agentProviderRequestHeaders } from "../../sync-engine/agent-model.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
   anthropicHarness,
-  type AnthropicHarness,
   doneAnthropicEvents,
   SIGNED_ANTHROPIC_REPLAY,
 } from "./anthropic-model-test-helpers.ts";
+import {
+  anthropicReplayConversation,
+  capturedRequestRecord,
+} from "./anthropic-replay-request-helpers.ts";
 import {
   cachedText,
   cachedTextMessage,
@@ -51,17 +54,6 @@ function invalidRequestResponse(message: string): Response {
   );
 }
 
-async function recordRequestBody(
-  harness: AnthropicHarness,
-  index: number,
-): Promise<Readonly<Record<string, unknown>>> {
-  const body = await harness.requestBody(index);
-  if (!isRecord(body)) {
-    throw new Error("The captured body was not a record");
-  }
-  return body;
-}
-
 describe("anthropic-format generic provider", () => {
   test("sends the catalog max output tokens when the session carries them", async () => {
     const harness = anthropicHarness([doneEvents()], {
@@ -69,7 +61,7 @@ describe("anthropic-format generic provider", () => {
     });
     await harness.complete();
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await capturedRequestRecord(harness, 0);
     expect(body["max_tokens"]).toBe(64_000);
   });
 
@@ -113,23 +105,12 @@ describe("anthropic-format generic provider", () => {
   test("sends a cached Messages request and reads the streamed step", async () => {
     const harness = anthropicHarness([doneEvents()], { tools: ["read"] });
 
-    const step = await harness.complete([
-      { content: "Hello", role: "user" },
-      {
-        content: "Reading.",
+    const step = await harness.complete(
+      anthropicReplayConversation({
         providerReplay: SIGNED_ANTHROPIC_REPLAY,
-        role: "assistant",
-        toolCalls: [
-          { arguments: '{"path":"SETUP.md"}', id: "read-call", name: "read" },
-        ],
-      },
-      {
-        content: "# Q Mush setup",
-        role: "tool",
-        toolCallId: "read-call",
-        toolName: "read",
-      },
-    ]);
+        toolContent: "# Q Mush setup",
+      }).slice(0, -1),
+    );
 
     expect(step).toMatchObject(
       providerStep("Done.", {
@@ -152,7 +133,7 @@ describe("anthropic-format generic provider", () => {
     expect(request?.headers.get("x-api-key")).toBe("anthropic-secret");
     expect(request?.headers.has("authorization")).toBe(false);
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await capturedRequestRecord(harness, 0);
     // No reasoning parameter and no invented output budget: without catalog
     // metadata the provider's own defaults govern.
     expectAbsentProperties(body, ["max_tokens", "output_config", "thinking"]);

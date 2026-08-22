@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
-import { isRecord } from "../../shared/auth-model.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { anthropicRequestBody } from "../../sync-engine/anthropic-request.ts";
 import {
@@ -15,6 +14,7 @@ import {
   anthropicAssistant,
   anthropicReplayConversation,
   capturedAssistantContent,
+  capturedRequestRecord,
   SIGNED_ANTHROPIC_REPLAY,
   signedReplayHarness,
 } from "./anthropic-replay-request-helpers.ts";
@@ -85,7 +85,7 @@ async function replayOnlyMessages(
 ): Promise<unknown> {
   const harness = signedReplayHarness();
   await harness.complete(messages);
-  return (await requestRecord(harness, 0))["messages"];
+  return (await capturedRequestRecord(harness, 0))["messages"];
 }
 
 async function completeReplayRequest(options: {
@@ -133,15 +133,6 @@ function expectUnsignedReplay(content: unknown): void {
   }
 }
 
-async function requestRecord(
-  harness: ReturnType<typeof anthropicHarness>,
-  index: number,
-): Promise<Readonly<Record<string, unknown>>> {
-  const body = await harness.requestBody(index);
-  if (isRecord(body)) return body;
-  throw new TypeError("Expected a record request body");
-}
-
 async function expectReplayOutcome(
   messages: readonly AgentConversationMessage[],
   unsafe: boolean,
@@ -161,6 +152,17 @@ async function expectReplayOutcome(
 
 function replayWithoutClientTool() {
   return { ...SIGNED_REPLAY, blocks: SIGNED_REPLAY.blocks.slice(0, 3) };
+}
+
+function mismatchedReplayConversation() {
+  return [
+    { content: "Hello", role: "user" } as const,
+    {
+      ...readAssistant(SIGNED_REPLAY),
+      toolCalls: [{ ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' }],
+    },
+    readToolResult("Setup"),
+  ];
 }
 
 function staleReplayConversation() {
@@ -317,16 +319,7 @@ describe("anthropic-format generic provider", () => {
         credential: ANTHROPIC_TEST_CREDENTIAL,
         credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
         maxOutputTokens: null,
-        messages: [
-          { content: "Hello", role: "user" },
-          {
-            ...readAssistant(SIGNED_REPLAY),
-            toolCalls: [
-              { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
-            ],
-          },
-          readToolResult("Setup"),
-        ],
+        messages: mismatchedReplayConversation(),
         model: KNOWN_MODEL,
         provider: "generic",
         reasoningEffort: undefined,
@@ -339,19 +332,7 @@ describe("anthropic-format generic provider", () => {
   });
 
   test("fails closed when tool-call sanitization changes the assistant", () =>
-    expectReplayOutcome(
-      [
-        { content: "Hello", role: "user" },
-        {
-          ...readAssistant(SIGNED_REPLAY),
-          toolCalls: [
-            { ...ANTHROPIC_READ_CALL, arguments: '{"path":"OTHER.md"}' },
-          ],
-        },
-        readToolResult("Setup"),
-      ],
-      true,
-    ));
+    expectReplayOutcome(mismatchedReplayConversation(), true));
 
   test("keeps private replay metadata out of OpenAI-format requests", async () => {
     const body = await captureOpenAiFormatReplayRequest(SIGNED_REPLAY);

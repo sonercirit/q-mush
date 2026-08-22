@@ -71,14 +71,22 @@ export async function capturedReplayRequest(
   return capturedAssistantContent(harness, 1);
 }
 
-export async function capturedAssistantContent(
+export async function capturedRequestRecord(
   harness: AnthropicHarness,
   requestIndex = 0,
-): Promise<unknown> {
+): Promise<Readonly<Record<string, unknown>>> {
   const body = await harness.requestBody(requestIndex);
   if (!isRecord(body)) {
     throw new Error("The captured body was invalid");
   }
+  return body;
+}
+
+export async function capturedAssistantContent(
+  harness: AnthropicHarness,
+  requestIndex = 0,
+): Promise<unknown> {
+  const body = await capturedRequestRecord(harness, requestIndex);
   const messages: unknown = body["messages"];
   const assistant: unknown = Array.isArray(messages) ? messages[1] : undefined;
   if (!isRecord(assistant)) {
