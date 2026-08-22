@@ -351,8 +351,7 @@ export class SessionAgentActions {
     await this.#dependencies.settled?.(parentSessionId);
     const parent = this.#dependencies.store.get(userId, parentSessionId);
     if (
-      parent !== undefined &&
-      parent.status === "idle" &&
+      parent?.status === "idle" &&
       parent.restartHandoff === null &&
       sessionCanResume(parent) &&
       !this.#dependencies.activeSession(parent.id) &&

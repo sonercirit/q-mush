@@ -100,7 +100,7 @@ export async function completeWokenParent(
   }
   await waitForRunnerSession(setup, SESSION_ID);
   const command = setup.latestRunnerCommand();
-  if (command === undefined || command.sessionId !== SESSION_ID) {
+  if (command?.sessionId !== SESSION_ID) {
     throw new Error("The woken parent command is unavailable");
   }
   completeRunnerCommand(setup, command);
@@ -108,7 +108,7 @@ export async function completeWokenParent(
     () => setup.sessions.detailForUser(TEST_USER_ID, SESSION_ID),
     (value) =>
       advancedParent(value) &&
-      (value["status"] === "idle" || value["status"] === "failed"),
+      (value.status === "idle" || value.status === "failed"),
   );
 }
 
