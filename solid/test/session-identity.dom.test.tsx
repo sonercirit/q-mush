@@ -91,6 +91,50 @@ function delayedCopy(): {
   };
 }
 
+function delayedCopyFailure(): {
+  readonly fail: () => void;
+  readonly promise: Promise<void>;
+} {
+  let rejectCopy: ((reason: Error) => void) | undefined;
+  const promise = new Promise<void>((_resolve, reject) => {
+    rejectCopy = reject;
+  });
+  return {
+    fail: () => {
+      rejectCopy?.(new Error("Stale clipboard failure"));
+    },
+    promise,
+  };
+}
+
+function startStaleCopyScenario(firstCopy: Promise<void>): {
+  readonly button: HTMLButtonElement;
+  readonly writeText: MockInstance<Clipboard["writeText"]>;
+} {
+  const writeText = vi
+    .spyOn(navigator.clipboard, "writeText")
+    .mockReturnValueOnce(firstCopy)
+    .mockResolvedValueOnce();
+  const { container } = mountIdentity(sessionDetail(FIRST_SESSION_ID));
+  const { button } = sessionIdControl(container);
+  for (let copy = 0; copy < 2; copy += 1) clickCopy(button);
+  return { button, writeText };
+}
+
+async function settleStaleCopy(
+  pending: Promise<void>,
+  settle: () => void,
+): Promise<HTMLButtonElement> {
+  const scenario = startStaleCopyScenario(pending);
+  await vi.waitFor(() => {
+    expect(scenario.writeText).toHaveBeenCalledTimes(2);
+    expectCopyState(scenario.button, "Copied!");
+  });
+  settle();
+  await Promise.resolve();
+  return scenario.button;
+}
+
 afterEach(() => {
   disposeTestViews(DOM_TEST_DISPOSALS);
   vi.restoreAllMocks();
@@ -130,22 +174,31 @@ test("shows the full selectable session ID with an accessible copy action", asyn
 
 test("ignores stale clipboard outcomes after a newer copy", async () => {
   const pending = delayedCopy();
-  const writeText = vi
-    .spyOn(navigator.clipboard, "writeText")
-    .mockReturnValueOnce(pending.promise)
-    .mockResolvedValueOnce();
-  const { container } = mountIdentity(sessionDetail(FIRST_SESSION_ID));
-  const { button } = sessionIdControl(container);
+  const button = await settleStaleCopy(pending.promise, pending.finish);
+  expectCopyState(button, "Copied!");
+});
 
-  for (let copy = 0; copy < 2; copy += 1) clickCopy(button);
-  await vi.waitFor(() => {
-    expect(writeText).toHaveBeenCalledTimes(2);
-    expectCopyState(button, "Copied!");
-  });
+test("ignores a stale clipboard failure after a newer copy succeeds", async () => {
+  const pending = delayedCopyFailure();
+  const button = await settleStaleCopy(pending.promise, pending.fail);
+  expectCopyState(button, "Copied!");
+});
+
+test("ignores a stale clipboard success after the session ID changes", async () => {
+  const pending = delayedCopy();
+  vi.spyOn(navigator.clipboard, "writeText").mockReturnValueOnce(
+    pending.promise,
+  );
+  const { container, replace } = mountIdentity(sessionDetail(FIRST_SESSION_ID));
+  clickCopy(sessionIdControl(container).button);
+
+  replace(sessionDetail(SECOND_SESSION_ID));
+  const { button } = sessionIdControl(container);
+  expect(button.textContent).toBe("Copy ID");
   pending.finish();
   await Promise.resolve();
 
-  expectCopyState(button, "Copied!");
+  expect(button.textContent).toBe("Copy ID");
 });
 
 test("updates the session ID in place across navigation and preserves copy focus", async () => {

@@ -39,10 +39,12 @@ import { SessionStopDialog } from "./session-stop-dialog.tsx";
 import { SessionToolUpdateEditor } from "./session-tool-update-client.tsx";
 import { createSessionTranscriptCounts } from "./session-transcript-counts.ts";
 import { SessionTranscriptFilterControls } from "./session-transcript-filter-controls.tsx";
+import {
+  isAtTranscriptScrollEnd,
+  transcriptScrollLock,
+} from "./session-transcript-scroll.ts";
 import { SessionTranscript } from "./session-transcript.tsx";
 import { SessionUsage } from "./session-usage-view.tsx";
-
-const SCROLL_END_TOLERANCE = 64;
 
 function currentPendingInputs(
   fallback: AgentSessionDetail,
@@ -85,13 +87,6 @@ function scrollRevision(
       ? "none"
       : `${detail.agentFile.name}:${String(detail.agentFile.content.length)}`;
   return `${detail.id}:${agentFileRevision}:${String(messages.length)}:${messages.at(-1)?.id ?? ""}`;
-}
-
-function isAtScrollEnd(element: HTMLElement): boolean {
-  return (
-    element.scrollHeight - element.clientHeight - element.scrollTop <=
-    SCROLL_END_TOLERANCE
-  );
 }
 
 export function SessionDetailBody(props: {
@@ -337,11 +332,15 @@ export function SessionDetailBody(props: {
         data-session-transcript="true"
         onScroll={(event) => {
           const element = event.currentTarget;
-          const programmatic = element.scrollTop === programmaticScrollTop;
+          const locked = transcriptScrollLock(
+            element,
+            {
+              programmaticScrollTop,
+              scrollLockEnabled: scrollLockEnabled(),
+            },
+            isAtTranscriptScrollEnd,
+          );
           programmaticScrollTop = undefined;
-          const locked = programmatic
-            ? scrollLockEnabled()
-            : isAtScrollEnd(element);
           shouldScrollToEnd = locked;
           setScrollLockEnabled(locked);
         }}
