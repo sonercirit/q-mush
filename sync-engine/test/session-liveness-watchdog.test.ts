@@ -485,8 +485,12 @@ function parentCallbackCount(setup: ReturnType<typeof spawnedChildSetup>) {
 function pendingCallbacksAreDelivered(
   setup: ReturnType<typeof spawnedChildSetup>,
 ): void {
-  expect(parentCallbackCount(setup)).toBe(1);
-  expect(setup.store.pendingSpawnedSessions()).toEqual([]);
+  const callbackCount = parentCallbackCount(setup);
+  const remainingSpawns = setup.store.pendingSpawnedSessions();
+  expect({ callbackCount, remainingSpawns }).toEqual({
+    callbackCount: 1,
+    remainingSpawns: [],
+  });
 }
 
 test("two real scans deliver a pending child callback exactly once", () => {
