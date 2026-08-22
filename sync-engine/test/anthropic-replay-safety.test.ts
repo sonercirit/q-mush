@@ -250,6 +250,54 @@ function transientResolutionModel(
   );
 }
 
+function transientContinuationModel(options: {
+  readonly continuation: "client_tool" | "pause_turn";
+  readonly retryModel: string;
+}): {
+  readonly model: ChatCompletionsAgentModel;
+  readonly requests: Request[];
+} {
+  const requests: Request[] = [];
+  let resolutionCount = 0;
+  let completionCount = 0;
+  const model = new ChatCompletionsAgentModel(
+    modelOptions((request) => {
+      requests.push(request);
+      if (request.method === "GET") {
+        resolutionCount += 1;
+        return Promise.resolve(
+          resolutionCount === 1
+            ? new Response(null, { status: 503 })
+            : Response.json({ id: options.retryModel, type: "model" }),
+        );
+      }
+      completionCount += 1;
+      return Promise.resolve(
+        completionCount > 1
+          ? modelCompletion(FIRST_SNAPSHOT)
+          : anthropicJsonResponse({
+              blocks:
+                options.continuation === "client_tool"
+                  ? signedToolBlocks()
+                  : [
+                      SIGNED_THINKING,
+                      serverToolReplayBlock({
+                        id: "server-call",
+                        input: { query: "news" },
+                        name: "web_search",
+                      }),
+                    ],
+              model: FIRST_SNAPSHOT,
+              ...(options.continuation === "pause_turn"
+                ? { stopReason: "pause_turn" }
+                : {}),
+            }),
+      );
+    }),
+  );
+  return { model, requests };
+}
+
 function testModel(
   response: (request: Request) => Response,
   requests: Request[],
@@ -443,6 +491,47 @@ describe("Anthropic replay safety", () => {
       await completeTwice(model);
 
       expectModelExchangeCounts(requests, { gets: 2, posts: 2 });
+    },
+  );
+
+  test.each(["client_tool", "pause_turn"] as const)(
+    "retries transient resolution within a %s response before continuation validation",
+    async (continuation) => {
+      const { model, requests } = transientContinuationModel({
+        continuation,
+        retryModel: FIRST_SNAPSHOT,
+      });
+
+      const step = await model.complete([{ content: "Inspect", role: "user" }]);
+
+      expectModelExchangeCounts(requests, {
+        gets: 2,
+        posts: continuation === "pause_turn" ? 2 : 1,
+      });
+      expect(step.providerReplay).toBeDefined();
+      expect(step.providerContinuation).toBeUndefined();
+      expect(step.content).toBe(
+        continuation === "pause_turn" ? "Done." : "",
+      );
+    },
+  );
+
+  test.each(["client_tool", "pause_turn"] as const)(
+    "fails a %s response closed when retried resolution finds a different model",
+    async (continuation) => {
+      const { model, requests } = transientContinuationModel({
+        continuation,
+        retryModel: MOVED_SNAPSHOT,
+      });
+
+      if (continuation === "pause_turn") {
+        await expect(
+          model.complete([{ content: "Inspect", role: "user" }]),
+        ).rejects.toThrow("cannot be continued safely");
+      } else {
+        await expectNoToolSideEffect(model);
+      }
+      expectModelExchangeCounts(requests, { gets: 2, posts: 1 });
     },
   );
 

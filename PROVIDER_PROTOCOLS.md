@@ -77,8 +77,8 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   (whitespace stays), but content and replay are withheld together across every
   trailing text block; a pause fails if none remain replayable. `cache_control`
   marks only text/client `tool_use`, scanning backward; trailing replay is
-  resent verbatim. `pause_turn` validates resent blocks, replays them without
-  duplicate UI, sums usage, caps at five continuations, and fails terminal
+  resent verbatim. `pause_turn` validates resent blocks, replays them/container
+  without duplicate UI, sums usage, caps at five continuations, and fails terminal
   client tools closed when replay cannot combine. The local proxy tolerates
   unsigned tool-loop replay; strict endpoints may not. Streamed reasoning deltas
   group by `output_index`/`summary_index`; separate summary parts with
