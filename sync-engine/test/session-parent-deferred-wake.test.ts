@@ -60,35 +60,104 @@ test("stopping children notifies the parent after delivering the stop report", (
   expect(delivery.notify).toHaveBeenCalledWith(TEST_USER_ID, setup.parentId);
 });
 
-test.each(["paused", "stopped", "failed"] as const)(
-  "a deferred report does not launch a %s parent and remains durable",
-  async (status) => {
-    const { delivery, setup } = deferredReportSetup();
-    setChildStatus({ ...setup, childId: setup.parentId }, status);
+type DeferredParentCase = {
+  arrange: (context: ReturnType<typeof deferredReportSetup>) => unknown;
+  assertParent: (
+    context: ReturnType<typeof deferredReportSetup>,
+    arranged: unknown,
+  ) => void;
+  name: string;
+  overrides?: Parameters<typeof deferredReportSetup>[0];
+};
 
-    await deliverDeferredReport(setup, delivery);
-
-    expectDurableReport(setup, delivery);
-    expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe(status);
+const deferredParentCases: DeferredParentCase[] = [
+  ...(["paused", "stopped", "failed"] as const).map((status) => ({
+    arrange: ({ setup }) =>
+      setChildStatus({ ...setup, childId: setup.parentId }, status),
+    assertParent: ({ setup }) => {
+      expect(setup.store.get(TEST_USER_ID, setup.parentId)?.status).toBe(
+        status,
+      );
+    },
+    name: `a deferred report does not launch a ${status} parent and remains durable`,
+  })),
+  ...(
+    [
+      ["active execution", { activeSession: () => true }],
+      ["unavailable runner", { runnerIsAvailable: () => false }],
+    ] as const
+  ).map(([state, overrides]) => ({
+    arrange: ({ setup }) => idleParent(setup),
+    assertParent: ({ setup }) => {
+      expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+        generation: setup.parentGeneration,
+        status: "idle",
+      });
+    },
+    name: `a deferred report does not launch an idle parent with ${state}`,
+    overrides,
+  })),
+  {
+    arrange: ({ setup }) => {
+      setup.database.$client
+        .query(
+          "UPDATE agent_sessions SET status = 'idle', restart_handoff = ? WHERE id = ?",
+        )
+        .run(
+          JSON.stringify({
+            executionGeneration: setup.parentGeneration,
+            operation: "agent",
+            pendingInput: [],
+            requestedBy: "server",
+            restartId: "deferred-report-drain",
+          }),
+          setup.parentId,
+        );
+    },
+    assertParent: ({ setup }) => {
+      expect(
+        setup.store.get(TEST_USER_ID, setup.parentId)?.restartHandoff,
+      ).not.toBeNull();
+    },
+    name: "a deferred report does not launch a restart-draining parent",
   },
-);
+  {
+    arrange: ({ setup }) => {
+      const parent = setup.store.get(TEST_USER_ID, setup.parentId);
+      if (parent === undefined) throw new Error("Question parent unavailable");
+      const pending = setup.store
+        .questions()
+        .create(
+          TEST_USER_ID,
+          parent.id,
+          parent.generation,
+          "parent-question",
+          testAskQuestionsInput(),
+          TEST_NOW + 8,
+        );
+      idleParent(setup);
+      return pending.id;
+    },
+    assertParent: ({ setup }, pendingId) => {
+      expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
+        pendingQuestions: { id: pendingId },
+        status: "idle",
+      });
+    },
+    name: "a deferred report does not consume the event while the parent awaits input",
+  },
+];
 
-test.each([
-  ["active execution", { activeSession: () => true }],
-  ["unavailable runner", { runnerIsAvailable: () => false }],
-] as const)(
-  "a deferred report does not launch an idle parent with %s",
-  async (_state, overrides) => {
-    const { delivery, setup } = deferredReportSetup(overrides);
-    idleParent(setup);
+test.each(deferredParentCases)(
+  "$name",
+  async ({ arrange, assertParent, overrides }) => {
+    const context = deferredReportSetup(overrides);
+    const arranged = arrange(context);
 
-    await deliverDeferredReport(setup, delivery);
+    await deliverDeferredReport(context.setup, context.delivery);
 
-    expectDurableReport(setup, delivery);
-    expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
-      generation: setup.parentGeneration,
-      status: "idle",
-    });
+    expectDurableReport(context.setup, context.delivery);
+    assertParent(context, arranged);
   },
 );
 
@@ -115,54 +184,4 @@ test("a manual resume racing the deferred wake consumes one report in one attemp
   expect(delivery.launchSession.mock.calls.length).toBeLessThanOrEqual(1);
   expect(reportCount(setup.store, setup.parentId)).toBe(1);
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
-});
-
-test("a deferred report does not launch a restart-draining parent", async () => {
-  const { delivery, setup } = deferredReportSetup();
-  setup.database.$client
-    .query(
-      "UPDATE agent_sessions SET status = 'idle', restart_handoff = ? WHERE id = ?",
-    )
-    .run(
-      JSON.stringify({
-        executionGeneration: setup.parentGeneration,
-        operation: "agent",
-        pendingInput: [],
-        requestedBy: "server",
-        restartId: "deferred-report-drain",
-      }),
-      setup.parentId,
-    );
-
-  await deliverDeferredReport(setup, delivery);
-
-  expectDurableReport(setup, delivery);
-  expect(
-    setup.store.get(TEST_USER_ID, setup.parentId)?.restartHandoff,
-  ).not.toBeNull();
-});
-
-test("a deferred report does not consume the event while the parent awaits input", async () => {
-  const { delivery, setup } = deferredReportSetup();
-  const parent = setup.store.get(TEST_USER_ID, setup.parentId);
-  if (parent === undefined) throw new Error("Question parent unavailable");
-  const pending = setup.store
-    .questions()
-    .create(
-      TEST_USER_ID,
-      parent.id,
-      parent.generation,
-      "parent-question",
-      testAskQuestionsInput(),
-      TEST_NOW + 8,
-    );
-  idleParent(setup);
-
-  await deliverDeferredReport(setup, delivery);
-
-  expectDurableReport(setup, delivery);
-  expect(setup.store.get(TEST_USER_ID, setup.parentId)).toMatchObject({
-    pendingQuestions: { id: pending.id },
-    status: "idle",
-  });
 });
