@@ -165,13 +165,8 @@ export function agentProviderRequestHeaders(
       options.protocol === "anthropic" &&
       isOfficialAnthropicEndpoint(credential.baseUrl)
     ) {
-      // Sending the catalog maximum as max_tokens can exceed the context
-      // window on long conversations. 4.5+ models then stop with
-      // model_context_window_exceeded; this documented beta opts earlier
-      // models into the same degradation instead of a validation error.
-      // First-party Messages completion only: the beta changes nothing off
-      // api.anthropic.com, and proxies and gateways 400 on unrecognized
-      // beta names; discovery and other JSON endpoints stay reachable.
+      // The context-window beta degrades pre-4.5 overshoots to a stop instead
+      // of an error. Keep it first-party-only: gateways reject unknown betas.
       headers.set("anthropic-beta", ANTHROPIC_CONTEXT_WINDOW_BETA);
     }
     if (token.length > 0) {
