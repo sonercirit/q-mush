@@ -303,10 +303,8 @@ export class ProviderCredentialStore {
       details.apiFormat === "anthropic"
         ? `${credential}\n${details.apiFormat}`
         : credential;
-    const fingerprint = fingerprintCredential(
-      details.baseUrl === undefined
-        ? value
-        : `${details.baseUrl}\n${value}`,
+    const hash = fingerprintCredential(
+      details.baseUrl === undefined ? value : `${details.baseUrl}\n${value}`,
     );
     const existing = this.#database
       .select({
@@ -314,7 +312,7 @@ export class ProviderCredentialStore {
         isDeleted: providerCredentials.isDeleted,
       })
       .from(providerCredentials)
-      .where(fingerprintCondition(this.#provider, userId, fingerprint))
+      .where(fingerprintCondition(this.#provider, userId, hash))
       .get();
     if (existing !== undefined && !existing.isDeleted) {
       throw new DuplicateProviderCredentialError();
@@ -348,7 +346,7 @@ export class ProviderCredentialStore {
             ...mutableValues,
             createdAt: timestamp,
             createdById: userId,
-            credentialFingerprint: fingerprint,
+            credentialFingerprint: hash,
             id,
             provider: this.#provider,
             userId,
