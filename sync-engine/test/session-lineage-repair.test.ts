@@ -72,6 +72,22 @@ function toolResult(
     .run();
 }
 
+function expectAmbiguousRepair(setup: LineageRepairSetup): void {
+  expectRepairResult(
+    setup,
+    { ambiguous: 1, repaired: 0, skipped: 0 },
+    TEST_NOW + 4,
+  );
+  expectUnlinked(setup);
+  closeSetup(setup);
+}
+
+function endCurrentTurn(setup: LineageRepairSetup): void {
+  const condition = eq(agentSessionTurns.id, setup.turnId);
+  const values = { endedAt: new Date(TEST_NOW + 3) };
+  setup.database.update(agentSessionTurns).set(values).where(condition).run();
+}
+
 function sessionTurnId(setup: StoreSetup, sessionId: string): string {
   const turn = setup.database.query.agentSessionTurns
     .findFirst({
@@ -464,6 +480,30 @@ describe("native spawn lineage repair", () => {
     closeSetup(setup);
   });
 
+  test("treats same-parent provenance from different generations as ambiguous", () => {
+    const setup = orphanSetup();
+    directProvenance(setup, "repair-generation-first");
+    clearLineage(setup);
+    endCurrentTurn(setup);
+    const secondTurnId = "018bcfe5-6800-7000-8000-000000000096";
+    setup.database
+      .insert(agentSessionTurns)
+      .values({
+        ...createdAuditFields(SYSTEM_ID, TEST_NOW + 3),
+        executionGeneration: setup.parent.generation + 1,
+        id: secondTurnId,
+        sessionId: setup.parent.id,
+        startedAt: new Date(TEST_NOW + 3),
+        userId: TEST_USER_ID,
+      })
+      .run();
+    directProvenance(setup, "repair-generation-second", {
+      turnId: secondTurnId,
+    });
+
+    expectAmbiguousRepair(setup);
+  });
+
   test("skips malformed, generic shell, and ambiguous native provenance", () => {
     const setup = orphanSetup();
     const secondParent = createTestSession(setup.store, TEST_NOW + 2);
@@ -492,12 +532,6 @@ describe("native spawn lineage repair", () => {
       });
     }
 
-    expectRepairResult(
-      setup,
-      { ambiguous: 1, repaired: 0, skipped: 0 },
-      TEST_NOW + 4,
-    );
-    expectUnlinked(setup);
-    closeSetup(setup);
+    expectAmbiguousRepair(setup);
   });
 });
