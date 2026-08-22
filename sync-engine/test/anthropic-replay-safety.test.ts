@@ -24,7 +24,7 @@ import {
 const REQUEST_ALIAS = "claude-current";
 const FIRST_SNAPSHOT = "claude-snapshot-20260101";
 const MOVED_SNAPSHOT = "claude-snapshot-20260201";
-const THINKING = "Inspect first.";
+const THINKING = "Look.";
 const SIGNATURE = "signed-thinking";
 const CALL_ID = "read-call";
 const DEFAULT_COMPLETION_BLOCKS = [{ text: "Done.", type: "text" }] as const;
