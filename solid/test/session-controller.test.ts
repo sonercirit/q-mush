@@ -193,12 +193,12 @@ async function selectedControllerWithCommand(
 async function expectReadCommand(
   command: ReturnType<typeof vi.fn>,
 ): Promise<void> {
-  await vi.waitFor(() =>
+  await vi.waitFor(() => {
     expect(command.mock.calls).toContainEqual([
       "sessions.read",
       { sessionId: TEST_SESSION_DETAIL.id },
-    ]),
-  );
+    ]);
+  });
 }
 
 function queuedCommand(

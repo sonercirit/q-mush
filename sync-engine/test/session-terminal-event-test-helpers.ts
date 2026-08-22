@@ -146,7 +146,9 @@ export function idleParent(setup: ReturnType<typeof spawnedChildSetup>): void {
 export async function expectParentWake(
   ...[setup, delivery]: DeliveryArguments
 ): Promise<void> {
-  await vi.waitFor(() => { expectQueuedParent(setup, delivery); });
+  await vi.waitFor(() => {
+    expectQueuedParent(setup, delivery);
+  });
 }
 
 export function expectQueuedParentState(
