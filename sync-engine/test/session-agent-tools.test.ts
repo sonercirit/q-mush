@@ -217,7 +217,7 @@ async function completePausedChild(
 }
 
 describe("agent tools", () => {
-  test("lists and reads owned sessions", async () => {
+  test("lists and reads only the spawning user's sessions", async () => {
     const model = scriptedModel([
       {
         content: "Read this session after listing it.",
@@ -245,7 +245,7 @@ describe("agent tools", () => {
     closeSessionTestDatabase(readSetup.database);
   });
 
-  test("routes mixed recipients", async () => {
+  test("routes more than eight mixed session and runner recipients through parallel", async () => {
     const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
         ? { parameters: {}, recipient_name: "list_sessions" }
@@ -410,7 +410,7 @@ describe("agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("hands off a parent when spawn races with draining", async () => {
+  test("hands off a parent at the step boundary when spawn races with draining", async () => {
     const model = scriptedModel([
       {
         content: "Delegate during restart; it must not launch.",
