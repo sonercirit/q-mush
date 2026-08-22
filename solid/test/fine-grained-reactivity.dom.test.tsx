@@ -255,6 +255,54 @@ function parentSession() {
   };
 }
 
+test("labels idle attempts Ready, terminal success Completed, and input pauses non-final", () => {
+  const idle = parentSession();
+  const completed = {
+    ...idle,
+    id: "completed-session",
+    status: "completed" as const,
+    title: "Completed task",
+  };
+  const waiting = {
+    ...idle,
+    id: "waiting-session",
+    pendingQuestions: {
+      createdAt: 1,
+      executionGeneration: 0,
+      id: "questions-1",
+      questions: [
+        {
+          id: "decision",
+          maxLength: 50,
+          prompt: "Which path?",
+          type: "free_text" as const,
+        },
+      ],
+      toolCallId: "call-questions",
+    },
+    status: "paused" as const,
+    title: "Waiting task",
+  };
+  const { container } = mountedSessionList([idle, completed, waiting]);
+
+  expect(
+    query(query(container, `[data-session-id='${idle.id}']`), ".rounded-full")
+      .textContent,
+  ).toBe("Ready");
+  expect(
+    query(
+      query(container, "[data-session-id='completed-session']"),
+      ".rounded-full",
+    ).textContent,
+  ).toBe("Completed");
+  expect(
+    query(
+      query(container, "[data-session-id='waiting-session']"),
+      ".rounded-full",
+    ).textContent,
+  ).toBe("Waiting for answers");
+});
+
 function relatedSession(
   parent: AgentSessionSummary,
   id: string,

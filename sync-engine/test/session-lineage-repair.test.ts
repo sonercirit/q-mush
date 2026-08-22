@@ -87,6 +87,17 @@ function updateChild(
     .run();
 }
 
+function linkParentToChild(setup: LineageRepairSetup): void {
+  setup.database
+    .update(agentSessions)
+    .set({
+      parentExecutionGeneration: setup.child.generation,
+      parentSessionId: setup.child.id,
+    })
+    .where(eq(agentSessions.id, setup.parent.id))
+    .run();
+}
+
 function clearLineage(setup: LineageRepairSetup): void {
   updateChild(setup, {
     parentCallbackGeneration: null,
@@ -293,18 +304,56 @@ describe("native spawn lineage repair", () => {
     expectRepairRejected(setup);
   });
 
+  test.each(["deleted turn", "mismatched turn owner"] as const)(
+    "ignores provenance from a %s",
+    (invalidTurn) => {
+      const setup = directOrphan(`repair-${invalidTurn.replaceAll(" ", "-")}`);
+      if (invalidTurn === "deleted turn") {
+        setup.database
+          .update(agentSessionTurns)
+          .set({ isDeleted: true })
+          .where(eq(agentSessionTurns.id, setup.turnId))
+          .run();
+      } else {
+        addTestUser(setup.database);
+        setup.database
+          .update(agentMessages)
+          .set({ userId: TEST_FOREIGN_USER_ID })
+          .where(eq(agentMessages.turnId, setup.turnId))
+          .run();
+      }
+
+      expectRepairRejected(setup, 0);
+    },
+  );
+
   test("rejects provenance that would create a cycle", () => {
     const setup = directOrphan("repair-cycle");
-    setup.database
-      .update(agentSessions)
-      .set({
-        parentExecutionGeneration: setup.child.generation,
-        parentSessionId: setup.child.id,
-      })
-      .where(eq(agentSessions.id, setup.parent.id))
-      .run();
+    linkParentToChild(setup);
 
     expectRepairRejected(setup);
+  });
+
+  test("pre-filters a cyclic candidate before resolving unique provenance", () => {
+    const setup = directOrphan("repair-cyclic-candidate");
+    const validParent = createTestSession(setup.store, TEST_NOW + 2);
+    const validTurn = sessionTurnId(setup, validParent.id);
+    linkParentToChild(setup);
+    const childOutput = spawnOutput(setup.child.id);
+    toolResult(setup, {
+      content: childOutput,
+      id: "repair-valid-candidate",
+      parentId: validParent.id,
+      toolName: "spawn_session",
+      turnId: validTurn,
+    });
+
+    expectRepairResult(setup, { ambiguous: 0, repaired: 1, skipped: 0 });
+    expect(storedSessionLineage(setup)).toEqual({
+      parentExecutionGeneration: validParent.generation,
+      parentSessionId: validParent.id,
+    });
+    closeSetup(setup);
   });
 
   test("rejects mutually inferred orphan links that form a cycle", () => {

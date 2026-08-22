@@ -175,7 +175,7 @@ class DrizzleSessionIntegration
       this.#runtimes,
       reportParent,
     );
-    const recoveryNow = Date.now();
+    const recoveryNow = this.#now();
     this.#store.repairSpawnedSessionLineage(recoveryNow);
     this.#store.recoverSpawnedSessionReservations(recoveryNow);
     this.#shutdown = new ShutdownInterruptedSessionStore({

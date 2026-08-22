@@ -184,9 +184,20 @@ describe("spawned session report generation fencing", () => {
     );
 
     expect(child.status).toBe("created");
-    expect(child.status === "created" ? child.detail.tools : []).toEqual([
-      "read",
-    ]);
+    if (child.status !== "created") throw new Error("Child creation failed");
+    expect(child.detail.tools).toEqual(["read"]);
+    expect(
+      setup.database.query.agentSessions
+        .findFirst({
+          columns: { spawnPreparationPending: true },
+          where: eq(agentSessions.id, child.detail.id),
+        })
+        .sync(),
+    ).toEqual({ spawnPreparationPending: false });
+    expect(setup.store.recoverSpawnedSessionReservations(TEST_NOW + 2)).toBe(0);
+    expect(setup.store.get(TEST_USER_ID, child.detail.id)).toMatchObject({
+      status: "queued",
+    });
     setup.database.$client.close();
   });
 

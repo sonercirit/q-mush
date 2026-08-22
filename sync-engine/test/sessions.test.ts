@@ -186,7 +186,8 @@ describe("agent sessions", () => {
   });
 
   test("stores session failures as error messages and settles active timing", async () => {
-    let now = TEST_NOW;
+    // Account for the shared injected timestamp read by startup repair/recovery.
+    let now = TEST_NOW - 3_000;
     const setup = connectedSessionSetup(
       new FailingModel(),
       "api_key",
@@ -195,7 +196,8 @@ describe("agent sessions", () => {
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
-    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, and settlement.
+    // Seven 3s ticks: shared startup recovery, two SessionRuntimes reads,
+    // creation, message, failure, and settlement.
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
         activeDurationMs: 18_000,

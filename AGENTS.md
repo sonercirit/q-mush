@@ -9,17 +9,22 @@ Memory.
 
 ## Working Agreements
 
-- Research provider docs and probe APIs; call capabilities impossible only with
-  excluding evidence. Prefer omission, then documented defaults/metadata.
-- Preserve patterns; TDD, DRY, and KISS. Fix defects; codify harmful fixes in
-  tests.
-- Integrate each session capability with every protocol's native control,
-  recording gaps. Never weaken checks or claim unperformed verification.
-- Record provider discovery/request/streaming/caching/retry/model-capability
-  facts in `PROVIDER_PROTOCOLS.md`; everything else stays here. Fix stale
-  records when evidence changes.
-- Keep workflows local-first: narrow checks, then broad, then failures. Never
-  commit secrets, artifacts, or env files.
+- Call capabilities impossible only with excluding evidence; else record an open
+  question. Research provider docs via Brave and probe APIs; omit tunables
+  first, then prefer defaults and metadata/docs.
+- Preserve patterns; improve touched code. TDD: fail, implement, refactor green.
+  Keep one path; avoid premature abstraction.
+- Fix defects on sight, including pre-existing/out-of-scope; if harmful, codify
+  why in a test. Integrate each session capability with every protocol's native
+  control, recording gaps.
+- Never weaken checks or claim unperformed verification; disclose gaps. Record
+  decisions/lessons in the appropriate memory file: facts about provider
+  discovery, requests, streaming, caching, retries, or model capability handling
+  belong in `PROVIDER_PROTOCOLS.md`; everything else, including provider
+  credential and OAuth configuration, stays here. Repeated guidance means a
+  missing rule. If evidence overturns a finding, fix code and stale records;
+  act, don't ask. Never commit secrets, artifacts, or env files.
+- Keep workflows local-first: narrow checks, then broad, then failures.
 
 ## Setup, Commands
 
@@ -28,7 +33,7 @@ Memory.
   `db:generate` / `db:migrate`.
 - Tests: `bun run test`; `test:watch` omits browsers; `test:browser` uses bare
   `scripts/test-browser.ts` (Bun no-orphans rejects `./`/absolute paths), pins
-  headless, clears `PWDEBUG`.
+  headless, clears `PWDEBUG`. `.github/workflows/checks.yml` runs CI.
 - `bun run check` runs static checks; `format`/`lint:fix` write. CI runs tests,
   checks, build, whitespace on Bun 1.3.14 with frozen lockfile.
 
@@ -61,26 +66,26 @@ Memory.
   Browser tests use real Chromium/Tailwind mutations, not synthetic layout/CSS
   assertions; CI rejects `.only`/zero tests.
 - `sync-engine/auth.ts` does Google OIDC (code + PKCE) with HttpOnly
-  state/verifier cookies; it fetches/discards provider tokens. `auth-store.ts`
-  uses Bun SQLite/Drizzle to upsert users and persist 7-day sessions. Keys are
-  UUIDv7; Google subjects/session tokens are distinct unique fields; tables have
-  created/updated timestamps, actor IDs, `isDeleted`. `shared/database.ts`
-  applies migrations on open; `sync-engine/index.ts` injects it; auth falls back
-  to in-memory SQLite. Shared PKCE/provider parsing/redirects are in `oauth.ts`;
-  cookie helpers in `http.ts`. Client reads `/api/auth/session`, gates app, logs
-  out.
+  state/verifier cookies; it fetches/discards provider tokens.
+  `sync-engine/auth-store.ts` uses Bun SQLite/Drizzle to upsert users and
+  persist 7-day sessions. Keys are UUIDv7; Google subjects/session tokens are
+  distinct unique fields; tables have created/updated timestamps, actor IDs,
+  `isDeleted`. `shared/database.ts` applies migrations on open;
+  `sync-engine/index.ts` injects it; auth falls back to in-memory SQLite. Shared
+  PKCE/provider parsing/redirects are in `oauth.ts`; cookie helpers in
+  `http.ts`. Client reads `/api/auth/session`, gates app, logs out.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
-  `runners.ts` issues hashed opaque setup tokens, owns management/token-auth
-  callbacks and origin-based installers. `runner-installer.ts` emits the
-  macOS/Linux one-liner: picks an x64/ARM64 glibc/musl target, starts under
-  `~/.q-mush/runner` without Bun. Runners send metadata and 15-second WebSocket
-  heartbeats, check updates on startup/every 5 minutes, recheck via handshake
-  version after restarts, replacing old sockets on reconnect. Updates use
-  source/compiler ETags and SHA-256, atomically replace/restart; dev restarts
-  drain sessions first. Reinstalling for the same user/machine rotates the
-  registration to its new token instead of adding one; others stay protected;
-  tokens never list.
+  `sync-engine/runners.ts` issues hashed opaque setup tokens, owns
+  management/token-auth callbacks and origin-based installers.
+  `sync-engine/runner-installer.ts` emits the macOS/Linux one-liner: picks an
+  x64/ARM64 glibc/musl target, starts under `~/.q-mush/runner` without Bun.
+  Runners send metadata and 15-second WebSocket heartbeats, check updates on
+  startup/every 5 minutes, recheck via handshake version after restarts,
+  replacing old sockets on reconnect. Updates use source/compiler ETags and
+  SHA-256, atomically replace/restart; dev restarts drain sessions first.
+  Reinstalling for the same user/machine rotates the registration to its new
+  token instead of adding one; others stay protected; tokens never list.
 - Browser messages sort by time/ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` keeps positional record/category
   controls; shared Unicode result bound applies after serialization.
@@ -95,50 +100,23 @@ Memory.
   explaining unavailable actions, keeping drafts; draft fields echo a local
   signal debounced into the shared draft — submit paths flush first; local prefs
   filter transcript categories. Provider secrets never reach browser/runner
-  payloads. Directory picker uses `directory-picker-client.tsx`
+  payloads. Directory picker uses `solid/directory-picker-client.tsx`
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads root
   `AGENTS.md` (else `CLAUDE.md`).
 
   `runner/runner-workspace.ts` owns canonical workspace and tool path
   resolution. Tool, skill, model, and effort choices persist per session;
-  pickers use canonical schemas. Bounded `read_session` spans transcript
-  categories and definitions; `get_session_options` pages spawn choices. Grouped
-  tools manage non-blocking owned children, report final messages, resume idle
-  parents. Native spawns reserve one durable child before provider discovery;
-  `parent_session_id` plus `parent_execution_generation` is stable lineage,
-  while `parent_callback_generation` is consumed independently. Startup repairs
-  only unambiguous same-user/workspace direct or parallel native-spawn results
-  and fails unfinished reservations. Session roots and child groups paginate
-  independently, nesting each linked child once. `parallel` takes 2+ calls on
-  four ordered workers and bounds output. `solid/session-transcript.tsx` renders
-  prompts, tool definitions, raw details, Markdown, code/JSON, diffs and
-  results, preserving user line breaks; session lists page by ten. Live sessions
-  use `solid/realtime-client.ts`, `solid/session-client.tsx`,
-  `solid/session-controller.ts`: model deltas combine once per frame per
-  session, other events are immediate, unchanged snapshots suppress
-  notifications, keyed messages rerender only changes. The long-lived Solid root
-  preserves focus and scroll; the changing session detail is not a document
-  scroll anchor, and only bottom-pinned transcripts follow live output.
-  `agent-model-discovery.ts` queries metadata, signal-cancelable;
-  `shared/agent-configuration.ts` owns catalog types/validation. New sessions
-  take the default online runner (else the first) and credential, first
-  discovered model, latest working directory, top reported effort. Unknown
-  modalities imply no attachment support; choices show provider and Q Mush
-  modalities. `solid/custom-select.tsx` shares search normalization, paginates
-  past ten items, owns accessible keyboard/focus. Focus mode fills the app
-  viewport (not browser Fullscreen), keeping drafts and scroll; its rail
-  overlays on desktop, becomes a drawer, collapses on selection, closing with
-  Escape first. `shared/agent-prompt.ts` builds the model system prompt and
-  transcript display; reasoning summaries persist as `thinking` messages omitted
-  from replay. Session and transcript rows sit in `agent_sessions` and
-  `agent_messages`; `step_started_at` sets per model step, clears with
-  `activeStartedAt` (live Step timer); interrupted processes mark active
-  sessions failed for resumption; rebuilds add interrupted tool errors on
-  resume. pickers use schemas. `read_session` spans transcript categories and
+  pickers use schemas. `read_session` spans transcript categories and
   definitions with positional record pagination; `get_session_options` pages
-  spawn choices. Parent-report tests must exercise the shared emitter and pin
-  every administrative caller; generation tests must distinguish attempt
-  advances (successor reportable) from administrative advances (successor
+  spawn choices. Native spawns reserve one durable child before provider
+  discovery; stable lineage uses `parent_session_id` and
+  `parent_execution_generation`, while callbacks consume
+  `parent_callback_generation` independently. Startup repairs only unambiguous
+  same-user/workspace direct or parallel spawn results and fails unfinished
+  reservations. User-initiated children do not create spawn reservations.
+  Parent-report tests must exercise the shared emitter and pin every
+  administrative caller; generation tests must distinguish attempt advances
+  (successor reportable) from administrative advances (successor
   non-reportable), or duplicate/lost delivery mutations can survive. Grouped
   tools manage non-blocking owned children; a generation ledger delivers one
   sanitized terminal event per attempt, including continued/immediate failures.
@@ -203,19 +181,6 @@ Memory.
   switches and canonical named imports (one declaration/module with inline
   `type` markers). Default imports: only `@eslint/js`, `@tailwindcss/vite`,
   `vite-plugin-solid`; aliases, namespaces, dynamic imports, import attributes,
-  import-equals, `import()` types, and side-effect imports (except the
-  production and browser-test imports of `solid/styles.css`) are rejected.
-  First-party code rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`,
-  and HTML-like `Response` bodies; HTML-like data and TSX pass.
-- Knip checks every issue type and entry export in test and production graphs;
-  tests cannot keep production alive, and unused test helpers fail.
-- CPD maps all JS/TS extensions to TSX and ignores imports. Its parse-error path
-  deliberately matches native CPD's crude whole-file fallback tokenizer.
-  Native-token and complete-function alpha matches of ≥20 tokens spanning a line
-  boundary fail the zero threshold; alpha ignores locally bound names but
-  preserves free names, member APIs, and literals.
-- Repository policy: 20,000-code-point maximum (`bun.lock`, `drizzle/`
-  excepted), tests only under `test`, no app HTML outside `test`/`fixtures`.
   import-equals, `import()` types, side-effect imports (except
   production/browser-test `solid/styles.css`) are rejected. First-party code
   rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`, HTML-like
