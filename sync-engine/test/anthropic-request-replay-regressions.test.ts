@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
+import { completionMessages } from "../../sync-engine/agent-completion.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { anthropicRequestBody } from "../../sync-engine/anthropic-request.ts";
 import {
@@ -124,6 +125,23 @@ async function captureOpenAiFormatReplayRequest(
   }
   const body: unknown = await captured.json();
   return body;
+}
+
+function directRequestBody(messages: readonly AgentConversationMessage[]) {
+  return anthropicRequestBody({
+    adaptiveThinking: null,
+    credential: ANTHROPIC_TEST_CREDENTIAL,
+    credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
+    maxOutputTokens: null,
+    messages,
+    model: KNOWN_MODEL,
+    provider: "generic",
+    reasoningEffort: undefined,
+    resolvedModel: KNOWN_MODEL,
+    stream: true,
+    systemPrompt: "System",
+    tools: [],
+  });
 }
 
 function expectUnsignedReplay(content: unknown): void {
@@ -313,22 +331,18 @@ describe("anthropic-format generic provider", () => {
     expectReplayOutcome(staleReplayConversation(), false));
 
   test("fails request assembly closed when replay differs from its assistant", () => {
-    expect(() =>
-      anthropicRequestBody({
-        adaptiveThinking: null,
-        credential: ANTHROPIC_TEST_CREDENTIAL,
-        credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
-        maxOutputTokens: null,
-        messages: mismatchedReplayConversation(),
-        model: KNOWN_MODEL,
-        provider: "generic",
-        reasoningEffort: undefined,
-        resolvedModel: KNOWN_MODEL,
-        stream: true,
-        systemPrompt: "System",
-        tools: [],
-      }),
-    ).toThrow(UNSAFE_TOOL_REPLAY_ERROR);
+    expect(() => directRequestBody(mismatchedReplayConversation())).toThrow(
+      UNSAFE_TOOL_REPLAY_ERROR,
+    );
+  });
+
+  test("drops signed replay when tool-call sanitization changes the assistant", () => {
+    const messages = completionMessages(
+      [mismatchedReplayConversation()],
+      KNOWN_MODEL,
+    );
+
+    expect(messages[1]).not.toHaveProperty("providerReplay");
   });
 
   test("fails closed when tool-call sanitization changes the assistant", () =>
@@ -362,16 +376,13 @@ describe("anthropic-format generic provider", () => {
   test("rejects a continuation container when the result IDs do not match", () =>
     expectReplayOutcome(containedReplayConversation("different-call"), true));
 
-  test("does not recover a container across a non-tool intervening turn", async () => {
-    const harness = signedReplayHarness();
-    await harness.complete([
+  test("does not recover a container across a non-tool intervening turn", () => {
+    const messages = [
       ...containedReplayConversation(),
-      { content: "Later question", role: "user" },
+      { content: "Later question", role: "user" as const },
       readToolResult("Late result"),
-    ]);
+    ];
 
-    await expect(harness.requestBody(0)).resolves.not.toHaveProperty(
-      "container",
-    );
+    expect(directRequestBody(messages)).not.toHaveProperty("container");
   });
 });

@@ -270,6 +270,28 @@ describe("provider credential agent access", () => {
     close();
   });
 
+  test("propagates non-collision errors during secret rotation", () => {
+    const { close, database, store } = createProviderStore();
+    createFirstCredential(store);
+    const storageFailure = new Error("credential storage unavailable");
+    const originalUpdate = database.update.bind(database);
+    database.update = () => {
+      throw storageFailure;
+    };
+
+    expect(() =>
+      store.updateSecret(
+        TEST_USER_ID,
+        CREDENTIAL_ID,
+        "rotated-secret",
+        TEST_NOW + 1,
+      ),
+    ).toThrow(storageFailure);
+
+    database.update = originalUpdate;
+    close();
+  });
+
   test("applies the scope schema on a legacy database", () => {
     const { close, store } = createProviderStore({ legacySchema: true });
     addAndRead(store, "sk-or-legacy-secret", {

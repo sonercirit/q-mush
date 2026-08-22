@@ -503,27 +503,27 @@ describe("Anthropic replay safety", () => {
   );
 
   test.each([
-    {
-      continuation: "client_tool",
-      moved: false,
-      name: "retries transient resolution within a client_tool response before continuation validation",
-    },
-    {
-      continuation: "pause_turn",
-      moved: false,
-      name: "retries transient resolution within a pause_turn response before continuation validation",
-    },
-    {
-      continuation: "client_tool",
-      moved: true,
-      name: "fails a client_tool response closed when retried resolution finds a different model",
-    },
-    {
-      continuation: "pause_turn",
-      moved: true,
-      name: "fails a pause_turn response closed when retried resolution finds a different model",
-    },
-  ] as const)("$name", async ({ continuation, moved }) => {
+    [
+      "retries transient resolution within a client_tool response before continuation validation",
+      "client_tool",
+      false,
+    ],
+    [
+      "retries transient resolution within a pause_turn response before continuation validation",
+      "pause_turn",
+      false,
+    ],
+    [
+      "fails a client_tool response closed when retried resolution finds a different model",
+      "client_tool",
+      true,
+    ],
+    [
+      "fails a pause_turn response closed when retried resolution finds a different model",
+      "pause_turn",
+      true,
+    ],
+  ] as const)("%s", async (_name, continuation, moved) => {
     const { model, requests } = transientContinuationModel({
       continuation,
       retryModel: moved ? MOVED_SNAPSHOT : FIRST_SNAPSHOT,
