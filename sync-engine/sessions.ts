@@ -124,6 +124,11 @@ class DrizzleSessionIntegration
   agentActionsDraining(): boolean {
     return this.#actions.isDraining();
   }
+
+  /** @internal Simulates a restart boundary in integration tests. */
+  abortAgentActionsForRestart(): void {
+    this.#restartController.abort("integration test restart");
+  }
   readonly #fallbacks: ReturnType<typeof createAttachmentFallbackIntegration>;
 
   constructor(

@@ -443,6 +443,17 @@ describe("native spawn lineage repair", () => {
     expectRepairRejected(setup);
   });
 
+  test("ignores provenance whose turn belongs to another session", () => {
+    const setup = orphanSetup();
+    clearLineage(setup);
+    const thirdSession = createTestSession(setup.store, TEST_NOW + 2);
+    directProvenance(setup, "repair-cross-session-turn", {
+      turnId: sessionTurnId(setup, thirdSession.id),
+    });
+
+    expectRepairRejected(setup, 0);
+  });
+
   test.each(["deleted turn", "mismatched turn owner"] as const)(
     "ignores provenance from a %s",
     (invalidTurn) => {

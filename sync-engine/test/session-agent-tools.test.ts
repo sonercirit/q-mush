@@ -28,9 +28,11 @@ import {
   completedParentToolOutputs,
   scriptedModel,
   startToolSession,
+  startToolSessionSetup,
   toolCall,
 } from "./session-agent-tool-setup.ts";
 import {
+  connectedSessionSetup,
   CREDENTIAL_ID,
   RUNNER_ID,
   SESSION_ID,
@@ -183,6 +185,17 @@ async function pausedChildSetup(): Promise<{
     throw new Error("The paused parent child session is unavailable");
   }
   return { childId: child.id, model, setup };
+}
+
+function queuedChildren(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+) {
+  return setup.sessions
+    .listForUser(TEST_USER_ID)
+    .filter(
+      ({ parentSessionId, status }) =>
+        parentSessionId === SESSION_ID && status === "queued",
+    );
 }
 
 async function completePausedChild(
@@ -360,6 +373,37 @@ describe("session agent tools", () => {
     );
   });
 
+  test("queues a prepared child when the restart signal is already aborted", async () => {
+    const model = scriptedModel([
+      {
+        content: "Delegate at the restart boundary.",
+        toolCalls: [spawnCall("This child must remain queued")],
+      },
+      { content: "Restart boundary handled.", toolCalls: [] },
+    ]);
+    const setup = connectedSessionSetup(model, "api_key", undefined, {
+      onChange: (userId, sessionId) => {
+        const child = setup.sessions.detailForUser(userId, sessionId);
+        const preparedForParent =
+          child?.parentSessionId === SESSION_ID && child.status === "queued";
+        if (preparedForParent) {
+          setup.sessions.abortAgentActionsForRestart?.();
+        }
+      },
+    });
+    await startToolSessionSetup(setup);
+    const detail = await completedParentDetail(setup, "idle");
+
+    expect(
+      jsonRecord(findToolResultContent(detail, "spawn_session") ?? "null"),
+    ).toMatchObject({ status: "queued" });
+    expect(queuedChildren(setup).map(({ status }) => status)).toEqual([
+      "queued",
+    ]);
+    expect(model.requests).toHaveLength(2);
+    closeSessionTestDatabase(setup.database);
+  });
+
   test("hands off a parent at the step boundary when spawn races with draining", async () => {
     const model = scriptedModel([
       {
@@ -399,13 +443,7 @@ describe("session agent tools", () => {
       restartHandoff: { requestedBy: "server" },
       status: "paused",
     });
-    const children = setup.sessions.listForUser(TEST_USER_ID);
-    expect(
-      children.filter(
-        ({ parentSessionId, status }) =>
-          parentSessionId === SESSION_ID && status === "queued",
-      ),
-    ).toHaveLength(1);
+    expect(queuedChildren(setup)).toHaveLength(1);
     expect(model.requests.length).toBeLessThanOrEqual(1);
     await draining;
     closeSessionTestDatabase(setup.database);
