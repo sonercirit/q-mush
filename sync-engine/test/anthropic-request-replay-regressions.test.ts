@@ -289,17 +289,19 @@ describe("anthropic-format generic provider", () => {
       ],
     };
     const messages = await replayOnlyMessages([
+      { content: "First", role: "user" },
       { ...thinkingOnlyAssistant(replay), content: " " },
       { content: "Middle", role: "user" },
       replayTextAssistant(),
     ]);
 
-    expect(messages[0]).toEqual({
+    expect(messages[0]).toEqual(cachedTextMessage("user", "First"));
+    expect(messages[1]).toEqual({
       content: replay.blocks.slice(1),
       role: "assistant",
     });
-    expect(messages.at(1)).toEqual(cachedTextMessage("user", "Middle"));
-    expect(messages.at(2)).toEqual({
+    expect(messages.at(2)).toEqual(cachedTextMessage("user", "Middle"));
+    expect(messages.at(3)).toEqual({
       content: replayWithoutClientTool().blocks,
       role: "assistant",
     });
@@ -392,19 +394,20 @@ describe("anthropic-format generic provider", () => {
   test("degrades stale signed tool replay after a historical model change", () =>
     expectReplayOutcome(staleReplayConversation(), false));
 
+  test("drops invalid replay during completion sanitization", () => {
+    for (const conversation of [
+      staleReplayConversation(),
+      mismatchedReplayConversation(),
+    ]) {
+      const messages = completionMessages([conversation], KNOWN_MODEL);
+      expect(messages[1]).not.toHaveProperty("providerReplay");
+    }
+  });
+
   test("fails request assembly closed when replay differs from its assistant", () => {
     expect(() => directRequestBody(mismatchedReplayConversation())).toThrow(
       UNSAFE_TOOL_REPLAY_ERROR,
     );
-  });
-
-  test("drops signed replay when tool-call sanitization changes the assistant", () => {
-    const messages = completionMessages(
-      [mismatchedReplayConversation()],
-      KNOWN_MODEL,
-    );
-
-    expect(messages[1]).not.toHaveProperty("providerReplay");
   });
 
   test("fails closed when tool-call sanitization changes the assistant", () =>
