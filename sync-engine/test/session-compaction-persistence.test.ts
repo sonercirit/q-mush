@@ -16,6 +16,7 @@ import {
   runningCompactionStore,
   type CompactionStoreSetup,
 } from "./session-compaction-test-helpers.ts";
+import { TEST_REPLAY_IDENTITY } from "./session-replay-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 const COMPACTION_TOKEN_USAGE = {
@@ -118,7 +119,9 @@ describe("session compaction persistence", () => {
       reportedStepCount: 0,
       stepCount: 0,
     });
-    expect(setup.store.conversation(STORE_SESSION_ID)).toEqual([
+    expect(
+      setup.store.conversation(STORE_SESSION_ID, TEST_REPLAY_IDENTITY),
+    ).toEqual([
       {
         content: testCompactionHandoffMessage("Continue from this handoff."),
         role: "user",

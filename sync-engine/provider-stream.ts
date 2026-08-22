@@ -6,6 +6,8 @@ import type {
 import { isRecord, readRequiredArray } from "../shared/auth-model.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import type { ProviderToolCallDelta } from "../shared/tool-stream.ts";
+import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
+import { unavailableAnthropicResponseIdentity } from "./anthropic-response-identity.ts";
 import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
@@ -591,13 +593,37 @@ class JsonChatCompletionsAccumulator
   }
 }
 
+type ProviderTextDeltaHandler = (delta: ProviderTextDelta) => void;
+
+export interface AnthropicStreamConfiguration {
+  readonly identity: AnthropicReplayIdentity;
+  readonly onDelta?: ProviderTextDeltaHandler;
+}
+
+export function createProviderStreamAccumulator(
+  protocol: "anthropic",
+  configuration: AnthropicStreamConfiguration,
+): ProviderStreamAccumulator;
+export function createProviderStreamAccumulator(
+  protocol: Exclude<ProviderStreamProtocol, "anthropic">,
+  onDelta?: ProviderTextDeltaHandler,
+): ProviderStreamAccumulator;
 export function createProviderStreamAccumulator(
   protocol: ProviderStreamProtocol,
-  onDelta?: (delta: ProviderTextDelta) => void,
+  configuration?: AnthropicStreamConfiguration | ProviderTextDeltaHandler,
 ): ProviderStreamAccumulator {
   if (protocol === "anthropic") {
-    return new AnthropicStreamAccumulator(onDelta);
+    if (typeof configuration === "function" || configuration === undefined) {
+      unavailableAnthropicResponseIdentity();
+    }
+    return new AnthropicStreamAccumulator(
+      configuration.identity.model,
+      configuration.identity.provenance,
+      configuration.onDelta,
+    );
   }
+  const onDelta =
+    typeof configuration === "function" ? configuration : undefined;
   if (protocol === "chat_completions_json") {
     return new JsonChatCompletionsAccumulator(onDelta);
   }

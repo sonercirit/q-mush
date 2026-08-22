@@ -1,7 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import { optionalSignal } from "../shared/validation.ts";
+import type { AgentProviderCredential } from "./agent-model-options.ts";
 import {
   fetchModelRequestAttempt,
   modelResponseRetryAfterMilliseconds,
@@ -10,8 +10,12 @@ import {
   type ModelRequestSleep,
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
+import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import { ProviderStreamError } from "./provider-error.ts";
-import { readProviderEventStream } from "./provider-event-stream.ts";
+import {
+  readProviderEventStream,
+  type AnthropicEventStreamOptions,
+} from "./provider-event-stream.ts";
 import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
@@ -19,11 +23,16 @@ import {
 
 export interface ProviderHttpOptions {
   readonly body: unknown;
+  readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint: string;
   readonly fetch: AgentModelFetch;
   readonly headers: Headers;
+  readonly model: string;
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
+  readonly onStreamRetry?: () => void;
   readonly protocol: "anthropic" | "chat_completions" | "responses";
   readonly provider: ProviderId;
+  readonly resolvedModel?: string;
   readonly sleep: ModelRequestSleep | undefined;
   readonly url: string;
 }
@@ -101,6 +110,15 @@ function streamFailure(
   return new RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
+function anthropicStreamOptions(
+  options: ProviderHttpOptions,
+): AnthropicEventStreamOptions {
+  const identity = anthropicReplayIdentityFrom(options);
+  return options.onDelta === undefined
+    ? { identity }
+    : { identity, onDelta: options.onDelta };
+}
+
 async function readAcceptedResponse(
   response: Response,
   options: ProviderHttpOptions,
@@ -110,10 +128,16 @@ async function readAcceptedResponse(
   }
 
   if (response.headers.get("content-type")?.includes("application/json")) {
-    const accumulator = createProviderStreamAccumulator(
-      options.protocol === "anthropic" ? "anthropic" : "chat_completions_json",
-      options.onDelta,
-    );
+    const accumulator =
+      options.protocol === "anthropic"
+        ? createProviderStreamAccumulator(
+            "anthropic",
+            anthropicStreamOptions(options),
+          )
+        : createProviderStreamAccumulator(
+            "chat_completions_json",
+            options.onDelta,
+          );
     try {
       accumulator.push(await response.json());
       return accumulator.finish();
@@ -128,11 +152,17 @@ async function readAcceptedResponse(
   }
 
   try {
-    return await readProviderEventStream(
-      response,
-      options.protocol,
-      options.onDelta,
-    );
+    return options.protocol === "anthropic"
+      ? await readProviderEventStream(
+          response,
+          "anthropic",
+          anthropicStreamOptions(options),
+        )
+      : await readProviderEventStream(
+          response,
+          options.protocol,
+          options.onDelta,
+        );
   } catch (error) {
     throw streamFailure(error, response);
   }
@@ -146,7 +176,7 @@ export async function completeProviderHttp(
     body: JSON.stringify(options.body),
     headers: options.headers,
     method: "POST",
-    ...optionalSignal(signal),
+    ...(signal === undefined ? {} : { signal }),
   });
   let streamed = false;
   const retryAttempt = async (): Promise<AgentModelStep> => {
@@ -162,6 +192,7 @@ export async function completeProviderHttp(
     } catch (error) {
       if (streamed && error instanceof RetryableModelRequestError) {
         options.onDelta?.({ content: "", reset: true, thinking: "" });
+        options.onStreamRetry?.();
         streamed = false;
       }
       throw error;

@@ -140,6 +140,35 @@ describe("explain attachment", () => {
     expect(setup.requestStates).toEqual(["admission"]);
   });
 
+  test.each([
+    [
+      "threads a resolved fallback model into its request model",
+      ["text"],
+      undefined,
+      "pdf-model",
+    ],
+    [
+      "reuses the session resolution for native attachment requests",
+      ["text", "file"],
+      "current-snapshot",
+      "current-snapshot",
+    ],
+  ] as const)(
+    "%s",
+    async (_label, inputModalities, currentResolvedModel, resolvedModel) => {
+      const setup = options(inputModalities);
+
+      await explainAttachment({
+        ...setup.value,
+        ...(currentResolvedModel === undefined ? {} : { currentResolvedModel }),
+      });
+
+      expect(setup.factory).toHaveBeenCalledWith(
+        expect.objectContaining({ resolvedModel }),
+      );
+    },
+  );
+
   test("appends the truncation notice to a length-stopped explanation", async () => {
     const setup = options(["text"]);
     const factory = vi.fn(() => ({

@@ -260,6 +260,13 @@
       "when": 1787359766762,
       "tag": "0036_dashing_hulk",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "6",
+      "when": 1787417651551,
+      "tag": "0037_absent_rocket_racer",
+      "breakpoints": true
     }
   ]
 }

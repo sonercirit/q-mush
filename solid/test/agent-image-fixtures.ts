@@ -1,5 +1,5 @@
 import type { AgentImage } from "../../shared/agent-images.ts";
-import type { AgentSessionMessage } from "../../shared/session-model.ts";
+import { createTestUserImageMessage } from "../../shared/test/agent-image-message-fixtures.ts";
 
 const IMAGE_DATA =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
@@ -10,18 +10,6 @@ export const TEST_AGENT_IMAGE: AgentImage = {
   name: "pixel.png",
 };
 
-export function testUserImageMessage(
-  id: string,
-  content: string,
-): AgentSessionMessage {
-  return {
-    content,
-    createdAt: 2,
-    id,
-    images: [TEST_AGENT_IMAGE],
-    role: "user",
-    toolCallId: null,
-    toolCalls: [],
-    toolName: null,
-  };
+export function testUserImageMessage(id: string, content: string) {
+  return createTestUserImageMessage(TEST_AGENT_IMAGE, id, content);
 }

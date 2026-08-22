@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
+import { fingerprintProviderCredential } from "../../shared/credential-cipher.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
@@ -29,6 +30,20 @@ const CREDENTIAL: ProviderCredentialAccess = {
   source: "api_key",
 };
 
+function fallbackModelSelection(
+  credential: ProviderCredentialAccess,
+): Parameters<typeof createFallbackModel>[1] {
+  return {
+    adaptiveThinking: null,
+    credential,
+    maxOutputTokens: null,
+    model: "claude-alias",
+    prompt: null,
+    provider: "generic",
+    providerPricing: null,
+  };
+}
+
 function recordingFactory(
   selections: Parameters<AgentModelFactory>[0][],
 ): AgentModelFactory {
@@ -44,6 +59,21 @@ function modelSelections(): {
 } {
   const selections: Parameters<AgentModelFactory>[0][] = [];
   return { factory: recordingFactory(selections), selections };
+}
+
+function recordFallbackSelection(
+  options: Parameters<typeof createFallbackModel>[1],
+): Parameters<AgentModelFactory>[0] | undefined {
+  const { factory, selections } = modelSelections();
+  createFallbackModel(factory, options);
+  return selections[0];
+}
+
+function sessionModelsWithOptions(
+  factory: AgentModelFactory,
+  overrides: Partial<Parameters<typeof createSessionAgentModels>[0]>,
+) {
+  return createSessionAgentModels(sessionModelOptions(factory, overrides));
 }
 
 function connectedRealtime(
@@ -161,6 +191,21 @@ describe("session agent models", () => {
     });
   });
 
+  test("derives the model-bound fingerprint from the secret and endpoint", () => {
+    const credential: ProviderCredentialAccess = {
+      ...CREDENTIAL,
+      apiFormat: "anthropic",
+      baseUrl: "https://anthropic.example.test/v1",
+    };
+    const selection = recordFallbackSelection(
+      fallbackModelSelection(credential),
+    );
+
+    expect(selection?.credentialFingerprint).toBe(
+      fingerprintProviderCredential(credential.secret, credential),
+    );
+  });
+
   test("passes a global fallback routing selection to the agent model", () => {
     const { factory, selections } = modelSelections();
 
@@ -179,6 +224,28 @@ describe("session agent models", () => {
     expect(selections[0]).toMatchObject({
       openRouterProviderRouting: { sort: "exacto", type: "sort" },
     });
+  });
+
+  test("passes a discovered fallback model resolution to the agent model", () => {
+    const selection = recordFallbackSelection({
+      ...fallbackModelSelection(CREDENTIAL),
+      resolvedModel: "claude-snapshot",
+    });
+
+    expect(selection?.resolvedModel).toBe("claude-snapshot");
+  });
+
+  test("passes one resolved model to every session model", () => {
+    const { factory, selections } = modelSelections();
+    const models = sessionModelsWithOptions(factory, {
+      resolvedModel: "claude-snapshot",
+    });
+
+    models.createCompactor();
+    const resolved = selections.map((selection) => selection.resolvedModel);
+
+    expect(resolved).toEqual(["claude-snapshot", "claude-snapshot"]);
+    expect(models.resolvedModel).toBe("claude-snapshot");
   });
 
   test("streams provider thinking and response to the workspace socket", () => {

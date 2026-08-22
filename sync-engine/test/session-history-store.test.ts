@@ -1,3 +1,4 @@
+import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
 import { agentMessages } from "../../shared/database/schema.ts";
 import {
@@ -5,6 +6,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
+import { privateReplay } from "./private-replay-fixtures.ts";
 import {
   appendCompactionAssistantMessage,
   runningCompactionStore,
@@ -12,10 +14,19 @@ import {
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
 const USAGE = { contextTokens: null, costBasis: null, costUsd: null } as const;
+const PRIVATE_REPLAY = privateReplay(
+  "history-private-signature",
+  "Before compaction",
+);
 
 test("compaction advances durable segment identity and pages old messages", () => {
   const setup = runningCompactionStore();
   appendCompactionAssistantMessage(setup, "Before compaction");
+  setup.database
+    .update(agentMessages)
+    .set({ providerReplay: JSON.stringify(PRIVATE_REPLAY) })
+    .where(eq(agentMessages.role, "assistant"))
+    .run();
 
   setup.store.compactCurrentConversation(
     STORE_SESSION_ID,
@@ -53,6 +64,7 @@ test("compaction advances durable segment identity and pages old messages", () =
       stepCount: 2,
     },
   });
+  expect(JSON.stringify(history)).not.toContain("history-private-signature");
   expect(history?.messages.map(({ content }) => content)).toEqual([
     expect.any(String),
     "Before compaction",

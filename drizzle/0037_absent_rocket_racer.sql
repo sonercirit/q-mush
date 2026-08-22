@@ -1,0 +1,1 @@
+ALTER TABLE `agent_messages` ADD `provider_replay` text;

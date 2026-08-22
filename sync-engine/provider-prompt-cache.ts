@@ -1,4 +1,5 @@
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
+import type { AnthropicReplayBlock } from "../shared/anthropic-replay.ts";
 import { isRecord } from "../shared/auth-model.ts";
 
 // Anthropic-compatible endpoints accept at most four cache breakpoints per
@@ -62,6 +63,29 @@ export function promptCacheBreakpoints(
   }
 
   return breakpoints;
+}
+
+// The Messages cache_control surface documents text and tool_use placements.
+// Other replay types stay byte-for-byte provider output while the scan moves
+// backward to the nearest documented block.
+function acceptsReplayCacheControl(block: AnthropicReplayBlock): boolean {
+  return block.type === "text" || block.type === "tool_use";
+}
+
+export function withAnthropicReplayCacheControl(
+  parts: readonly AnthropicReplayBlock[],
+): readonly unknown[] | undefined {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part !== undefined && acceptsReplayCacheControl(part)) {
+      return parts.map((candidate, candidateIndex) =>
+        candidateIndex === index
+          ? { ...candidate, cache_control: PROMPT_CACHE_CONTROL }
+          : candidate,
+      );
+    }
+  }
+  return undefined;
 }
 
 export function withPromptCacheControl(

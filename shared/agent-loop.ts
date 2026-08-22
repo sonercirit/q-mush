@@ -1,4 +1,5 @@
 import type { AgentAttachment } from "./agent-attachments.ts";
+import type { AnthropicAssistantReplay } from "./anthropic-replay.ts";
 import { isRecord } from "./auth-model.ts";
 import { parseOptionalJsonRecord } from "./json-record.ts";
 import type { AgentSessionUsageUpdate } from "./session-model.ts";
@@ -63,6 +64,8 @@ export function readAgentToolCalls(
   });
 }
 
+export type AgentProviderReplay = AnthropicAssistantReplay;
+
 export type AgentConversationMessage =
   | {
       readonly content: string;
@@ -72,6 +75,7 @@ export type AgentConversationMessage =
     }
   | {
       readonly content: string;
+      readonly providerReplay?: AgentProviderReplay;
       readonly role: "assistant";
       readonly toolCalls: readonly AgentToolCall[];
     }
@@ -114,10 +118,26 @@ export interface AgentModelStep {
   readonly content: string;
   readonly contextTokens: number | null;
   readonly costUsd: number | null;
+  readonly providerContinuation?:
+    "anthropic_pause_turn" | "anthropic_replay_unavailable";
+  readonly providerReplay?: AgentProviderReplay;
   readonly thinking: string;
   readonly tokenUsage: AgentTokenUsage | null;
   readonly toolCalls: readonly AgentToolCall[];
   readonly truncation?: AgentStepTruncation;
+}
+
+function assistantConversationMessage(
+  step: Pick<AgentModelStep, "content" | "providerReplay" | "toolCalls">,
+): Extract<AgentConversationMessage, { readonly role: "assistant" }> {
+  return {
+    content: step.content,
+    ...(step.providerReplay === undefined
+      ? {}
+      : { providerReplay: step.providerReplay }),
+    role: "assistant",
+    toolCalls: step.toolCalls,
+  };
 }
 
 export interface AgentModel {
@@ -280,6 +300,9 @@ function nextStepHasInput(
   return last !== undefined && last.role !== "assistant";
 }
 
+const UNSAFE_ANTHROPIC_CONTINUATION =
+  "The Anthropic response requested a tool with content that cannot be continued safely";
+
 export async function runAgentLoop(
   options: AgentLoopOptions,
 ): Promise<AgentLoopResult> {
@@ -318,11 +341,7 @@ export async function runAgentLoop(
       throw new Error("The model returned invalid context usage");
     }
 
-    const assistantMessage: AgentConversationMessage = {
-      content: step.content,
-      role: "assistant",
-      toolCalls: step.toolCalls,
-    };
+    const assistantMessage = assistantConversationMessage(step);
     recordedMessages.push(assistantMessage);
     if (step.truncation !== undefined) {
       // Record the soft stop durably so a truncated answer is never mistaken
@@ -345,6 +364,13 @@ export async function runAgentLoop(
         continue;
       }
       return { messages, status: "complete" };
+    }
+
+    if (
+      step.providerContinuation === "anthropic_replay_unavailable" &&
+      step.toolCalls.length > 0
+    ) {
+      throw new Error(UNSAFE_ANTHROPIC_CONTINUATION);
     }
 
     for (const call of step.toolCalls) {

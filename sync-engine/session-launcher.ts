@@ -37,6 +37,7 @@ interface SessionLauncherDependencies {
   readonly discoverModels?: SessionModelRuntimeResources["discoverModels"];
   readonly beforeLaunch?: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly modelFactory: AgentModelFactory;
+  readonly modelFetch?: SessionModelRuntimeResources["modelFetch"];
   readonly notify: SessionNotification;
   readonly now: typeof Date.now;
   readonly realtime: RealtimeHub | undefined;
@@ -157,6 +158,9 @@ export class SessionLauncher {
               ? {}
               : { discoverModels: this.#dependencies.discoverModels }),
             modelFactory: this.#dependencies.modelFactory,
+            ...(this.#dependencies.modelFetch === undefined
+              ? {}
+              : { modelFetch: this.#dependencies.modelFetch }),
             now: this.#dependencies.now,
             notify: this.#dependencies.notify,
             realtime: this.#dependencies.realtime,

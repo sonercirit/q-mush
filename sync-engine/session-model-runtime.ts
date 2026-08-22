@@ -81,6 +81,9 @@ export function sessionModelRuntime(
     manualCompactionRequested: () =>
       resources.store.manualCompactionPending(detail.id, detail.generation),
     modelFactory: resources.modelFactory,
+    ...(resources.modelFetch === undefined
+      ? {}
+      : { modelFetch: resources.modelFetch }),
     now: resources.now,
     pendingComponent: markPending,
     restartHandoffRequested,

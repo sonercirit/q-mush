@@ -1,3 +1,11 @@
+type SessionRuntimeApply = (
+  sessionId: string,
+  now: number,
+  generation: number,
+) => void;
+
+export type SessionRuntimeWriter = (apply: SessionRuntimeApply) => void;
+
 export function invokeRuntimeWrite(
   now: () => number,
   generation: number,

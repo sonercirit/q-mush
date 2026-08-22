@@ -246,7 +246,15 @@ export function createProviderIntegration(options: {
       preparedSecret,
       runtime.now(),
     );
-    return { ...credential, secret: preparedSecret };
+    const preparedCredential = credentials.readCredential(
+      userId,
+      credentialId,
+      workspaceId,
+    );
+    if (preparedCredential === undefined) {
+      throw new Error("The provider credential is no longer available");
+    }
+    return preparedCredential;
   };
   const quota = new ProviderQuotaEndpoints(options.auth, {
     now: runtime.now,

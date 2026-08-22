@@ -4,6 +4,7 @@ import type {
   AgentRecordedMessage,
   AgentTokenUsage,
 } from "../shared/agent-loop.ts";
+import { serializeAnthropicAssistantReplay } from "../shared/anthropic-replay.ts";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
@@ -24,6 +25,7 @@ const INTERRUPTED_SESSION_ERROR =
 export interface StoredMessageValues {
   readonly content: string;
   readonly images: string | null;
+  readonly providerReplay?: string | null;
   readonly role:
     | "assistant"
     | "compaction_request"
@@ -94,6 +96,7 @@ export function recordedMessageValues(
     return {
       ...emptyToolMetadata(),
       content: message.content,
+      providerReplay: serializeAnthropicAssistantReplay(message.providerReplay),
       role: "assistant",
       ...(tokenUsage === undefined ? {} : { tokenUsage }),
       toolCalls: JSON.stringify(message.toolCalls),

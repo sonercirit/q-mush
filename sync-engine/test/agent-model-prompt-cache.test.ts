@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { TEST_CREDENTIAL_FINGERPRINT } from "./agent-model-credential-fixtures.ts";
 import {
   chatCompletionsDone,
   codexOAuthCredential,
@@ -24,12 +25,14 @@ function apiKeyChatOptions(
   return {
     credential: {
       accountId: null,
+      id: "test-api-key-credential",
       ...(provider === "generic"
         ? { baseUrl: "https://generic.example.test/v1" }
         : {}),
       secret: "sk-chat",
       source: "api_key",
     },
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     maxOutputTokens: null,
     model,
     ...(promptCacheKey === undefined ? {} : { promptCacheKey }),
@@ -100,6 +103,7 @@ describe("prompt cache request state", () => {
     const model = new ChatCompletionsAgentModel({
       toolSettings: DEFAULT_TOOL_SETTINGS,
       credential: codexOAuthCredential(),
+      credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
       fetch: (request) => {
         captured = request;
         return Promise.resolve(completedEventResponse());

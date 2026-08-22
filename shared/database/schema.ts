@@ -517,6 +517,7 @@ export const agentMessages = sqliteTable(
     toolCallId: text("tool_call_id"),
     toolName: text("tool_name"),
     toolCalls: text("tool_calls"),
+    providerReplay: text("provider_replay"),
     images: text("images"),
     ...tokenUsageColumns(),
   },

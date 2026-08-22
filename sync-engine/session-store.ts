@@ -13,6 +13,7 @@ import type {
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
+import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
 import { CurrentSessionStore } from "./session-current-store.ts";
@@ -70,10 +71,11 @@ import {
 import {
   appendInterruptedRunnerToolResult,
   appendUnknownRestartToolResults,
-  conversationFromMessages,
+  conversationFromInternalMessages,
+  readInternalSessionMessages,
   readStoredSessionMessages,
   storedConversationTruncation,
-  withInterruptedToolResults,
+  withInterruptedInternalToolResults,
 } from "./session-store-read.ts";
 import {
   failInterruptedStoredSession,
@@ -318,13 +320,15 @@ export class SessionStore extends SessionStoreRestarts {
   }
   conversation(
     sessionId: string,
+    replayIdentity?: AnthropicReplayIdentity,
     interrupted = true,
   ): readonly AgentConversationMessage[] {
-    return conversationFromMessages(
-      withInterruptedToolResults(
-        readStoredSessionMessages(this.#database, sessionId),
+    return conversationFromInternalMessages(
+      withInterruptedInternalToolResults(
+        readInternalSessionMessages(this.#database, sessionId),
         interrupted,
       ),
+      replayIdentity,
     );
   }
   conversationTruncation(sessionId: string): AgentStepTruncation | undefined {

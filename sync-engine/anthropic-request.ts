@@ -4,13 +4,25 @@ import {
 } from "../shared/agent-attachments.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import type { AgentToolDefinition } from "../shared/agent-tools.ts";
+import {
+  anthropicReplayBlocksForRequest,
+  anthropicReplayMatchesAssistant,
+  type AnthropicAssistantReplay,
+  type AnthropicReplayBlock,
+} from "../shared/anthropic-replay.ts";
 import { parseOptionalJsonRecord } from "../shared/json-record.ts";
+import {
+  anthropicReplayIdentityFrom,
+  anthropicReplayMatchesIdentity,
+  type AnthropicReplayIdentity,
+} from "./anthropic-replay-identity.ts";
 import {
   textInputItems,
   userAttachments,
 } from "./provider-attachment-input.ts";
 import {
   promptCacheBreakpoints,
+  withAnthropicReplayCacheControl,
   withPromptCacheControl,
 } from "./provider-prompt-cache.ts";
 import type { ProviderModelRequest } from "./provider-request.ts";
@@ -25,10 +37,14 @@ export const ANTHROPIC_CONTEXT_WINDOW_BETA =
 export type AnthropicRequestOptions = Pick<
   ProviderModelRequest,
   | "adaptiveThinking"
+  | "credential"
+  | "credentialFingerprint"
   | "maxOutputTokens"
   | "messages"
   | "model"
+  | "provider"
   | "reasoningEffort"
+  | "resolvedModel"
   | "stream"
   | "systemPrompt"
   | "tools"
@@ -36,8 +52,12 @@ export type AnthropicRequestOptions = Pick<
 
 interface AnthropicMessage {
   readonly content: readonly unknown[];
+  readonly replayBlocks?: readonly AnthropicReplayBlock[];
   readonly role: "assistant" | "user";
 }
+
+const UNSAFE_TOOL_REPLAY =
+  "The Anthropic assistant tool turn cannot be continued safely";
 
 // Anthropic accepts images and PDF documents; other attachment modalities
 // reach the model through the attachment fallback instead.
@@ -60,8 +80,39 @@ function attachmentBlocks(attachment: AgentAttachment): readonly unknown[] {
   ];
 }
 
+function matchingReplay(
+  message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
+  identity: AnthropicReplayIdentity,
+): AnthropicAssistantReplay | undefined {
+  const replay = message.providerReplay;
+  return replay !== undefined &&
+    anthropicReplayMatchesIdentity(replay, identity) &&
+    anthropicReplayMatchesAssistant(replay, message.content, message.toolCalls)
+    ? replay
+    : undefined;
+}
+
+function assistantBlocks(
+  message: Extract<AgentConversationMessage, { readonly role: "assistant" }>,
+  replayBlocks: readonly AnthropicReplayBlock[] | undefined,
+): readonly unknown[] {
+  if (replayBlocks !== undefined) {
+    return replayBlocks;
+  }
+  return [
+    ...textInputItems(message.content, "text"),
+    ...message.toolCalls.map((call) => ({
+      id: call.id,
+      input: parseOptionalJsonRecord(call.arguments) ?? {},
+      name: call.name,
+      type: "tool_use" as const,
+    })),
+  ];
+}
+
 function anthropicMessage(
   message: AgentConversationMessage,
+  identity: AnthropicReplayIdentity,
 ): AnthropicMessage | undefined {
   switch (message.role) {
     case "user": {
@@ -72,16 +123,19 @@ function anthropicMessage(
       return content.length === 0 ? undefined : { content, role: "user" };
     }
     case "assistant": {
-      const content = [
-        ...textInputItems(message.content, "text"),
-        ...message.toolCalls.map((call) => ({
-          id: call.id,
-          input: parseOptionalJsonRecord(call.arguments) ?? {},
-          name: call.name,
-          type: "tool_use",
-        })),
-      ];
-      return content.length === 0 ? undefined : { content, role: "assistant" };
+      const replay = matchingReplay(message, identity);
+      const replayBlocks =
+        replay === undefined
+          ? undefined
+          : anthropicReplayBlocksForRequest(replay.blocks);
+      const content = assistantBlocks(message, replayBlocks);
+      return content.length === 0
+        ? undefined
+        : {
+            content,
+            ...(replayBlocks === undefined ? {} : { replayBlocks }),
+            role: "assistant",
+          };
     }
     case "compaction_notice":
       return undefined;
@@ -99,33 +153,156 @@ function anthropicMessage(
   }
 }
 
+function continuationReplay(
+  messages: readonly AgentConversationMessage[],
+  assistantIndex: number,
+  identity: AnthropicReplayIdentity,
+): AnthropicAssistantReplay | undefined {
+  const assistant = messages[assistantIndex];
+  if (assistant?.role !== "assistant") return undefined;
+  const results: Extract<
+    AgentConversationMessage,
+    { readonly role: "tool" }
+  >[] = [];
+  let index = assistantIndex + 1;
+  for (;;) {
+    const result = messages[index];
+    if (result?.role !== "tool") break;
+    results.push(result);
+    index += 1;
+  }
+  if (results.length === 0) return undefined;
+  const expectedIds = assistant.toolCalls.map(({ id }) => id);
+  const resultIds = results.map(({ toolCallId }) => toolCallId);
+  const expectedIdSet = new Set(expectedIds);
+  const resultIdSet = new Set(resultIds);
+  const replay = matchingReplay(assistant, identity);
+  if (
+    replay === undefined ||
+    expectedIds.length === 0 ||
+    expectedIdSet.size !== resultIdSet.size ||
+    expectedIds.some((id) => !resultIdSet.has(id))
+  ) {
+    throw new Error(UNSAFE_TOOL_REPLAY);
+  }
+  return replay;
+}
+
+function trailingToolAssistantIndex(
+  messages: readonly AgentConversationMessage[],
+): number | undefined {
+  if (messages.at(-1)?.role !== "tool") return undefined;
+  let assistantIndex = messages.length - 1;
+  while (messages[assistantIndex]?.role === "tool") {
+    assistantIndex -= 1;
+  }
+  return messages[assistantIndex]?.role === "assistant"
+    ? assistantIndex
+    : undefined;
+}
+
+export function assertAnthropicContinuationReplays(
+  messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
+): void {
+  const assistantIndex = trailingToolAssistantIndex(messages);
+  if (assistantIndex !== undefined) {
+    continuationReplay(messages, assistantIndex, identity);
+  }
+}
+
+// A trailing assistant replay is sent back verbatim to continue a paused
+// turn, and merging joins every trailing assistant message into it, so no
+// breakpoint may mark any block of that final merged message.
+function preservedTrailingAssistantIndex(
+  messages: readonly AnthropicMessage[],
+): number {
+  if (messages.at(-1)?.replayBlocks === undefined) {
+    return messages.length;
+  }
+  let index = messages.length - 1;
+  while (messages[index - 1]?.role === "assistant") {
+    index -= 1;
+  }
+  return index;
+}
+
+function applyAnthropicMessageBreakpoint(
+  messages: AnthropicMessage[],
+  start: number,
+  preservedFromIndex: number,
+): void {
+  let index = Math.min(start, preservedFromIndex - 1);
+  while (index >= 0) {
+    const currentIndex = index;
+    const message = messages.at(currentIndex);
+    index -= 1;
+    if (message === undefined || message.content.length === 0) {
+      continue;
+    }
+    const content =
+      message.replayBlocks === undefined
+        ? withPromptCacheControl(message.content)
+        : withAnthropicReplayCacheControl(message.replayBlocks);
+    if (content !== undefined) {
+      messages[currentIndex] = { ...message, content };
+      return;
+    }
+  }
+}
+
 function anthropicMessages(
   messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
 ): readonly unknown[] {
   const breakpoints = promptCacheBreakpoints(messages);
-  const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
+  const converted: AnthropicMessage[] = [];
+  const convertedAtOrBeforeSource: number[] = [];
 
-  for (const [index, message] of messages.entries()) {
-    const converted = anthropicMessage(message);
-
-    if (converted === undefined) {
-      continue;
+  for (const [sourceIndex, message] of messages.entries()) {
+    const result = anthropicMessage(message, identity);
+    if (result !== undefined) {
+      converted.push(result);
     }
+    convertedAtOrBeforeSource[sourceIndex] = converted.length - 1;
+  }
 
-    const content = breakpoints.has(index)
-      ? withPromptCacheControl(converted.content)
-      : converted.content;
+  const preservedFromIndex = preservedTrailingAssistantIndex(converted);
+  for (const sourceIndex of breakpoints) {
+    applyAnthropicMessageBreakpoint(
+      converted,
+      convertedAtOrBeforeSource[sourceIndex] ?? -1,
+      preservedFromIndex,
+    );
+  }
+
+  const merged: { content: unknown[]; role: "assistant" | "user" }[] = [];
+  for (const message of converted) {
     const previous = merged.at(-1);
 
-    if (previous?.role === converted.role) {
-      previous.content.push(...content);
+    if (previous?.role === message.role) {
+      previous.content.push(...message.content);
       continue;
     }
 
-    merged.push({ content: [...content], role: converted.role });
+    merged.push({ content: [...message.content], role: message.role });
   }
 
   return merged;
+}
+
+function continuationContainer(
+  messages: readonly AgentConversationMessage[],
+  identity: AnthropicReplayIdentity,
+): string | undefined {
+  const last = messages.at(-1);
+  if (last?.role === "assistant") {
+    return matchingReplay(last, identity)?.container;
+  }
+  const assistantIndex = trailingToolAssistantIndex(messages);
+  return assistantIndex === undefined
+    ? undefined
+    : continuationReplay(messages, assistantIndex, identity)?.container;
 }
 
 function anthropicTools(
@@ -172,13 +349,17 @@ export function anthropicRequestBody(
             ? {}
             : { thinking: { display: "summarized", type: "adaptive" } }),
         };
+  const identity = anthropicReplayIdentityFrom(options);
+  assertAnthropicContinuationReplays(options.messages, identity);
+  const container = continuationContainer(options.messages, identity);
   return {
     ...(options.maxOutputTokens === null
       ? {}
       : { max_tokens: options.maxOutputTokens }),
-    messages: anthropicMessages(options.messages),
+    messages: anthropicMessages(options.messages, identity),
     model: options.model,
     ...reasoning,
+    ...(container === undefined ? {} : { container }),
     ...(options.stream ? { stream: true } : {}),
     system: withPromptCacheControl([
       { text: options.systemPrompt, type: "text" },
