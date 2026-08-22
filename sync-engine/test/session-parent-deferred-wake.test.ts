@@ -64,29 +64,35 @@ test("stopping children notifies the parent after delivering the stop report", (
 
 type DeferredParentContext = ReturnType<typeof deferredReportSetup>;
 
-type DeferredParentCase = {
+interface DeferredParentCase {
   arrange: (context: DeferredParentContext) => unknown;
   assertParent: (context: DeferredParentContext, arranged: unknown) => void;
   name: string;
   overrides?: Parameters<typeof deferredReportSetup>[0];
-};
+}
 
 const deferredParentCases: DeferredParentCase[] = [
-  ...(["paused", "stopped", "failed"] as const).map((status) => ({
-    arrange: ({ setup }: DeferredParentContext) =>
-      setChildStatus({ ...setup, childId: setup.parentId }, status),
-    assertParent: ({ setup }: DeferredParentContext) => {
-      expect(parentState(setup)?.status).toBe(status);
-    },
-    name: `a deferred report does not launch a ${status} parent and remains durable`,
-  })),
+  ...(["paused", "stopped", "failed"] as const).map((status) => {
+    const arrange = ({ setup }: DeferredParentContext): void => {
+      setChildStatus({ ...setup, childId: setup.parentId }, status);
+    };
+    return {
+      arrange,
+      assertParent: ({ setup }: DeferredParentContext) => {
+        expect(parentState(setup)?.status).toBe(status);
+      },
+      name: `a deferred report does not launch a ${status} parent and remains durable`,
+    };
+  }),
   ...(
     [
       ["active execution", { activeSession: () => true }],
       ["unavailable runner", { runnerIsAvailable: () => false }],
     ] as const
   ).map(([state, overrides]) => ({
-    arrange: ({ setup }: DeferredParentContext) => idleParent(setup),
+    arrange: ({ setup }: DeferredParentContext) => {
+      idleParent(setup);
+    },
     assertParent: ({ setup }: DeferredParentContext) => {
       expect(parentState(setup)).toMatchObject({
         generation: setup.parentGeneration,
@@ -163,7 +169,9 @@ test("a manual resume racing the deferred wake consumes one report in one attemp
 
   reportParentDisposition(setup, delivery, "deferred");
   const manual = setup.store.queue(TEST_USER_ID, setup.parentId, TEST_NOW + 10);
-  await vi.waitFor(() => expectQueuedParentState(setup));
+  await vi.waitFor(() => {
+    expectQueuedParentState(setup);
+  });
 
   expect(["busy", "queued"]).toContain(manual.status);
   expect(delivery.launchSession.mock.calls.length).toBeLessThanOrEqual(1);

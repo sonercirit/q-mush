@@ -1,6 +1,6 @@
 import { expect, vi } from "vitest";
 import { SessionAgentActions } from "../session-agent-actions.ts";
-import { SessionStore } from "../session-store.ts";
+import { type SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -146,7 +146,7 @@ export function idleParent(setup: ReturnType<typeof spawnedChildSetup>): void {
 export async function expectParentWake(
   ...[setup, delivery]: DeliveryArguments
 ): Promise<void> {
-  await vi.waitFor(() => expectQueuedParent(setup, delivery));
+  await vi.waitFor(() => { expectQueuedParent(setup, delivery); });
 }
 
 export function expectQueuedParentState(

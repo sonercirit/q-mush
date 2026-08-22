@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../session-agent-actions.ts";
+import { type SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
 import { testAskQuestionsInput } from "./ask-questions-test-fixtures.ts";
 import {
