@@ -467,16 +467,28 @@ export class ProviderCredentialStore {
       accountId,
       label,
     ] = parameters;
-    return updateCredentialSecret({
-      ...this.#credentialState(userId, credentialId, now),
-      cipher: this.#cipher,
-      secret,
-      ...(requireReauthentication === undefined
-        ? {}
-        : { requireReauthentication }),
-      ...(accountId === undefined ? {} : { accountId }),
-      ...(label === undefined ? {} : { label }),
-    });
+    try {
+      return updateCredentialSecret({
+        ...this.#credentialState(userId, credentialId, now),
+        cipher: this.#cipher,
+        secret,
+        ...(requireReauthentication === undefined
+          ? {}
+          : { requireReauthentication }),
+        ...(accountId === undefined ? {} : { accountId }),
+        ...(label === undefined ? {} : { label }),
+      });
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.includes(
+          "provider_credentials.user_id, provider_credentials.provider, provider_credentials.credential_fingerprint",
+        )
+      ) {
+        throw new DuplicateProviderCredentialError();
+      }
+      throw error;
+    }
   }
 
   #credentialState(userId: string, credentialId: string, now: number) {

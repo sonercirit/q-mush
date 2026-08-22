@@ -122,7 +122,7 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   ).toContain("provider_replay");
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 6",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 7",
     )
     .all()
     .map(({ createdAt }) => createdAt);
@@ -133,6 +133,7 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     PARENT_REPORT_MIGRATION_TIMESTAMP,
     TOOL_SETTINGS_MIGRATION_TIMESTAMP,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
+    MAX_OUTPUT_TOKENS_MIGRATION_TIMESTAMP,
   ]);
   upgradedDatabase.$client.close();
 });
