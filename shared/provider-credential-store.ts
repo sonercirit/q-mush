@@ -403,7 +403,6 @@ export class ProviderCredentialStore {
       credentialId,
     );
   }
-
   static listActiveModelCredentials(
     database: AppDatabase,
     userId: string,
@@ -412,7 +411,6 @@ export class ProviderCredentialStore {
   ): readonly ProviderCredentialSummary[] {
     return activeCredentialSummaries(database, provider, userId, workspaceId);
   }
-
   static hasActiveModelCredential(
     database: AppDatabase,
     userId: string,
@@ -427,7 +425,6 @@ export class ProviderCredentialStore {
       ) !== undefined
     );
   }
-
   static listModelCredentials(
     database: AppDatabase,
     userId: string,
@@ -475,7 +472,6 @@ export class ProviderCredentialStore {
       totalItems,
     };
   }
-
   #readStored(userId: string, credentialId: string) {
     return this.#database.query.providerCredentials
       .findFirst({
@@ -494,13 +490,11 @@ export class ProviderCredentialStore {
       })
       .sync();
   }
-
   read(
     userId: string,
     ...[credentialId, workspaceId]: [credentialId: string, workspaceId?: string]
   ): ProviderCredentialAccess | undefined {
     const stored = this.#readStored(userId, credentialId);
-
     if (
       stored === undefined ||
       (workspaceId !== undefined &&
@@ -515,7 +509,6 @@ export class ProviderCredentialStore {
     ) {
       return undefined;
     }
-
     const summary: ProviderCredentialAccess = {
       accountId: stored.providerAccountId,
       ...(stored.apiFormat === null ? {} : { apiFormat: stored.apiFormat }),
@@ -535,7 +528,6 @@ export class ProviderCredentialStore {
       ? { ...legacyCredentialSummary(summary), secret: summary.secret }
       : summary;
   }
-
   readSecret(
     userId: string,
     credentialId: string,
@@ -543,7 +535,6 @@ export class ProviderCredentialStore {
   ): string | undefined {
     return this.read(userId, credentialId, workspaceId)?.secret;
   }
-
   setScopes(
     userId: string,
     credentialId: string,
@@ -576,7 +567,6 @@ export class ProviderCredentialStore {
       return true;
     });
   }
-
   setDefault(userId: string, credentialId: string, now: number): boolean {
     let changed = false;
 
