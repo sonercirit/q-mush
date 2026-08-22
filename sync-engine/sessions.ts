@@ -119,6 +119,16 @@ class DrizzleSessionIntegration
   readonly #toolSettings: Pick<ToolSettingsStore, "read">;
   readonly #workspaces: SessionWorkspaceReader;
   readonly #actions: SessionAgentActions;
+
+  /** @internal Exposes the configured restart gate to integration tests. */
+  agentActionsDraining(): boolean {
+    return this.#actions.isDraining();
+  }
+
+  /** @internal Simulates a restart boundary in integration tests. */
+  abortAgentActionsForRestart(): void {
+    this.#restartController.abort("integration test restart");
+  }
   readonly #fallbacks: ReturnType<typeof createAttachmentFallbackIntegration>;
 
   constructor(
@@ -175,6 +185,9 @@ class DrizzleSessionIntegration
       this.#runtimes,
       reportParent,
     );
+    const recoveryNow = this.#now();
+    this.#store.repairSpawnedSessionLineage(recoveryNow);
+    this.#store.recoverSpawnedSessionReservations(recoveryNow);
     this.#shutdown = new ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,

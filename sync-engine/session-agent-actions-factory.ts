@@ -83,6 +83,7 @@ export function createSessionAgentActions(
         request.workspaceId,
       ),
     modelCredentialPool: resources.modelCredentialPool,
+    draining: () => resources.runtimes.draining,
     notify: resources.notify,
     now: resources.now,
     pendingRestart: (runnerId) => resources.runtimes.pendingRestart(runnerId),

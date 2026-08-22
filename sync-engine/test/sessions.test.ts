@@ -1,5 +1,7 @@
+import { and, eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import { runnerDirectoriesPath, SESSIONS_PATH } from "../../shared/routes.ts";
 import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -32,6 +34,10 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 import { expectJsonResponse } from "./session-launch-race-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
 
 const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000081";
 class FailingModel implements AgentModel {
@@ -110,6 +116,43 @@ async function unauthenticatedSessionStatus(): Promise<number> {
 }
 
 describe("agent sessions", () => {
+  test("uses the injected startup clock when recovering reservations", () => {
+    const seeded = createStore();
+    const child = createTestSession(seeded.store);
+    seeded.database
+      .update(agentSessions)
+      .set({
+        spawnPreparationPending: child.id.length > 0,
+        updatedAt: new Date(TEST_NOW),
+      })
+      .where(
+        and(eq(agentSessions.id, child.id), eq(agentSessions.status, "queued")),
+      )
+      .run();
+    const recoveryNow = TEST_NOW + 9_876;
+
+    const setup = connectedSessionSetup(
+      new ScriptedAgentModel([]),
+      "api_key",
+      undefined,
+      { database: seeded.database, now: () => recoveryNow },
+    );
+
+    const recovered = setup.database
+      .select({
+        status: agentSessions.status,
+        updatedAt: agentSessions.updatedAt,
+      })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, child.id))
+      .get();
+    expect(recovered).toEqual({
+      status: "failed",
+      updatedAt: new Date(recoveryNow),
+    });
+    setup.database.$client.close();
+  });
+
   test("requires an owned workspace for creation and every HTTP session item action", async () => {
     const setup = completingSessionSetup("Workspace isolation ready.");
 
@@ -186,7 +229,8 @@ describe("agent sessions", () => {
   });
 
   test("stores session failures as error messages and settles active timing", async () => {
-    let now = TEST_NOW;
+    // Account for the shared injected timestamp read by startup repair/recovery.
+    let now = TEST_NOW - 3_000;
     const setup = connectedSessionSetup(
       new FailingModel(),
       "api_key",
@@ -195,7 +239,8 @@ describe("agent sessions", () => {
     );
     const response = await setup.sessions.collection(createSessionRequest());
 
-    // Six 3s ticks: two SessionRuntimes reads, creation, message, failure, and settlement.
+    // Seven 3s ticks: shared startup recovery, two SessionRuntimes reads,
+    // creation, message, failure, and settlement.
     expect(await expectSessionReaches(setup, response, "failed")).toMatchObject(
       {
         activeDurationMs: 18_000,

@@ -33,7 +33,7 @@ Memory.
   `db:generate` / `db:migrate`.
 - Tests: `bun run test`; `test:watch` omits browsers; `test:browser` uses bare
   `scripts/test-browser.ts` (Bun no-orphans rejects `./`/absolute paths), pins
-  headless, clears `PWDEBUG`.
+  headless, clears `PWDEBUG`. `.github/workflows/checks.yml` runs CI.
 - `bun run check` runs static checks; `format`/`lint:fix` write. CI runs tests,
   checks, build, whitespace on Bun 1.3.14 with frozen lockfile.
 
@@ -66,41 +66,43 @@ Memory.
   Browser tests use real Chromium/Tailwind mutations, not synthetic layout/CSS
   assertions; CI rejects `.only`/zero tests.
 - `sync-engine/auth.ts` does Google OIDC (code + PKCE) with HttpOnly
-  state/verifier cookies; it fetches/discards provider tokens. `auth-store.ts`
-  uses Bun SQLite/Drizzle to upsert users and persist 7-day sessions. Keys are
-  UUIDv7; Google subjects/session tokens are distinct unique fields; tables have
-  created/updated timestamps, actor IDs, `isDeleted`. `shared/database.ts`
-  applies migrations on open; `sync-engine/index.ts` injects it; auth falls back
-  to in-memory SQLite. Shared PKCE/provider parsing/redirects are in `oauth.ts`;
-  cookie helpers in `http.ts`. Client reads `/api/auth/session`, gates app, logs
-  out.
+  state/verifier cookies; it fetches/discards provider tokens.
+  `sync-engine/auth-store.ts` uses Bun SQLite/Drizzle to upsert users and
+  persist 7-day sessions. Keys are UUIDv7; Google subjects/session tokens are
+  distinct unique fields; tables have created/updated timestamps, actor IDs,
+  `isDeleted`. `shared/database.ts` applies migrations on open;
+  `sync-engine/index.ts` injects it; auth falls back to in-memory SQLite. Shared
+  PKCE/provider parsing/redirects are in `oauth.ts`; cookie helpers in
+  `http.ts`. Client reads `/api/auth/session`, gates app, logs out.
 - `sync-engine/runner-store.ts` persists runner registrations in `runners`: one
   active registration per machine fingerprint, one default per user.
-  `runners.ts` issues hashed opaque setup tokens, owns management/token-auth
-  callbacks and origin-based installers. `runner-installer.ts` emits the
-  macOS/Linux one-liner: picks an x64/ARM64 glibc/musl target, starts under
-  `~/.q-mush/runner` without Bun. Runners send metadata and 15-second WebSocket
-  heartbeats, check updates on startup/every 5 minutes, recheck via handshake
-  version after restarts, replacing old sockets on reconnect. Updates use
-  source/compiler ETags and SHA-256, atomically replace/restart; dev restarts
-  drain sessions first. Reinstalling for the same user/machine rotates the
-  registration to its new token instead of adding one; others stay protected;
-  tokens never list.
+  `sync-engine/runners.ts` issues hashed opaque setup tokens, owns
+  management/token-auth callbacks and origin-based installers.
+  `sync-engine/runner-installer.ts` emits the macOS/Linux one-liner: picks an
+  x64/ARM64 glibc/musl target, starts under `~/.q-mush/runner` without Bun.
+  Runners send metadata and 15-second WebSocket heartbeats, check updates on
+  startup/every 5 minutes, recheck via handshake version after restarts,
+  replacing old sockets on reconnect. Updates use source/compiler ETags and
+  SHA-256, atomically replace/restart; dev restarts drain sessions first.
+  Reinstalling for the same user/machine rotates the registration to its new
+  token instead of adding one; others stay protected; tokens never list.
 - Browser messages sort by time/ID; live output anchors at its initiator,
   snapshots replace it. `session-agent-read.ts` keeps positional record/category
   controls; shared Unicode result bound applies after serialization.
 - `sync-engine/sessions.ts` and `session-store.ts` persist coding sessions.
-  Messages take eight 10 MB PNG/JPEG/GIF/WebP images. Sessions record active
-  time, cost, token usage, context limit; reported charges win. Auto-compaction
-  defaults on at 95%; truncation enters only its immediate compactor context,
-  including persisted manual/idle compaction, so partial output stays unfinished
-  without retry marking. Idle sessions compact manually or, opted in, at 30 idle
-  minutes; compaction soft-deletes messages into a replayable handoff; replays
-  deliver drafts, skip re-verifying. Composer stays mounted across statuses,
-  explaining unavailable actions, keeping drafts; draft fields echo a local
-  signal debounced into the shared draft — submit paths flush first; local prefs
-  filter transcript categories. Provider secrets never reach browser/runner
-  payloads. Directory picker uses `directory-picker-client.tsx`
+  Session roots and each expanded child group paginate independently, nesting
+  every linked child exactly once. Messages take eight 10 MB PNG/JPEG/GIF/WebP
+  images. Sessions record active time, cost, token usage, context limit;
+  reported charges win. Auto-compaction defaults on at 95%; truncation enters
+  only its immediate compactor context, including persisted manual/idle
+  compaction, so partial output stays unfinished without retry marking. Idle
+  sessions compact manually or, opted in, at 30 idle minutes; compaction
+  soft-deletes messages into a replayable handoff; replays deliver drafts, skip
+  re-verifying. Composer stays mounted across statuses, explaining unavailable
+  actions, keeping drafts; draft fields echo a local signal debounced into the
+  shared draft — submit paths flush first; local prefs filter transcript
+  categories. Provider secrets never reach browser/runner payloads. Directory
+  picker uses `solid/directory-picker-client.tsx`
   (`/api/runners/:id/directories`). Each run, `read_agent_file` loads root
   `AGENTS.md` (else `CLAUDE.md`).
 
@@ -108,9 +110,15 @@ Memory.
   resolution. Tool, skill, model, and effort choices persist per session;
   pickers use schemas. `read_session` spans transcript categories and
   definitions with positional record pagination; `get_session_options` pages
-  spawn choices. Parent-report tests must exercise the shared emitter and pin
-  every administrative caller; generation tests must distinguish attempt
-  advances (successor reportable) from administrative advances (successor
+  spawn choices. Native spawns reserve one durable child before provider
+  discovery; stable lineage uses `parent_session_id` and
+  `parent_execution_generation`, while callbacks consume
+  `parent_callback_generation` independently. Startup repairs only unambiguous
+  same-user/workspace direct or parallel spawn results and fails unfinished
+  reservations. User-initiated children do not create spawn reservations.
+  Parent-report tests must exercise the shared emitter and pin every
+  administrative caller; generation tests must distinguish attempt advances
+  (successor reportable) from administrative advances (successor
   non-reportable), or duplicate/lost delivery mutations can survive. Grouped
   tools manage non-blocking owned children; a generation ledger delivers one
   sanitized terminal event per attempt, including continued/immediate failures.

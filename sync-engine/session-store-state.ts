@@ -47,6 +47,7 @@ export function readStoredSessionGeneration(options: {
 const STORED_SESSION_STATE_SELECTION = {
   currentSegment: agentSessions.currentSegment,
   executionGeneration: agentSessions.executionGeneration,
+  parentCallbackGeneration: agentSessions.parentCallbackGeneration,
   parentExecutionGeneration: agentSessions.parentExecutionGeneration,
   parentReportedGeneration: agentSessions.parentReportedGeneration,
   parentSessionId: agentSessions.parentSessionId,

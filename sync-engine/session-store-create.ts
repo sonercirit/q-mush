@@ -161,6 +161,7 @@ function storedSessionValues(
   options: Readonly<{
     parentExecutionGeneration: number | null;
     parentSessionId: string | null;
+    spawnPreparationPending: boolean;
     status: "idle" | "queued";
     title: string;
   }>,
@@ -179,8 +180,10 @@ function storedSessionValues(
     model: input.model,
     openRouterProviderTag: input.openRouterProviderTag,
     parentExecutionGeneration: options.parentExecutionGeneration,
+    parentCallbackGeneration: options.parentExecutionGeneration,
     parentReportedGeneration: -1,
     parentSessionId: options.parentSessionId,
+    spawnPreparationPending: options.spawnPreparationPending,
     provider: input.provider,
     providerCredentialId: input.credentialId,
     providerPricing: serializeProviderPricing(input.providerPricing),
@@ -265,6 +268,9 @@ export function createStoredSession(
       storedSessionValues({ ...input, runnerRequired: false }, sessionId, now, {
         parentExecutionGeneration: input.parentGeneration ?? null,
         parentSessionId: input.parentSessionId ?? null,
+        spawnPreparationPending:
+          input.parentSessionId !== undefined &&
+          input.parentUserInitiated !== true,
         status: "queued",
         title: titleFromPrompt(input.prompt),
       }),
@@ -368,6 +374,7 @@ export function forkStoredSession(
       storedSessionValues(session, sessionId, now, {
         parentExecutionGeneration: null,
         parentSessionId: null,
+        spawnPreparationPending: false,
         status: "idle",
         title: `Fork of ${input.source.title}`.slice(0, 80),
       }),

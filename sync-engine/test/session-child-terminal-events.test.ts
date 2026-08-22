@@ -200,6 +200,35 @@ function compactRunningParent(
   );
 }
 
+function runningChildWithoutCallback() {
+  const setup = spawnedRunningChildSetup("independent runtime generations");
+  const child = requireSpawnedChild(setup);
+  setup.database.$client
+    .query(
+      "UPDATE agent_sessions SET parent_callback_generation = NULL WHERE id = ?",
+    )
+    .run(child.id);
+  return { child, setup };
+}
+
+test("runtime terminal settlement uses the callback generation independently", () => {
+  const { child, setup } = runningChildWithoutCallback();
+
+  setup.store.commitRuntimeTerminal(
+    child.id,
+    [terminalRecordedMessage("independent terminal")],
+    TEST_NOW + 6,
+    child.generation,
+    null,
+  );
+
+  expect(setup.store.get(TEST_USER_ID, child.id)).toMatchObject({
+    parentExecutionGeneration: setup.parentGeneration,
+    status: "idle",
+  });
+  closeSpawnedChildSetup(setup);
+});
+
 test("continued child generations retain the parent delivery route", () => {
   const setup = spawnedChildSetup();
   const continued = continueChild(setup);

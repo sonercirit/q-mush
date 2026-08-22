@@ -67,6 +67,14 @@ export async function startToolSession(
   return setup;
 }
 
+export async function completedParentToolResult(
+  setup: Awaited<ReturnType<typeof connectedSessionSetup>>,
+  name: string,
+): Promise<string | undefined> {
+  const detail = await completedParentDetail(setup, "idle");
+  return findToolResultContents(detail, name)[0];
+}
+
 export async function completedParentToolOutputs(
   model: AgentModel,
   name: string,

@@ -1,13 +1,15 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
-import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
+import {
+  ProviderCredentialStore,
+  type ProviderCredentialAccess,
+} from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../shared/session-model.ts";
 import { abortSignalError } from "../shared/validation.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
-import { createJsonResponse } from "./http.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
   sessionToolOutput,
@@ -16,10 +18,7 @@ import {
 import type { SessionCredentialAction } from "./session-credential-access.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
-import {
-  restartSignalIsAborted,
-  serverRestartingResponse,
-} from "./session-restart-gate.ts";
+import { restartSignalIsAborted } from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import type { SessionStore } from "./session-store.ts";
 
@@ -32,6 +31,7 @@ export interface SessionAgentActionDependencies {
   readonly settled?: (sessionId: string) => Promise<void>;
   readonly database: AppDatabase;
   readonly discoverModels: AgentModelDiscoverer;
+  readonly draining?: () => boolean;
   readonly store: SessionStore;
   readonly now: () => number;
   readonly restartSignal: () => AbortSignal;
@@ -123,13 +123,6 @@ export async function responseToolOutput(response: Response): Promise<string> {
   return sessionToolOutput(value);
 }
 
-function sessionLaunchResponse(
-  sessionId: string,
-  status: "queued" | "spawned",
-): Response {
-  return createJsonResponse({ sessionId, status });
-}
-
 export function sessionCanResume(
   session: Pick<AgentSessionDetail, "runnerRequired" | "status">,
 ): boolean {
@@ -149,151 +142,229 @@ export async function spawnAgentSession(options: {
   readonly terminal: (detail: AgentSessionDetail) => void;
   readonly userId: string;
 }): Promise<string> {
-  const restartSignal = options.dependencies.restartSignal();
+  const { authority, dependencies, input, userId } = options;
+  const restartSignal = dependencies.restartSignal();
   const operationSignal =
     options.signal === undefined
       ? restartSignal
       : AbortSignal.any([options.signal, restartSignal]);
-  const cancellationResponse = (): Response | undefined => {
+  const cancellationOutput = (): string | undefined => {
     if (options.signal?.aborted === true) {
       throw abortSignalError(options.signal, "The spawn was canceled");
     }
-    return restartSignal.aborted ? serverRestartingResponse() : undefined;
+    return restartSignal.aborted
+      ? sessionToolOutput({ error: "server_restarting" })
+      : undefined;
   };
-  const translateCancellation = (error: unknown): Response => {
-    const response = cancellationResponse();
-    if (response !== undefined) return response;
+  const cancellationAfterError = (error: unknown): string => {
+    const output = cancellationOutput();
+    if (output !== undefined) return output;
     throw error;
   };
-  const parent = options.dependencies.store.get(
-    options.userId,
-    options.authority.sessionId,
-  );
+  const initialCancellation = cancellationOutput();
+  if (initialCancellation !== undefined) return initialCancellation;
+  const parent = dependencies.store.get(userId, authority.sessionId);
   if (parent === undefined) {
     return sessionToolOutput({ error: "parent_session_unavailable" });
   }
 
-  const selection = { ...options.input, workspaceId: parent.workspaceId };
-  const pool = options.dependencies.modelCredentialPool;
+  const selection = { ...input, workspaceId: parent.workspaceId };
   const balanced = isBalancedCredentialId(
     selection.provider,
     selection.credentialId,
   );
+  const summaries = ProviderCredentialStore.listActiveModelCredentials(
+    dependencies.database,
+    userId,
+    selection.provider,
+    parent.workspaceId,
+  );
+  const reservedCredential = balanced
+    ? summaries[0]
+    : summaries.find(({ id }) => id === selection.credentialId);
+  if (reservedCredential === undefined) {
+    return sessionToolOutput({ error: "credential_unavailable" });
+  }
 
-  async function enqueue(
-    input: SpawnSessionToolInput,
+  const created = dependencies.store.create(
+    {
+      ...input,
+      adaptiveThinking: null,
+      credentialId: reservedCredential.id,
+      maxContextTokens: null,
+      maxOutputTokens: null,
+      parentGeneration: authority.generation,
+      parentSessionId: authority.sessionId,
+      providerPricing: null,
+      userId,
+      workspaceId: parent.workspaceId,
+    },
+    dependencies.now(),
+  );
+  if (created.status !== "created") {
+    return sessionToolOutput({ error: created.status });
+  }
+  const child = created.detail;
+  const childIdentity = { generation: child.generation, sessionId: child.id };
+  const discard = (): void => {
+    dependencies.store.discardSpawnedSessionPreparation(
+      userId,
+      child.id,
+      child.generation,
+      dependencies.now(),
+    );
+  };
+  const canceled = (): string | undefined => {
+    try {
+      const output = cancellationOutput();
+      if (output !== undefined) discard();
+      return output;
+    } catch (error) {
+      discard();
+      throw error;
+    }
+  };
+
+  const fail = (
+    error: string,
+    content = "Session failed: the child session could not be prepared",
+  ): string => {
+    const failed = dependencies.store.failSpawnedSessionPreparation(
+      userId,
+      child.id,
+      child.generation,
+      content,
+      dependencies.now(),
+    );
+    dependencies.notify(userId, child.id);
+    const status = failed
+      ? "failed"
+      : (dependencies.store.get(userId, child.id)?.status ?? "unavailable");
+    return sessionToolOutput({ error, sessionId: child.id, status });
+  };
+  const claim = (): boolean =>
+    dependencies.store.claimSpawnedSession(userId, childIdentity, authority);
+  const prepareAndLaunch = async (
     credential: ProviderCredentialAccess,
-    workspaceId: string,
-  ): Promise<Response> {
+  ): Promise<string | undefined> => {
+    const cancellation = canceled();
+    if (cancellation !== undefined) return cancellation;
     let metadata: SessionRequestModelMetadata;
     try {
-      metadata = await options.dependencies.discoverSessionMetadata(
-        input,
+      metadata = await dependencies.discoverSessionMetadata(
+        { ...input, credentialId: credential.id },
         credential,
-        options.userId,
+        userId,
         balanced,
         operationSignal,
       );
     } catch (error) {
-      return translateCancellation(error);
-    }
-    // Discovery settles even when the deadline fires mid-flight; never
-    // create a child after the caller already reported timed-out.
-    const cancellation = cancellationResponse();
-    if (cancellation !== undefined) return cancellation;
-    const created = options.dependencies.store.create(
-      {
-        ...input,
-        ...metadata,
-        parentGeneration: options.authority.generation,
-        parentSessionId: options.authority.sessionId,
-        userId: options.userId,
-        workspaceId,
-      },
-      options.dependencies.now(),
-    );
-    if (created.status !== "created") {
-      return createJsonResponse({ error: created.status }, 409);
-    }
-    const { detail: child } = created;
-    const notifiedResponse = (status: "queued" | "spawned"): Response => {
-      options.dependencies.notify(options.userId, child.id);
-      return sessionLaunchResponse(child.id, status);
-    };
-    if (restartSignalIsAborted(() => restartSignal)) {
-      return notifiedResponse("queued");
-    }
-    const launch = options.dependencies.launchSession(
-      credential,
-      child,
-      options.userId,
-    );
-    if (!launch) {
-      if (
-        pauseQueuedSessionForRestart(
-          options.dependencies,
-          child,
-          options.userId,
-        )
-      ) {
-        return createJsonResponse({ error: "server_restarting" }, 503);
+      try {
+        const cancellation = cancellationOutput();
+        if (cancellation !== undefined) {
+          discard();
+          return cancellation;
+        }
+      } catch (cancellationError) {
+        discard();
+        throw cancellationError;
       }
-      options.dependencies.store.settleRuntimeFailure(
-        child.id,
-        "Session failed: the child session could not be launched",
-        options.dependencies.now(),
-        child.generation,
-      );
-      const failed = options.dependencies.store.get(options.userId, child.id);
-      if (failed !== undefined) options.terminal(failed);
-      throw new Error("The child session could not be launched");
+      if (balanced && dependencies.modelCredentialPool !== undefined) {
+        if (
+          dependencies.modelCredentialPool.reject(
+            userId,
+            selection,
+            credential.id,
+            error,
+          )
+        ) {
+          return undefined;
+        }
+        throw error;
+      }
+      return fail("provider_unavailable");
     }
-    return notifiedResponse("spawned");
-  }
-  // Avoid credential reads during maintenance; pool candidates also enforce
-  // this signal, while the direct-credential path falls back to enqueue.
-  if (restartSignal.aborted) {
-    return responseToolOutput(serverRestartingResponse());
-  }
-  if (pool !== undefined && balanced) {
+    const postDiscoveryCancellation = canceled();
+    if (postDiscoveryCancellation !== undefined) {
+      return postDiscoveryCancellation;
+    }
+    const prepared = dependencies.store.prepareSpawnedSession(
+      childIdentity,
+      userId,
+      authority,
+      { ...metadata, credentialId: credential.id },
+      dependencies.now(),
+    );
+    if (prepared !== "prepared") {
+      discard();
+      return sessionToolOutput({ error: "parent_stale" });
+    }
+    const preparedChild = dependencies.store.get(userId, child.id);
+    if (preparedChild === undefined) {
+      return fail("parent_stale");
+    }
+    dependencies.notify(userId, child.id);
+    if (
+      restartSignalIsAborted(dependencies.restartSignal) ||
+      dependencies.draining?.() === true
+    ) {
+      if (!claim()) return fail("parent_stale");
+      return sessionToolOutput({ sessionId: child.id, status: "queued" });
+    }
+    if (!claim()) return fail("parent_stale");
+    if (!dependencies.launchSession(credential, preparedChild, userId)) {
+      if (pauseQueuedSessionForRestart(dependencies, preparedChild, userId)) {
+        return sessionToolOutput({ error: "server_restarting" });
+      }
+      fail(
+        "session_launch_failed",
+        "Session failed: the child session could not be launched",
+      );
+      const failedChild = dependencies.store.get(userId, child.id);
+      if (failedChild !== undefined) options.terminal(failedChild);
+      const launchError = new Error("The child session could not be launched");
+      launchError.name = "SessionLaunchError";
+      throw launchError;
+    }
+    return sessionToolOutput({ sessionId: child.id, status: "spawned" });
+  };
+
+  if (balanced && dependencies.modelCredentialPool !== undefined) {
     let credentials: readonly ProviderCredentialAccess[];
     try {
-      credentials = await pool.candidates(
-        options.userId,
+      credentials = await dependencies.modelCredentialPool.candidates(
+        userId,
         selection,
         operationSignal,
       );
     } catch (error) {
-      return responseToolOutput(translateCancellation(error));
+      discard();
+      return cancellationAfterError(error);
     }
-    if (credentials.length === 0) {
-      return responseToolOutput(
-        createJsonResponse({ error: "credential_unavailable" }, 409),
-      );
-    }
-    for (const credential of credentials) {
-      try {
-        return await responseToolOutput(
-          await enqueue(
-            { ...options.input, credentialId: credential.id },
-            credential,
-            parent.workspaceId,
-          ),
-        );
-      } catch (error) {
-        if (!pool.reject(options.userId, selection, credential.id, error)) {
-          throw error;
-        }
+    if (credentials.length > 0) {
+      for (const credential of credentials) {
+        const output = await prepareAndLaunch(credential);
+        if (output !== undefined) return output;
       }
+      return fail("credential_unavailable");
     }
-    return responseToolOutput(
-      createJsonResponse({ error: "credential_unavailable" }, 409),
-    );
   }
-  const response = await options.dependencies.withCredential(
-    options.userId,
-    selection,
-    (credential) => enqueue(options.input, credential, parent.workspaceId),
-  );
-  return responseToolOutput(response);
+
+  try {
+    const response = await dependencies.withCredential(
+      userId,
+      { ...selection, credentialId: reservedCredential.id },
+      async (value) =>
+        new Response(await prepareAndLaunch(value), {
+          headers: { "content-type": "application/json" },
+        }),
+    );
+    return await response.text();
+  } catch (error) {
+    const launchFailure =
+      error instanceof Error && error.name === "SessionLaunchError";
+    if (launchFailure) throw error;
+    discard();
+    return cancellationAfterError(error);
+  }
 }

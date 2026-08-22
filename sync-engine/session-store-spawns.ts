@@ -153,6 +153,7 @@ export function pendingSpawnedSessions(
           status: REPORTABLE_CHILD_STATUSES,
         }),
         isNotNull(agentSessions.parentSessionId),
+        isNotNull(agentSessions.parentCallbackGeneration),
         isNotNull(agentSessions.parentExecutionGeneration),
         sql`${agentSessions.parentReportedGeneration} < ${agentSessions.executionGeneration}`,
       ),
@@ -185,26 +186,13 @@ export function spawnedSessionLink(
 ): SpawnedSessionLink | undefined {
   const stored = database
     .select({
-      generation: agentSessions.executionGeneration,
-      parentGeneration: agentSessions.parentExecutionGeneration,
+      parentGeneration: agentSessions.parentCallbackGeneration,
       parentId: agentSessions.parentSessionId,
-      reportedGeneration: agentSessions.parentReportedGeneration,
-      runnerRequired: agentSessions.runnerRequired,
-      status: agentSessions.status,
     })
     .from(agentSessions)
     .where(ownedActiveSessionCondition(userId, sessionId))
     .get();
-  if (
-    stored?.parentId == null ||
-    stored.parentGeneration === null ||
-    (!stored.runnerRequired &&
-      stored.reportedGeneration >= stored.generation) ||
-    (stored.runnerRequired &&
-      stored.status !== "idle" &&
-      REPORTABLE_CHILD_STATUSES.some((status) => status === stored.status) &&
-      stored.reportedGeneration >= stored.generation)
-  ) {
+  if (stored?.parentId == null || stored.parentGeneration === null) {
     return undefined;
   }
   return {

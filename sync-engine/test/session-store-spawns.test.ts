@@ -3,12 +3,19 @@ import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { advanceStoredSessionGeneration } from "../session-generation-advance.ts";
 import {
+  claimSpawnedSessionReservation,
+  failSpawnedSessionReservation,
+  prepareSpawnedSessionReservation,
+} from "../session-spawn-reservation-store.ts";
+import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
   expectParentId,
+  pendingReservationSetup,
   spawnedChildSetup,
+  spawnedRunningChildSetup,
   type SpawnedChildReference,
 } from "./session-store-spawn-test-helpers.ts";
 import {
@@ -78,8 +85,7 @@ function expectReportDisposition(
   now = TEST_NOW + 5,
 ): void {
   expect(report(setup, now) !== undefined).toBe(claimed);
-  if (claimed) expect(spawnedLink(setup)).toBeUndefined();
-  else expectParentId(setup);
+  expectParentId(setup);
 }
 
 function expectReportClaimed(
@@ -116,9 +122,19 @@ function closeAfterParentAssertion(
 
 function updateChild(
   setup: SpawnedChildReference,
-  values: { parentExecutionGeneration?: null; runnerRequired?: true },
+  values: {
+    parentCallbackGeneration?: null;
+    parentExecutionGeneration?: null;
+    runnerRequired?: true;
+  },
 ): void {
   updateSession(setup, setup.childId, values);
+}
+
+function expectNoSpawnLink(setup: SpawnedChildReference): void {
+  expect(spawnedLink(setup)).toBeUndefined();
+  expectNoPendingReports(setup);
+  closeSetup(setup);
 }
 
 function setRunnerRequired(
@@ -165,7 +181,97 @@ function expectNoPendingReports(setup: SpawnedChildReference): void {
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 }
 
+function reservationOptions(setup: ReturnType<typeof pendingReservationSetup>) {
+  return {
+    authority: {
+      generation: setup.parent.generation,
+      sessionId: setup.parent.id,
+    },
+    database: setup.setup.database,
+    identity: setup.identity,
+  };
+}
+
 describe("spawned session report generation fencing", () => {
+  test("claims a pending reservation once and only allowClaimed can fail it afterward", () => {
+    const pending = pendingReservationSetup();
+    const { child, identity, reservation, setup } = pending;
+    updateSession(reservation, child.id, { spawnPreparationPending: true });
+    const claimOptions = reservationOptions(pending);
+
+    expect(claimSpawnedSessionReservation(claimOptions)).toBe(true);
+    expect(claimSpawnedSessionReservation(claimOptions)).toBe(false);
+    const failureOptions = {
+      content: "Launch failed after claim",
+      database: setup.database,
+      generateId: () => crypto.randomUUID(),
+      identity,
+      now: TEST_NOW + 3,
+    };
+    expect(failSpawnedSessionReservation(failureOptions)).toBe(false);
+    expect(
+      failSpawnedSessionReservation({ ...failureOptions, allowClaimed: true }),
+    ).toBe(true);
+    const failed = setup.store.get(TEST_USER_ID, child.id);
+    expect(failed?.status).toBe("failed");
+    setup.database.$client.close();
+  });
+
+  const expectReservationHidden = (
+    initial: readonly string[],
+    query: (setup: SpawnedChildReference) => readonly string[],
+  ): void => {
+    const setup = spawnedRunningChildSetup("Hidden reservation");
+    updateSession(setup, setup.childId, {
+      activeStartedAt: null,
+      spawnPreparationPending: false,
+      status: "queued",
+    });
+    expect(query(setup)).toEqual(initial);
+    updateSession(setup, setup.childId, { spawnPreparationPending: true });
+    expect(query(setup)).toEqual([]);
+    setup.database.$client.close();
+  };
+
+  test("hides reservations from both queued-session launch queries", () => {
+    const setup = spawnedRunningChildSetup("Expected queued ID");
+    const childId = setup.childId;
+    setup.database.$client.close();
+    expectReservationHidden([childId], (current) =>
+      current.store.queuedSessions(TEST_USER_ID).map(({ id }) => id),
+    );
+  });
+
+  test("hides reservations from queued-session owner IDs", () => {
+    expectReservationHidden([TEST_USER_ID], (setup) =>
+      setup.store.queuedSessionOwnerIds(),
+    );
+  });
+
+  test("does not prepare a reservation that was already claimed", () => {
+    const pending = pendingReservationSetup();
+    const { child, parent, reservation, setup } = pending;
+    updateSession(reservation, child.id, {
+      parentExecutionGeneration: parent.generation,
+      parentSessionId: parent.id,
+      spawnPreparationPending: false,
+    });
+    expect(
+      prepareSpawnedSessionReservation({
+        ...reservationOptions(pending),
+        metadata: {
+          adaptiveThinking: null,
+          credentialId: "018bcfe5-6800-7000-8000-000000000001",
+          maxContextTokens: null,
+          maxOutputTokens: null,
+          providerPricing: null,
+        },
+        now: TEST_NOW + 4,
+      }),
+    ).toBe("parent_stale");
+    setup.database.$client.close();
+  });
+
   test("allows a user-initiated child from an idle current parent", () => {
     const setup = createStore();
     const parent = createTestSession(setup.store);
@@ -181,9 +287,20 @@ describe("spawned session report generation fencing", () => {
     );
 
     expect(child.status).toBe("created");
-    expect(child.status === "created" ? child.detail.tools : []).toEqual([
-      "read",
-    ]);
+    if (child.status !== "created") throw new Error("Child creation failed");
+    expect(child.detail.tools).toEqual(["read"]);
+    expect(
+      setup.database.query.agentSessions
+        .findFirst({
+          columns: { spawnPreparationPending: true },
+          where: eq(agentSessions.id, child.detail.id),
+        })
+        .sync(),
+    ).toEqual({ spawnPreparationPending: false });
+    expect(setup.store.recoverSpawnedSessionReservations(TEST_NOW + 2)).toBe(0);
+    expect(setup.store.get(TEST_USER_ID, child.detail.id)).toMatchObject({
+      status: "queued",
+    });
     setup.database.$client.close();
   });
 
@@ -436,14 +553,23 @@ describe("spawned session report generation fencing", () => {
     closeSetup(setup);
   });
 
-  test("does not expose historical links without a generation", () => {
-    const setup = spawnedChildSetup();
-    updateChild(setup, { parentExecutionGeneration: null });
-
-    expect(spawnedLink(setup)).toBeUndefined();
-    expectNoPendingReports(setup);
-    closeSetup(setup);
-  });
+  test.each([
+    ["callback", { parentCallbackGeneration: null }],
+    [
+      "callback and execution",
+      {
+        parentCallbackGeneration: null,
+        parentExecutionGeneration: null,
+      },
+    ],
+  ] as const)(
+    "does not expose historical links without %s generation",
+    (_name, values) => {
+      const setup = spawnedChildSetup();
+      updateChild(setup, values);
+      expectNoSpawnLink(setup);
+    },
+  );
 });
 
 test("a failed report append does not claim or report delivery", () => {

@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
+import { agentSessions } from "../../shared/database/schema.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
@@ -526,6 +527,45 @@ test.each(["failed", "paused", "queued", "running", "stopped"] as const)(
     closeSessionTestDatabase(setup.database);
   },
 );
+
+test("direct spawn discovery failure settles its reservation", async () => {
+  const setup = agentActionsSetup("none", false, {
+    discoverSessionMetadata: () => Promise.reject(new Error("unavailable")),
+  });
+  const output = await executeSessionAgentTool(
+    setup.actions,
+    "spawn_session",
+    spawnInput(setup, "Delegate despite unavailable discovery"),
+    new AbortController().signal,
+  );
+
+  expect(parseToolOutput(output)).toMatchObject({
+    error: "provider_unavailable",
+    status: "failed",
+  });
+  const failedChild = spawnedSession(setup);
+  expect(failedChild).toMatchObject({
+    parentExecutionGeneration: setup.parent.generation,
+    parentSessionId: setup.parent.id,
+    status: "failed",
+  });
+  expect(
+    setup.store.get(TEST_USER_ID, failedChild?.id ?? "")?.messages,
+  ).toContainEqual(
+    expect.objectContaining({
+      content: "Session failed: the child session could not be prepared",
+      role: "error",
+    }),
+  );
+  expect(
+    setup.database
+      .select({ pending: agentSessions.spawnPreparationPending })
+      .from(agentSessions)
+      .all()
+      .filter(({ pending }) => pending),
+  ).toEqual([]);
+  closeSessionTestDatabase(setup.database);
+});
 
 describe.each(LAUNCH_RACES)("$label", (expected) => {
   launchRaceTests(expected);

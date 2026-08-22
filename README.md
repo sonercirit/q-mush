@@ -335,6 +335,3 @@ declarations and rejects other JavaScript or TypeScript clones of at least 20
 tokens on one or more lines, including clones across source extensions. Run
 `bun run format` to format files, `bun run lint:fix` to apply safe lint fixes,
 and `bun run test` to run Vitest under Bun.
-
-This project was created using `bun init` in bun v1.3.14. [Bun](https://bun.com)
-is a fast all-in-one JavaScript runtime.

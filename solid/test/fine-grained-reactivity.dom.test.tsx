@@ -1,7 +1,10 @@
 import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import type { AgentSessionDetail } from "../../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionSummary,
+} from "../../shared/session-model.ts";
 import { OPENAI_PANEL } from "../provider-client.tsx";
 import { ProviderController } from "../provider-controller.ts";
 import {
@@ -26,7 +29,6 @@ import {
   disposeTestViews,
   expectTestText,
   mountTestView,
-  queryTestElement,
   queryTestTranscript,
 } from "./dom-test-helpers.ts";
 import { defineElementSize } from "./element-size-test-helpers.ts";
@@ -40,6 +42,12 @@ import {
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import {
+  mountedSessionList,
+  parentSession,
+  query,
+  relatedChildren,
+} from "./session-list-test-helpers.tsx";
+import {
   runningSessionDetail,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
@@ -48,35 +56,6 @@ const disposals: (() => void)[] = [];
 
 function mount(renderView: () => JSX.Element): HTMLDivElement {
   return mountTestView(renderView, disposals);
-}
-
-interface MountedSessionList {
-  readonly container: HTMLDivElement;
-  readonly controller: SessionController;
-  readonly select: (sessionId: string) => void;
-}
-
-function mountedSessionList(
-  sessions: readonly ReturnType<typeof summaryFromDetail>[],
-  selectedId?: string,
-): MountedSessionList {
-  const state = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    selectedId,
-    sessions,
-  });
-  const controller = new SessionController(state);
-  return {
-    container: mount(() => <SessionList controller={controller} />),
-    controller,
-    select: (sessionId: string) => {
-      state.setState((current) => ({ ...current, selectedId: sessionId }));
-    },
-  };
-}
-
-function query(container: ParentNode, selector: string): Element {
-  return queryTestElement(container, selector);
 }
 
 function credential(id: string, label: string): ProviderCredential {
@@ -244,69 +223,59 @@ test("scrolling away from and back to the transcript end updates scroll lock", (
   expectScrollLock(toggle, false);
 });
 
-function parentSession() {
-  return {
-    ...summaryFromDetail(TEST_SESSION_DETAIL),
-    id: "parent-session",
-    title: "Parent task",
-  };
+function relatedSession(
+  parent: AgentSessionSummary,
+  id: string,
+  title: string,
+  parentSessionId: string | null = parent.id,
+): AgentSessionSummary {
+  return { ...parent, id, parentSessionId, title };
 }
 
-test("labels idle attempts Ready, terminal success Completed, and input pauses non-final", () => {
-  const idle = parentSession();
-  const completed = {
-    ...idle,
-    id: "completed-session",
-    status: "completed" as const,
-    title: "Completed task",
-  };
-  const waiting = {
-    ...idle,
-    id: "waiting-session",
-    pendingQuestions: {
-      createdAt: 1,
-      executionGeneration: 0,
-      id: "questions-1",
-      questions: [
-        {
-          id: "decision",
-          maxLength: 50,
-          prompt: "Which path?",
-          type: "free_text" as const,
-        },
-      ],
-      toolCallId: "call-questions",
-    },
-    status: "paused" as const,
-    title: "Waiting task",
-  };
-  const { container } = mountedSessionList([idle, completed, waiting]);
+function expectSessionDepth(
+  container: ParentNode,
+  sessionId: string,
+  depth: number,
+): void {
+  const item = query(container, `[data-session-id='${sessionId}']`).closest(
+    "li",
+  );
+  expect(item?.getAttribute("data-session-depth")).toBe(String(depth));
+}
 
-  expect(
-    query(container, `[data-session-id='${idle.id}']`).textContent,
-  ).toContain("Ready");
-  expect(
-    query(container, "[data-session-id='completed-session']").textContent,
-  ).toContain("Completed");
-  expect(
-    query(container, "[data-session-id='waiting-session']").textContent,
-  ).toContain("Waiting for answers");
+function childGroupSession(
+  container: ParentNode,
+  parentId: string,
+  childId: string,
+): Element | null {
+  return query(
+    container,
+    `[data-child-session-group='${parentId}']`,
+  ).querySelector(`[data-session-id='${childId}']`);
+}
+
+test("renders status badges in session list rows", () => {
+  for (const [status, label] of [
+    ["idle", "Ready"],
+    ["completed", "Completed"],
+  ] as const) {
+    const session = { ...parentSession(), id: `status-${status}`, status };
+    const { container } = mountedSessionList([session]);
+    expect(
+      query(container, `[data-session-id='${session.id}']`).textContent,
+    ).toContain(label);
+  }
 });
 
 test("nests spawned sessions under a collapsed parent", () => {
   const parent = parentSession();
-  const child = {
-    ...parent,
-    id: "child-session",
-    parentSessionId: parent.id,
-    title: "Delegated task",
-  };
-  const detached = {
-    ...parent,
-    id: "detached-session",
-    parentSessionId: "missing-parent",
-    title: "Detached task",
-  };
+  const child = relatedSession(parent, "child-session", "Delegated task");
+  const detached = relatedSession(
+    parent,
+    "detached-session",
+    "Detached task",
+    "missing-parent",
+  );
   const { container } = mountedSessionList([child, detached, parent]);
   const parentToggle = query(
     container,
@@ -326,34 +295,66 @@ test("nests spawned sessions under a collapsed parent", () => {
   }
   parentToggle.click();
 
+  const collapseToggle = query(
+    container,
+    "button[aria-label='Collapse child sessions for Parent task']",
+  );
+  expect(collapseToggle.textContent).toContain("Collapse (1)");
+  expect(childGroupSession(container, parent.id, child.id)).not.toBeNull();
+  expect(
+    container.querySelectorAll("[data-session-id='child-session']"),
+  ).toHaveLength(1);
+  expectSessionDepth(container, child.id, 1);
+
+  if (!(collapseToggle instanceof HTMLButtonElement)) {
+    throw new TypeError("The child session toggle is not a button");
+  }
+  collapseToggle.click();
   expect(
     query(
       container,
-      "button[aria-label='Collapse child sessions for Parent task']",
-    ).textContent,
-  ).toContain("Collapse (1)");
+      "button[aria-label='Expand child sessions for Parent task']",
+    ).getAttribute("aria-expanded"),
+  ).toBe("false");
   expect(
-    query(container, "[data-session-id='child-session']")
-      .closest("li")
-      ?.getAttribute("data-session-depth"),
-  ).toBe("1");
+    container.querySelector("[data-session-id='child-session']"),
+  ).toBeNull();
 });
 
-test("bounds expanded children while revealing the selected child", () => {
+function boundedChildList(prefix: string, selectedIndex: number) {
   const parent = parentSession();
-  const children = Array.from({ length: 24 }, (_, index) => ({
-    ...parent,
-    id: `child-${String(index + 1)}`,
-    parentSessionId: parent.id,
-    title: `Child ${String(index + 1)}`,
-  }));
-  const selected = children.at(-1);
+  const children = relatedChildren(parent, prefix);
+  const selected = children[selectedIndex];
   if (selected === undefined) throw new TypeError("Missing selected child");
-  const { container, select } = mountedSessionList([parent, ...children]);
+  const mounted = mountedSessionList([parent, ...children]);
+  mounted.select(selected.id);
+  return { ...mounted, parent, selected };
+}
 
-  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(1);
-  select(selected.id);
-  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(10);
+test.each([
+  { selectedIndex: 0, visible: true },
+  { selectedIndex: 9, visible: true },
+  { selectedIndex: 10, visible: true },
+  { selectedIndex: 23, visible: true },
+] as const)(
+  "bounds expanded children with selected index $selectedIndex",
+  ({ selectedIndex, visible }) => {
+    const { container, selected } = boundedChildList(
+      "boundary-child",
+      selectedIndex,
+    );
+
+    expect(container.querySelectorAll("[data-session-id]")).toHaveLength(11);
+    expect(
+      container.querySelector(`[data-session-id='${selected.id}']`) !== null,
+    ).toBe(visible);
+  },
+);
+
+test("bounds expanded children while revealing the selected child", () => {
+  const { container, selected } = boundedChildList("child", 23);
+
+  expect(container.querySelectorAll("[data-session-id]")).toHaveLength(11);
   expect(
     query(
       container,
@@ -367,7 +368,41 @@ test("bounds expanded children while revealing the selected child", () => {
   ).toBe("true");
   expect(
     container.querySelector("[data-load-more-sessions='true']"),
+  ).toBeNull();
+  expect(
+    container.querySelector("[data-load-more-children='parent-session']"),
   ).not.toBeNull();
+});
+
+test("reparents realtime rows without leaving a duplicate root", () => {
+  const parent = parentSession();
+  const child = relatedSession(
+    parent,
+    "realtime-child",
+    "Realtime child",
+    null,
+  );
+  const { container, controller, select } = mountedSessionList([child, parent]);
+  select(child.id);
+  expectSessionDepth(container, child.id, 0);
+
+  controller.applyRealtime([
+    parent,
+    {
+      ...child,
+      parentExecutionGeneration: 0,
+      parentSessionId: parent.id,
+    },
+  ]);
+
+  expect(
+    container.querySelectorAll("[data-session-id='realtime-child']"),
+  ).toHaveLength(1);
+  expect(
+    childGroupSession(container, parent.id, child.id),
+    "the grouped child",
+  ).toBeTruthy();
+  expectSessionDepth(container, child.id, 1);
 });
 
 test("loads more sessions on scroll and resets for a new root", () => {

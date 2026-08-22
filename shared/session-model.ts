@@ -38,10 +38,10 @@ export interface RestartHandoff {
 
 export function normalSessionCompletionStatus(
   session: Readonly<{
-    parentExecutionGeneration: number | null | undefined;
+    parentCallbackGeneration: number | null | undefined;
   }>,
 ): "completed" | "idle" {
-  return session.parentExecutionGeneration == null ? "idle" : "completed";
+  return session.parentCallbackGeneration == null ? "idle" : "completed";
 }
 
 export type AgentSessionCostBasis = "estimated" | "none" | "reported";
