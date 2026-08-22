@@ -21,7 +21,6 @@ import {
   finishedAnthropicStep,
   streamedAnthropicReadEvents,
 } from "./anthropic-response-event-fixtures.ts";
-
 const REQUEST_ALIAS = "claude-current";
 const FIRST_SNAPSHOT = "claude-snapshot-20260101";
 const MOVED_SNAPSHOT = "claude-snapshot-20260201";
