@@ -216,7 +216,7 @@ async function completePausedChild(
   );
 }
 
-describe("session agent tools", () => {
+describe("agent tools", () => {
   test("lists and reads owned sessions", async () => {
     const model = scriptedModel([
       {
@@ -245,7 +245,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(readSetup.database);
   });
 
-  test("routes mixed recipients through parallel", async () => {
+  test("routes mixed recipients", async () => {
     const toolUses = Array.from({ length: 10 }, (_, index) =>
       index % 2 === 0
         ? { parameters: {}, recipient_name: "list_sessions" }
@@ -275,7 +275,7 @@ describe("session agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
 
-  test("keeps parallel session recipients off the runner", async () => {
+  test("keeps session recipients off the runner", async () => {
     const model = scriptedModel([
       {
         content: "Inspecting sessions in parallel.",
