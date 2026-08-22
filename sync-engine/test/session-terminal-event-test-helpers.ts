@@ -130,7 +130,7 @@ export function terminalEventActions(
   };
 }
 
-export function deliverySetup(
+function deliverySetup(
   setup: ReturnType<typeof spawnedChildSetup>,
   overrides: Parameters<typeof terminalEventActions>[3] = {},
 ) {
