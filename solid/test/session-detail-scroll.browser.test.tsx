@@ -79,7 +79,6 @@ function setComposerValue(composer: HTMLTextAreaElement, value: string): void {
 afterEach(async () => {
   // Detach first so browser observers cannot react while Solid disposers run.
   document.body.replaceChildren();
-  document.body.replaceChildren();
   while (BROWSER_TEST_DISPOSALS.length > 0) {
     BROWSER_TEST_DISPOSALS.pop()?.();
   }
