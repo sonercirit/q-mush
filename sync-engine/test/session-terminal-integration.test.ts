@@ -191,7 +191,7 @@ test("settles one deferred terminal answer without a restart handoff", async () 
   });
 });
 
-test("does not relaunch after consuming a sleep-wake child callback", async () => {
+test("wakes again for a continued child's callback", async () => {
   const model = new PrefillRejectingSleepWakeCallbackModel();
   const { broker, commands } = autoCompletingAgentFileBroker();
   const setup = connectedSessionSetup(model, "api_key", undefined, { broker });
@@ -282,12 +282,11 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
     readParent,
     (value) =>
       isRecord(value) &&
-      recordContentsContaining(
-        value["pendingInputs"],
-        "Spawned session completed",
-      ).length === 1,
+      value["status"] === "idle" &&
+      recordContentsContaining(value["messages"], "Spawned session completed")
+        .length === 2,
   );
-  expect(parentSessionRequests(model.requests)).toHaveLength(3);
+  expect(parentSessionRequests(model.requests)).toHaveLength(4);
   const parentReports: readonly unknown[] | undefined = isRecord(
     parentWithSecondReport,
   )
@@ -310,7 +309,7 @@ test("does not relaunch after consuming a sleep-wake child callback", async () =
       ({ sessionId, tool }) =>
         sessionId === SESSION_ID && tool === RUNNER_AGENT_FILE_COMMAND,
     ),
-  ).toHaveLength(1);
+  ).toHaveLength(2);
   setup.database.$client.close();
 });
 
