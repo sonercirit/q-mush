@@ -11,15 +11,7 @@ import {
 import { spawnedParentReports } from "./session-race-test-helpers.ts";
 import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import {
-  expectParentWake,
-  idleParent,
-  reportCount,
-  setChildStatus,
-  terminalEventActions,
-} from "./session-terminal-event-test-helpers.ts";
-import {
   completeSpawnedChildGeneration,
-  continueSpawnedChild,
   expectNoPendingSpawnedSessions,
   requireSpawnedChild,
   spawnedChildSetup,
@@ -31,16 +23,20 @@ import {
   emptyRuntimes,
   testSessionInput,
 } from "./session-store-test-fixtures.ts";
+import {
+  continueChild,
+  expectParentWake,
+  idleParent,
+  reportCount,
+  setChildStatus,
+  terminalEventActions,
+} from "./session-terminal-event-test-helpers.ts";
 
 function parentReports(
   store: SessionStore,
   parentId: string,
 ): readonly string[] {
   return spawnedParentReports(store, parentId);
-}
-
-function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
-  return continueSpawnedChild(setup, TEST_NOW + 6);
 }
 
 function reportPendingTwice(

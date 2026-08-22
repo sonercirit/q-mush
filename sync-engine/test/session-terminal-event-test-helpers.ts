@@ -1,12 +1,56 @@
 import { expect, vi } from "vitest";
 import { SessionAgentActions } from "../session-agent-actions.ts";
 import { SessionStore } from "../session-store.ts";
-import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
+import {
+  TEST_NOW,
+  TEST_USER_ID,
+} from "./authenticated-integration-test-helpers.ts";
 import {
   spawnedParentReports,
   terminalEventActionSetup,
 } from "./session-race-test-helpers.ts";
-import { spawnedChildSetup } from "./session-store-spawn-test-helpers.ts";
+import {
+  continueSpawnedChild,
+  requireSpawnedChild,
+  spawnedChildSetup,
+} from "./session-store-spawn-test-helpers.ts";
+
+export function deferredReportSetup(
+  overrides: Parameters<typeof terminalEventActions>[3] = {},
+) {
+  const setup = spawnedChildSetup();
+  const delivery = terminalEventActions(
+    setup.store,
+    setup.database,
+    vi.fn(),
+    overrides,
+  );
+  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
+  return { delivery, setup };
+}
+
+export async function deliverDeferredReport(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+): Promise<void> {
+  delivery.actions.reportedParent(
+    { disposition: "deferred", parentId: setup.parentId },
+    TEST_USER_ID,
+  );
+  await Promise.resolve();
+}
+
+export function expectDurableReport(
+  setup: ReturnType<typeof spawnedChildSetup>,
+  delivery: ReturnType<typeof terminalEventActions>,
+): void {
+  expect(delivery.launchSession).not.toHaveBeenCalled();
+  expect(reportCount(setup.store, setup.parentId)).toBe(1);
+}
+
+export function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
+  return continueSpawnedChild(setup, TEST_NOW + 6);
+}
 
 export function terminalEventActions(
   store: SessionStore,

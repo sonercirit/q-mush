@@ -5,55 +5,21 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import {
+  requireSpawnedChild,
+  spawnedChildSetup,
+  transitionSpawnedChild,
+} from "./session-store-spawn-test-helpers.ts";
+import {
+  continueChild,
+  deferredReportSetup,
+  deliverDeferredReport,
+  expectDurableReport,
   expectParentWake,
   idleParent,
   reportCount,
   setChildStatus,
   terminalEventActions,
 } from "./session-terminal-event-test-helpers.ts";
-import {
-  continueSpawnedChild,
-  requireSpawnedChild,
-  spawnedChildSetup,
-  transitionSpawnedChild,
-} from "./session-store-spawn-test-helpers.ts";
-
-function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
-  return continueSpawnedChild(setup, TEST_NOW + 6);
-}
-
-function deferredReportSetup(
-  overrides: Parameters<typeof terminalEventActions>[3] = {},
-) {
-  const setup = spawnedChildSetup();
-  const delivery = terminalEventActions(
-    setup.store,
-    setup.database,
-    vi.fn(),
-    overrides,
-  );
-  delivery.actions.reportOne(requireSpawnedChild(setup), TEST_USER_ID);
-  return { delivery, setup };
-}
-
-async function deliverDeferredReport(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  delivery: ReturnType<typeof terminalEventActions>,
-) {
-  delivery.actions.reportedParent(
-    { disposition: "deferred", parentId: setup.parentId },
-    TEST_USER_ID,
-  );
-  await Promise.resolve();
-}
-
-function expectDurableReport(
-  setup: ReturnType<typeof spawnedChildSetup>,
-  delivery: ReturnType<typeof terminalEventActions>,
-) {
-  expect(delivery.launchSession).not.toHaveBeenCalled();
-  expect(reportCount(setup.store, setup.parentId)).toBe(1);
-}
 
 test("stopping a child wakes a runnable idle parent and consumes its report", async () => {
   const setup = spawnedChildSetup();
