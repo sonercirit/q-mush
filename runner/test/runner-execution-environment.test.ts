@@ -14,43 +14,26 @@ import { useTemporaryDirectories } from "./temporary-directories.ts";
 
 const workspace = useTemporaryDirectories("q-mush-environment-test-");
 
-class FakeContainers {
-  readonly cleaned: string[] = [];
-  readonly prepared: {
-    readonly root: string;
-    readonly sessionId: string;
-    readonly signal: AbortSignal | undefined;
-  }[] = [];
-  shellOutput = "container shell output";
-  readonly shells: {
-    readonly command: string;
-    readonly root: string;
-    readonly sessionId: string;
-    readonly timeout: number;
-  }[] = [];
-
-  cleanupSession(sessionId: string): Promise<void> {
-    this.cleaned.push(sessionId);
-    return Promise.resolve();
-  }
-
-  prepare(
-    ...input: Parameters<RunnerContainerManager["prepare"]>
-  ): Promise<void> {
-    const [sessionId, root, signal] = input;
-    this.prepared.push({ root, sessionId, signal });
-    return Promise.resolve();
-  }
-
-  executeShell(
-    sessionId: string,
-    root: string,
-    command: string,
-    timeout: number,
-  ): Promise<string> {
-    this.shells.push({ command, root, sessionId, timeout });
-    return Promise.resolve(this.shellOutput);
-  }
+function createFakeContainers() {
+  const cleaned: string[] = [];
+  const prepared: { readonly root: string; readonly sessionId: string; readonly signal: AbortSignal | undefined }[] = [];
+  const shells: { readonly command: string; readonly root: string; readonly sessionId: string; readonly timeout: number }[] = [];
+  return {
+    cleaned,
+    prepared,
+    shellOutput: "container shell output",
+    shells,
+    cleanupSession: (sessionId: string) => { cleaned.push(sessionId); return Promise.resolve(); },
+    prepare: (...input: Parameters<RunnerContainerManager["prepare"]>) => {
+      const [sessionId, root, signal] = input;
+      prepared.push({ root, sessionId, signal });
+      return Promise.resolve();
+    },
+    executeShell(sessionId: string, root: string, command: string, timeout: number) {
+      shells.push({ command, root, sessionId, timeout });
+      return Promise.resolve(this.shellOutput);
+    },
+  };
 }
 
 function command(
@@ -74,10 +57,10 @@ function command(
 }
 
 function containerExecutor(): {
-  readonly containers: FakeContainers;
+  readonly containers: ReturnType<typeof createFakeContainers>;
   readonly executor: RunnerCommandExecutor;
 } {
-  const containers = new FakeContainers();
+  const containers = createFakeContainers();
   return { containers, executor: new RunnerCommandExecutor(containers) };
 }
 
@@ -222,7 +205,7 @@ describe("container runner commands", () => {
   });
 
   test("cleans a tracked container only for an explicit session cleanup command", async () => {
-    const containers = new FakeContainers();
+    const containers = createFakeContainers();
     const executor = new RunnerCommandExecutor(containers);
 
     expect(
@@ -241,7 +224,7 @@ describe("container runner commands", () => {
 
   test("retains raw container overflow for the engine finalizer", async () => {
     const root = await workspace();
-    const containers = new FakeContainers();
+    const containers = createFakeContainers();
     containers.shellOutput = "😀".repeat(500);
     const executor = new RunnerCommandExecutor(containers);
     const output = await executor.execute({
