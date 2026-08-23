@@ -5,7 +5,10 @@ import {
 } from "../agent-model-options.ts";
 import { ChatCompletionsAgentModel } from "../agent-model.ts";
 import { anthropicReplayIdentityFrom } from "../anthropic-replay-identity.ts";
-import { runSessionAgent } from "../session-agent-runtime.ts";
+import {
+  compactSessionConversation,
+  runSessionAgent,
+} from "../session-agent-runtime.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
   KNOWN_ANTHROPIC_MODEL,
@@ -16,6 +19,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completingTestBroker,
   IDLE_RUNTIME_SIGNALS,
@@ -54,12 +58,95 @@ function clientToolResponse(): Response {
   });
 }
 
+function runtimeDefaults() {
+  return {
+    broker: completingTestBroker(),
+    braveSearch: { execute: () => Promise.resolve("unused search") },
+    ...IDLE_RUNTIME_SIGNALS,
+    isCurrent: () => true,
+    pendingComponent: () => undefined,
+    sessionTools: unusedSessionToolActions(),
+    signal: new AbortController().signal,
+    userId: TEST_USER_ID,
+  };
+}
+
 describe("session Anthropic model resolution", () => {
+  test.each([
+    ["agent", runSessionAgent],
+    ["compactor", compactSessionConversation],
+  ] as const)(
+    "retains matching persisted replay for the %s conversation",
+    async (_label, execute) => {
+      const setup = runningCompactionStore();
+      const stored = requireCompactionSession(setup.store);
+      const credential = {
+        ...ANTHROPIC_TEST_CREDENTIAL,
+        isDefault: true,
+        label: "Anthropic test",
+      };
+      const detail = {
+        ...stored,
+        credentialId: credential.id,
+        model: REQUEST_ALIAS,
+        provider: "generic" as const,
+      };
+      const identity = anthropicReplayIdentityFrom({
+        credential,
+        credentialFingerprint: agentCredentialFingerprint(credential),
+        model: REQUEST_ALIAS,
+        provider: "generic",
+        resolvedModel: KNOWN_ANTHROPIC_MODEL,
+      });
+      setup.store.appendCurrentAgentMessage(
+        stored.id,
+        {
+          content: "Persisted answer",
+          providerReplay: {
+            blocks: [{ text: "Persisted answer", type: "text" }],
+            model: KNOWN_ANTHROPIC_MODEL,
+            protocol: "anthropic",
+            provenance: identity.provenance,
+            requestModel: REQUEST_ALIAS,
+          },
+          role: "assistant",
+          toolCalls: [],
+        },
+        TEST_NOW + 2,
+      );
+      const model = new ScriptedAgentModel([
+        { content: "Reloaded completion", toolCalls: [] },
+      ]);
+      const runtime = {
+        ...runtimeDefaults(),
+        credential,
+        continuous: true,
+        detail,
+        isCurrent: () => true,
+        modelFactory: () => model,
+        modelFetch: () =>
+          Promise.resolve(Response.json({ id: KNOWN_ANTHROPIC_MODEL })),
+        now: () => TEST_NOW + 3,
+        store: setup.store,
+      };
+
+      await expect(execute(runtime)).resolves.toBe("complete");
+
+      expect(
+        model.requests[0]?.find(
+          (message) => message.content === "Persisted answer",
+        ),
+      ).toMatchObject({
+        providerReplay: { provenance: identity.provenance },
+      });
+      closeSessionTestDatabase(setup.database);
+    },
+  );
+
   test("retries a transient startup resolution on a later completion in the same run", async () => {
     const setup = runningCompactionStore();
-    const stored = requireCompactionSession(setup.store);
     const detail = {
-      ...stored,
+      ...requireCompactionSession(setup.store),
       credentialId: ANTHROPIC_TEST_CREDENTIAL.id,
       model: REQUEST_ALIAS,
       provider: "generic" as const,
@@ -92,14 +179,12 @@ describe("session Anthropic model resolution", () => {
 
     await expect(
       runSessionAgent({
-        broker: completingTestBroker(),
-        braveSearch: { execute: () => Promise.resolve("unused search") },
+        ...runtimeDefaults(),
         credential: {
           ...ANTHROPIC_TEST_CREDENTIAL,
           isDefault: true,
           label: "Anthropic test",
         },
-        ...IDLE_RUNTIME_SIGNALS,
         detail,
         isCurrent: () => true,
         modelFactory,
@@ -108,13 +193,10 @@ describe("session Anthropic model resolution", () => {
           return Promise.reject(new TypeError("temporary retrieval failure"));
         },
         now: () => (now += 1),
-        pendingComponent: () => undefined,
         sessionTools: unusedSessionToolActions({
           listSessions: () => "session list",
         }),
         store: setup.store,
-        userId: TEST_USER_ID,
-        signal: new AbortController().signal,
       }),
     ).resolves.toBe("complete");
 

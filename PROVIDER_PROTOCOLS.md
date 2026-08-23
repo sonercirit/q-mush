@@ -72,7 +72,9 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   replay is missing, stale, incomplete, unsupported, or unsigned. Older
   incompatible tool history falls back to plain reconstruction. Trailing result
   IDs use deduplicated, order-insensitive sets. Transient retrieval failures
-  retry later; permanent unresolved identities stay cached. Known resolved
+  retry later; permanent unresolved identities stay cached. Runtime conversation
+  reads resolve the model before loading persisted replay; unresolved identity
+  remains fail-closed rather than acting as a wildcard. Known resolved
   identities flow to agent, compactor, and attachment fallback. Empty text drops
   (whitespace stays), but content and replay are withheld together across every
   trailing text block; a pause fails if none remain replayable. `cache_control`

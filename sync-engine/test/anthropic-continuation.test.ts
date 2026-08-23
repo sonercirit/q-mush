@@ -24,11 +24,18 @@ const INITIAL_MESSAGES: readonly AgentConversationMessage[] = [
 
 function replay(
   blocks: readonly AnthropicReplayBlock[],
-  options: { readonly container?: string; readonly model?: string } = {},
+  options: {
+    readonly container?: string;
+    readonly model?: string;
+    readonly provenance?: string;
+  } = {},
 ): AnthropicAssistantReplay {
   return createAnthropicAssistantReplay(
     blocks,
-    { model: options.model ?? MODEL, provenance: PROVENANCE },
+    {
+      model: options.model ?? MODEL,
+      provenance: options.provenance ?? PROVENANCE,
+    },
     options.container,
   );
 }
@@ -431,6 +438,7 @@ async function expectUnsafeFinalTool(step: AgentModelStep): Promise<void> {
 const SECOND_REPLAY_VARIANTS = {
   "a changed replay container": { container: "container-2" },
   "a foreign replay identity": { model: "claude-other" },
+  "foreign replay provenance": { provenance: "other-provenance" },
 } as const;
 
 function secondStep(
@@ -447,23 +455,24 @@ function secondStep(
   });
 }
 
-test.each(["a changed replay container", "a foreign replay identity"] as const)(
-  "rejects %s while pausing again",
-  async (variant) => {
-    const rejected = completeAnthropicPauseTurns(
-      INITIAL_MESSAGES,
-      containedPauseStep(),
-      () =>
-        Promise.resolve(
-          secondStep(variant, {
-            providerContinuation: "anthropic_pause_turn",
-          }),
-        ),
-    );
+test.each([
+  "a changed replay container",
+  "a foreign replay identity",
+  "foreign replay provenance",
+] as const)("rejects %s while pausing again", async (variant) => {
+  const rejected = completeAnthropicPauseTurns(
+    INITIAL_MESSAGES,
+    containedPauseStep(),
+    () =>
+      Promise.resolve(
+        secondStep(variant, {
+          providerContinuation: "anthropic_pause_turn",
+        }),
+      ),
+  );
 
-    await expect(rejected).rejects.toThrow(PAUSE_ERROR);
-  },
-);
+  await expect(rejected).rejects.toThrow(PAUSE_ERROR);
+});
 
 test.each([
   [

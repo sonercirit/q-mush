@@ -29,6 +29,7 @@ import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills } from "./agent-skills.ts";
+import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -154,6 +155,14 @@ async function loadModels(
         markProviderPending(runtime, state);
       };
       const refreshCredential = runtimeCredentialRefresher(runtime);
+      const resolution = await resolveAnthropicModelAttempt({
+        credential: runtime.credential,
+        fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
+        model: runtime.detail.model,
+        provider: runtime.detail.provider,
+        signal,
+      });
+      throwIfRestartRequested(runtime);
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
@@ -166,6 +175,9 @@ async function loadModels(
           markSessionStepStart(runtime);
         },
         realtime: runtime.realtime,
+        ...(resolution.model === undefined
+          ? {}
+          : { resolvedModel: resolution.model }),
         ...(options.streamId === undefined
           ? {}
           : { streamId: options.streamId }),
@@ -192,7 +204,10 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = sessionRuntimeConversation(runtime);
+  const conversation = sessionRuntimeConversation(
+    runtime,
+    models.resolvedModel,
+  );
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -306,11 +321,6 @@ export async function runSessionAgent(
 ): Promise<"complete" | "handoff"> {
   const settings = runtime.toolSettings;
   const streamId = createUuidV7();
-  const initialMessages = sessionRuntimeConversation(runtime);
-  const messages =
-    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
-      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
-      : initialMessages;
   const toolStream = new ToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
@@ -319,6 +329,14 @@ export async function runSessionAgent(
     workspaceId: runtime.detail.workspaceId,
   });
   const models = await loadModels(runtime, { streamId, toolStream });
+  const initialMessages = sessionRuntimeConversation(
+    runtime,
+    models.resolvedModel,
+  );
+  const messages =
+    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
+      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
+      : initialMessages;
   const handoffController = new AbortController();
   const toolSignal = AbortSignal.any([
     runtime.signal,

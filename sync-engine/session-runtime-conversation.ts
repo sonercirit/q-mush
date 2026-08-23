@@ -5,6 +5,7 @@ import type { SessionStore } from "./session-store.ts";
 
 export function sessionRuntimeConversation(
   runtime: SessionAgentRuntimeDependencies,
+  resolvedModel: string | null | undefined,
 ): ReturnType<SessionStore["conversation"]> {
   return runtime.store.conversation(
     runtime.detail.id,
@@ -13,6 +14,7 @@ export function sessionRuntimeConversation(
       credentialFingerprint: agentCredentialFingerprint(runtime.credential),
       model: runtime.detail.model,
       provider: runtime.detail.provider,
+      ...(typeof resolvedModel === "string" ? { resolvedModel } : {}),
     }),
     runtime.detail.restartHandoff === null,
   );
