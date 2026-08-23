@@ -5,7 +5,7 @@ import {
   DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitMilliseconds,
 } from "../../shared/tool-limits.ts";
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
@@ -52,7 +52,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
           {},
           {
             actions: orchestrationActions(setup.database, setup.store),
-            activeTools: new ActiveSessionTools(),
+            activeTools: createActiveSessionTools(),
             braveSearch: new (class {
               execute(): Promise<string> {
                 return Promise.resolve("unused loading search result");

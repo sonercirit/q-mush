@@ -6,7 +6,7 @@ import type {
 } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { ActiveSessionTools } from "../../sync-engine/active-session-tools.ts";
+import { createActiveSessionTools } from "../../sync-engine/active-session-tools.ts";
 import { runPersistedSession } from "../../sync-engine/session-run.ts";
 import {
   TEST_NOW,
@@ -91,7 +91,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
     operation: "agent",
     pendingComponent: () => undefined,
     resources: {
-      activeTools: new ActiveSessionTools(),
+      activeTools: createActiveSessionTools(),
       actions: orchestrationActions(setup.database, setup.store),
       braveSearch: { execute: () => Promise.resolve("unused search") },
       broker,

@@ -3,7 +3,10 @@ import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
 import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
-import { ActiveSessionTools } from "./active-session-tools.ts";
+import {
+  createActiveSessionTools,
+  type ActiveSessionTools,
+} from "./active-session-tools.ts";
 import {
   discoverAgentModels,
   type AgentModelDiscoverer,
@@ -133,7 +136,7 @@ class DrizzleSessionIntegration
   ) {
     super();
     this.#auth = auth;
-    this.#activeTools = dependencies.activeTools ?? new ActiveSessionTools();
+    this.#activeTools = dependencies.activeTools ?? createActiveSessionTools();
     this.#realtime = dependencies.realtime;
     this.#broker =
       dependencies.broker ??

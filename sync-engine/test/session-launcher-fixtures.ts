@@ -1,4 +1,4 @@
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 import { SessionLauncher } from "../session-launcher.ts";
 
 type TestSessionLauncherDependencies = Omit<
@@ -11,7 +11,7 @@ export function createSessionLauncher(
 ): SessionLauncher {
   return new SessionLauncher({
     ...dependencies,
-    activeTools: new ActiveSessionTools(),
+    activeTools: createActiveSessionTools(),
     braveSearch: { execute: () => Promise.resolve("unused search") },
     realtime: undefined,
     shutdownInterrupted: {
