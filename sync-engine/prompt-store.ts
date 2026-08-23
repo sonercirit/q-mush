@@ -16,9 +16,7 @@ import {
 } from "./prompt-query.ts";
 
 export type PromptStoreErrorKind =
-  | "duplicate_prompt_name"
-  | "prompt_changed"
-  | "prompt_limit";
+  "duplicate_prompt_name" | "prompt_changed" | "prompt_limit";
 
 export type PromptStoreError = Error & { readonly kind: PromptStoreErrorKind };
 
@@ -28,7 +26,9 @@ const promptStoreErrorMessages: Record<PromptStoreErrorKind, string> = {
   prompt_limit: "The active prompt limit has been reached",
 };
 
-export function createPromptStoreError(kind: PromptStoreErrorKind): PromptStoreError {
+export function createPromptStoreError(
+  kind: PromptStoreErrorKind,
+): PromptStoreError {
   return Object.assign(new Error(promptStoreErrorMessages[kind]), {
     kind,
     name: "PromptStoreError",

@@ -2,9 +2,9 @@ import { isRecord } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import {
+  normalizePromptInput,
   PROMPT_BODY_MAXIMUM_BYTES,
   PROMPT_NAME_MAXIMUM_LENGTH,
-  normalizePromptInput,
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
@@ -17,10 +17,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
-import {
-  isPromptStoreErrorKind,
-  PromptStore,
-} from "./prompt-store.ts";
+import { isPromptStoreErrorKind, PromptStore } from "./prompt-store.ts";
 
 interface PromptDependencies {
   readonly database?: AppDatabase;

@@ -1,9 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { prompts } from "../../shared/database/schema.ts";
-import {
-  PromptStore,
-} from "../../sync-engine/prompt-store.ts";
+import { PromptStore } from "../../sync-engine/prompt-store.ts";
 import {
   addTestUser,
   createAuthenticatedTestDatabase,
@@ -92,7 +90,9 @@ function updatePrompt(
 }
 
 function expectPromptChanged(action: () => unknown): void {
-  expect(() => action()).toThrow(expect.objectContaining({ kind: "prompt_changed" }));
+  expect(() => action()).toThrow(
+    expect.objectContaining({ kind: "prompt_changed" }),
+  );
 }
 
 describe("prompt store", () => {
