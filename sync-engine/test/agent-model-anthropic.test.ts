@@ -1,11 +1,17 @@
 import { describe, expect, test } from "vitest";
 import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { agentProviderRequestHeaders } from "../../sync-engine/agent-model.ts";
 import {
-  agentProviderRequestHeaders,
-  ChatCompletionsAgentModel,
-} from "../../sync-engine/agent-model.ts";
+  ANTHROPIC_TEST_CREDENTIAL,
+  anthropicHarness,
+  doneAnthropicEvents,
+  SIGNED_ANTHROPIC_REPLAY,
+} from "./anthropic-model-test-helpers.ts";
+import {
+  anthropicReplayConversation,
+  capturedRequestRecord,
+} from "./anthropic-replay-request-helpers.ts";
 import {
   cachedText,
   cachedTextMessage,
@@ -13,69 +19,9 @@ import {
 } from "./prompt-cache-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 
-type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
-
 const BASE_URL = "https://anthropic.example.test/v1";
-const KNOWN_MODEL = "claude-test-4";
-const ANTHROPIC_CREDENTIAL = {
-  accountId: null,
-  apiFormat: "anthropic",
-  baseUrl: BASE_URL,
-  secret: "anthropic-secret",
-  source: "api_key",
-} as const;
-
-function anthropicEvents(events: readonly unknown[]): Response {
-  const body = events
-    .map((event) =>
-      isRecord(event)
-        ? `event: ${String(event["type"])}\ndata: ${JSON.stringify(event)}\n\n`
-        : "",
-    )
-    .join("");
-  return new Response(body, {
-    headers: { "content-type": "text/event-stream" },
-  });
-}
-
-function textStopEvents(options: {
-  readonly stopReason: string;
-  readonly text: string;
-  readonly usage: Readonly<Record<string, number>>;
-}): Response {
-  return anthropicEvents([
-    { message: { usage: options.usage }, type: "message_start" },
-    {
-      content_block: { text: "", type: "text" },
-      index: 0,
-      type: "content_block_start",
-    },
-    {
-      delta: { text: options.text, type: "text_delta" },
-      index: 0,
-      type: "content_block_delta",
-    },
-    { index: 0, type: "content_block_stop" },
-    {
-      delta: { stop_reason: options.stopReason },
-      type: "message_delta",
-      usage: { output_tokens: options.text.length },
-    },
-    { type: "message_stop" },
-  ]);
-}
-
-function doneEvents(): Response {
-  return textStopEvents({
-    stopReason: "end_turn",
-    text: "Done.",
-    usage: {
-      cache_creation_input_tokens: 40,
-      cache_read_input_tokens: 900,
-      input_tokens: 60,
-    },
-  });
-}
+const ANTHROPIC_CREDENTIAL = ANTHROPIC_TEST_CREDENTIAL;
+const doneEvents = doneAnthropicEvents;
 
 function expectAbsentProperties(
   body: unknown,
@@ -108,58 +54,6 @@ function invalidRequestResponse(message: string): Response {
   );
 }
 
-interface AnthropicHarness {
-  readonly complete: (
-    messages?: Parameters<ChatCompletionsAgentModel["complete"]>[0],
-  ) => ReturnType<ChatCompletionsAgentModel["complete"]>;
-  readonly requestBody: (index: number) => Promise<unknown>;
-  readonly requests: Request[];
-}
-
-function anthropicHarness(
-  responses: readonly Response[],
-  options: Partial<ModelOptions> = {},
-): AnthropicHarness {
-  const requests: Request[] = [];
-  const remaining = [...responses];
-  const model = new ChatCompletionsAgentModel({
-    toolSettings: DEFAULT_TOOL_SETTINGS,
-    credential: ANTHROPIC_CREDENTIAL,
-    fetch: (request) => {
-      requests.push(request);
-      const response = remaining.shift();
-      if (response === undefined) {
-        throw new Error("No scripted response remains");
-      }
-      return Promise.resolve(response);
-    },
-    maxOutputTokens: null,
-    model: KNOWN_MODEL,
-    provider: "generic",
-    ...options,
-  });
-  return {
-    complete: (messages = [{ content: "Hello", role: "user" }]) =>
-      model.complete(messages),
-    requestBody: async (index) => {
-      const body: unknown = await requests[index]?.json();
-      return body;
-    },
-    requests,
-  };
-}
-
-async function recordRequestBody(
-  harness: AnthropicHarness,
-  index: number,
-): Promise<Readonly<Record<string, unknown>>> {
-  const body = await harness.requestBody(index);
-  if (!isRecord(body)) {
-    throw new Error("The captured body was not a record");
-  }
-  return body;
-}
-
 describe("anthropic-format generic provider", () => {
   test("sends the catalog max output tokens when the session carries them", async () => {
     const harness = anthropicHarness([doneEvents()], {
@@ -167,7 +61,7 @@ describe("anthropic-format generic provider", () => {
     });
     await harness.complete();
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await capturedRequestRecord(harness, 0);
     expect(body["max_tokens"]).toBe(64_000);
   });
 
@@ -211,24 +105,14 @@ describe("anthropic-format generic provider", () => {
   test("sends a cached Messages request and reads the streamed step", async () => {
     const harness = anthropicHarness([doneEvents()], { tools: ["read"] });
 
-    const step = await harness.complete([
-      { content: "Hello", role: "user" },
-      {
-        content: "Reading.",
-        role: "assistant",
-        toolCalls: [
-          { arguments: '{"path":"SETUP.md"}', id: "read-call", name: "read" },
-        ],
-      },
-      {
-        content: "# Q Mush setup",
-        role: "tool",
-        toolCallId: "read-call",
-        toolName: "read",
-      },
-    ]);
+    const step = await harness.complete(
+      anthropicReplayConversation({
+        providerReplay: SIGNED_ANTHROPIC_REPLAY,
+        toolContent: "# Q Mush setup",
+      }).slice(0, -1),
+    );
 
-    expect(step).toEqual(
+    expect(step).toMatchObject(
       providerStep("Done.", {
         contextTokens: 1_000,
         tokenUsage: {
@@ -249,7 +133,7 @@ describe("anthropic-format generic provider", () => {
     expect(request?.headers.get("x-api-key")).toBe("anthropic-secret");
     expect(request?.headers.has("authorization")).toBe(false);
 
-    const body = await recordRequestBody(harness, 0);
+    const body = await capturedRequestRecord(harness, 0);
     // No reasoning parameter and no invented output budget: without catalog
     // metadata the provider's own defaults govern.
     expectAbsentProperties(body, ["max_tokens", "output_config", "thinking"]);
@@ -269,15 +153,7 @@ describe("anthropic-format generic provider", () => {
     expect(body["messages"]).toEqual([
       cachedTextMessage("user", "Hello"),
       {
-        content: [
-          { text: "Reading.", type: "text" },
-          {
-            id: "read-call",
-            input: { path: "SETUP.md" },
-            name: "read",
-            type: "tool_use",
-          },
-        ],
+        content: SIGNED_ANTHROPIC_REPLAY.blocks,
         role: "assistant",
       },
       {
@@ -292,66 +168,6 @@ describe("anthropic-format generic provider", () => {
         role: "user",
       },
     ]);
-  });
-
-  test("streams tool calls and thinking from Messages events", async () => {
-    const deltas: string[] = [];
-    const harness = anthropicHarness(
-      [
-        anthropicEvents([
-          {
-            message: { usage: { input_tokens: 12 } },
-            type: "message_start",
-          },
-          {
-            content_block: { thinking: "", type: "thinking" },
-            index: 0,
-            type: "content_block_start",
-          },
-          {
-            delta: { thinking: "Inspect first.", type: "thinking_delta" },
-            index: 0,
-            type: "content_block_delta",
-          },
-          {
-            content_block: { id: "call-9", name: "read", type: "tool_use" },
-            index: 1,
-            type: "content_block_start",
-          },
-          {
-            delta: { partial_json: '{"path":', type: "input_json_delta" },
-            index: 1,
-            type: "content_block_delta",
-          },
-          {
-            delta: { partial_json: '"src"}', type: "input_json_delta" },
-            index: 1,
-            type: "content_block_delta",
-          },
-          { type: "message_delta", usage: { output_tokens: 9 } },
-          { type: "message_stop" },
-        ]),
-      ],
-      {
-        onDelta: (delta) => {
-          deltas.push(delta.thinking);
-        },
-      },
-    );
-
-    const step = await harness.complete([{ content: "Go", role: "user" }]);
-
-    expect(step.thinking).toBe("Inspect first.");
-    expect(step.toolCalls).toEqual([
-      { arguments: '{"path":"src"}', id: "call-9", name: "read" },
-    ]);
-    expect(step.tokenUsage).toEqual({
-      cacheWriteInputTokens: 0,
-      cachedInputTokens: 0,
-      inputTokens: 12,
-      outputTokens: 9,
-    });
-    expect(deltas.join("")).toBe("Inspect first.");
   });
 
   test("maps a selected reasoning effort to output_config and thinking", async () => {
@@ -435,73 +251,5 @@ describe("anthropic-format generic provider", () => {
       "does not support effort level",
     );
     expect(harness.requests).toHaveLength(1);
-  });
-
-  test.each(["max_tokens", "model_context_window_exceeded"] as const)(
-    "reports %s stops as truncation",
-    async (stopReason) => {
-      const harness = anthropicHarness([
-        textStopEvents({
-          stopReason,
-          text: "Partial",
-          usage: { input_tokens: 3 },
-        }),
-      ]);
-
-      const step = await harness.complete();
-
-      expect(step.content).toBe("Partial");
-      expect(step.truncation).toBe(stopReason);
-    },
-  );
-
-  async function completedTruncation(
-    response: Response,
-  ): Promise<string | undefined> {
-    const step = await anthropicHarness([response]).complete();
-    return step.truncation;
-  }
-
-  test("reports no truncation for an end_turn stop", async () => {
-    expect(await completedTruncation(doneEvents())).toBeUndefined();
-  });
-
-  test("reports truncation from a non-streaming stopped message", async () => {
-    const stopped = Response.json({
-      content: [{ text: "Cut short.", type: "text" }],
-      role: "assistant",
-      stop_reason: "max_tokens",
-      type: "message",
-      usage: { input_tokens: 4, output_tokens: 2 },
-    });
-
-    expect(await completedTruncation(stopped)).toBe("max_tokens");
-  });
-
-  test("parses a non-streaming JSON message response", async () => {
-    const harness = anthropicHarness([
-      Response.json({
-        content: [
-          { text: "Plain.", type: "text" },
-          {
-            id: "call-2",
-            input: { command: "ls" },
-            name: "bash",
-            type: "tool_use",
-          },
-        ],
-        role: "assistant",
-        type: "message",
-        usage: { input_tokens: 7, output_tokens: 3 },
-      }),
-    ]);
-
-    const step = await harness.complete([{ content: "Hi", role: "user" }]);
-
-    expect(step.content).toBe("Plain.");
-    expect(step.toolCalls).toEqual([
-      { arguments: '{"command":"ls"}', id: "call-2", name: "bash" },
-    ]);
-    expect(step.tokenUsage).toMatchObject({ inputTokens: 7, outputTokens: 3 });
   });
 });

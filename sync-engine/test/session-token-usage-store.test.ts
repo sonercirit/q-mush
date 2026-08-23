@@ -9,6 +9,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { TEST_REPLAY_IDENTITY } from "./session-replay-test-helpers.ts";
 import { runningStore } from "./session-store-lifecycle-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
@@ -127,7 +128,9 @@ test("aggregates partial usage coverage by each message's segment", () => {
     NEXT_SEGMENT_TOKEN_USAGE,
   );
   appendStep(setup.store, "Second unreported step", TEST_NOW + 6);
-  expect(setup.store.conversation(STORE_SESSION_ID)).toHaveLength(3);
+  expect(
+    setup.store.conversation(STORE_SESSION_ID, TEST_REPLAY_IDENTITY),
+  ).toHaveLength(3);
 
   const session = setup.store.get(TEST_USER_ID, STORE_SESSION_ID);
   expect(session?.tokenUsage).toEqual({

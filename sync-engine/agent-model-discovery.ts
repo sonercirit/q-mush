@@ -24,11 +24,11 @@ import {
   modelOption,
   reasoningEfforts,
 } from "./agent-model-discovery-option.ts";
-import { usesAnthropicFormat } from "./agent-model-options.ts";
 import {
-  agentProviderRequestHeaders,
-  type AgentProviderCredential,
-} from "./agent-model.ts";
+  usesAnthropicFormat,
+  type AgentProviderDiscoveryCredential,
+} from "./agent-model-options.ts";
+import { agentProviderRequestHeaders } from "./agent-model.ts";
 import { genericProviderEndpoint } from "./generic-provider-url.ts";
 
 const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
@@ -284,7 +284,7 @@ async function mergeOpenAiListedEfforts(
   catalog: AgentModelCatalog,
   unknownEffortIds: ReadonlySet<string>,
   source: {
-    readonly credential: AgentProviderCredential;
+    readonly credential: AgentProviderDiscoveryCredential;
     readonly fetch: AgentModelDiscoveryFetch;
     readonly signal?: AbortSignal;
   },
@@ -357,7 +357,7 @@ function readOpenAiCatalog(value: unknown): AgentModelCatalog {
 
 function discoveryRequest(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderDiscoveryCredential,
 ): { readonly headers: Headers; readonly url: string } {
   const codexOAuth = provider === "openai" && credential.source === "oauth";
   const url = codexOAuth
@@ -376,7 +376,7 @@ function discoveryRequest(
 
 export async function discoverAgentModels(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderDiscoveryCredential,
   signal?: AbortSignal,
 ): Promise<AgentModelCatalog> {
   return discoverAgentModelsWithFetch(
@@ -389,7 +389,7 @@ export async function discoverAgentModels(
 
 export async function discoverAgentModelsWithFetch(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: AgentProviderDiscoveryCredential,
   fetch: AgentModelDiscoveryFetch,
   signal?: AbortSignal,
 ): Promise<AgentModelCatalog> {

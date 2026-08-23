@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  TEST_CREDENTIAL_FINGERPRINT,
+  testApiKeyCredential,
+} from "./agent-model-credential-fixtures.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
@@ -26,11 +30,10 @@ describe("provider HTTP connection-limit classification", () => {
     const modelOptions: ConstructorParameters<
       typeof ChatCompletionsAgentModel
     >[0] = {
-      credential: Object.freeze({
-        accountId: null,
-        secret: "sk-or-secret",
-        source: "api_key" as const,
+      credential: testApiKeyCredential("sk-or-secret", {
+        id: "openrouter-test-credential",
       }),
+      credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
       fetch: () => {
         fetchCount += 1;
         return Promise.resolve(connectionLimitResponse());

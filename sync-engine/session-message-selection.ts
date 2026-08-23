@@ -15,3 +15,8 @@ export const STORED_SESSION_MESSAGE_SELECTION = {
   toolName: agentMessages.toolName,
   turnId: agentMessages.turnId,
 };
+
+export const INTERNAL_SESSION_MESSAGE_SELECTION = {
+  ...STORED_SESSION_MESSAGE_SELECTION,
+  providerReplay: agentMessages.providerReplay,
+};

@@ -11,6 +11,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import { ModelConversationCompactor } from "./agent-compaction.ts";
 import {
+  agentCredentialFingerprint,
   agentModelOpenRouterProviderRouting,
   type AgentModelRequestOptions,
 } from "./agent-model-options.ts";
@@ -33,6 +34,7 @@ export interface SessionAgentModels {
   readonly agent: AgentModel;
   readonly createCompactor: () => ModelConversationCompactor;
   readonly publishCompactionSettled: () => void;
+  readonly resolvedModel?: string | null;
 }
 
 function agentModelRoutingOptions(
@@ -64,12 +66,17 @@ export function createFallbackModel(
     readonly provider: ProviderId;
     readonly providerPricing: ProviderModelPricing | null;
     readonly refreshCredential?: AgentModelFactoryOptions["refreshCredential"];
-    readonly toolSettings: ToolSettings;
+    readonly resolvedModel?: string | null;
+    readonly toolSettings?: ToolSettings;
   },
 ): AgentModel {
   return factory({
     adaptiveThinking: selection.adaptiveThinking,
     credential: selection.credential,
+    credentialFingerprint: agentCredentialFingerprint(selection.credential),
+    ...(selection.toolSettings === undefined
+      ? {}
+      : { toolSettings: selection.toolSettings }),
     maxOutputTokens: selection.maxOutputTokens,
     model: selection.model,
     ...(selection.onRequestState === undefined
@@ -81,10 +88,12 @@ export function createFallbackModel(
     ...(selection.refreshCredential === undefined
       ? {}
       : { refreshCredential: selection.refreshCredential }),
+    ...(selection.resolvedModel === undefined
+      ? {}
+      : { resolvedModel: selection.resolvedModel }),
     systemPrompt:
       selection.prompt ??
       "Describe the supplied attachment faithfully for another text-only model. Return only the useful textual result.",
-    toolSettings: selection.toolSettings,
     tools: [],
   });
 }
@@ -93,6 +102,7 @@ function modelOptions(
   detail: AgentSessionDetail,
   credential: ProviderCredentialAccess,
   systemPrompt: string,
+  resolvedModel: string | null | undefined,
   toolSettings: ToolSettings,
   onDelta?: AgentModelFactoryOptions["onDelta"],
   onStepStart?: AgentModelFactoryOptions["onStepStart"],
@@ -102,6 +112,8 @@ function modelOptions(
   return {
     adaptiveThinking: detail.adaptiveThinking,
     credential,
+    credentialFingerprint: agentCredentialFingerprint(credential),
+    toolSettings,
     ...(sessionToolCacheCapability({
       credentialSource: credential.source,
       provider: detail.provider,
@@ -120,10 +132,31 @@ function modelOptions(
     provider: detail.provider,
     providerPricing: detail.providerPricing,
     reasoningEffort: detail.reasoningEffort,
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
     systemPrompt,
-    toolSettings,
     tools: detail.tools,
   };
+}
+
+function createConfiguredModel(
+  options: Parameters<typeof createSessionAgentModels>[0],
+  systemPrompt: string,
+  onDelta: AgentModelFactoryOptions["onDelta"],
+  onStepStart: AgentModelFactoryOptions["onStepStart"],
+): AgentModel {
+  return options.factory(
+    modelOptions(
+      options.detail,
+      options.credential,
+      systemPrompt,
+      options.resolvedModel,
+      options.toolSettings,
+      onDelta,
+      onStepStart,
+      options.onRequestState,
+      options.refreshCredential,
+    ),
+  );
 }
 
 export function createSessionAgentModels(options: {
@@ -136,13 +169,13 @@ export function createSessionAgentModels(options: {
   readonly isCurrent: () => boolean;
   readonly onRequestState?: AgentModelFactoryOptions["onRequestState"];
   readonly realtime: RealtimeHub | undefined;
+  readonly resolvedModel?: string | null;
   readonly toolStream?: ToolStreamPublisher;
   readonly streamId?: string;
   readonly toolSettings: ToolSettings;
   readonly userId: string;
   readonly onStepStart?: () => void;
 }): SessionAgentModels {
-  const toolSettings = options.toolSettings;
   const id = options.id ?? createUuidV7;
   let streamId = options.streamId ?? id();
   const startStep = (): void => {
@@ -181,7 +214,7 @@ export function createSessionAgentModels(options: {
   const systemPrompt = createAgentSystemPrompt(
     options.agentFile,
     options.detail.executionEnvironment,
-    toolSettings,
+    options.toolSettings,
   );
   const publishCompaction = (
     event:
@@ -217,25 +250,16 @@ export function createSessionAgentModels(options: {
   const publishCompactionSettled = (): void => {
     publishCompaction({ type: "settled" });
   };
-  const createModel = (onStepStart?: () => void) =>
-    options.factory(
-      modelOptions(
-        options.detail,
-        options.credential,
-        systemPrompt,
-        toolSettings,
-        onDelta,
-        onStepStart,
-        options.onRequestState,
-        options.refreshCredential,
-      ),
-    );
+  const resolvedModel = options.resolvedModel;
   return {
-    agent: createModel(startStep),
+    agent: createConfiguredModel(options, systemPrompt, onDelta, startStep),
     createCompactor: () => {
       streamId = id();
       return new ModelConversationCompactor(
-        createModel(
+        createConfiguredModel(
+          options,
+          systemPrompt,
+          onDelta,
           // The compactor stream ID is already fresh; its step start only
           // needs the persistence hook, not another stream reset.
           options.onStepStart,
@@ -244,5 +268,6 @@ export function createSessionAgentModels(options: {
       );
     },
     publishCompactionSettled,
+    ...(resolvedModel === undefined ? {} : { resolvedModel }),
   };
 }

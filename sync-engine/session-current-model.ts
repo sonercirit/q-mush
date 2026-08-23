@@ -3,8 +3,8 @@ import type { ProviderCredentialAccess } from "../shared/provider-credential-sto
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { usesAnthropicFormat } from "./agent-model-options.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
+import type { SessionRuntimeWriter } from "./session-runtime-write.ts";
 import type { SessionStore } from "./session-store.ts";
-
 type CurrentModelSource = Pick<
   AttachmentFallbackRuntimeResources,
   "discoverModels"
@@ -41,9 +41,7 @@ type RefreshRuntime = CurrentModelSource & {
 // preserve the omissions; a canceled run still rejects promptly.
 export async function sessionRequestMetadata(
   runtime: RefreshRuntime,
-  write: (
-    apply: (sessionId: string, now: number, generation: number) => void,
-  ) => void,
+  write: SessionRuntimeWriter,
   signal?: AbortSignal,
 ): Promise<SessionRequestMetadata> {
   const liveDetail = runtime.store.get(runtime.userId, runtime.detail.id);

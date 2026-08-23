@@ -4,13 +4,15 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type {
   AgentSessionDetail,
-  AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
 import { sessionExecutionIsCurrent } from "./session-execution-authority.ts";
 import { runnerReadySessionCondition } from "./session-store-persistence.ts";
-import { serializeProviderPricing } from "./session-store-read.ts";
+import {
+  serializeProviderPricing,
+  type InternalSessionMessage,
+} from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { readStoredSessionResult } from "./session-store-result.ts";
 import { readStoredSessionGeneration } from "./session-store-state.ts";
@@ -75,7 +77,7 @@ export interface ForkAgentSession extends Pick<
     | "providerPricing"
     | "reasoningEffort"
   >;
-  readonly messages: readonly AgentSessionMessage[];
+  readonly messages: readonly InternalSessionMessage[];
   readonly source: AgentSessionSummary;
 }
 
@@ -320,20 +322,21 @@ export function createStoredSession(
   );
 }
 
-function forkMessageValues(message: AgentSessionMessage) {
+function forkMessageValues(internal: InternalSessionMessage) {
+  const message = internal.message;
   const { content, toolCallId, toolCalls, toolName } = message;
   switch (message.role) {
     case "compaction_request":
       throw new Error("A transient compaction request cannot be copied");
-    case "assistant":
+    case "assistant": {
+      const assistant = { content, role: "assistant" as const, toolCalls };
       return recordedMessageValues(
-        {
-          content,
-          role: "assistant",
-          toolCalls,
-        },
+        internal.providerReplay === undefined
+          ? assistant
+          : { ...assistant, providerReplay: internal.providerReplay },
         message.tokenUsage,
       );
+    }
     case "tool":
       if (toolCallId === null || toolName === null) {
         throw new Error("A stored tool result has no tool identity");
@@ -379,8 +382,9 @@ export function forkStoredSession(
         title: `Fork of ${input.source.title}`.slice(0, 80),
       }),
     );
-    for (const message of input.messages) {
-      insertStoredMessage(transaction, forkMessageValues(message), {
+    for (const internal of input.messages) {
+      const message = internal.message;
+      insertStoredMessage(transaction, forkMessageValues(internal), {
         actorId: input.userId,
         id: resources.generateId(now),
         now: message.createdAt,

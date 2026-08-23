@@ -4,7 +4,7 @@ import {
   type ForkAgentSession,
   type ForkSessionResult,
 } from "./session-store-create.ts";
-import { readStoredSessionMessages } from "./session-store-read.ts";
+import { readInternalSessionMessages } from "./session-store-read.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 
 export type SessionStoreForkParameters = readonly [
@@ -18,6 +18,22 @@ export type SessionStoreForkParameters = readonly [
 
 export type SessionStoreForkResult =
   ForkSessionResult | { readonly status: "fork_point_not_found" | "not_found" };
+
+function forkConfigurationPreservesReplay(
+  source: Readonly<{
+    credentialId: string;
+    model: string;
+    provider: string;
+  }>,
+  configuration: ForkAgentSession["configuration"],
+): boolean {
+  return (
+    configuration === undefined ||
+    (configuration.credentialId === source.credentialId &&
+      configuration.model === source.model &&
+      configuration.provider === source.provider)
+  );
+}
 
 export function forkStoredSessionFromSource(
   resources: SessionStoreWriteResources,
@@ -34,18 +50,30 @@ export function forkStoredSessionFromSource(
   if (source === undefined) {
     return { status: "not_found" };
   }
-  const messages = readStoredSessionMessages(resources.database, source.id);
-  const forkPoint = messages.find(({ id }) => id === forkPointMessageId);
+  const messages = readInternalSessionMessages(resources.database, source.id);
+  const forkPoint = messages.find(
+    ({ message }) => message.id === forkPointMessageId,
+  );
   if (forkPoint === undefined) {
     return { status: "fork_point_not_found" };
   }
-  const copied = messages.filter(
-    (message) =>
-      compareAgentSessionMessages(message, forkPoint) <= 0 &&
-      (message.role === "user" ||
-        message.role === "assistant" ||
-        message.role === "tool"),
+  const preserveReplay = forkConfigurationPreservesReplay(
+    source,
+    configuration,
   );
+  const copied = messages
+    .filter(
+      ({ message }) =>
+        compareAgentSessionMessages(message, forkPoint.message) <= 0 &&
+        (message.role === "user" ||
+          message.role === "assistant" ||
+          message.role === "tool"),
+    )
+    .map((internal) =>
+      internal.providerReplay === undefined || preserveReplay
+        ? internal
+        : { message: internal.message },
+    );
   return forkStoredSession(
     resources,
     {

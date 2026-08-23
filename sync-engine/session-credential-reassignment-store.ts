@@ -1,8 +1,9 @@
-import { and, asc, eq, ne, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, ne, type SQL } from "drizzle-orm";
 import { readOpenRouterProviderRouting } from "../shared/agent-configuration.ts";
 import { updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
+  agentMessages,
   agentSessions,
   providerCredentials,
 } from "../shared/database/schema.ts";
@@ -58,6 +59,28 @@ type SessionReassignmentSelection = Pick<
   "credentialId" | "provider" | "scope" | "userId"
 >;
 
+function sessionsToReassignCondition(
+  selection: SessionReassignmentSelection,
+): SQL | undefined {
+  return and(
+    eq(agentSessions.userId, selection.userId),
+    eq(agentSessions.provider, selection.provider),
+    eq(agentSessions.isDeleted, false),
+    ne(agentSessions.providerCredentialId, selection.credentialId),
+    scopeCondition(selection.scope),
+  );
+}
+
+function reassignedSessionIdQuery(
+  database: Pick<AppDatabase, "select">,
+  selection: SessionReassignmentSelection,
+) {
+  const query = database.select({ sessionId: agentSessions.id });
+  return query
+    .from(agentSessions)
+    .where(sessionsToReassignCondition(selection));
+}
+
 function sessionsToReassign(
   database: Pick<AppDatabase, "select">,
   selection: SessionReassignmentSelection,
@@ -70,15 +93,7 @@ function sessionsToReassign(
       openRouterProviderTag: agentSessions.openRouterProviderTag,
     })
     .from(agentSessions)
-    .where(
-      and(
-        eq(agentSessions.userId, selection.userId),
-        eq(agentSessions.provider, selection.provider),
-        eq(agentSessions.isDeleted, false),
-        ne(agentSessions.providerCredentialId, selection.credentialId),
-        scopeCondition(selection.scope),
-      ),
-    )
+    .where(sessionsToReassignCondition(selection))
     .orderBy(asc(agentSessions.id))
     .all();
 }
@@ -207,6 +222,33 @@ function targetIsAccessible(
   );
 }
 
+// Replay blocks are bound to the credential that produced them, so every
+// reassigned session loses them. The reassigned sessions are selected by the
+// same condition as the update below instead of materialized IDs, which keeps
+// the statement within SQLite's bound-parameter limit at any session count.
+function clearReassignedSessionReplay(
+  transaction: Pick<AppDatabase, "select" | "update">,
+  selection: SessionReassignmentSelection,
+  now: number,
+): void {
+  transaction
+    .update(agentMessages)
+    .set({
+      providerReplay: null,
+      ...updatedAuditFields(selection.userId, now),
+    })
+    .where(
+      and(
+        inArray(
+          agentMessages.sessionId,
+          reassignedSessionIdQuery(transaction, selection),
+        ),
+        isNotNull(agentMessages.providerReplay),
+      ),
+    )
+    .run();
+}
+
 export class SessionCredentialReassignmentStore {
   readonly #database: AppDatabase;
 
@@ -258,18 +300,11 @@ export class SessionCredentialReassignmentStore {
         }
 
         const prepared = options.preparedProviderState;
-        const currentSessions =
-          prepared === undefined
-            ? undefined
-            : sessionsToReassign(transaction, options);
+        const sessions = sessionsToReassign(transaction, options);
         if (
           prepared !== undefined &&
-          (currentSessions === undefined ||
-            !snapshotsMatch(currentSessions, prepared.expectedSessions) ||
-            !metadataUpdatesAreComplete(
-              currentSessions,
-              prepared.metadataUpdates,
-            ))
+          (!snapshotsMatch(sessions, prepared.expectedSessions) ||
+            !metadataUpdatesAreComplete(sessions, prepared.metadataUpdates))
         ) {
           return undefined;
         }
@@ -277,6 +312,7 @@ export class SessionCredentialReassignmentStore {
         if (prepared !== undefined) {
           applyMetadataUpdates(transaction, prepared.metadataUpdates);
         }
+        clearReassignedSessionReplay(transaction, options, options.now);
 
         transaction
           .update(agentSessions)
@@ -290,15 +326,7 @@ export class SessionCredentialReassignmentStore {
               : {}),
             ...updatedAuditFields(options.userId, options.now),
           })
-          .where(
-            and(
-              eq(agentSessions.userId, options.userId),
-              eq(agentSessions.provider, options.provider),
-              eq(agentSessions.isDeleted, false),
-              ne(agentSessions.providerCredentialId, options.credentialId),
-              scopeCondition(options.scope),
-            ),
-          )
+          .where(sessionsToReassignCondition(options))
           .run();
         const migratedSessionCount = sqliteChangeCount(
           this.#database,

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import { type AppDatabase } from "../../shared/database.ts";
 import {
+  agentMessages,
   agentSessions,
   providerCredentials,
   providerCredentialWorkspaces,
@@ -239,6 +240,39 @@ describe("session credential reassignment store", () => {
     expect(
       transaction.mock.calls.every((call) => call[1]?.behavior === "immediate"),
     ).toBe(true);
+  });
+
+  test("clears private provider replay when the credential changes", () => {
+    const { database, store } = setupWithSession();
+    database
+      .insert(agentMessages)
+      .values({
+        ...createdAuditFields(USER_ID, NOW),
+        content: "Answer",
+        id: "assistant-message",
+        providerReplay: JSON.stringify({ private: true }),
+        role: "assistant",
+        sessionId: "session-1",
+        userId: USER_ID,
+      })
+      .run();
+
+    expectMigratedSessionCount(reassign(store), 1);
+
+    const stored = database
+      .select({
+        replay: agentMessages.providerReplay,
+        updatedAt: agentMessages.updatedAt,
+        updatedById: agentMessages.updatedById,
+      })
+      .from(agentMessages)
+      .where(eq(agentMessages.id, "assistant-message"))
+      .get();
+    expect(stored).toMatchObject({
+      replay: null,
+      updatedAt: new Date(NOW + 1),
+      updatedById: USER_ID,
+    });
   });
 
   test("uses one set-based update, reports exact rows, and is idempotent", () => {

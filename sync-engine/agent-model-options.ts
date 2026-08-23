@@ -4,12 +4,22 @@ import {
   type OpenRouterProviderRouting,
 } from "../shared/agent-configuration.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
+import { fingerprintProviderCredential } from "../shared/credential-cipher.ts";
 import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
+
+export function agentCredentialFingerprint(
+  credential: Pick<
+    ProviderCredentialAccess,
+    "apiFormat" | "baseUrl" | "secret"
+  >,
+): string {
+  return fingerprintProviderCredential(credential.secret, credential);
+}
 
 export function agentModelOpenRouterProviderRouting(
   selection: string | null | undefined,
@@ -20,6 +30,11 @@ export function agentModelOpenRouterProviderRouting(
 export type AgentProviderCredential = Pick<
   ProviderCredentialAccess,
   "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
+> & { readonly id?: string };
+
+export type AgentProviderDiscoveryCredential = Omit<
+  AgentProviderCredential,
+  "id"
 >;
 
 export type AgentCredentialRefresher = (
@@ -41,6 +56,7 @@ export type ProviderRequestState = "active" | "admission";
 export interface AgentModelRequestOptions {
   readonly adaptiveThinking?: boolean | null;
   readonly credential: AgentProviderCredential;
+  readonly credentialFingerprint?: string;
   readonly dynamicToolCache?: boolean;
   readonly maxOutputTokens: number | null;
   readonly model: string;
@@ -53,7 +69,8 @@ export interface AgentModelRequestOptions {
   readonly provider: ProviderId;
   readonly reasoningEffort?: AgentReasoningEffort | null;
   readonly refreshCredential?: AgentCredentialRefresher;
+  readonly resolvedModel?: string | null;
   readonly systemPrompt?: string;
-  readonly toolSettings: ToolSettings;
+  readonly toolSettings?: ToolSettings;
   readonly tools?: readonly AgentSessionToolName[];
 }

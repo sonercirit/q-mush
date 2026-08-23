@@ -1,21 +1,70 @@
+import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { createDatabase } from "../../shared/database.ts";
+import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
+  addTestProviderCredential,
+  createAuthenticatedTestDatabase,
   TEST_NOW,
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
+import { replayIdentity } from "./session-replay-test-helpers.ts";
 import { markTestSessionRunning } from "./session-store-lifecycle-test-helpers.ts";
+import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import {
-  STORE_RUNNER_ID,
-  STORE_SESSION_ID,
   createStore,
   createTestSession,
+  STORE_RUNNER_ID,
+  STORE_SESSION_ID,
+  testSessionInput,
 } from "./session-store-test-fixtures.ts";
+
+const temporaryDirectory = useSynchronousTemporaryDirectories(
+  "q-mush-provider-replay-",
+);
 
 const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000048";
+const REPLAY_BLOCKS = [
+  {
+    signature: "persisted-signature",
+    thinking: "Private reasoning",
+    type: "thinking" as const,
+  },
+  { data: "persisted-redaction", type: "redacted_thinking" as const },
+  { text: "I will inspect the file.", type: "text" as const },
+  {
+    id: "call-1",
+    input: { path: "README.md" },
+    name: "read",
+    type: "tool_use" as const,
+  },
+] as const;
+const PROVIDER_REPLAY = {
+  blocks: REPLAY_BLOCKS,
+  model: "fork-model",
+  protocol: "anthropic" as const,
+  provenance: "test-provenance",
+};
+
+const FORK_ASSISTANT_MESSAGE = {
+  content: "I will inspect the file.",
+  providerReplay: PROVIDER_REPLAY,
+  role: "assistant" as const,
+  toolCalls: [
+    {
+      arguments: '{"path":"README.md"}',
+      id: "call-1",
+      name: "read",
+    },
+  ],
+};
+
 const TOKEN_USAGE = {
   outputTokens: 20,
   inputTokens: 100,
@@ -45,19 +94,7 @@ function prepareForkSource() {
   );
   setup.store.appendRuntimeAgentMessages(
     STORE_SESSION_ID,
-    [
-      {
-        content: "I will inspect the file.",
-        role: "assistant",
-        toolCalls: [
-          {
-            arguments: '{"path":"README.md"}',
-            id: "call-1",
-            name: "read",
-          },
-        ],
-      },
-    ],
+    [FORK_ASSISTANT_MESSAGE],
     TEST_NOW + 3,
     source.generation,
     {
@@ -104,6 +141,55 @@ function forkAtToolMessage(
     TEST_NOW + 7,
     selection,
   );
+}
+
+function replayConversation(
+  store: ReturnType<typeof createStore>["store"],
+  sessionId: string,
+) {
+  return store.conversation(
+    sessionId,
+    replayIdentity(PROVIDER_REPLAY.model, PROVIDER_REPLAY.provenance),
+  );
+}
+
+function forkAssistant(
+  store: ReturnType<typeof createStore>["store"],
+  sessionId: string,
+) {
+  return replayConversation(store, sessionId).find(
+    ({ role }) => role === "assistant",
+  );
+}
+
+function expectPublicMessagesHideReplay(messages: readonly unknown[]): void {
+  expect(messages[1]).not.toHaveProperty("providerReplay");
+  expect(JSON.stringify(messages)).not.toContain("persisted-signature");
+}
+
+function replacementForkSelection(
+  source: ReturnType<typeof prepareForkSource>["source"],
+) {
+  return {
+    adaptiveThinking: false,
+    credentialId: source.credentialId,
+    maxContextTokens: 256_000,
+    maxOutputTokens: null,
+    model: "replacement/model",
+    openRouterProviderTag: null,
+    provider: "openrouter" as const,
+    providerPricing: null,
+    reasoningEffort: "high" as const,
+  };
+}
+
+function replacementFork() {
+  const setup = prepareForkSource();
+  const result = forkAtToolMessage(
+    setup.store,
+    replacementForkSelection(setup.source),
+  );
+  return { ...setup, fork: requireForked(result) };
 }
 
 describe("session store forks", () => {
@@ -160,8 +246,59 @@ describe("session store forks", () => {
       expect(copiedIds.has(sourceId)).toBe(false);
     }
     expect(fork.messages[0]?.images).toEqual(source.messages[0]?.images);
+    const forkConversation = replayConversation(store, fork.id);
+    expect(forkConversation[1]).toMatchObject({
+      providerReplay: PROVIDER_REPLAY,
+    });
+    expectPublicMessagesHideReplay(fork.messages);
     expect(store.list(TEST_USER_ID)).toHaveLength(2);
     database.$client.close();
+  });
+
+  test("replays signed metadata after reopening the database", () => {
+    const path = join(temporaryDirectory(), "session.sqlite");
+    const database = createAuthenticatedTestDatabase({ path });
+    addSessionTestRunner(database, "replay-restart-machine", STORE_RUNNER_ID);
+    addTestProviderCredential(database, testSessionInput().credentialId);
+    const ids = [
+      STORE_SESSION_ID,
+      "018bcfe5-6800-7000-8000-000000000044",
+      "018bcfe5-6800-7000-8000-000000000045",
+    ];
+    const store = new SessionStore(
+      database,
+      () => {
+        const replayId = ids.shift();
+        if (replayId === undefined) {
+          throw new Error("No fork replay test ID remains");
+        }
+        return replayId;
+      },
+      () => DEFAULT_TOOL_SETTINGS,
+      { pending: () => undefined },
+    );
+    createTestSession(store, TEST_NOW, {
+      images: [],
+      model: PROVIDER_REPLAY.model,
+    });
+    markTestSessionRunning(store);
+    store.appendCurrentAgentMessage(
+      STORE_SESSION_ID,
+      FORK_ASSISTANT_MESSAGE,
+      TEST_NOW + 2,
+    );
+    database.$client.close();
+
+    const reopened = createDatabase(path);
+    expect(
+      replayConversation(
+        new SessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
+          pending: () => undefined,
+        }),
+        STORE_SESSION_ID,
+      )[1],
+    ).toEqual(expect.objectContaining({ providerReplay: PROVIDER_REPLAY }));
+    reopened.$client.close();
   });
 
   test("preserves persisted assistant usage in a fork", () => {
@@ -194,21 +331,9 @@ describe("session store forks", () => {
   });
 
   test("creates a fork with a chosen provider and model", () => {
-    const { database, source, store } = prepareForkSource();
+    const { database, fork, source } = replacementFork();
 
-    const result = forkAtToolMessage(store, {
-      adaptiveThinking: false,
-      credentialId: source.credentialId,
-      maxContextTokens: 256_000,
-      maxOutputTokens: null,
-      model: "replacement/model",
-      openRouterProviderTag: null,
-      provider: "openrouter",
-      providerPricing: null,
-      reasoningEffort: "high",
-    });
-
-    expect(requireForked(result)).toMatchObject({
+    expect(fork).toMatchObject({
       adaptiveThinking: false,
       credentialId: source.credentialId,
       executionEnvironment: source.executionEnvironment,
@@ -220,6 +345,30 @@ describe("session store forks", () => {
       workingDirectory: source.workingDirectory,
     });
     database.$client.close();
+  });
+
+  test("drops signed replay when a fork changes models", () => {
+    const { database, fork, store } = replacementFork();
+
+    const assistant = forkAssistant(store, fork.id);
+    expect(assistant).not.toHaveProperty("providerReplay");
+    database.$client.close();
+  });
+
+  test("drops signed replay when a fork changes credentials", () => {
+    const setup = prepareForkSource();
+    addTestProviderCredential(setup.database, "replacement-credential");
+    const selection = {
+      ...replacementForkSelection(setup.source),
+      credentialId: "replacement-credential",
+      model: setup.source.model,
+      provider: setup.source.provider,
+    };
+    const fork = requireForked(forkAtToolMessage(setup.store, selection));
+
+    const assistant = forkAssistant(setup.store, fork.id);
+    expect(assistant).not.toHaveProperty("providerReplay");
+    setup.database.$client.close();
   });
 
   test("preserves a source runner reassignment requirement", () => {

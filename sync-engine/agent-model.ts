@@ -17,7 +17,7 @@ import {
 } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
-import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
 import {
   completionMessages,
   completionSignal,
@@ -25,6 +25,7 @@ import {
   type OptionalStep,
 } from "./agent-completion.ts";
 import {
+  agentCredentialFingerprint,
   usesAnthropicFormat,
   type AgentCredentialRefresher,
   type AgentModelRequestOptions,
@@ -32,9 +33,19 @@ import {
 } from "./agent-model-options.ts";
 import type { ModelRequestSleep } from "./agent-model-retry.ts";
 import {
+  defaultAgentModelWebSocket,
+  emptyOutputDelta,
+  headersRecord,
+} from "./agent-model-transport.ts";
+import { completeAnthropicPauseTurns } from "./anthropic-continuation.ts";
+import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
+import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
+import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
+  assertAnthropicContinuationReplays,
 } from "./anthropic-request.ts";
+import { validateAnthropicStepContinuation } from "./anthropic-step-continuation.ts";
 import {
   genericProviderEndpoint,
   isOfficialAnthropicEndpoint,
@@ -74,14 +85,14 @@ export interface ChatCompletionsAgentModelOptions extends AgentModelRequestOptio
 
 function usesCodexOAuth(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: Pick<AgentProviderCredential, "source">,
 ): boolean {
   return provider === "openai" && credential.source === "oauth";
 }
 
 function endpoint(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: Pick<AgentProviderCredential, "apiFormat" | "baseUrl" | "source">,
 ): string {
   if (usesCodexOAuth(provider, credential)) {
     return OPENAI_CODEX_RESPONSES_URL;
@@ -104,7 +115,7 @@ function endpoint(
 
 function accessToken(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: Pick<AgentProviderCredential, "secret" | "source">,
 ): string {
   return provider === "openai" && credential.source === "oauth"
     ? readOpenAiOAuthCredential(credential.secret).access
@@ -134,7 +145,10 @@ function promptCacheKeyHeader(
 
 export function agentProviderRequestHeaders(
   provider: ProviderId,
-  credential: AgentProviderCredential,
+  credential: Pick<
+    AgentProviderCredential,
+    "accountId" | "apiFormat" | "baseUrl" | "secret" | "source"
+  >,
   options: AgentProviderRequestHeaderOptions,
 ): Headers {
   const headers = new Headers({
@@ -149,13 +163,8 @@ export function agentProviderRequestHeaders(
       options.protocol === "anthropic" &&
       isOfficialAnthropicEndpoint(credential.baseUrl)
     ) {
-      // Sending the catalog maximum as max_tokens can exceed the context
-      // window on long conversations. 4.5+ models then stop with
-      // model_context_window_exceeded; this documented beta opts earlier
-      // models into the same degradation instead of a validation error.
-      // First-party Messages completion only: the beta changes nothing off
-      // api.anthropic.com, and proxies and gateways 400 on unrecognized
-      // beta names; discovery and other JSON endpoints stay reachable.
+      // The beta degrades pre-4.5 context overshoots to a stop, not an error.
+      // First-party only: gateways reject unknown betas.
       headers.set("anthropic-beta", ANTHROPIC_CONTEXT_WINDOW_BETA);
     }
     if (token.length > 0) {
@@ -186,9 +195,6 @@ export function agentProviderRequestHeaders(
 
     headers.set("originator", "q_mush");
 
-    // The Codex backend routes a session to the machine that already holds its
-    // prompt cache, so the stable session identifier is what keeps hit rates
-    // high across steps.
     if (options.promptCacheKey !== undefined) {
       headers.set("session_id", options.promptCacheKey);
     }
@@ -204,27 +210,20 @@ interface CompletionInput {
   readonly signal: AbortSignal | undefined;
 }
 
-function completionInput(parameters: CompletionArguments): CompletionInput {
+function completionInput(
+  parameters: CompletionArguments,
+  model?: string,
+): CompletionInput {
   return {
-    messages: completionMessages(parameters),
+    messages: completionMessages(parameters, model),
     signal: completionSignal(parameters),
   };
-}
-
-function headersRecord(headers: Headers): Readonly<Record<string, string>> {
-  return Object.fromEntries(headers.entries());
-}
-
-function defaultWebSocket(
-  url: string,
-  options: { readonly headers: Readonly<Record<string, string>> },
-) {
-  return createServerWebSocket(url, options.headers);
 }
 
 export class ChatCompletionsAgentModel implements AgentModel {
   readonly #adaptiveThinking: boolean | null;
   #credential: AgentProviderCredential;
+  readonly #credentialFingerprint: string;
   readonly #dynamicToolCache: boolean;
   readonly #fetch: AgentModelFetch;
   readonly #maxOutputTokens: number | null;
@@ -237,6 +236,8 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #provider: ProviderId;
   readonly #reasoningEffort: AgentReasoningEffort | undefined;
   readonly #refreshCredential: AgentCredentialRefresher | undefined;
+  readonly #resolvedModel: string | null | undefined;
+  #resolvedModelPromise: Promise<string | undefined> | undefined;
   readonly #sleep: ModelRequestSleep | undefined;
   readonly #systemPrompt: string;
   readonly #selectedTools: readonly AgentSessionToolName[];
@@ -247,6 +248,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#adaptiveThinking = options.adaptiveThinking ?? null;
     this.#credential = options.credential;
+    this.#credentialFingerprint =
+      options.credentialFingerprint ??
+      agentCredentialFingerprint(options.credential);
     this.#dynamicToolCache = options.dynamicToolCache === true;
     this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
     this.#maxOutputTokens = options.maxOutputTokens ?? null;
@@ -263,14 +267,15 @@ export class ChatCompletionsAgentModel implements AgentModel {
     this.#provider = options.provider;
     this.#reasoningEffort = options.reasoningEffort ?? undefined;
     this.#refreshCredential = options.refreshCredential;
+    this.#resolvedModel = options.resolvedModel;
     this.#sleep = options.sleep;
     this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
     this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
     this.#tools = selectedAgentTools(
       this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
-      options.toolSettings,
+      options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
     );
-    this.#webSocket = options.webSocket ?? defaultWebSocket;
+    this.#webSocket = options.webSocket ?? defaultAgentModelWebSocket;
   }
 
   readonly startStep = (): void => {
@@ -393,9 +398,12 @@ export class ChatCompletionsAgentModel implements AgentModel {
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     stream: boolean,
+    resolvedModel?: string,
   ): unknown {
     return requestBody({
       adaptiveThinking: this.#adaptiveThinking,
+      credential: this.#credential,
+      credentialFingerprint: this.#credentialFingerprint,
       dynamicToolCache: this.#dynamicToolCache,
       maxOutputTokens: this.#maxOutputTokens,
       messages,
@@ -405,6 +413,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       protocol,
       provider: this.#provider,
       reasoningEffort: this.#reasoningEffort,
+      resolvedModel,
       selectedTools: this.#selectedTools,
       stream,
       systemPrompt: this.#systemPrompt,
@@ -463,25 +472,143 @@ export class ChatCompletionsAgentModel implements AgentModel {
     });
   }
 
-  #completeHttp(...parameters: CompletionArguments): Promise<AgentModelStep> {
-    const input = completionInput(parameters);
-    const protocol = this.#httpProtocol();
-    return completeProviderHttp(
+  #anthropicResolvedModel(
+    signal: AbortSignal | undefined,
+  ): Promise<string | undefined> {
+    if (this.#resolvedModel !== undefined) {
+      return Promise.resolve(this.#resolvedModel ?? undefined);
+    }
+    if (this.#resolvedModelPromise !== undefined) {
+      return this.#resolvedModelPromise;
+    }
+    const resolution = resolveAnthropicModelAttempt({
+      credential: this.#credential,
+      fetch: this.#fetch,
+      model: this.#model,
+      provider: this.#provider,
+      ...(signal === undefined ? {} : { signal }),
+    });
+    this.#resolvedModelPromise = resolution.then((result) => {
+      if (result.retryable) {
+        this.#resolvedModelPromise = undefined;
+      }
+      return result.model;
+    });
+    return this.#resolvedModelPromise;
+  }
+
+  #anthropicReplayIdentity(
+    resolvedModel: string | undefined,
+  ): ReturnType<typeof anthropicReplayIdentityFrom> {
+    const options = {
+      credential: this.#credential,
+      credentialFingerprint: this.#credentialFingerprint,
+      model: this.#model,
+      provider: this.#provider,
+    };
+    return resolvedModel === undefined
+      ? anthropicReplayIdentityFrom(options)
+      : anthropicReplayIdentityFrom({ ...options, resolvedModel });
+  }
+
+  #assertAnthropicContinuationReplays(
+    messages: readonly AgentConversationMessage[],
+    resolvedModel: string | undefined,
+  ): void {
+    assertAnthropicContinuationReplays(
+      messages,
+      this.#anthropicReplayIdentity(resolvedModel),
+    );
+  }
+
+  async #httpRequest(
+    messages: readonly AgentConversationMessage[],
+    protocol: ProviderRequestProtocol,
+    signal: AbortSignal | undefined,
+    resolvedModel: string | undefined,
+    onStreamRetry?: () => void,
+  ): Promise<AgentModelStep> {
+    if (protocol === "anthropic") {
+      this.#assertAnthropicContinuationReplays(messages, resolvedModel);
+    }
+    const step = await completeProviderHttp(
       {
-        body: this.#requestBody(input.messages, protocol, true),
+        body: this.#requestBody(messages, protocol, true, resolvedModel),
+        credential: this.#credential,
+        credentialFingerprint: this.#credentialFingerprint,
         fetch: this.#fetch,
         headers: agentProviderRequestHeaders(this.#provider, this.#credential, {
           accept: "text/event-stream",
           ...promptCacheKeyHeader(this.#promptCacheKey),
           protocol,
         }),
+        model: this.#model,
         onDelta: this.#onDelta,
+        ...(onStreamRetry === undefined ? {} : { onStreamRetry }),
         protocol,
         provider: this.#provider,
+        ...(resolvedModel === undefined ? {} : { resolvedModel }),
         sleep: this.#sleep,
         url: endpoint(this.#provider, this.#credential),
       },
-      input.signal,
+      signal,
     );
+    if (protocol !== "anthropic") return step;
+    const continuationModel =
+      resolvedModel === undefined &&
+      (step.toolCalls.length > 0 ||
+        step.providerContinuation === "anthropic_pause_turn")
+        ? await this.#anthropicResolvedModel(signal)
+        : resolvedModel;
+    return validateAnthropicStepContinuation(
+      step,
+      this.#anthropicReplayIdentity(continuationModel),
+    );
+  }
+
+  async #completeHttp(
+    ...parameters: CompletionArguments
+  ): Promise<AgentModelStep> {
+    const protocol = this.#httpProtocol();
+    const input = completionInput(parameters, this.#model);
+    const resolvedModel =
+      protocol === "anthropic"
+        ? await this.#anthropicResolvedModel(input.signal)
+        : undefined;
+    if (protocol === "anthropic") {
+      this.#assertAnthropicContinuationReplays(parameters[0], resolvedModel);
+    }
+    const step = await this.#httpRequest(
+      input.messages,
+      protocol,
+      input.signal,
+      resolvedModel,
+    );
+    if (
+      step.providerContinuation === "anthropic_replay_unavailable" &&
+      step.toolCalls.length > 0
+    ) {
+      return step;
+    }
+    return protocol === "anthropic"
+      ? completeAnthropicPauseTurns(
+          input.messages,
+          step,
+          async (messages, output) => {
+            const restoreOutput = (): void => {
+              this.#onDelta?.(output);
+            };
+            this.#onDelta?.(emptyOutputDelta());
+            restoreOutput();
+            return this.#httpRequest(
+              messages,
+              protocol,
+              input.signal,
+              resolvedModel,
+              restoreOutput,
+            );
+          },
+        )
+      : step;
   }
 }

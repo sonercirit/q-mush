@@ -4,12 +4,67 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { runningStore } from "./session-store-lifecycle-test-helpers.ts";
+import { privateReplay } from "./private-replay-fixtures.ts";
+import {
+  runningStore,
+  storedAssistantReplays,
+} from "./session-store-lifecycle-test-helpers.ts";
 import { STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
 
+function snapshot(options: {
+  readonly includeSystem: boolean;
+  readonly roles: readonly ("assistant" | "error" | "tool")[];
+}) {
+  const setup = runningStore();
+  return {
+    ...setup,
+    read: () =>
+      readSessionSnapshot(setup.database, {
+        includeSystem: options.includeSystem,
+        limit: 10,
+        roles: options.roles,
+        sessionId: STORE_SESSION_ID,
+        userId: TEST_USER_ID,
+      }),
+  };
+}
+
 describe("stored session reads", () => {
+  test("never selects private provider replay for read_session", () => {
+    const { database, read, store } = snapshot({
+      includeSystem: false,
+      roles: ["assistant"],
+    });
+    store.appendCurrentAgentMessage(
+      STORE_SESSION_ID,
+      {
+        content: "Visible answer",
+        providerReplay: privateReplay(
+          "read-session-private-signature",
+          "Visible answer",
+        ),
+        role: "assistant",
+        toolCalls: [],
+      },
+      TEST_NOW + 2,
+    );
+
+    const session = read();
+
+    expect(JSON.stringify(session)).toContain("Visible answer");
+    expect(JSON.stringify(session)).not.toContain(
+      "read-session-private-signature",
+    );
+    const stored = storedAssistantReplays(database);
+    expect(stored[0]?.replay).toContain("read-session-private-signature");
+    database.$client.close();
+  });
+
   test("returns complete persisted source content before the final result bound", () => {
-    const { database, store } = runningStore();
+    const { database, read, store } = snapshot({
+      includeSystem: true,
+      roles: ["tool"],
+    });
     const agentFileContent = `instructions:${"😀".repeat(12_000)}`;
     const messageContent = `result:${"é".repeat(10_000)}`;
     store.setCurrentAgentFile(
@@ -28,21 +83,19 @@ describe("stored session reads", () => {
       TEST_NOW + 3,
     );
 
-    const snapshot = readSessionSnapshot(database, {
-      includeSystem: true,
-      limit: 10,
-      roles: ["tool"],
-      sessionId: STORE_SESSION_ID,
-      userId: TEST_USER_ID,
-    });
+    const session = read();
 
-    expect(snapshot?.agentFile?.content).toBe(agentFileContent);
-    expect(snapshot?.transcript.messages.at(-1)?.content).toBe(messageContent);
+    expect(session?.agentFile?.content).toBe(agentFileContent);
+    expect(session?.transcript.messages.at(-1)?.content).toBe(messageContent);
     database.$client.close();
   });
 
   test("returns persisted error notices when the error category is selected", () => {
-    const { database, store } = runningStore();
+    const errorSetup = snapshot({
+      includeSystem: false,
+      roles: ["assistant", "error"],
+    });
+    const { database, read, store } = errorSetup;
     // Truncation and failure notices persist as error rows; the database
     // filter must return them when selected, not only the formatter.
     store.appendRuntimeErrorMessage(
@@ -52,16 +105,10 @@ describe("stored session reads", () => {
       0,
     );
 
-    const snapshot = readSessionSnapshot(database, {
-      includeSystem: false,
-      limit: 10,
-      roles: ["assistant", "error"],
-      sessionId: STORE_SESSION_ID,
-      userId: TEST_USER_ID,
-    });
+    const session = read();
 
     expect(
-      snapshot?.transcript.messages.map(({ content, role }) => ({
+      session?.transcript.messages.map(({ content, role }) => ({
         content,
         role,
       })),

@@ -6,6 +6,10 @@ import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderRequestLifecycleOptions } from "../../sync-engine/provider-request-lifecycle.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
+import {
+  TEST_CREDENTIAL_FINGERPRINT,
+  testApiKeyCredential,
+} from "./agent-model-credential-fixtures.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
@@ -260,11 +264,8 @@ export function apiKeyModel(
   },
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
-    credential: {
-      accountId: null,
-      secret: "sk-openai",
-      source: "api_key",
-    },
+    credential: testApiKeyCredential("sk-openai", { id: "test-credential" }),
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     fetch: options.fetch ?? neverFetch,
     maxOutputTokens: null,
     model: "api-test-model",
@@ -285,6 +286,7 @@ function oauthModel(
 ): ChatCompletionsAgentModel {
   return new ChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
+    credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     fetch,
     maxOutputTokens: null,
     model: "gpt-5-codex",

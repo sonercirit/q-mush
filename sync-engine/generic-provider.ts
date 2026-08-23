@@ -62,7 +62,11 @@ async function readGenericCredentialDetails(
   try {
     await discoverAgentModelsWithFetch(
       "generic",
-      { ...endpoint, secret: apiKey, source: "api_key" },
+      {
+        ...endpoint,
+        secret: apiKey,
+        source: "api_key",
+      },
       (request) => runtime.fetch(request),
     );
   } catch (error) {

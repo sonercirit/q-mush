@@ -68,7 +68,10 @@ import {
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
-import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
+import {
+  resolveSessionReplayModel,
+  sessionRuntimeConversation,
+} from "./session-runtime-conversation.ts";
 import { runtimeCredentialRefresher } from "./session-runtime-credential-refresh.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
@@ -154,6 +157,8 @@ async function loadModels(
         markProviderPending(runtime, state);
       };
       const refreshCredential = runtimeCredentialRefresher(runtime);
+      const resolvedModel = await resolveSessionReplayModel(runtime, signal);
+      throwIfRestartRequested(runtime);
       return createSessionAgentModels({
         agentFile,
         credential: runtime.credential,
@@ -166,6 +171,7 @@ async function loadModels(
           markSessionStepStart(runtime);
         },
         realtime: runtime.realtime,
+        ...(resolvedModel === undefined ? {} : { resolvedModel }),
         ...(options.streamId === undefined
           ? {}
           : { streamId: options.streamId }),
@@ -192,7 +198,10 @@ export async function compactSessionConversation(
   if (runtime.restartHandoffRequested()) {
     return "handoff";
   }
-  const conversation = sessionRuntimeConversation(runtime);
+  const conversation = sessionRuntimeConversation(
+    runtime,
+    models.resolvedModel,
+  );
   const truncation = runtime.store.conversationTruncation(runtime.detail.id);
   const compactor = models.createCompactor();
   const startedAt = runtime.now();
@@ -306,11 +315,6 @@ export async function runSessionAgent(
 ): Promise<"complete" | "handoff"> {
   const settings = runtime.toolSettings;
   const streamId = createUuidV7();
-  const initialMessages = sessionRuntimeConversation(runtime);
-  const messages =
-    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
-      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
-      : initialMessages;
   const toolStream = new ToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
@@ -319,14 +323,20 @@ export async function runSessionAgent(
     workspaceId: runtime.detail.workspaceId,
   });
   const models = await loadModels(runtime, { streamId, toolStream });
+  const initialMessages = sessionRuntimeConversation(
+    runtime,
+    models.resolvedModel,
+  );
+  const messages =
+    runtime.continuous && initialMessages.at(-1)?.role === "assistant"
+      ? [...initialMessages, { content: "Continue.", role: "user" as const }]
+      : initialMessages;
   const handoffController = new AbortController();
   const toolSignal = AbortSignal.any([
     runtime.signal,
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  // Resumed runs park at their next step boundary too; exempting them let a
-  // drain that caught one never converge.
   const stepBoundaryRequested = runtime.restartHandoffRequested;
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
@@ -405,8 +415,6 @@ export async function runSessionAgent(
       throwIfRestartRequested(runtime);
       runtime.pendingComponent("provider_request");
       const currentModel = await discoverCurrentSessionModel(runtime, signal);
-      // Discovery may ignore cancellation and settle after the wrapper already
-      // reported timed-out; never start explanation model work afterward.
       throwIfAgentAborted(signal);
       throwIfRestartRequested(runtime);
       if (currentModel === undefined) {
