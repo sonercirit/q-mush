@@ -17,7 +17,10 @@ import {
 } from "../../sync-engine/session-agent-models.ts";
 import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
+import {
+  createRecordingRealtimeSocket,
+  type RecordingRealtimeSocket,
+} from "./realtime-hub-test-helpers.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { promiseGate } from "./session-race-test-helpers.ts";
 
@@ -88,7 +91,7 @@ function realtimeSetup(): {
   readonly socket: RecordingRealtimeSocket;
 } {
   const hub = new RealtimeHub();
-  const socket = new RecordingRealtimeSocket();
+  const socket = createRecordingRealtimeSocket();
   connectedRealtime(hub, socket);
   return { hub, socket };
 }

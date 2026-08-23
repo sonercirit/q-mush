@@ -4,23 +4,24 @@ import {
   RealtimeHub,
   type RealtimeSocket,
 } from "../../sync-engine/realtime-hub.ts";
-import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
+import { createRecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 
-class FailingSocket implements RealtimeSocket {
-  close(): void {
-    // Already closed.
-  }
-
-  send(): number {
-    throw new Error("socket closed");
-  }
+function createFailingSocket(): RealtimeSocket {
+  return {
+    close() {
+      // Already closed.
+    },
+    send() {
+      throw new Error("socket closed");
+    },
+  };
 }
 
 test("replaces an existing connection for the same runner", () => {
   const hub = new RealtimeHub();
   const sockets = [
-    new RecordingRealtimeSocket(),
-    new RecordingRealtimeSocket(),
+    createRecordingRealtimeSocket(),
+    createRecordingRealtimeSocket(),
   ] as const;
   const [first, second] = sockets;
 
@@ -34,9 +35,9 @@ test("replaces an existing connection for the same runner", () => {
 
 test("continues publishing when one user socket is closing", () => {
   const hub = new RealtimeHub();
-  const active = new RecordingRealtimeSocket();
+  const active = createRecordingRealtimeSocket();
   const userId = "closing-user";
-  hub.setUser(userId, new FailingSocket(), true);
+  hub.setUser(userId, createFailingSocket(), true);
   hub.setUser(userId, active, true);
 
   hub.publishUser(userId, { sessions: [], type: "sessions" });
@@ -46,9 +47,9 @@ test("continues publishing when one user socket is closing", () => {
 
 test("publishes snapshots only to the authenticated user's sockets", () => {
   const hub = new RealtimeHub();
-  const first = new RecordingRealtimeSocket();
-  const second = new RecordingRealtimeSocket();
-  const other = new RecordingRealtimeSocket();
+  const first = createRecordingRealtimeSocket();
+  const second = createRecordingRealtimeSocket();
+  const other = createRecordingRealtimeSocket();
 
   hub.setUser("user-1", first, true);
   hub.setUser("user-1", second, true);
@@ -69,10 +70,10 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
 
 test("publishes user-wide settings to every owned workspace without cross-user leakage", () => {
   const hub = new RealtimeHub();
-  const firstWorkspace = new RecordingRealtimeSocket();
-  const secondWorkspace = new RecordingRealtimeSocket();
-  const global = new RecordingRealtimeSocket();
-  const otherUser = new RecordingRealtimeSocket();
+  const firstWorkspace = createRecordingRealtimeSocket();
+  const secondWorkspace = createRecordingRealtimeSocket();
+  const global = createRecordingRealtimeSocket();
+  const otherUser = createRecordingRealtimeSocket();
   hub.setUser("user-1", firstWorkspace, true, "workspace-1");
   hub.setUser("user-1", secondWorkspace, true, "workspace-2");
   hub.setUser("user-1", global, true);
@@ -95,7 +96,7 @@ test("publishes user-wide settings to every owned workspace without cross-user l
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
   const hub = new RealtimeHub();
 
-  const runner = new RecordingRealtimeSocket();
+  const runner = createRecordingRealtimeSocket();
   const command = testRunnerCommand();
 
   expect(hub.publishRunnerCommand("runner-1", command)).toBe(false);
