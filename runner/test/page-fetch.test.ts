@@ -8,8 +8,9 @@ import {
 } from "../page-fetch-content.ts";
 import {
   assertPublicPageUrl,
-  PageFetchProxy,
+  createPageFetchProxy,
   type PageAddressResolver,
+  type PageFetchProxy,
   type UpstreamConnector,
 } from "../page-fetch-process.ts";
 import {
@@ -88,7 +89,7 @@ async function withProxyClient<Result>(
   request: string,
   run: (proxy: PageFetchProxy) => Promise<Result>,
 ): Promise<Result> {
-  const proxy = new PageFetchProxy(resolver, connectUpstream);
+  const proxy = createPageFetchProxy(resolver, connectUpstream);
   const port = await proxy.start();
   const client = connect({ host: "127.0.0.1", port });
   try {

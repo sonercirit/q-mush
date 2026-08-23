@@ -325,64 +325,50 @@ function forwardedRequest(header: Buffer, url: URL): Buffer {
   );
 }
 
-const processProxySocket = (proxy: PageFetchProxy, socket: Socket): void => {
-  proxy.accept(socket);
-};
-
 export type UpstreamConnector = (options: NetConnectOpts) => Socket;
 
-export class PageFetchProxy {
-  readonly #connectUpstream: UpstreamConnector;
-  readonly #resolveAddress: PageAddressResolver;
-  readonly #sockets = new Set<Socket>();
-  #server: Server | undefined;
-  failure: Error | undefined;
+export function createPageFetchProxy(
+  resolveAddress: PageAddressResolver = defaultPageAddressResolver,
+  connectUpstream: UpstreamConnector = createConnection,
+) {
+  const sockets = new Set<Socket>();
+  let server: Server | undefined;
+  let failure: Error | undefined;
 
-  constructor(
-    resolveAddress: PageAddressResolver = defaultPageAddressResolver,
-    connectUpstream: UpstreamConnector = createConnection,
-  ) {
-    this.#connectUpstream = connectUpstream;
-    this.#resolveAddress = resolveAddress;
-  }
-
-  async start(): Promise<number> {
-    if (this.#server !== undefined) {
+  async function start(): Promise<number> {
+    if (server !== undefined) {
       throw new Error("Page fetch proxy is already running");
     }
-    const server = createServer((socket) => {
-      processProxySocket(this, socket);
+    const createdServer = createServer((socket) => {
+      accept(socket);
     });
-    this.#server = server;
+    server = createdServer;
     await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", () => {
-        server.removeListener("error", reject);
+      createdServer.once("error", reject);
+      createdServer.listen(0, "127.0.0.1", () => {
+        createdServer.removeListener("error", reject);
         resolve();
       });
     });
     const address = server.address();
     if (address === null || typeof address === "string") {
-      await this.close();
+      await close();
       throw new Error("Page fetch proxy did not expose a local port");
     }
     return address.port;
   }
 
-  accept(client: Socket): void {
-    this.#sockets.add(client);
+  function accept(client: Socket): void {
+    sockets.add(client);
     client.once("close", () => {
-      this.#sockets.delete(client);
+      sockets.delete(client);
     });
     let buffered = Buffer.alloc(0);
     const receive = (chunk: string | Buffer): void => {
       const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
       buffered = Buffer.concat([buffered, bytes]);
       if (buffered.byteLength > MAXIMUM_PROXY_HEADER_BYTES) {
-        this.#reject(
-          client,
-          new Error("Browser proxy headers exceeded the limit"),
-        );
+        reject(client, new Error("Browser proxy headers exceeded the limit"));
         return;
       }
       const headerEnd = buffered.indexOf("\r\n\r\n");
@@ -391,14 +377,12 @@ export class PageFetchProxy {
       }
       client.removeAllListeners("data");
       client.pause();
-      void this.#forward(client, buffered, headerEnd + 4).catch(
-        (error: unknown) => {
-          this.#reject(
-            client,
-            error instanceof Error ? error : new Error(String(error)),
-          );
-        },
-      );
+      void forward(client, buffered, headerEnd + 4).catch((error: unknown) => {
+        reject(
+          client,
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
     };
     client.on("data", receive);
     client.once("error", () => {
@@ -406,7 +390,7 @@ export class PageFetchProxy {
     });
   }
 
-  async #forward(
+  async function forward(
     client: Socket,
     buffered: Buffer,
     bodyStart: number,
@@ -420,23 +404,23 @@ export class PageFetchProxy {
     }
     const isConnect = method.toUpperCase() === "CONNECT";
     const url = isConnect ? connectUrl(target) : proxyUrl(target);
-    const addresses = await publicPageAddresses(url, this.#resolveAddress);
+    const addresses = await publicPageAddresses(url, resolveAddress);
     const address = addresses[0];
     if (address === undefined) {
       throw hostnameResolutionFailure();
     }
-    const upstream = this.#connectUpstream({
+    const upstream = connectUpstream({
       family: address.family,
       host: address.address,
       port: targetPort(url),
       timeout: UPSTREAM_CONNECT_TIMEOUT_MILLISECONDS,
     });
-    this.#sockets.add(upstream);
+    sockets.add(upstream);
     upstream.once("close", () => {
-      this.#sockets.delete(upstream);
+      sockets.delete(upstream);
     });
     upstream.once("error", (error) => {
-      this.#reject(client, error);
+      reject(client, error);
     });
     await new Promise<void>((resolve, reject) => {
       upstream.once("connect", resolve);
@@ -467,9 +451,9 @@ export class PageFetchProxy {
     client.resume();
   }
 
-  #reject(client: Socket, error: Error): void {
-    this.failure ??= error;
-    for (const socket of this.#sockets) {
+  function reject(client: Socket, error: Error): void {
+    failure ??= error;
+    for (const socket of sockets) {
       if (socket !== client) {
         socket.destroy();
       }
@@ -479,23 +463,34 @@ export class PageFetchProxy {
     }
   }
 
-  async close(): Promise<void> {
-    for (const socket of this.#sockets) {
+  async function close(): Promise<void> {
+    for (const socket of sockets) {
       socket.destroy();
     }
-    this.#sockets.clear();
-    const server = this.#server;
-    this.#server = undefined;
-    if (server === undefined) {
+    sockets.clear();
+    const closingServer = server;
+    server = undefined;
+    if (closingServer === undefined) {
       return;
     }
     await new Promise<void>((resolve) => {
-      server.close(() => {
+      closingServer.close(() => {
         resolve();
       });
     });
   }
+
+  return {
+    accept,
+    close,
+    get failure() {
+      return failure;
+    },
+    start,
+  };
 }
+
+export type PageFetchProxy = ReturnType<typeof createPageFetchProxy>;
 
 function trackedChildProcessIds(parentId: number): readonly number[] {
   if (process.platform !== "linux") {

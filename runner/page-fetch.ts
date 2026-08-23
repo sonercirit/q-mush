@@ -23,8 +23,8 @@ import {
 } from "./page-fetch-devtools.ts";
 import {
   assertPublicPageUrl,
+  createPageFetchProxy,
   defaultPageAddressResolver,
-  PageFetchProxy,
   removeChromiumProfile,
   stopChromium,
   type PageAddressResolver,
@@ -414,7 +414,7 @@ function defaultRenderer(
     retryChromiumStartup(async () => {
       const executablePath = await discoverChromiumExecutable(options);
       const profilePath = await mkdtemp(join(tmpdir(), "q-mush-page-fetch-"));
-      const proxy = new PageFetchProxy(resolveAddress);
+      const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {
         const proxyPort = await proxy.start();
