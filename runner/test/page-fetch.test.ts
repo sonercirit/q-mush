@@ -10,7 +10,6 @@ import {
   assertPublicPageUrl,
   createPageFetchProxy,
   type PageAddressResolver,
-  type PageFetchProxy,
   type UpstreamConnector,
 } from "../page-fetch-process.ts";
 import {
@@ -19,6 +18,8 @@ import {
   PAGE_FETCH_TOOL_NAME,
   type PageFetchDependencies,
 } from "../page-fetch.ts";
+
+type PageFetchProxy = ReturnType<typeof createPageFetchProxy>;
 
 type PageRenderer = NonNullable<PageFetchDependencies["render"]>;
 

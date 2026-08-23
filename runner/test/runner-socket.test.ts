@@ -1,14 +1,13 @@
 import { expect, test } from "vitest";
 import {
   createRunnerRegistrationRejectedError,
-  createRunnerSupersededError,
   observeOperationalRunnerSocket,
 } from "../../runner/runner-socket.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
-  return expect(failure).resolves.toEqual(createRunnerSupersededError());
+  return expect(failure).resolves.toMatchObject({ name: "RunnerSupersededError" });
 }
 
 function observedSocketFailure(

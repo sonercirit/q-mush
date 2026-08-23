@@ -1,4 +1,4 @@
-export interface RunnerRestartSocket {
+interface RunnerRestartSocket {
   readonly readyState: number;
   addEventListener(
     type: string,

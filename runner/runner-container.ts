@@ -34,7 +34,7 @@ export interface RunnerContainerShellOptions extends Pick<
   ) => void;
 }
 
-export type RunnerContainerRun = (
+type RunnerContainerRun = (
   executable: string,
   arguments_: readonly string[],
   options: RunnerContainerRunOptions,

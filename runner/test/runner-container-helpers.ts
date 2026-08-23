@@ -1,7 +1,6 @@
 import {
   createRunnerContainerManager,
   type RunnerContainerManager,
-  type RunnerContainerRun,
 } from "../runner-container.ts";
 import type { RunnerProcessResult } from "../runner-process.ts";
 
@@ -49,7 +48,17 @@ function pendingResult(
   });
 }
 
-type ContainerRunOptions = Parameters<RunnerContainerRun>[2];
+interface ContainerRunOptions {
+  readonly onOutput?: (delta: Omit<import("../../shared/runner-command-broker.ts").RunnerCommandOutputDelta, "sequence">) => void;
+  readonly outputLimitCharacters?: number;
+  readonly signal?: AbortSignal;
+  readonly timeoutSeconds?: number;
+}
+type RunnerContainerRun = (
+  executable: string,
+  arguments_: readonly string[],
+  options: ContainerRunOptions,
+) => Promise<RunnerProcessResult>;
 type ContainerOperationHandler = (
   arguments_: readonly string[],
   options: ContainerRunOptions,

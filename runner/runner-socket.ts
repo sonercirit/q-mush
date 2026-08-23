@@ -20,7 +20,7 @@ export function isRunnerRegistrationRejectedError(
   );
 }
 
-export function createRunnerSupersededError(): RunnerConnectionError {
+function createRunnerSupersededError(): RunnerConnectionError {
   return createRunnerConnectionError(
     "The runner connection was superseded by a newer process",
     "RunnerSupersededError",

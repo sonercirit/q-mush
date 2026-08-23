@@ -2,10 +2,16 @@ import { expect, test } from "vitest";
 import {
   createRunnerRestartCoordinator,
   type RunnerRestartCoordinator,
-  type RunnerRestartSocket,
 } from "../../runner/runner-restart.ts";
 
-interface TestSocket extends RunnerRestartSocket {
+interface TestSocket {
+  readonly readyState: number;
+  addEventListener(
+    type: string,
+    listener: EventListenerOrEventListenerObject | null,
+    options?: boolean | AddEventListenerOptions,
+  ): void;
+  send(message: string): void;
   readonly sent: readonly string[];
   readonly completeRestart: (
     restartId: string,

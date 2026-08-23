@@ -4,7 +4,6 @@ import { describe, expect, test } from "vitest";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import {
   createRunnerContainerManager,
-  type RunnerContainerRun,
 } from "../runner-container.ts";
 import {
   calledArguments,
@@ -25,6 +24,10 @@ import {
 const temporaryDirectory = useSynchronousTemporaryDirectories(
   "q-mush-container-test-",
 );
+
+type RunnerContainerRun = NonNullable<
+  NonNullable<Parameters<typeof createRunnerContainerManager>[0]>["run"]
+>;
 
 type FakeCall = FakeContainerCall;
 
