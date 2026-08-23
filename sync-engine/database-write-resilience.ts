@@ -86,7 +86,10 @@ function closedError(): Error {
 
 export interface DatabaseWriteResilience {
   close(): void;
-  run<Result>(priority: DatabaseWritePriority, operation: () => Result): Result | undefined;
+  run<Result>(
+    priority: DatabaseWritePriority,
+    operation: () => Result,
+  ): Result | undefined;
 }
 
 export function createDatabaseWriteResilience(
@@ -96,7 +99,9 @@ export function createDatabaseWriteResilience(
   const health = options.health;
   const sleep = options.sleep ?? Bun.sleepSync;
   let closed = false;
-  const perform = <Result>(operation: () => Result): DatabaseWriteAttempt<Result> => {
+  const perform = <Result>(
+    operation: () => Result,
+  ): DatabaseWriteAttempt<Result> => {
     try {
       return { result: attempt(operation), status: "persisted" };
     } catch (error) {
@@ -108,7 +113,10 @@ export function createDatabaseWriteResilience(
     close() {
       closed = true;
     },
-    run<Result>(priority: DatabaseWritePriority, operation: () => Result): Result | undefined {
+    run<Result>(
+      priority: DatabaseWritePriority,
+      operation: () => Result,
+    ): Result | undefined {
       if (closed) throw closedError();
       let attempted = perform(operation);
       if (attempted.status === "persisted") return attempted.result;

@@ -4,11 +4,11 @@ import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import { readSqlitePragmaNumber } from "../../shared/test/sqlite.ts";
 import {
   createDatabaseWriteResilience,
-  type DatabaseWriteResilience,
   installDatabaseWriteResilience,
   isDiskFullFailure,
   runNoncriticalDatabaseWrite,
   startDatabaseRecoveryWatcher,
+  type DatabaseWriteResilience,
 } from "../database-write-resilience.ts";
 import { createEngineHealth, type EngineHealth } from "../engine-health.ts";
 

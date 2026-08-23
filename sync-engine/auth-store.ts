@@ -80,72 +80,99 @@ export function createDrizzleAuthStore(
         let userId: string;
         if (existingUser === undefined) {
           userId = generateId(now);
-          transaction.insert(users).values({
-            ...storedProfile,
-            createdAt: timestamp,
-            createdById: SYSTEM_ID,
-            googleSubject: profile.googleSubject,
-            id: userId,
-            isDeleted: false,
-            updatedAt: timestamp,
-            updatedById: SYSTEM_ID,
-          }).run();
-          transaction.insert(workspaces).values({
+          transaction
+            .insert(users)
+            .values({
+              ...storedProfile,
+              createdAt: timestamp,
+              createdById: SYSTEM_ID,
+              googleSubject: profile.googleSubject,
+              id: userId,
+              isDeleted: false,
+              updatedAt: timestamp,
+              updatedById: SYSTEM_ID,
+            })
+            .run();
+          transaction
+            .insert(workspaces)
+            .values({
+              createdAt: timestamp,
+              createdById: userId,
+              id: generateId(now),
+              isDefault: true,
+              isDeleted: false,
+              name: DEFAULT_WORKSPACE_NAME,
+              updatedAt: timestamp,
+              updatedById: userId,
+              userId,
+            })
+            .run();
+        } else {
+          if (existingUser.isDeleted)
+            throw new Error("The user has been deleted");
+          userId = existingUser.id;
+          transaction
+            .update(users)
+            .set({
+              ...storedProfile,
+              updatedAt: timestamp,
+              updatedById: SYSTEM_ID,
+            })
+            .where(eq(users.id, userId))
+            .run();
+        }
+        transaction
+          .insert(sessions)
+          .values({
             createdAt: timestamp,
             createdById: userId,
+            expiresAt: new Date(expiresAt),
             id: generateId(now),
-            isDefault: true,
             isDeleted: false,
-            name: DEFAULT_WORKSPACE_NAME,
+            token,
             updatedAt: timestamp,
             updatedById: userId,
             userId,
-          }).run();
-        } else {
-          if (existingUser.isDeleted) throw new Error("The user has been deleted");
-          userId = existingUser.id;
-          transaction.update(users).set({
-            ...storedProfile,
-            updatedAt: timestamp,
-            updatedById: SYSTEM_ID,
-          }).where(eq(users.id, userId)).run();
-        }
-        transaction.insert(sessions).values({
-          createdAt: timestamp,
-          createdById: userId,
-          expiresAt: new Date(expiresAt),
-          id: generateId(now),
-          isDeleted: false,
-          token,
-          updatedAt: timestamp,
-          updatedById: userId,
-          userId,
-        }).run();
+          })
+          .run();
       });
     },
     expireSessions(now) {
       softDeleteSessions(
-        and(eq(sessions.isDeleted, false), lte(sessions.expiresAt, new Date(now))),
+        and(
+          eq(sessions.isDeleted, false),
+          lte(sessions.expiresAt, new Date(now)),
+        ),
         SYSTEM_ID,
         now,
       );
     },
     readSessionUser(token, now) {
-      const user = database.select({
-        email: users.email,
-        id: users.id,
-        name: users.name,
-        picture: users.picture,
-      }).from(sessions).innerJoin(users, eq(sessions.userId, users.id)).where(and(
-        activeSessionCondition(token),
-        gt(sessions.expiresAt, new Date(now)),
-        eq(users.isDeleted, false),
-      )).get();
+      const user = database
+        .select({
+          email: users.email,
+          id: users.id,
+          name: users.name,
+          picture: users.picture,
+        })
+        .from(sessions)
+        .innerJoin(users, eq(sessions.userId, users.id))
+        .where(
+          and(
+            activeSessionCondition(token),
+            gt(sessions.expiresAt, new Date(now)),
+            eq(users.isDeleted, false),
+          ),
+        )
+        .get();
       return user === undefined ? null : toAuthenticatedUser(user);
     },
     revokeSession(token, now) {
-      const session = database.select({ id: sessions.id, userId: sessions.userId })
-        .from(sessions).where(activeSessionCondition(token)).get();
+      const session = database
+        .select({ id: sessions.id, userId: sessions.userId })
+        .from(sessions)
+        .where(activeSessionCondition(token))
+        .get();
       if (session !== undefined) {
         softDeleteSessions(eq(sessions.id, session.id), session.userId, now);
       }

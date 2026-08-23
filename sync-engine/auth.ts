@@ -4,7 +4,10 @@ import {
   AUTH_GOOGLE_CALLBACK_PATH,
   AUTH_GOOGLE_PATH,
 } from "../shared/routes.ts";
-import { createDrizzleAuthStore, type GoogleUserProfile } from "./auth-store.ts";
+import {
+  createDrizzleAuthStore,
+  type GoogleUserProfile,
+} from "./auth-store.ts";
 import {
   appendCookies,
   createCookie,
