@@ -178,13 +178,8 @@ export class ConnectedAccountOAuth {
       this.#configuration.flowCookies,
     );
 
-    switch (callback.status) {
-      case "ready":
-        break;
-      case "denied":
-      case "failed":
-      case "invalid_state":
-        return this.#appRedirect(request, callback.status, clearedCookies);
+    if (callback.status !== "ready") {
+      return this.#appRedirect(request, callback.status, clearedCookies);
     }
 
     const invalidState = (): Response =>
