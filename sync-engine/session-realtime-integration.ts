@@ -38,7 +38,7 @@ import { type CancelPendingInputResult } from "./session-pending-inputs.ts";
 import type { SessionProviderUpdateDependencies } from "./session-provider-update.ts";
 import {
   answerSessionQuestionsCommand,
-  QuestionActionFailure,
+  isQuestionActionFailure,
   type SessionQuestionActionDependencies,
 } from "./session-question-actions.ts";
 import {
@@ -168,7 +168,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         payload,
       );
     } catch (error) {
-      if (error instanceof QuestionActionFailure) {
+      if (isQuestionActionFailure(error)) {
         throw new RealtimeCommandError(error.code);
       }
       throw error;

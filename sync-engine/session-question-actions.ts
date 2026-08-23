@@ -12,11 +12,27 @@ import type {
   SessionLifecycleDependencies,
 } from "./session-lifecycle-types.ts";
 
-export class QuestionActionFailure extends RealtimeCommandError {
-  constructor(code: string) {
-    super(code);
-    this.name = "QuestionActionFailure";
-  }
+export type QuestionActionFailure = RealtimeCommandError & {
+  readonly tag: "question_action_failure";
+};
+
+export function createQuestionActionFailure(
+  code: string,
+): QuestionActionFailure {
+  return Object.assign(new RealtimeCommandError(code), {
+    name: "QuestionActionFailure",
+    tag: "question_action_failure" as const,
+  });
+}
+
+export function isQuestionActionFailure(
+  error: unknown,
+): error is QuestionActionFailure {
+  return (
+    error instanceof RealtimeCommandError &&
+    "tag" in error &&
+    error.tag === "question_action_failure"
+  );
 }
 
 export type AnsweredQuestionLaunch = RecoverableQuestionIdentity;
@@ -40,15 +56,16 @@ export interface SessionQuestionActionDependencies extends SessionLifecycleDepen
   >;
 }
 
-function answerFailure(status: "conflict" | "not_found" | "stale"): never {
-  switch (status) {
-    case "conflict":
-      throw new QuestionActionFailure("question_answer_conflict");
-    case "not_found":
-      throw new QuestionActionFailure("not_found");
-    case "stale":
-      throw new QuestionActionFailure("question_request_stale");
-  }
+type AnswerFailureStatus = "conflict" | "not_found" | "stale";
+
+const answerFailureCodes: Record<AnswerFailureStatus, string> = {
+  conflict: "question_answer_conflict",
+  not_found: "not_found",
+  stale: "question_request_stale",
+};
+
+function answerFailure(status: AnswerFailureStatus): never {
+  throw createQuestionActionFailure(answerFailureCodes[status]);
 }
 
 function validAnswers(
@@ -63,7 +80,7 @@ function validAnswers(
       payload.workspaceId,
     ) === false
   ) {
-    throw new QuestionActionFailure("not_found");
+    throw createQuestionActionFailure("not_found");
   }
   const input = dependencies.questions.input(
     userId,
@@ -75,7 +92,7 @@ function validAnswers(
       ? undefined
       : readAskQuestionAnswers({ answers: payload.answers }, input.questions);
   if (answers === undefined) {
-    throw new QuestionActionFailure(
+    throw createQuestionActionFailure(
       input === undefined ? "not_found" : "invalid_request",
     );
   }
@@ -97,7 +114,7 @@ export async function answerSessionQuestionsCommand(
 }> {
   const payload = readAnswerQuestionsRealtimePayload(value);
   if (payload === undefined) {
-    throw new QuestionActionFailure("invalid_request");
+    throw createQuestionActionFailure("invalid_request");
   }
   const answers = validAnswers(dependencies, user.id, payload);
   const answered = dependencies.questions.answer(
@@ -107,32 +124,57 @@ export async function answerSessionQuestionsCommand(
     answers,
     dependencies.now(),
   );
-  switch (answered.status) {
-    case "conflict":
-    case "not_found":
-    case "stale":
-      return answerFailure(answered.status);
-    case "already_answered":
+  type AnswerResult = typeof answered;
+  type AnswerStatus = AnswerResult["status"];
+  type AlreadyAnswered = {
+    readonly result: string;
+    readonly status: "already_answered";
+  };
+  type SuccessfulAnswer = {
+    readonly request: {
+      readonly executionGeneration: number;
+      readonly id: string;
+      readonly sessionId: string;
+      readonly userId: string;
+    };
+    readonly result: string;
+    readonly status: "answered";
+  };
+  const handlers: Record<
+    AnswerStatus,
+    (result: never) => Promise<{
+      readonly launchStarted: boolean;
+      readonly result: string;
+      readonly status: "already_answered" | "answered";
+    }>
+  > = {
+    conflict: (result) =>
+      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
+    not_found: (result) =>
+      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
+    stale: (result) =>
+      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
+    already_answered: async (result) => {
+      const value = result as AlreadyAnswered;
       return {
         launchStarted: false,
-        result: answered.result,
-        status: answered.status,
+        result: value.result,
+        status: value.status,
       };
-    case "answered": {
+    },
+    answered: async (result) => {
+      const value = result as SuccessfulAnswer;
       dependencies.notify(user.id, payload.sessionId);
       const launchStarted = await dependencies.launchAnswered({
-        executionGeneration: answered.request.executionGeneration,
-        requestId: answered.request.id,
-        sessionId: answered.request.sessionId,
-        userId: answered.request.userId,
+        executionGeneration: value.request.executionGeneration,
+        requestId: value.request.id,
+        sessionId: value.request.sessionId,
+        userId: value.request.userId,
       });
-      return {
-        launchStarted,
-        result: answered.result,
-        status: answered.status,
-      };
-    }
-  }
+      return { launchStarted, result: value.result, status: value.status };
+    },
+  };
+  return handlers[answered.status](answered as never);
 }
 
 export async function recoverAnsweredQuestions(

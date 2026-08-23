@@ -11,7 +11,7 @@ import type {
 } from "../../sync-engine/ask-questions-store.ts";
 import {
   answerSessionQuestionsCommand,
-  QuestionActionFailure,
+  isQuestionActionFailure,
 } from "../../sync-engine/session-question-actions.ts";
 import {
   TEST_QUESTION_ANSWERS,
@@ -185,6 +185,6 @@ describe("ask_questions agent tool", () => {
         requestId: REQUEST.id,
         sessionId: REQUEST.sessionId,
       }),
-    ).rejects.toBeInstanceOf(QuestionActionFailure);
+    ).rejects.toSatisfy(isQuestionActionFailure);
   });
 });

@@ -13,7 +13,11 @@ export type AskQuestionsPause = Error & {
 export function createAskQuestionsPause(requestId: string): AskQuestionsPause {
   return Object.assign(
     new Error("The agent session is paused for question answers"),
-    { name: "AskQuestionsPause", requestId, tag: "ask_questions_pause" as const },
+    {
+      name: "AskQuestionsPause",
+      requestId,
+      tag: "ask_questions_pause" as const,
+    },
   );
 }
 
