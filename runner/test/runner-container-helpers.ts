@@ -1,9 +1,11 @@
-import type { RunnerCommandOutputDelta } from "../../shared/runner-command-broker.ts";
 import {
   createRunnerContainerManager,
   type RunnerContainerManager,
 } from "../runner-container.ts";
-import type { RunnerProcessResult } from "../runner-process.ts";
+import type {
+  RunnerProcessOptions,
+  RunnerProcessResult,
+} from "../runner-process.ts";
 
 export interface FakeContainerCall {
   readonly arguments: readonly string[];
@@ -49,14 +51,10 @@ function pendingResult(
   });
 }
 
-interface ContainerRunOptions {
-  readonly onOutput?: (
-    delta: Omit<RunnerCommandOutputDelta, "sequence">,
-  ) => void;
-  readonly outputLimitCharacters?: number;
-  readonly signal?: AbortSignal;
-  readonly timeoutSeconds?: number;
-}
+type ContainerRunOptions = Pick<
+  RunnerProcessOptions,
+  "onOutput" | "outputLimitCharacters" | "signal" | "timeoutSeconds"
+>;
 type RunnerContainerRun = (
   executable: string,
   arguments_: readonly string[],
