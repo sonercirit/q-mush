@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 import { completeRunnerRegistration } from "../runner/runner-registration.ts";
 import {
   observeOperationalRunnerSocket,
-  RunnerSupersededError,
+  createRunnerSupersededError,
 } from "../runner/runner-socket.ts";
 import {
   RunnerStartupRestart,
@@ -249,7 +249,7 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   expect(staleProcess.client.readyState).toBe(WebSocket.CLOSED);
   expect(staleProcess.client.received).toContain(runnerSupersededMessage());
   await expect(staleProcess.stopped()).resolves.toEqual(
-    new RunnerSupersededError(),
+    createRunnerSupersededError(),
   );
   await expect(commandRejection).resolves.toEqual(
     new RunnerDisconnectedError(

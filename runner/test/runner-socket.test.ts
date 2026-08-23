@@ -1,14 +1,14 @@
 import { expect, test } from "vitest";
 import {
   observeOperationalRunnerSocket,
-  RunnerRegistrationRejectedError,
-  RunnerSupersededError,
+  createRunnerRegistrationRejectedError,
+  createRunnerSupersededError,
 } from "../../runner/runner-socket.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
-  return expect(failure).resolves.toEqual(new RunnerSupersededError());
+  return expect(failure).resolves.toEqual(createRunnerSupersededError());
 }
 
 function observedSocketFailure(
@@ -23,7 +23,7 @@ function observedSocketFailure(
 test("reports an explicit registration rejection distinctly", () => {
   return expect(
     observedSocketFailure({ type: "registration_rejected" }),
-  ).resolves.toEqual(new RunnerRegistrationRejectedError());
+  ).resolves.toEqual(createRunnerRegistrationRejectedError());
 });
 
 test("reports an explicit supersession frame distinctly", () => {

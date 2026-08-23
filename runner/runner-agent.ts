@@ -13,7 +13,7 @@ import { RunnerCommandExecutions } from "./runner-command-executions.ts";
 import { readRunnerCommand, RunnerCommandExecutor } from "./runner-command.ts";
 import {
   createRunnerConnectionSettlement,
-  RunnerConnectionError,
+  createRunnerConnectionError,
 } from "./runner-connection.ts";
 import { RunnerContainerManager } from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
@@ -23,8 +23,8 @@ import {
   addRunnerSocketFailureListeners,
   observeOperationalRunnerSocket,
   parseSocketJsonRecord,
-  RunnerRegistrationRejectedError,
-  RunnerSupersededError,
+  isRunnerRegistrationRejectedError,
+  isRunnerSupersededError,
 } from "./runner-socket.ts";
 import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
@@ -321,7 +321,7 @@ async function connectRunner(
           }),
         );
       } catch {
-        throw new RunnerConnectionError(
+        throw createRunnerConnectionError(
           "The WebSocket connection message could not be sent",
         );
       }
@@ -350,8 +350,8 @@ async function connectRunner(
     } catch (error) {
       socket.close();
       if (
-        error instanceof RunnerRegistrationRejectedError ||
-        error instanceof RunnerSupersededError
+        isRunnerRegistrationRejectedError(error) ||
+        isRunnerSupersededError(error)
       ) {
         throw error;
       }
@@ -461,7 +461,7 @@ async function pendingSupersession(
   milliseconds: number,
 ): Promise<void> {
   const pending = await pendingSocketFailure(failure, milliseconds);
-  if (pending instanceof RunnerSupersededError) {
+  if (isRunnerSupersededError(pending)) {
     await throwSocketFailure(socket, active, pending);
   }
 }
@@ -471,7 +471,7 @@ async function throwSocketFailure(
   active: RunnerCommandExecutions,
   failure: Error,
 ): Promise<never> {
-  if (failure instanceof RunnerSupersededError) {
+  if (isRunnerSupersededError(failure)) {
     socket.close(1000, "Superseded");
     active.abortAll();
     await activeRunnerExecution().containers.cleanupAll();
@@ -506,7 +506,7 @@ async function maintainConnection(
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
       const failure = await socketFailure;
-      if (failure instanceof RunnerSupersededError) {
+      if (isRunnerSupersededError(failure)) {
         await throwSocketFailure(socket, active, failure);
       }
       socket = await establishConnection();

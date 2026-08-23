@@ -7,12 +7,12 @@ import {
 } from "../shared/runner-realtime-protocol.ts";
 import {
   createRunnerConnectionSettlement,
-  RunnerConnectionError,
+  createRunnerConnectionError,
 } from "./runner-connection.ts";
 import {
   addRunnerSocketFailureListeners,
   parseSocketJsonRecord,
-  RunnerRegistrationRejectedError,
+  createRunnerRegistrationRejectedError,
 } from "./runner-socket.ts";
 import type { RunnerStartupConnection } from "./runner-update.ts";
 
@@ -78,14 +78,14 @@ interface RegistrationContext {
     ((restartId: string | undefined) => boolean) | undefined;
   readonly onVersion: ((version: string) => void) | undefined;
   readonly send: (message: string) => boolean;
-  readonly settle: (error?: RunnerConnectionError) => void;
+  readonly settle: (error?: Error) => void;
   readonly startupConnection: RunnerStartupConnection;
   readonly state: RegistrationState;
 }
 
 function invalidRegistration(context: RegistrationContext): void {
   context.settle(
-    new RunnerConnectionError("The server returned invalid setup data"),
+    createRunnerConnectionError("The server returned invalid setup data"),
   );
 }
 
@@ -251,7 +251,7 @@ const registrationHandlers: Readonly<
       context.installOperationalHandlers();
     } catch {
       context.settle(
-        new RunnerConnectionError(
+        createRunnerConnectionError(
           "The runner command handlers could not be installed",
         ),
       );
@@ -273,7 +273,7 @@ const registrationHandlers: Readonly<
       context.onOperational?.(context.startupConnection.restartId) === false
     ) {
       context.settle(
-        new RunnerConnectionError("The runner restart settlement was invalid"),
+        createRunnerConnectionError("The runner restart settlement was invalid"),
       );
       return;
     }
@@ -314,7 +314,7 @@ export function completeRunnerRegistration(
     };
     const settlement = createRunnerConnectionSettlement(resolve, reject);
     let settled = false;
-    const settle = (error?: RunnerConnectionError): void => {
+    const settle = (error?: Error): void => {
       settlement.settle(error);
       settled = settlement.settled;
     };
@@ -327,7 +327,7 @@ export function completeRunnerRegistration(
         return true;
       } catch {
         settle(
-          new RunnerConnectionError(
+          createRunnerConnectionError(
             "The WebSocket registration acknowledgement failed",
           ),
         );
@@ -351,7 +351,7 @@ export function completeRunnerRegistration(
       ) {
         const message = parseRunnerRegistrationMessage(event.data);
         if (message?.["type"] === "registration_rejected") {
-          settle(new RunnerRegistrationRejectedError());
+          settle(createRunnerRegistrationRejectedError());
           return;
         }
         if (message === undefined) {
@@ -363,7 +363,7 @@ export function completeRunnerRegistration(
       }
       if (!settled) {
         settle(
-          new RunnerConnectionError("The server returned binary setup data"),
+          createRunnerConnectionError("The server returned binary setup data"),
         );
       }
     });

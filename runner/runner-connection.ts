@@ -1,18 +1,25 @@
-export class RunnerConnectionError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "RunnerConnectionError";
-  }
+export type RunnerConnectionError = Error & {
+  readonly runnerConnectionError: true;
+};
+
+export function createRunnerConnectionError(
+  message: string,
+  name = "RunnerConnectionError",
+): RunnerConnectionError {
+  return Object.assign(new Error(message), {
+    name,
+    runnerConnectionError: true as const,
+  });
 }
 
 export interface RunnerConnectionSettlement {
   readonly settled: boolean;
-  readonly settle: (error?: RunnerConnectionError) => void;
+  readonly settle: (error?: Error) => void;
 }
 
 export function createRunnerConnectionSettlement(
   resolve: () => void,
-  reject: (error: RunnerConnectionError) => void,
+  reject: (error: Error) => void,
 ): RunnerConnectionSettlement {
   let settled = false;
   return {
@@ -20,15 +27,10 @@ export function createRunnerConnectionSettlement(
       return settled;
     },
     settle: (error) => {
-      if (settled) {
-        return;
-      }
+      if (settled) return;
       settled = true;
-      if (error === undefined) {
-        resolve();
-      } else {
-        reject(error);
-      }
+      if (error === undefined) resolve();
+      else reject(error);
     },
   };
 }

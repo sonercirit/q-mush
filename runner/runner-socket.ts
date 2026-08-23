@@ -1,19 +1,27 @@
 import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../shared/runner-realtime-protocol.ts";
-import { RunnerConnectionError } from "./runner-connection.ts";
+import { createRunnerConnectionError, type RunnerConnectionError } from "./runner-connection.ts";
 
-export class RunnerRegistrationRejectedError extends RunnerConnectionError {
-  constructor() {
-    super("The runner registration was rejected by Q Mush");
-    this.name = "RunnerRegistrationRejectedError";
-  }
+export function createRunnerRegistrationRejectedError(): RunnerConnectionError {
+  return createRunnerConnectionError(
+    "The runner registration was rejected by Q Mush",
+    "RunnerRegistrationRejectedError",
+  );
 }
 
-export class RunnerSupersededError extends RunnerConnectionError {
-  constructor() {
-    super("The runner connection was superseded by a newer process");
-    this.name = "RunnerSupersededError";
-  }
+export function isRunnerRegistrationRejectedError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "RunnerRegistrationRejectedError";
+}
+
+export function createRunnerSupersededError(): RunnerConnectionError {
+  return createRunnerConnectionError(
+    "The runner connection was superseded by a newer process",
+    "RunnerSupersededError",
+  );
+}
+
+export function isRunnerSupersededError(error: unknown): error is Error {
+  return error instanceof Error && error.name === "RunnerSupersededError";
 }
 
 function parseOptionalRecord<Message extends Readonly<Record<string, unknown>>>(
@@ -47,9 +55,9 @@ function socketMessageFailure(event: Event): Error | undefined {
   }
   const type = parseSocketJsonRecord(event.data)?.["type"];
   if (type === "registration_rejected") {
-    return new RunnerRegistrationRejectedError();
+    return createRunnerRegistrationRejectedError();
   }
-  return type === "superseded" ? new RunnerSupersededError() : undefined;
+  return type === "superseded" ? createRunnerSupersededError() : undefined;
 }
 
 function socketCloseFailure(
@@ -58,8 +66,8 @@ function socketCloseFailure(
 ): Error {
   return event instanceof CloseEvent &&
     event.code === RUNNER_SUPERSEDED_CLOSE_CODE
-    ? new RunnerSupersededError()
-    : new RunnerConnectionError(messages.close);
+    ? createRunnerSupersededError()
+    : createRunnerConnectionError(messages.close);
 }
 
 export function observeOperationalRunnerSocket(
@@ -103,7 +111,7 @@ export function addRunnerSocketFailureListeners(
   socket.addEventListener(
     "error",
     () => {
-      settle(new RunnerConnectionError(messages.error));
+      settle(createRunnerConnectionError(messages.error));
     },
     { once: true },
   );
