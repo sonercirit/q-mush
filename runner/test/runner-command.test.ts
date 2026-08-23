@@ -3,7 +3,8 @@ import { describe, expect, test } from "vitest";
 import {
   executeRunnerCommand,
   readRunnerCommand,
-  RunnerCommandExecutor,
+  createRunnerCommandExecutor,
+  type RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
@@ -52,7 +53,7 @@ function createSessionExecutor(
   root: string,
   sessionId: string,
 ): SessionExecutor {
-  return { executor: new RunnerCommandExecutor(), root, sessionId };
+  return { executor: createRunnerCommandExecutor(), root, sessionId };
 }
 
 async function sessionWithFile(

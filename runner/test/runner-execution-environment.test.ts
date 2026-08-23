@@ -2,7 +2,8 @@ import { symlink } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 import {
   readRunnerCommand,
-  RunnerCommandExecutor,
+  createRunnerCommandExecutor,
+  type RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import type { RunnerContainerManager } from "../../runner/runner-container.ts";
 import {
@@ -61,7 +62,7 @@ function containerExecutor(): {
   readonly executor: RunnerCommandExecutor;
 } {
   const containers = createFakeContainers();
-  return { containers, executor: new RunnerCommandExecutor(containers) };
+  return { containers, executor: createRunnerCommandExecutor(containers) };
 }
 
 describe("container runner commands", () => {
@@ -206,7 +207,7 @@ describe("container runner commands", () => {
 
   test("cleans a tracked container only for an explicit session cleanup command", async () => {
     const containers = createFakeContainers();
-    const executor = new RunnerCommandExecutor(containers);
+    const executor = createRunnerCommandExecutor(containers);
 
     expect(
       await executor.execute({
@@ -226,7 +227,7 @@ describe("container runner commands", () => {
     const root = await workspace();
     const containers = createFakeContainers();
     containers.shellOutput = "😀".repeat(500);
-    const executor = new RunnerCommandExecutor(containers);
+    const executor = createRunnerCommandExecutor(containers);
     const output = await executor.execute({
       ...command("bash", "container", root),
       outputLimitCharacters: 200,
@@ -248,7 +249,7 @@ describe("container runner commands", () => {
   });
 
   test("keeps bare-metal behavior available", async () => {
-    const output = await new RunnerCommandExecutor().execute({
+    const output = await createRunnerCommandExecutor().execute({
       arguments: { command: "printf bare-metal", timeout: 5 },
       executionEnvironment: "bare_metal",
       id: "bare-command",

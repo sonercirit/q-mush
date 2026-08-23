@@ -10,7 +10,7 @@ import {
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
 import { RunnerCommandExecutions } from "./runner-command-executions.ts";
-import { readRunnerCommand, RunnerCommandExecutor } from "./runner-command.ts";
+import { createRunnerCommandExecutor, readRunnerCommand, type RunnerCommandExecutor } from "./runner-command.ts";
 import {
   createRunnerConnectionSettlement,
   createRunnerConnectionError,
@@ -584,7 +584,7 @@ async function run(): Promise<void> {
     trackingPath: join(dirname(configurationPath), "owned-containers.json"),
   });
   runnerExecution = {
-    commands: new RunnerCommandExecutor(containers),
+    commands: createRunnerCommandExecutor(containers),
     containers,
   };
   writeFileSync(
