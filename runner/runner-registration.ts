@@ -241,7 +241,10 @@ const registrationHandlers: Readonly<
       context,
       activationReceipt,
     );
-    if (!receiptMatches) return invalidRegistration(context);
+    if (!receiptMatches) {
+      invalidRegistration(context);
+      return;
+    }
     acknowledgeRegistration(
       context,
       registrationId,

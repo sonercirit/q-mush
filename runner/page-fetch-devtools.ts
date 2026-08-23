@@ -97,7 +97,9 @@ function createDevtoolsConnection(url: string) {
       return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
-      const opened = (): void => resolve();
+      const opened = (): void => {
+        resolve();
+      };
       socket.addEventListener("open", opened, { once: true });
       socket.addEventListener(
         "error",
