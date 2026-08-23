@@ -139,66 +139,55 @@ function acceptsEntityTag(request: Request, tag: string): boolean {
   );
 }
 
-class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
-  readonly #executables: RunnerExecutableSource;
-  readonly #supervisors: RunnerExecutableSource;
-  readonly version: string;
-
-  constructor(
-    version: string,
-    build: RunnerExecutableBuilder,
-    buildSupervisor: RunnerExecutableBuilder,
-  ) {
-    if (!RUNNER_VERSION_PATTERN.test(version)) {
-      throw new Error("The runner version must be a SHA-256 digest");
-    }
-
-    this.version = version;
-    this.#executables = { build, cache: new Map() };
-    this.#supervisors = { build: buildSupervisor, cache: new Map() };
+function createRunnerExecutableProvider(
+  version: string,
+  build: RunnerExecutableBuilder,
+  buildSupervisor: RunnerExecutableBuilder,
+): RunnerExecutableProvider {
+  if (!RUNNER_VERSION_PATTERN.test(version)) {
+    throw new Error("The runner version must be a SHA-256 digest");
   }
-
-  compile(target: RunnerExecutableTarget, entrypoint: string): Promise<Blob> {
-    return compileStandaloneExecutable(target, this.version, entrypoint);
-  }
-
-  serve(request: Request): Promise<Response> {
-    return this.#serve(request, this.#executables);
-  }
-
-  serveSupervisor(request: Request): Promise<Response> {
-    const source = this.#supervisors;
-    return this.#serve(request, source);
-  }
-
-  #serve(request: Request, source: RunnerExecutableSource): Promise<Response> {
-    return request.method === "GET"
-      ? this.#serveDownload(request, source)
-      : Promise.resolve(createMethodNotAllowedResponse("GET"));
-  }
-
-  async #serveDownload(
+  const executables: RunnerExecutableSource = { build, cache: new Map() };
+  const supervisors: RunnerExecutableSource = {
+    build: buildSupervisor,
+    cache: new Map(),
+  };
+  const load = (
+    target: RunnerExecutableTarget,
+    source: RunnerExecutableSource,
+  ): Promise<RunnerExecutable> => {
+    const existing = source.cache.get(target);
+    if (existing !== undefined) return existing;
+    const pending = Promise.resolve()
+      .then(() => source.build(target))
+      .then(async (body) => ({
+        body,
+        sha256: createHash("sha256")
+          .update(new Uint8Array(await body.arrayBuffer()))
+          .digest("hex"),
+      }));
+    source.cache.set(target, pending);
+    void pending.catch(() => {
+      if (source.cache.get(target) === pending) source.cache.delete(target);
+    });
+    return pending;
+  };
+  const serveDownload = async (
     request: Request,
     source: RunnerExecutableSource,
-  ): Promise<Response> {
+  ): Promise<Response> => {
     const targetValue = new URL(request.url).searchParams.get("target");
-
-    if (targetValue === null || !isRunnerExecutableTarget(targetValue)) {
+    if (targetValue === null || !isRunnerExecutableTarget(targetValue))
       return new Response("Not found", { status: 404 });
-    }
-
-    const tag = entityTag(this.version);
+    const tag = entityTag(version);
     const cacheHeaders = new Headers({
       "cache-control": "no-cache",
       etag: tag,
     });
-
-    if (acceptsEntityTag(request, tag)) {
+    if (acceptsEntityTag(request, tag))
       return new Response(null, { headers: cacheHeaders, status: 304 });
-    }
-
     try {
-      const executable = await this.#load(targetValue, source);
+      const executable = await load(targetValue, source);
       cacheHeaders.set(
         "content-disposition",
         'attachment; filename="q-mush-runner"',
@@ -215,34 +204,21 @@ class LazyRunnerExecutableProvider implements RunnerExecutableProvider {
         status: 503,
       });
     }
-  }
-
-  #load(
-    target: RunnerExecutableTarget,
+  };
+  const serve = (
+    request: Request,
     source: RunnerExecutableSource,
-  ): Promise<RunnerExecutable> {
-    const existing = source.cache.get(target);
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const pending = Promise.resolve()
-      .then(() => source.build(target))
-      .then(async (body) => ({
-        body,
-        sha256: createHash("sha256")
-          .update(new Uint8Array(await body.arrayBuffer()))
-          .digest("hex"),
-      }));
-    source.cache.set(target, pending);
-    void pending.catch(() => {
-      if (source.cache.get(target) === pending) {
-        source.cache.delete(target);
-      }
-    });
-    return pending;
-  }
+  ): Promise<Response> =>
+    request.method === "GET"
+      ? serveDownload(request, source)
+      : Promise.resolve(createMethodNotAllowedResponse("GET"));
+  return {
+    compile: (target, entrypoint) =>
+      compileStandaloneExecutable(target, version, entrypoint),
+    serve: (request) => serve(request, executables),
+    serveSupervisor: (request) => serve(request, supervisors),
+    version,
+  };
 }
 
 export async function buildRunnerExecutableProvider(
@@ -261,5 +237,5 @@ export async function buildRunnerExecutableProvider(
         version,
         RUNNER_SUPERVISOR_ENTRYPOINT,
       ));
-  return new LazyRunnerExecutableProvider(version, build, buildSupervisor);
+  return createRunnerExecutableProvider(version, build, buildSupervisor);
 }
