@@ -8,7 +8,7 @@ import { SYSTEM_ID, type IdGenerator } from "../shared/ids.ts";
 import { manualCompactionOperation } from "./session-manual-compaction-query.ts";
 import { runningCondition } from "./session-store-persistence.ts";
 
-export type ManualCompactionScheduleResult =
+type ManualCompactionScheduleResult =
   "already_pending" | "scheduled" | "unavailable";
 
 export interface ManualCompactionStore {
