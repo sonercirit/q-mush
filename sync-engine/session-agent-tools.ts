@@ -234,6 +234,94 @@ function failedToolOutput(error: unknown): RunnerCommandResult {
   return failedRunnerCommandResult(error);
 }
 
+type SessionAgentToolHandler = (
+  actions: SessionAgentToolActions,
+  arguments_: RunnerCommandArguments,
+  signal: AbortSignal,
+) => Promise<string>;
+
+const sessionAgentToolHandlers: Record<
+  SessionAgentToolName,
+  SessionAgentToolHandler
+> = {
+  sleep: () => {
+    throw new Error("sleep requires the active session runtime");
+  },
+  browse_runner_directories: (actions, arguments_, signal) => {
+    const runnerId = readIdentifier(arguments_["runnerId"]);
+    const path = readStringField(
+      arguments_,
+      "path",
+      MAXIMUM_RUNNER_PATH_LENGTH,
+      {
+        trim: true,
+      },
+    );
+    if (
+      !hasOnlySessionToolArguments(arguments_, ["runnerId", "path"]) ||
+      runnerId === undefined ||
+      path === undefined ||
+      path.includes("\0")
+    ) {
+      throw new Error("The browse_runner_directories arguments are invalid");
+    }
+    return actions.browseRunnerDirectories(runnerId, path, signal);
+  },
+  compact_session: (actions, arguments_, signal) => {
+    if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+      throw new Error("compact_session received invalid arguments");
+    }
+    return actions.compactSession(sessionId(arguments_), signal);
+  },
+  continue_session: (actions, arguments_, signal) => {
+    if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+      throw new Error("continue_session received invalid arguments");
+    }
+    return actions.continueSession(sessionId(arguments_), signal);
+  },
+  get_session_options: (actions, arguments_, signal) =>
+    actions.getSessionOptions(getSessionOptionsToolInput(arguments_), signal),
+  list_runners: (actions, arguments_) => {
+    if (Object.keys(arguments_).length > 0) {
+      throw new Error("list_runners does not accept arguments");
+    }
+    return Promise.resolve(actions.listRunners());
+  },
+  list_sessions: (actions, arguments_) =>
+    Promise.resolve(actions.listSessions(listSessionsToolInput(arguments_))),
+  read_session: (actions, arguments_) =>
+    Promise.resolve(actions.readSession(readSessionToolInput(arguments_))),
+  reassign_session: (actions, arguments_, signal) => {
+    const input = reassignmentInput(arguments_);
+    return Promise.resolve(
+      actions.reassignSession(
+        input.sessionId,
+        input.runnerId,
+        input.workingDirectory,
+        signal,
+      ),
+    );
+  },
+  send_to_session: (actions, arguments_, signal) =>
+    actions.sendToSession(sessionId(arguments_), message(arguments_), signal),
+  spawn_session: (actions, arguments_, signal) =>
+    actions.spawnSession(spawnInput(arguments_), signal),
+  steer_session: (actions, arguments_, signal) =>
+    actions.steerSession(sessionId(arguments_), message(arguments_), signal),
+  stop_session: (actions, arguments_, signal) => {
+    if (!hasOnlySessionToolArguments(arguments_, ["sessionId", "cascade"])) {
+      throw new Error("stop_session received invalid arguments");
+    }
+    const cascade = arguments_["cascade"];
+    if (cascade !== undefined && typeof cascade !== "boolean") {
+      throw new Error("stop_session received invalid arguments");
+    }
+    return Promise.resolve(
+      actions.stopSession(sessionId(arguments_), cascade ?? true, signal),
+    );
+  },
+};
+
 export function executeSessionAgentTool(
   actions: SessionAgentToolActions,
   name: SessionAgentToolName,
@@ -241,111 +329,10 @@ export function executeSessionAgentTool(
   signal: AbortSignal,
 ): Promise<RunnerCommandResult> {
   try {
-    let output: Promise<string>;
-    switch (name) {
-      case "sleep":
-        throw new Error("sleep requires the active session runtime");
-      case "browse_runner_directories": {
-        const runnerId = readIdentifier(arguments_["runnerId"]);
-        const path = readStringField(
-          arguments_,
-          "path",
-          MAXIMUM_RUNNER_PATH_LENGTH,
-          { trim: true },
-        );
-        if (
-          !hasOnlySessionToolArguments(arguments_, ["runnerId", "path"]) ||
-          runnerId === undefined ||
-          path === undefined ||
-          path.includes("\0")
-        ) {
-          throw new Error(
-            "The browse_runner_directories arguments are invalid",
-          );
-        }
-        output = actions.browseRunnerDirectories(runnerId, path, signal);
-        break;
-      }
-      case "compact_session":
-        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
-          throw new Error("compact_session received invalid arguments");
-        }
-        output = actions.compactSession(sessionId(arguments_), signal);
-        break;
-      case "continue_session":
-        if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
-          throw new Error("continue_session received invalid arguments");
-        }
-        output = actions.continueSession(sessionId(arguments_), signal);
-        break;
-      case "get_session_options":
-        output = actions.getSessionOptions(
-          getSessionOptionsToolInput(arguments_),
-          signal,
-        );
-        break;
-      case "list_runners":
-        if (Object.keys(arguments_).length > 0) {
-          throw new Error("list_runners does not accept arguments");
-        }
-        output = Promise.resolve(actions.listRunners());
-        break;
-      case "list_sessions":
-        output = Promise.resolve(
-          actions.listSessions(listSessionsToolInput(arguments_)),
-        );
-        break;
-      case "read_session":
-        output = Promise.resolve(
-          actions.readSession(readSessionToolInput(arguments_)),
-        );
-        break;
-      case "reassign_session": {
-        const input = reassignmentInput(arguments_);
-        output = Promise.resolve(
-          actions.reassignSession(
-            input.sessionId,
-            input.runnerId,
-            input.workingDirectory,
-            signal,
-          ),
-        );
-        break;
-      }
-      case "send_to_session":
-        output = actions.sendToSession(
-          sessionId(arguments_),
-          message(arguments_),
-          signal,
-        );
-        break;
-      case "spawn_session":
-        output = actions.spawnSession(spawnInput(arguments_), signal);
-        break;
-      case "steer_session":
-        output = actions.steerSession(
-          sessionId(arguments_),
-          message(arguments_),
-          signal,
-        );
-        break;
-      case "stop_session": {
-        if (
-          !hasOnlySessionToolArguments(arguments_, ["sessionId", "cascade"])
-        ) {
-          throw new Error("stop_session received invalid arguments");
-        }
-        const cascade = arguments_["cascade"];
-        if (cascade !== undefined && typeof cascade !== "boolean") {
-          throw new Error("stop_session received invalid arguments");
-        }
-        output = Promise.resolve(
-          actions.stopSession(sessionId(arguments_), cascade ?? true, signal),
-        );
-        break;
-      }
-    }
-    return output.then(completedRunnerCommandResult, failedToolOutput);
+    return sessionAgentToolHandlers[name](actions, arguments_, signal).then(
+      completedRunnerCommandResult,
+      failedToolOutput,
+    );
   } catch (error) {
     return Promise.resolve(failedToolOutput(error));
   }
