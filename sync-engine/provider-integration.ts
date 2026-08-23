@@ -32,7 +32,7 @@ import {
   createPreparedCredentialReader,
   type ProviderCredentialPreparer,
 } from "./provider-prepared-credential.ts";
-import { ProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
+import { createProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
 import type {
   ProviderQuotaReader,
   ProviderQuotaResetter,
@@ -227,7 +227,7 @@ export function createProviderIntegration(options: {
     runtime,
     store,
   });
-  const quota = new ProviderQuotaEndpoints(options.auth, {
+  const quota = createProviderQuotaEndpoints(options.auth, {
     now: runtime.now,
     quotaStore,
     readCredential,
