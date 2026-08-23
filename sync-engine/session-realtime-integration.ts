@@ -73,8 +73,8 @@ import type { SessionReassignmentInput } from "./session-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
 import {
   applySessionToolUpdate,
+  isSessionToolUpdateError,
   previewSessionToolUpdate,
-  SessionToolUpdateError,
   type SessionToolUpdateDependencies,
 } from "./session-tool-update.ts";
 
@@ -571,7 +571,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
 
   #toolUpdateError(error: unknown): RealtimeCommandError {
     return new RealtimeCommandError(
-      error instanceof SessionToolUpdateError ? error.code : "command_failed",
+      isSessionToolUpdateError(error) ? error.code : "command_failed",
     );
   }
 

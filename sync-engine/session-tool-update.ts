@@ -14,11 +14,25 @@ import {
   type SessionToolUpdateStoreOptions,
 } from "./session-tool-update-store.ts";
 
-export class SessionToolUpdateError extends RealtimeCommandError {
-  constructor(code: string) {
-    super(code);
-    this.name = "SessionToolUpdateError";
-  }
+export type SessionToolUpdateError = RealtimeCommandError & {
+  readonly tag: "session_tool_update_error";
+};
+
+function createSessionToolUpdateError(code: string): SessionToolUpdateError {
+  return Object.assign(new RealtimeCommandError(code), {
+    name: "SessionToolUpdateError",
+    tag: "session_tool_update_error" as const,
+  });
+}
+
+export function isSessionToolUpdateError(
+  error: unknown,
+): error is SessionToolUpdateError {
+  return (
+    error instanceof RealtimeCommandError &&
+    "tag" in error &&
+    error.tag === "session_tool_update_error"
+  );
 }
 
 export interface SessionToolUpdateDependencies extends SessionGenerationInterruptionDependencies {
@@ -43,14 +57,14 @@ async function previewFor(
     input.workspaceId,
   );
   if (detail === undefined) {
-    throw new SessionToolUpdateError("not_found");
+    throw createSessionToolUpdateError("not_found");
   }
   const credentialSource = await dependencies.readCredentialSource(
     userId,
     detail,
   );
   if (credentialSource === undefined) {
-    throw new SessionToolUpdateError("credential_unavailable");
+    throw createSessionToolUpdateError("credential_unavailable");
   }
   return {
     detail,
@@ -77,13 +91,13 @@ export async function applySessionToolUpdate(
 ): Promise<AgentSessionDetail> {
   const { detail, preview } = await previewFor(dependencies, userId, input);
   if (detail.generation !== input.expectedGeneration) {
-    throw new SessionToolUpdateError("stale_generation");
+    throw createSessionToolUpdateError("stale_generation");
   }
   if (
     preview.cacheDisposition === "warning_required" &&
     !input.confirmedCacheDrop
   ) {
-    throw new SessionToolUpdateError("cache_warning_required");
+    throw createSessionToolUpdateError("cache_warning_required");
   }
   if (sessionToolsMatch(detail.tools, input.tools)) {
     return detail;
@@ -98,7 +112,7 @@ export async function applySessionToolUpdate(
     workspaceId: input.workspaceId,
   });
   if (result.status !== "updated") {
-    throw new SessionToolUpdateError(
+    throw createSessionToolUpdateError(
       result.status === "not_found" ? "not_found" : "stale_generation",
     );
   }
