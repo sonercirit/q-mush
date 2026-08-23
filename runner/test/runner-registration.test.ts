@@ -4,8 +4,8 @@ import { completeRunnerRegistration } from "../../runner/runner-registration.ts"
 import { createRunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
 import {
   createRunnerStartupRestart,
-  type RunnerStartupRestart,
   type RunnerStartupConnection,
+  type RunnerStartupRestart,
 } from "../../runner/runner-update.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 

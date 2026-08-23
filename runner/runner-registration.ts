@@ -6,13 +6,13 @@ import {
   runnerRegistrationReceivedMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import {
-  createRunnerConnectionSettlement,
   createRunnerConnectionError,
+  createRunnerConnectionSettlement,
 } from "./runner-connection.ts";
 import {
   addRunnerSocketFailureListeners,
-  parseSocketJsonRecord,
   createRunnerRegistrationRejectedError,
+  parseSocketJsonRecord,
 } from "./runner-socket.ts";
 import type { RunnerStartupConnection } from "./runner-update.ts";
 
@@ -273,7 +273,9 @@ const registrationHandlers: Readonly<
       context.onOperational?.(context.startupConnection.restartId) === false
     ) {
       context.settle(
-        createRunnerConnectionError("The runner restart settlement was invalid"),
+        createRunnerConnectionError(
+          "The runner restart settlement was invalid",
+        ),
       );
       return;
     }

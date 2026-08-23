@@ -1,8 +1,8 @@
 import { symlink } from "node:fs/promises";
 import { describe, expect, test } from "vitest";
 import {
-  readRunnerCommand,
   createRunnerCommandExecutor,
+  readRunnerCommand,
   type RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import type { RunnerContainerManager } from "../../runner/runner-container.ts";
@@ -17,20 +17,37 @@ const workspace = useTemporaryDirectories("q-mush-environment-test-");
 
 function createFakeContainers() {
   const cleaned: string[] = [];
-  const prepared: { readonly root: string; readonly sessionId: string; readonly signal: AbortSignal | undefined }[] = [];
-  const shells: { readonly command: string; readonly root: string; readonly sessionId: string; readonly timeout: number }[] = [];
+  const prepared: {
+    readonly root: string;
+    readonly sessionId: string;
+    readonly signal: AbortSignal | undefined;
+  }[] = [];
+  const shells: {
+    readonly command: string;
+    readonly root: string;
+    readonly sessionId: string;
+    readonly timeout: number;
+  }[] = [];
   return {
     cleaned,
     prepared,
     shellOutput: "container shell output",
     shells,
-    cleanupSession: (sessionId: string) => { cleaned.push(sessionId); return Promise.resolve(); },
+    cleanupSession: (sessionId: string) => {
+      cleaned.push(sessionId);
+      return Promise.resolve();
+    },
     prepare: (...input: Parameters<RunnerContainerManager["prepare"]>) => {
       const [sessionId, root, signal] = input;
       prepared.push({ root, sessionId, signal });
       return Promise.resolve();
     },
-    executeShell(sessionId: string, root: string, command: string, timeout: number) {
+    executeShell(
+      sessionId: string,
+      root: string,
+      command: string,
+      timeout: number,
+    ) {
       shells.push({ command, root, sessionId, timeout });
       return Promise.resolve(this.shellOutput);
     },

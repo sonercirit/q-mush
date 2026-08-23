@@ -1,9 +1,9 @@
 import { dirname, join } from "node:path";
 import { describe, expect, test } from "vitest";
 import {
+  createRunnerCommandExecutor,
   executeRunnerCommand,
   readRunnerCommand,
-  createRunnerCommandExecutor,
   type RunnerCommandExecutor,
 } from "../../runner/runner-command.ts";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";

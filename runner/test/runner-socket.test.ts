@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import {
-  observeOperationalRunnerSocket,
   createRunnerRegistrationRejectedError,
   createRunnerSupersededError,
+  observeOperationalRunnerSocket,
 } from "../../runner/runner-socket.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";

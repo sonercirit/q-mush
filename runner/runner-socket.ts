@@ -1,6 +1,9 @@
 import { parseJsonRecord } from "../shared/json-record.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../shared/runner-realtime-protocol.ts";
-import { createRunnerConnectionError, type RunnerConnectionError } from "./runner-connection.ts";
+import {
+  createRunnerConnectionError,
+  type RunnerConnectionError,
+} from "./runner-connection.ts";
 
 export function createRunnerRegistrationRejectedError(): RunnerConnectionError {
   return createRunnerConnectionError(
@@ -9,8 +12,12 @@ export function createRunnerRegistrationRejectedError(): RunnerConnectionError {
   );
 }
 
-export function isRunnerRegistrationRejectedError(error: unknown): error is Error {
-  return error instanceof Error && error.name === "RunnerRegistrationRejectedError";
+export function isRunnerRegistrationRejectedError(
+  error: unknown,
+): error is Error {
+  return (
+    error instanceof Error && error.name === "RunnerRegistrationRejectedError"
+  );
 }
 
 export function createRunnerSupersededError(): RunnerConnectionError {

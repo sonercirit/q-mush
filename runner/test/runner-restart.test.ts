@@ -7,7 +7,10 @@ import {
 
 interface TestSocket extends RunnerRestartSocket {
   readonly sent: readonly string[];
-  readonly completeRestart: (restartId: string, attempt: Promise<string>) => Promise<void>;
+  readonly completeRestart: (
+    restartId: string,
+    attempt: Promise<string>,
+  ) => Promise<void>;
   readonly emitAcknowledgement: (restartId: string) => void;
   readonly close: () => void;
 }
@@ -18,8 +21,12 @@ function createTestSocket(sendFailure?: Error): TestSocket {
   let readyState: number = WebSocket.OPEN;
   const socket: TestSocket = {
     addEventListener: target.addEventListener.bind(target),
-    get readyState() { return readyState; },
-    get sent() { return sent; },
+    get readyState() {
+      return readyState;
+    },
+    get sent() {
+      return sent;
+    },
     completeRestart: async (restartId, attempt) => {
       socket.emitAcknowledgement(restartId);
       await expect(attempt).resolves.toBe(restartId);

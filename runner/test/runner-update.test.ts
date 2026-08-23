@@ -416,7 +416,9 @@ test("a later connection replays finalized state while fencing the prior lease",
 });
 
 test("stale or pre-finalized operational acknowledgements cannot consume activation state", () => {
-  const startupRestart = createRunnerStartupRestart("restart-operational-fence");
+  const startupRestart = createRunnerStartupRestart(
+    "restart-operational-fence",
+  );
   const connection = startupRestart.connection();
 
   expect(connection.prepareActivation("prepared-receipt")).toBe(true);

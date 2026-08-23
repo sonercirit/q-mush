@@ -54,10 +54,15 @@ export interface RunnerStartupRestart {
   readonly connection: () => RunnerStartupConnection;
   readonly finalizeActivation: (receipt: string) => void;
   readonly prepareActivation: (receipt: string) => void;
-  readonly restoreActivation: (receipt: string, phase?: "finalized" | "prepared") => void;
+  readonly restoreActivation: (
+    receipt: string,
+    phase?: "finalized" | "prepared",
+  ) => void;
 }
 
-export function createRunnerStartupRestart(restartId?: string): RunnerStartupRestart {
+export function createRunnerStartupRestart(
+  restartId?: string,
+): RunnerStartupRestart {
   let activationReceipt: string | undefined;
   let activationReceiptPhase: "finalized" | "prepared" | undefined;
   let connectionGeneration = 0;
@@ -65,12 +70,11 @@ export function createRunnerStartupRestart(restartId?: string): RunnerStartupRes
   let currentRestartId = restartId;
   const restartWasProvided = restartId !== undefined;
   if (
-      restartId !== undefined &&
-      (restartId.length === 0 || restartId.length > 200)
-    ) {
-      throw new Error("The runner restart ID is invalid");
-    }
-
+    restartId !== undefined &&
+    (restartId.length === 0 || restartId.length > 200)
+  ) {
+    throw new Error("The runner restart ID is invalid");
+  }
 
   const snapshot = (): RunnerStartupConnection => {
     let snapshotReceipt = activationReceipt;
@@ -117,7 +121,9 @@ export function createRunnerStartupRestart(restartId?: string): RunnerStartupRes
         return true;
       },
       prepareActivation: (receipt) => retainActivation(receipt, "prepared"),
-      ...(snapshotReceipt === undefined ? {} : { activationReceipt: snapshotReceipt }),
+      ...(snapshotReceipt === undefined
+        ? {}
+        : { activationReceipt: snapshotReceipt }),
       ...(snapshotPhase === undefined
         ? {}
         : { activationReceiptPhase: snapshotPhase }),
@@ -137,7 +143,10 @@ export function createRunnerStartupRestart(restartId?: string): RunnerStartupRes
     return snapshot();
   };
 
-  const setActivation = (receipt: string, phase: "finalized" | "prepared"): void => {
+  const setActivation = (
+    receipt: string,
+    phase: "finalized" | "prepared",
+  ): void => {
     if (receipt.length > 0 && receipt.length <= 200) {
       connectionGeneration += 1;
       activationReceipt = receipt;
@@ -164,12 +173,25 @@ export function createRunnerStartupRestart(restartId?: string): RunnerStartupRes
     }
   };
   return {
-    get activationReceipt() { return activationReceipt; },
-    get activationReceiptPhase() { return activationReceiptPhase; },
-    get retainedActivationReceipt() { return activationReceipt; },
-    get restartId() { return currentRestartId; },
-    get startupRestart() { return restartWasProvided; },
-    connection, finalizeActivation, prepareActivation, restoreActivation,
+    get activationReceipt() {
+      return activationReceipt;
+    },
+    get activationReceiptPhase() {
+      return activationReceiptPhase;
+    },
+    get retainedActivationReceipt() {
+      return activationReceipt;
+    },
+    get restartId() {
+      return currentRestartId;
+    },
+    get startupRestart() {
+      return restartWasProvided;
+    },
+    connection,
+    finalizeActivation,
+    prepareActivation,
+    restoreActivation,
   };
 }
 
