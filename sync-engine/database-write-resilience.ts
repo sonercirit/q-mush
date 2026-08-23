@@ -84,78 +84,60 @@ function closedError(): Error {
   return new Error("Database write resilience has shut down");
 }
 
-export class DatabaseWriteResilience {
-  readonly #attempt: DatabaseWriteAttemptRunner;
-  readonly #health: StorageHealth;
-  readonly #sleep: RetrySleep;
-  #closed = false;
+export interface DatabaseWriteResilience {
+  close(): void;
+  run<Result>(priority: DatabaseWritePriority, operation: () => Result): Result | undefined;
+}
 
-  constructor(options: DatabaseWriteResilienceOptions) {
-    this.#attempt = options.attempt ?? ((operation) => operation());
-    this.#health = options.health;
-    this.#sleep = options.sleep ?? Bun.sleepSync;
-  }
-
-  close(): void {
-    this.#closed = true;
-  }
-
-  #throwIfClosed(): void {
-    if (this.#closed) {
-      throw closedError();
-    }
-  }
-
-  #perform<Result>(operation: () => Result): DatabaseWriteAttempt<Result> {
+export function createDatabaseWriteResilience(
+  options: DatabaseWriteResilienceOptions,
+): DatabaseWriteResilience {
+  const attempt = options.attempt ?? ((operation) => operation());
+  const health = options.health;
+  const sleep = options.sleep ?? Bun.sleepSync;
+  let closed = false;
+  const perform = <Result>(operation: () => Result): DatabaseWriteAttempt<Result> => {
     try {
-      return { result: this.#attempt(operation), status: "persisted" };
+      return { result: attempt(operation), status: "persisted" };
     } catch (error) {
-      if (!isDiskFullError(error)) {
-        throw error;
-      }
+      if (!isDiskFullError(error)) throw error;
       return { error, status: "disk_full" };
     }
-  }
-
-  run<Result>(
-    priority: DatabaseWritePriority,
-    operation: () => Result,
-  ): Result | undefined {
-    this.#throwIfClosed();
-    let attempted = this.#perform(operation);
-    if (attempted.status === "persisted") {
-      return attempted.result;
-    }
-    this.#health.degrade(
-      "disk_full",
-      priority === "critical"
-        ? "a critical database write ran out of space and is retrying briefly"
-        : "a non-critical database write was dropped because the disk is full",
-      attempted.error,
-    );
-    if (priority === "noncritical") {
-      return undefined;
-    }
-
-    // Bun SQLite and Drizzle are synchronous. Keeping retries synchronous is
-    // the only way to return an honest result to their callers. This bounded
-    // two-second window may delay the event loop (and signal callbacks), but it
-    // cannot monopolize it indefinitely; callers then receive DiskFullError.
-    for (const delay of CRITICAL_RETRY_DELAYS_MS) {
-      this.#sleep(delay);
-      attempted = this.#perform(operation);
-      if (attempted.status === "persisted") {
-        this.#health.restore("disk_full");
-        return attempted.result;
+  };
+  return {
+    close() {
+      closed = true;
+    },
+    run<Result>(priority: DatabaseWritePriority, operation: () => Result): Result | undefined {
+      if (closed) throw closedError();
+      let attempted = perform(operation);
+      if (attempted.status === "persisted") return attempted.result;
+      health.degrade(
+        "disk_full",
+        priority === "critical"
+          ? "a critical database write ran out of space and is retrying briefly"
+          : "a non-critical database write was dropped because the disk is full",
+        attempted.error,
+      );
+      if (priority === "noncritical") return undefined;
+      // SQLite writes are synchronous, so bounded synchronous retries preserve
+      // an honest result for callers without monopolizing the loop indefinitely.
+      for (const delay of CRITICAL_RETRY_DELAYS_MS) {
+        sleep(delay);
+        attempted = perform(operation);
+        if (attempted.status === "persisted") {
+          health.restore("disk_full");
+          return attempted.result;
+        }
       }
-    }
-    this.#health.degrade(
-      "disk_full",
-      "a critical database write still cannot persist after bounded retries",
-      attempted.error,
-    );
-    throw createDiskFullFailure(attempted.error);
-  }
+      health.degrade(
+        "disk_full",
+        "a critical database write still cannot persist after bounded retries",
+        attempted.error,
+      );
+      throw createDiskFullFailure(attempted.error);
+    },
+  };
 }
 
 export function runNoncriticalDatabaseWrite(

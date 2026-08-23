@@ -1,7 +1,7 @@
 import { appendFileSync } from "node:fs";
 import type { AppDatabase } from "../shared/database.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   isDiskFullFailure,
 } from "./database-write-resilience.ts";
 import type { EngineHealth } from "./engine-health.ts";
@@ -38,7 +38,7 @@ export function startDatabaseRetryFixture(
   }
   setTimeout(() => {
     let attempts = 0;
-    const resilience = new DatabaseWriteResilience({
+    const resilience = createDatabaseWriteResilience({
       attempt(operation) {
         attempts += 1;
         recordDatabaseRetryFixtureEvent(

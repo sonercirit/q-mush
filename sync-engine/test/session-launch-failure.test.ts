@@ -3,7 +3,7 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
 import { createEngineHealth } from "../engine-health.ts";
@@ -108,7 +108,7 @@ test.each([
     const { detail, storeSetup } = setupStore();
     const setup = launchFailureSetup(
       storeSetup,
-      new DatabaseWriteResilience({
+      createDatabaseWriteResilience({
         attempt: (operation) => {
           writeAttempts += 1;
           if (diskFull && writeAttempts !== 5) throw fullError;
@@ -140,7 +140,7 @@ test.each([
     expect(setup.hasPendingReconciliation()).toBe(true);
 
     let unrelatedAttempts = 0;
-    const unrelatedWrite = new DatabaseWriteResilience({
+    const unrelatedWrite = createDatabaseWriteResilience({
       attempt(operation) {
         const thisAttempt = unrelatedAttempts;
         unrelatedAttempts += 1;

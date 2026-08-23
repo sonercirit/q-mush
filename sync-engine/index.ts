@@ -26,7 +26,7 @@ import {
   startDatabaseRetryFixture,
 } from "./database-write-resilience-fixture.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
@@ -92,7 +92,7 @@ if (vacuum.rebuilt) {
     "Q Mush rebuilt the database once to enable incremental vacuum maintenance",
   );
 }
-const writeResilience = new DatabaseWriteResilience({ health });
+const writeResilience = createDatabaseWriteResilience({ health });
 installDatabaseWriteResilience(database, writeResilience);
 let vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
