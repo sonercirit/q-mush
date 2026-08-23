@@ -13,24 +13,21 @@ export abstract class AuthenticatedCollectionIntegration extends AuthenticatedIn
       Partial<Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod>>
     >,
   ): Promise<Response> | Response {
+    const handlers: Readonly<
+      Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod | undefined>
+    > = {
+      GET: methods.GET,
+      POST: methods.POST,
+      PUT: methods.PUT,
+    };
     const dispatch = (
       userId: string,
       method: string,
     ): Promise<Response> | Response => {
-      let handler: AuthenticatedCollectionMethod | undefined;
-      switch (method) {
-        case "GET":
-          handler = methods.GET;
-          break;
-        case "POST":
-          handler = methods.POST;
-          break;
-        case "PUT":
-          handler = methods.PUT;
-          break;
-        default:
-          break;
-      }
+      const handler =
+        method === "GET" || method === "POST" || method === "PUT"
+          ? handlers[method]
+          : undefined;
       return handler === undefined
         ? createMethodNotAllowedResponse(Object.keys(methods).join(", "))
         : handler(userId);
