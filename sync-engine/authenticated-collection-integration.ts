@@ -1,18 +1,37 @@
 import type { GoogleAuth } from "./auth.ts";
-import { AuthenticatedIntegration } from "./authenticated-integration.ts";
+import { withAuthenticatedUser } from "./authenticated-request.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 
 type AuthenticatedCollectionMethod = (
   userId: string,
 ) => Promise<Response> | Response;
 
-export abstract class AuthenticatedCollectionIntegration extends AuthenticatedIntegration {
-  protected collectionRoute(
+type CollectionRoute = (
+  request: Request,
+  methods: Readonly<
+    Partial<Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod>>
+  >,
+) => Promise<Response> | Response;
+
+export interface AuthenticatedCollectionIntegration {
+  readonly collectionRoute: CollectionRoute;
+  readonly route: (
     request: Request,
-    methods: Readonly<
-      Partial<Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod>>
-    >,
-  ): Promise<Response> | Response {
+    serve: (userId: string, method: string) => Promise<Response> | Response,
+  ) => Promise<Response> | Response;
+}
+
+export function createAuthenticatedCollectionIntegration(
+  auth: GoogleAuth,
+): AuthenticatedCollectionIntegration {
+  const route = (
+    request: Request,
+    serve: (userId: string, method: string) => Promise<Response> | Response,
+  ): Promise<Response> | Response => {
+    const method = request.method;
+    return withAuthenticatedUser(auth, request, ({ id }) => serve(id, method));
+  };
+  const collectionRoute: CollectionRoute = (request, methods) => {
     const handlers: Readonly<
       Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod | undefined>
     > = {
@@ -32,10 +51,17 @@ export abstract class AuthenticatedCollectionIntegration extends AuthenticatedIn
         ? createMethodNotAllowedResponse(Object.keys(methods).join(", "))
         : handler(userId);
     };
-    return this.route(request, dispatch);
-  }
-
-  protected constructor(auth: GoogleAuth) {
-    super(auth);
-  }
+    return route(request, dispatch);
+  };
+  return { collectionRoute, route };
 }
+
+interface AuthenticatedCollectionIntegrationConstructor {
+  new (auth: GoogleAuth): AuthenticatedCollectionIntegration;
+}
+
+// Constructable compatibility lets existing integrations migrate independently.
+export const AuthenticatedCollectionIntegration: AuthenticatedCollectionIntegrationConstructor =
+  function (this: AuthenticatedCollectionIntegration, auth: GoogleAuth): void {
+    Object.assign(this, createAuthenticatedCollectionIntegration(auth));
+  } as unknown as AuthenticatedCollectionIntegrationConstructor;
