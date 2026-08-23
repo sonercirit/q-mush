@@ -1,3 +1,4 @@
+import type { RunnerCommandOutputDelta } from "../../shared/runner-command-broker.ts";
 import {
   createRunnerContainerManager,
   type RunnerContainerManager,
@@ -50,10 +51,7 @@ function pendingResult(
 
 interface ContainerRunOptions {
   readonly onOutput?: (
-    delta: Omit<
-      import("../../shared/runner-command-broker.ts").RunnerCommandOutputDelta,
-      "sequence"
-    >,
+    delta: Omit<RunnerCommandOutputDelta, "sequence">,
   ) => void;
   readonly outputLimitCharacters?: number;
   readonly signal?: AbortSignal;
