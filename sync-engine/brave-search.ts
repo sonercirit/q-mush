@@ -147,60 +147,40 @@ async function readSearchOutput(
 
 type BraveSearchExecute = BraveSearchSkill["execute"];
 
-class BraveSearchSkillIntegration implements BraveSearchSkill {
-  readonly #balancer: CredentialPoolBalancer;
-  readonly #credentials: ProviderCredentialEndpoints;
-  readonly #fetch: BraveSearchFetch;
-  readonly #store: ProviderCredentialStore | undefined;
-
-  constructor(
-    auth: GoogleAuth,
-    dependencies: BraveSearchDependencies,
-    encodedCredentialKey: string | undefined,
-  ) {
-    this.#fetch = dependencies.fetch ?? globalThis.fetch;
-    this.#balancer = new CredentialPoolBalancer({
-      ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
-    });
-    this.#store =
-      encodedCredentialKey === undefined
-        ? undefined
-        : new ProviderCredentialStore(
-            dependencies.database ?? createDatabase(":memory:"),
-            createCredentialCipher(
-              encodedCredentialKey,
-              "BRAVE_SEARCH_CREDENTIAL_KEY",
-            ),
-            "brave_search",
-            dependencies.randomId ?? createUuidV7,
-          );
-    this.#credentials = new ProviderCredentialEndpoints({
-      auth,
-      labelRequired: true,
-      now: dependencies.now ?? Date.now,
-      readCredentialDetails: (_apiKey, { label }) =>
-        Promise.resolve({
-          accountId: null,
-          label: label ?? "Brave Search key",
-        }),
-      store: this.#store,
-      validateApiKey: (apiKey) => apiKey.startsWith("BSA"),
-    });
-  }
-
-  keys(request: Request): Promise<Response> {
-    return this.#credentials.credentials(request);
-  }
-
-  remove(request: Request, keyId: string): Response {
-    return this.#credentials.remove(request, keyId);
-  }
-
-  setScopes(request: Request, keyId: string): Promise<Response> {
-    return this.#credentials.setScopes(request, keyId);
-  }
-
-  execute: BraveSearchExecute = async (
+function createBraveSearchSkill(
+  auth: GoogleAuth,
+  dependencies: BraveSearchDependencies,
+  encodedCredentialKey: string | undefined,
+): BraveSearchSkill {
+  const fetch = dependencies.fetch ?? globalThis.fetch;
+  const balancer = new CredentialPoolBalancer({
+    ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
+  });
+  const store =
+    encodedCredentialKey === undefined
+      ? undefined
+      : new ProviderCredentialStore(
+          dependencies.database ?? createDatabase(":memory:"),
+          createCredentialCipher(
+            encodedCredentialKey,
+            "BRAVE_SEARCH_CREDENTIAL_KEY",
+          ),
+          "brave_search",
+          dependencies.randomId ?? createUuidV7,
+        );
+  const credentialsApi = new ProviderCredentialEndpoints({
+    auth,
+    labelRequired: true,
+    now: dependencies.now ?? Date.now,
+    readCredentialDetails: (_apiKey, { label }) =>
+      Promise.resolve({
+        accountId: null,
+        label: label ?? "Brave Search key",
+      }),
+    store: store,
+    validateApiKey: (apiKey) => apiKey.startsWith("BSA"),
+  });
+  const execute: BraveSearchExecute = async (
     userId,
     workspaceId,
     arguments_,
@@ -209,7 +189,7 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
     if (!isWorkspaceId(workspaceId)) {
       return "Error: the Brave Search workspace is invalid.";
     }
-    if (this.#store === undefined) {
+    if (store === undefined) {
       return "Error: Brave Search credential storage is not configured.";
     }
 
@@ -219,29 +199,25 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
       return "Error: query must be a non-empty string and count must be an integer from 1 to 20.";
     }
 
-    const credentials = this.#store.list(userId, workspaceId);
+    const credentials = store.list(userId, workspaceId);
 
     if (credentials.length === 0) {
       return "Error: no Brave Search API keys are available.";
     }
 
-    for (const credential of this.#balancer.ordered(
+    for (const credential of balancer.ordered(
       `${userId}:${workspaceId}:brave_search`,
       credentials,
     )) {
       try {
-        const secret = this.#store.readSecret(
-          userId,
-          credential.id,
-          workspaceId,
-        );
+        const secret = store.readSecret(userId, credential.id, workspaceId);
 
         if (secret === undefined) {
           continue;
         }
 
         const response = await searchResponse(
-          this.#fetch,
+          fetch,
           secret,
           parameters,
           signal,
@@ -252,7 +228,7 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
         }
 
         if (BRAVE_SEARCH_RETRYABLE_STATUSES.has(response.status)) {
-          this.#balancer.coolDown(
+          balancer.coolDown(
             `${userId}:${workspaceId}:brave_search`,
             credential.id,
           );
@@ -274,6 +250,12 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
 
     return "Error: Brave Search failed with every saved API key.";
   };
+  return {
+    execute,
+    keys: (request) => credentialsApi.credentials(request),
+    remove: (request, keyId) => credentialsApi.remove(request, keyId),
+    setScopes: (request, keyId) => credentialsApi.setScopes(request, keyId),
+  };
 }
 
 export function createBraveSearchSkillFromEnvironment(
@@ -285,10 +267,6 @@ export function createBraveSearchSkillFromEnvironment(
   const credentialKey = normalizeOptionalValue(
     environment["BRAVE_SEARCH_CREDENTIAL_KEY"],
   );
-  const integration = new BraveSearchSkillIntegration(
-    auth,
-    dependencies,
-    credentialKey,
-  );
+  const integration = createBraveSearchSkill(auth, dependencies, credentialKey);
   return integration;
 }
