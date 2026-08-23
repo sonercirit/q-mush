@@ -66,9 +66,18 @@ export interface ProviderQuotaDependencies {
 }
 
 export interface ProviderQuotaEndpoints {
-  readonly consume: (request: Request, credentialId: string) => Promise<Response>;
-  readonly read: (request: Request, credentialId: string) => Promise<Response> | Response;
-  readonly setThreshold: (request: Request, credentialId: string) => Promise<Response>;
+  readonly consume: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response>;
+  readonly read: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response> | Response;
+  readonly setThreshold: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response>;
 }
 
 export function createProviderQuotaEndpoints(
@@ -104,7 +113,10 @@ export function createProviderQuotaEndpoints(
     return credential;
   }
 
-  function read(request: Request, credentialId: string): Promise<Response> | Response {
+  function read(
+    request: Request,
+    credentialId: string,
+  ): Promise<Response> | Response {
     const methodError = requireRequestMethod(request, "GET");
     if (methodError !== undefined) return methodError;
     return authenticated({
@@ -116,10 +128,7 @@ export function createProviderQuotaEndpoints(
         } catch {
           return createApiError("not_found", 404);
         }
-        const setting = dependencies.quotaStore?.read(
-          user.id,
-          credentialId,
-        );
+        const setting = dependencies.quotaStore?.read(user.id, credentialId);
         const threshold =
           setting?.autoResetThresholdPercent ??
           DEFAULT_AUTO_RESET_THRESHOLD_PERCENT;
@@ -177,7 +186,10 @@ export function createProviderQuotaEndpoints(
     });
   }
 
-  async function consume(request: Request, credentialId: string): Promise<Response> {
+  async function consume(
+    request: Request,
+    credentialId: string,
+  ): Promise<Response> {
     const requestId = await parseRecordJsonForMethod(
       request,
       "POST",
