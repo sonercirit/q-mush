@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { WORKSPACES_PATH } from "../../shared/routes.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { createWorkspaceIntegration } from "../../sync-engine/workspaces.ts";
 import {
   createAuthenticatedRequest,
@@ -19,7 +19,7 @@ describe("workspace API", () => {
     const integration = createWorkspaceIntegration({
       auth,
       now: () => TEST_NOW,
-      store: new WorkspaceStore(database, () => WORKSPACE_ID),
+      store: createWorkspaceStore(database, () => WORKSPACE_ID),
     });
 
     expect(

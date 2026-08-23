@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { runnerDirectoriesPath, SESSIONS_PATH } from "../../shared/routes.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   createAuthenticatedRequest,
@@ -168,7 +168,7 @@ describe("agent sessions", () => {
       error: "workspace_unavailable",
     });
 
-    new WorkspaceStore(setup.database, () => SECOND_WORKSPACE_ID).create(
+    createWorkspaceStore(setup.database, () => SECOND_WORKSPACE_ID).create(
       TEST_USER_ID,
       "Second",
       TEST_NOW,

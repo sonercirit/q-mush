@@ -42,7 +42,7 @@ import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createRequestHandler } from "../../sync-engine/server.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
 import { createToolSettingsIntegration } from "../../sync-engine/tool-settings.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import { createWorkspaceIntegration } from "../../sync-engine/workspaces.ts";
 import {
   createSchemaCompatibleTestDatabase,
@@ -116,7 +116,7 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
   );
 
   const runners = createRunnerIntegration(googleAuth, integrationDependencies);
-  const workspaceStore = new WorkspaceStore(database);
+  const workspaceStore = createWorkspaceStore(database);
   const workspaces = createWorkspaceIntegration({
     auth: googleAuth,
     store: workspaceStore,

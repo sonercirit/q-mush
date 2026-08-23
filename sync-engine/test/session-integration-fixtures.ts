@@ -27,7 +27,7 @@ import type { AgentModelFactory } from "../../sync-engine/session-agent-models.t
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { readUserSpawnSession } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -400,7 +400,7 @@ export function connectedSessionSetup(
       ...(options.toolSettings === undefined
         ? {}
         : { toolSettings: options.toolSettings }),
-      workspaces: new WorkspaceStore(database),
+      workspaces: createWorkspaceStore(database),
     },
   );
   sessions.runnerOperational(RUNNER_ID);

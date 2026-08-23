@@ -11,7 +11,10 @@ import {
   users,
 } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import {
+  createWorkspaceStore,
+  type WorkspaceStore,
+} from "../../sync-engine/workspace-store.ts";
 import { ensureWaveOneColumns } from "./authenticated-integration-test-helpers.ts";
 
 const NOW = 1_700_000_000_000;
@@ -48,7 +51,7 @@ function setup() {
     return id;
   };
 
-  const store = new WorkspaceStore(database, nextWorkspaceId);
+  const store = createWorkspaceStore(database, nextWorkspaceId);
   return { database, store };
 }
 
