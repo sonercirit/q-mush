@@ -7,7 +7,7 @@ import {
 } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
-import { SessionRestartAbort } from "../session-restart-abort.ts";
+import { createSessionRestartAbort } from "../session-restart-abort.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   addTestProviderCredential,
@@ -335,7 +335,7 @@ describe("session provider update", () => {
 
   test("recovery replacement cannot mutate after credential lookup", async () => {
     const setupValue = setup();
-    const restart = new SessionRestartAbort();
+    const restart = createSessionRestartAbort();
     setupValue.dependencies.restartSignal = () => restart.signal;
     const readCredential =
       setupValue.dependencies.providers.openrouter.readCredential;

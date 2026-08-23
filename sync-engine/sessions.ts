@@ -31,7 +31,10 @@ import {
 } from "./session-compaction-actions.ts";
 import type { SessionLaunchBoundary } from "./session-creation.ts";
 import type { SessionCredentialReaders } from "./session-credential-access.ts";
-import { SessionCredentialAccess } from "./session-credential-service.ts";
+import {
+  createSessionCredentialAccess,
+  type SessionCredentialAccess,
+} from "./session-credential-service.ts";
 import {
   permissiveWorkspaceReader,
   type SessionDependencies,
@@ -68,7 +71,7 @@ import { launchQueuedSessions } from "./session-queued-launcher.ts";
 import { createRealtimeSessionCommands } from "./session-realtime-factory.ts";
 import type { RealtimeSessionCommands } from "./session-realtime-integration.ts";
 import { SessionRequestHelpers } from "./session-request-helpers.ts";
-import { SessionRestartAbort } from "./session-restart-abort.ts";
+import { createSessionRestartAbort } from "./session-restart-abort.ts";
 import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
 import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
@@ -114,7 +117,7 @@ class DrizzleSessionIntegration
     createSessionFailureReconciler();
   readonly #runners: RunnerIntegration;
   readonly #runtimes: SessionRuntimes;
-  readonly #restartController = new SessionRestartAbort();
+  readonly #restartController = createSessionRestartAbort();
   readonly #restart;
   readonly #restartGate: SessionRestartCoordinator;
   readonly #removal: RunnerRemovalCoordinator;
@@ -164,7 +167,7 @@ class DrizzleSessionIntegration
     this.#now = dependencies.now ?? Date.now;
     this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;
-    const credentials = new SessionCredentialAccess(providers);
+    const credentials = createSessionCredentialAccess(providers);
     this.#readCredential = credentials.read;
     this.#withCredential = credentials.with;
     this.#credentialPool = new ModelCredentialPool({

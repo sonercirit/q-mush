@@ -4,20 +4,25 @@
  * traffic, so the signal must be replaceable: an aborted AbortController can
  * never be reopened.
  */
-export class SessionRestartAbort {
-  #controller = new AbortController();
+export interface SessionRestartAbort {
+  readonly signal: AbortSignal;
+  readonly abort: (reason: unknown) => void;
+  readonly restore: () => void;
+}
 
-  get signal(): AbortSignal {
-    return this.#controller.signal;
-  }
-
-  abort(reason: unknown): void {
-    this.#controller.abort(reason);
-  }
-
-  restore(): void {
-    if (this.#controller.signal.aborted) {
-      this.#controller = new AbortController();
-    }
-  }
+export function createSessionRestartAbort(): SessionRestartAbort {
+  let controller = new AbortController();
+  return {
+    get signal() {
+      return controller.signal;
+    },
+    abort: (reason) => {
+      controller.abort(reason);
+    },
+    restore: () => {
+      if (controller.signal.aborted) {
+        controller = new AbortController();
+      }
+    },
+  };
 }

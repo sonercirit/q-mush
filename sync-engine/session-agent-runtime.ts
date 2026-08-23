@@ -67,7 +67,7 @@ import {
 } from "./session-current-model.ts";
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
-import { SessionRecorder } from "./session-recorder.ts";
+import { createSessionRecorder } from "./session-recorder.ts";
 import {
   resolveSessionReplayModel,
   sessionRuntimeConversation,
@@ -502,7 +502,7 @@ export async function runSessionAgent(
     userId: runtime.userId,
     workspaceId: runtime.detail.workspaceId,
   });
-  const recorder = new SessionRecorder(
+  const recorder = createSessionRecorder(
     runtime.store,
     runtime.detail.id,
     runtime.now,
