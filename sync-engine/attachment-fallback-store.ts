@@ -5,7 +5,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import { attachmentFallbacks } from "../shared/database/schema.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 
-export interface AttachmentFallbackStoreResources {
+interface AttachmentFallbackStoreResources {
   readonly database: AppDatabase;
   readonly generateId: IdGenerator;
 }
