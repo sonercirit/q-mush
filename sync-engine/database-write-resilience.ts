@@ -38,18 +38,25 @@ export interface DatabaseWriteResilienceOptions {
   readonly sleep?: RetrySleep;
 }
 
-export function isDiskFullFailure(error: unknown): boolean {
-  return error instanceof DiskFullError;
+const DISK_FULL_ERROR = Symbol("DiskFullError");
+
+interface DiskFullFailure extends Error {
+  readonly cause: unknown;
+  readonly [DISK_FULL_ERROR]: true;
 }
 
-class DiskFullError extends Error {
-  override readonly cause: unknown;
+export function isDiskFullFailure(error: unknown): error is DiskFullFailure {
+  return (
+    error instanceof Error &&
+    Reflect.get(error, DISK_FULL_ERROR) === true
+  );
+}
 
-  constructor(cause: unknown) {
-    super("The database write failed because the disk is full");
-    this.name = "DiskFullError";
-    this.cause = cause;
-  }
+function createDiskFullFailure(cause: unknown): DiskFullFailure {
+  return Object.assign(
+    new Error("The database write failed because the disk is full", { cause }),
+    { [DISK_FULL_ERROR]: true as const, cause, name: "DiskFullError" },
+  );
 }
 
 function isDiskFullError(error: unknown): boolean {
@@ -150,7 +157,7 @@ export class DatabaseWriteResilience {
       "a critical database write still cannot persist after bounded retries",
       attempted.error,
     );
-    throw new DiskFullError(attempted.error);
+    throw createDiskFullFailure(attempted.error);
   }
 }
 
@@ -169,16 +176,17 @@ function isStatementMethod(value: PropertyKey): value is StatementMethod {
   );
 }
 
+const DEFAULT_STATEMENT_RESULTS: Readonly<
+  Record<StatementMethod, () => unknown>
+> = {
+  all: () => [],
+  get: () => null,
+  run: droppedChanges,
+  values: () => [],
+};
+
 function defaultStatementResult(method: StatementMethod): unknown {
-  switch (method) {
-    case "get":
-      return null;
-    case "run":
-      return droppedChanges();
-    case "all":
-    case "values":
-      return [];
-  }
+  return DEFAULT_STATEMENT_RESULTS[method]();
 }
 
 function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
