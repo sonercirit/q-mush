@@ -166,12 +166,13 @@ function anthropicMessage(
   message: AgentConversationMessage,
   identity: AnthropicReplayIdentity,
 ): AnthropicMessage | undefined {
-  function dispatch<Role extends AgentConversationMessage["role"]>(
-    narrowed: ConversationMessageByRole[Role],
-  ): AnthropicMessage | undefined {
-    return anthropicMessageHandlers[narrowed.role](narrowed, identity);
-  }
-  return dispatch(message);
+  if (message.role === "assistant")
+    return anthropicMessageHandlers.assistant(message, identity);
+  if (message.role === "compaction_notice")
+    return anthropicMessageHandlers.compaction_notice(message, identity);
+  if (message.role === "tool")
+    return anthropicMessageHandlers.tool(message, identity);
+  return anthropicMessageHandlers.user(message, identity);
 }
 
 function continuationReplay(

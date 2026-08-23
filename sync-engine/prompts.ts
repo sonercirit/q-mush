@@ -178,13 +178,10 @@ class DrizzlePromptIntegration
             : this.#write(request, userId, promptId, revision);
         },
       };
-      const handler = handlers[method as keyof typeof handlers];
-      if (handler === undefined) {
-        const unsupportedMethod: never = method as never;
-        void unsupportedMethod;
-        return createMethodNotAllowedResponse("GET, PUT, DELETE");
-      }
-      return handler();
+      if (method === "DELETE") return handlers.DELETE();
+      if (method === "GET") return handlers.GET();
+      if (method === "PUT") return handlers.PUT();
+      return createMethodNotAllowedResponse("GET, PUT, DELETE");
     });
   }
 
