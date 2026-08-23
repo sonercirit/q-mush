@@ -14,7 +14,7 @@ export abstract class SessionStoreRestarts extends SessionStoreRuntime {
 
   constructor(database: AppDatabase, generateId: IdGenerator) {
     super();
-    this.#restartHandoffs = new RestartHandoffStore({
+    this.#restartHandoffs = RestartHandoffStore({
       database,
       generateId,
       interruptUnknownTools: (transaction, sessionId, now) => {

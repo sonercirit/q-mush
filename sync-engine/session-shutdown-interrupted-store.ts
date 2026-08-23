@@ -41,6 +41,14 @@ function shutdownHandoff(
   };
 }
 
+type ShutdownMarkArguments = [
+  string,
+  number,
+  string,
+  RestartHandoffOperation,
+  number,
+];
+
 export interface ShutdownInterruptedSessionStore {
   readonly beginLiveDrain: () => void;
   readonly clear: (
@@ -50,13 +58,7 @@ export interface ShutdownInterruptedSessionStore {
   ) => boolean;
   readonly enableRecovery: () => void;
   readonly failInvalid: (now: number) => void;
-  readonly mark: (
-    sessionId: string,
-    generation: number,
-    restartId: string,
-    operation: RestartHandoffOperation,
-    now: number,
-  ) => boolean;
+  readonly mark: (...arguments_: ShutdownMarkArguments) => boolean;
   readonly recover: (now: () => number) => void;
   readonly recoveryEnabled: () => boolean;
   readonly restore: (now: number) => void;
@@ -67,13 +69,8 @@ export function ShutdownInterruptedSessionStore(
 ): ShutdownInterruptedSessionStore {
   let recoveryEnabled = true;
 
-  function mark(
-    sessionId: string,
-    generation: number,
-    restartId: string,
-    operation: RestartHandoffOperation,
-    now: number,
-  ): boolean {
+  function mark(...arguments_: ShutdownMarkArguments): boolean {
+    const [sessionId, generation, restartId, operation, now] = arguments_;
     const marker = shutdownHandoff(generation, restartId, operation);
     return updateStoredSessions(
       options.database,
