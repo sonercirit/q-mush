@@ -10,7 +10,7 @@ export type AskQuestionsPause = Error & {
   readonly tag: "ask_questions_pause";
 };
 
-export function createAskQuestionsPause(requestId: string): AskQuestionsPause {
+function createAskQuestionsPause(requestId: string): AskQuestionsPause {
   return Object.assign(
     new Error("The agent session is paused for question answers"),
     {

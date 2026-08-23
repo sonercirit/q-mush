@@ -16,9 +16,7 @@ export type QuestionActionFailure = RealtimeCommandError & {
   readonly tag: "question_action_failure";
 };
 
-export function createQuestionActionFailure(
-  code: string,
-): QuestionActionFailure {
+function createQuestionActionFailure(code: string): QuestionActionFailure {
   return Object.assign(new RealtimeCommandError(code), {
     name: "QuestionActionFailure",
     tag: "question_action_failure" as const,

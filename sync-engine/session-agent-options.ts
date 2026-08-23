@@ -291,57 +291,59 @@ type SessionOptionReader = (
   source: SessionOptionsSource,
 ) => readonly BoundedOption<SessionOption>[];
 
-const sessionOptionReaders: Record<SessionOptionDispatchCategory, SessionOptionReader> =
-  {
-    credentials: (source) => source.credentials.map(boundedCredential),
-    models: (source) => source.models.map(boundedModel),
-    reasoning_efforts: (source) =>
-      source.reasoningEfforts.map((effort) => ({
-        option: { effort },
-        truncated: false,
-      })),
-    runners: (source) =>
-      source.runners.flatMap(
-        (runner): readonly BoundedOption<SessionOption>[] => {
-          if (runner.status !== "online") return [];
-          const architecture = boundedNullableText(runner.architecture);
-          const id = boundedText(runner.id);
-          const name = boundedNullableText(runner.name);
-          const platform = boundedNullableText(runner.platform);
-          return [
-            {
-              option: {
-                architecture: architecture.option,
-                id: id.option,
-                isDefault: runner.isDefault,
-                name: name.option,
-                platform: platform.option,
-                status: "online",
-              },
-              truncated:
-                architecture.truncated ||
-                id.truncated ||
-                name.truncated ||
-                platform.truncated,
+const sessionOptionReaders: Record<
+  SessionOptionDispatchCategory,
+  SessionOptionReader
+> = {
+  credentials: (source) => source.credentials.map(boundedCredential),
+  models: (source) => source.models.map(boundedModel),
+  reasoning_efforts: (source) =>
+    source.reasoningEfforts.map((effort) => ({
+      option: { effort },
+      truncated: false,
+    })),
+  runners: (source) =>
+    source.runners.flatMap(
+      (runner): readonly BoundedOption<SessionOption>[] => {
+        if (runner.status !== "online") return [];
+        const architecture = boundedNullableText(runner.architecture);
+        const id = boundedText(runner.id);
+        const name = boundedNullableText(runner.name);
+        const platform = boundedNullableText(runner.platform);
+        return [
+          {
+            option: {
+              architecture: architecture.option,
+              id: id.option,
+              isDefault: runner.isDefault,
+              name: name.option,
+              platform: platform.option,
+              status: "online",
             },
-          ];
-        },
-      ),
-    tools: (source) =>
-      source.tools.map(({ classification, description, label, name }) => {
-        const boundedDescription = boundedText(description);
-        const boundedLabel = boundedText(label);
-        return {
-          option: {
-            classification,
-            description: boundedDescription.option,
-            label: boundedLabel.option,
-            name,
+            truncated:
+              architecture.truncated ||
+              id.truncated ||
+              name.truncated ||
+              platform.truncated,
           },
-          truncated: boundedDescription.truncated || boundedLabel.truncated,
-        };
-      }),
-  };
+        ];
+      },
+    ),
+  tools: (source) =>
+    source.tools.map(({ classification, description, label, name }) => {
+      const boundedDescription = boundedText(description);
+      const boundedLabel = boundedText(label);
+      return {
+        option: {
+          classification,
+          description: boundedDescription.option,
+          label: boundedLabel.option,
+          name,
+        },
+        truncated: boundedDescription.truncated || boundedLabel.truncated,
+      };
+    }),
+};
 
 function optionsForCategory(
   input: GetSessionOptionsToolInput,

@@ -14,7 +14,7 @@ export type SessionContextTokenCapError = Error & {
   readonly tag: "session_context_token_cap_error";
 };
 
-export function createSessionContextTokenCapError(
+function createSessionContextTokenCapError(
   message: string,
 ): SessionContextTokenCapError {
   return Object.assign(new Error(message), {
