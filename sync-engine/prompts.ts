@@ -9,7 +9,10 @@ import {
   type PromptInput,
 } from "../shared/prompt-model.ts";
 import type { GoogleAuth } from "./auth.ts";
-import { AuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
+import {
+  createAuthenticatedCollectionIntegration,
+  type AuthenticatedCollectionIntegration,
+} from "./authenticated-collection-integration.ts";
 import type { CollectionItemIntegration } from "./collection-item-integration.ts";
 import {
   createApiError,
@@ -124,15 +127,13 @@ function readPromptInput(value: unknown): PromptInput | undefined {
   return normalizePromptInput({ body, name });
 }
 
-class DrizzlePromptIntegration
-  extends AuthenticatedCollectionIntegration
-  implements PromptIntegration
-{
+class DrizzlePromptIntegration implements PromptIntegration {
+  readonly #authenticated: AuthenticatedCollectionIntegration;
   readonly #now: () => number;
   readonly #store: PromptStore;
 
   constructor(auth: GoogleAuth, dependencies: PromptDependencies) {
-    super(auth);
+    this.#authenticated = createAuthenticatedCollectionIntegration(auth);
     const database = dependencies.database ?? createDatabase(":memory:");
     this.#now = dependencies.now ?? Date.now;
     this.#store = new PromptStore(
@@ -148,11 +149,11 @@ class DrizzlePromptIntegration
         createJsonResponse({ prompts: this.#store.list(userId) }),
       POST: (userId: string) => this.#write(request, userId),
     };
-    return this.collectionRoute(request, methods);
+    return this.#authenticated.collectionRoute(request, methods);
   }
 
   item(request: Request, promptId: string): Promise<Response> | Response {
-    return this.route(request, (userId, method) => {
+    return this.#authenticated.route(request, (userId, method) => {
       switch (method) {
         case "GET":
           return this.#promptResponse(this.#store.get(userId, promptId));

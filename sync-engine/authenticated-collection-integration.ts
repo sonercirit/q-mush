@@ -56,12 +56,3 @@ export function createAuthenticatedCollectionIntegration(
   return { collectionRoute, route };
 }
 
-interface AuthenticatedCollectionIntegrationConstructor {
-  new (auth: GoogleAuth): AuthenticatedCollectionIntegration;
-}
-
-// Constructable compatibility lets existing integrations migrate independently.
-export const AuthenticatedCollectionIntegration: AuthenticatedCollectionIntegrationConstructor =
-  function (this: AuthenticatedCollectionIntegration, auth: GoogleAuth): void {
-    Object.assign(this, createAuthenticatedCollectionIntegration(auth));
-  } as unknown as AuthenticatedCollectionIntegrationConstructor;
