@@ -7,7 +7,7 @@ import {
   discoverModelOption,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
-import { AttachmentFallbackApi } from "./attachment-fallback-api.ts";
+import { createAttachmentFallbackApi, type AttachmentFallbackApi } from "./attachment-fallback-api.ts";
 import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
@@ -31,7 +31,7 @@ export function createAttachmentFallbackIntegration(options: {
     options.database,
     options.generateId,
   );
-  const api = new AttachmentFallbackApi({
+  const api = createAttachmentFallbackApi({
     now: options.now,
     requests: options.requests,
     store,
