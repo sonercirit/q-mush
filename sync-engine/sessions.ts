@@ -37,7 +37,10 @@ import {
   type SessionDependencies,
 } from "./session-dependencies.ts";
 import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
-import { SessionFailureReconciler } from "./session-failure-reconciler.ts";
+import {
+  createSessionFailureReconciler,
+  type SessionFailureReconciler,
+} from "./session-failure-reconciler.ts";
 import { SessionFinisher } from "./session-finisher.ts";
 import { compactIdleSessions } from "./session-idle-compaction.ts";
 import {
@@ -104,7 +107,8 @@ class DrizzleSessionIntegration
   readonly #liveness;
   readonly #cleanup: SessionExecutionCleanup;
   readonly #finisher: SessionFinisher;
-  readonly #failureReconciler = new SessionFailureReconciler();
+  readonly #failureReconciler: SessionFailureReconciler =
+    createSessionFailureReconciler();
   readonly #runners: RunnerIntegration;
   readonly #runtimes: SessionRuntimes;
   readonly #restartController = new SessionRestartAbort();
