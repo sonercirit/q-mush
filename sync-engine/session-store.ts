@@ -16,7 +16,10 @@ import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
 import { AskQuestionsStore } from "./ask-questions-store.ts";
-import { CurrentSessionStore } from "./session-current-store.ts";
+import {
+  createCurrentSessionStore,
+  type CurrentSessionStore,
+} from "./session-current-store.ts";
 import {
   sessionExecutionIsCurrent,
   type SessionExecutionAuthority,
@@ -538,7 +541,7 @@ export class SessionStore extends SessionStoreRestarts {
     return current;
   }
   #current(): CurrentSessionStore {
-    return new CurrentSessionStore(this, (sessionId) =>
+    return createCurrentSessionStore(this, (sessionId) =>
       this.#currentGeneration(sessionId),
     );
   }

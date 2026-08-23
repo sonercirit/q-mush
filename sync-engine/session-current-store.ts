@@ -4,93 +4,89 @@ import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
 import type { SessionStore } from "./session-store.ts";
 
-export class CurrentSessionStore {
-  readonly #generation: (sessionId: string) => number;
-  readonly #store: SessionStore;
-
-  constructor(store: SessionStore, generation: (sessionId: string) => number) {
-    this.#generation = generation;
-    this.#store = store;
-  }
-
+export interface CurrentSessionStore {
   appendAgentMessage(
     sessionId: string,
     message: AgentRecordedMessage,
     now: number,
-  ): void {
-    this.#store.appendRuntimeAgentMessages(
-      sessionId,
-      [message],
-      now,
-      this.#generation(sessionId),
-    );
-  }
-
-  appendErrorMessage(sessionId: string, content: string, now: number): void {
-    this.#store.appendRuntimeErrorMessage(
-      sessionId,
-      content,
-      now,
-      this.#generation(sessionId),
-    );
-  }
-
+  ): void;
+  appendErrorMessage(sessionId: string, content: string, now: number): void;
   compactConversation(
     sessionId: string,
     summary: string,
     usage: CompactionUsage,
     now: number,
-  ): void {
-    this.#store.compactRuntimeConversation(
-      sessionId,
-      summary,
-      usage,
-      now,
-      this.#generation(sessionId),
-      now,
-    );
-  }
-
+  ): void;
   setAgentFile(
     sessionId: string,
     agentFile: AgentFile | null,
     now: number,
-  ): void {
-    this.#store.setRuntimeAgentFile(
-      sessionId,
-      agentFile,
-      now,
-      this.#generation(sessionId),
-    );
-  }
-
+  ): void;
   updateUsage(
     sessionId: string,
     input: AgentSessionUsageUpdate,
     now: number,
-  ): void {
-    this.#store.updateRuntimeUsage(
-      sessionId,
-      input,
-      now,
-      this.#generation(sessionId),
-    );
-  }
-
+  ): void;
   transition(
     sessionId: string,
     status: "failed" | "idle" | "running",
     now: number,
-  ): boolean {
-    try {
-      return this.#store.transitionRuntime(
+  ): boolean;
+}
+
+export function createCurrentSessionStore(
+  store: SessionStore,
+  generation: (sessionId: string) => number,
+): CurrentSessionStore {
+  return {
+    appendAgentMessage(sessionId, message, now) {
+      store.appendRuntimeAgentMessages(
         sessionId,
-        status,
+        [message],
         now,
-        this.#generation(sessionId),
+        generation(sessionId),
       );
-    } catch {
-      return false;
-    }
-  }
+    },
+    appendErrorMessage(sessionId, content, now) {
+      store.appendRuntimeErrorMessage(
+        sessionId,
+        content,
+        now,
+        generation(sessionId),
+      );
+    },
+    compactConversation(sessionId, summary, usage, now) {
+      store.compactRuntimeConversation(
+        sessionId,
+        summary,
+        usage,
+        now,
+        generation(sessionId),
+        now,
+      );
+    },
+    setAgentFile(sessionId, agentFile, now) {
+      store.setRuntimeAgentFile(
+        sessionId,
+        agentFile,
+        now,
+        generation(sessionId),
+      );
+    },
+    updateUsage(sessionId, input, now) {
+      store.updateRuntimeUsage(sessionId, input, now, generation(sessionId));
+    },
+    transition(sessionId, status, now) {
+      try {
+        return store.transitionRuntime(
+          sessionId,
+          status,
+          now,
+          generation(sessionId),
+        );
+      } catch {
+        return false;
+      }
+    },
+  };
 }
