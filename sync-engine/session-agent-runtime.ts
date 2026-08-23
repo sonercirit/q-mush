@@ -29,7 +29,6 @@ import { forEachAssistantToolCall } from "./agent-conversation.ts";
 import { estimateAgentStepCost } from "./agent-cost.ts";
 import type { ProviderRequestState } from "./agent-model-options.ts";
 import { createAgentSkills } from "./agent-skills.ts";
-import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import { isAskQuestionsPause } from "./ask-questions-pause.ts";
 import { explainAttachment } from "./attachment-fallback-model.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -69,7 +68,10 @@ import {
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { SessionRecorder } from "./session-recorder.ts";
-import { sessionRuntimeConversation } from "./session-runtime-conversation.ts";
+import {
+  resolveSessionReplayModel,
+  sessionRuntimeConversation,
+} from "./session-runtime-conversation.ts";
 import { runtimeCredentialRefresher } from "./session-runtime-credential-refresh.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
@@ -155,13 +157,7 @@ async function loadModels(
         markProviderPending(runtime, state);
       };
       const refreshCredential = runtimeCredentialRefresher(runtime);
-      const resolution = await resolveAnthropicModelAttempt({
-        credential: runtime.credential,
-        fetch: runtime.modelFetch ?? ((request) => globalThis.fetch(request)),
-        model: runtime.detail.model,
-        provider: runtime.detail.provider,
-        signal,
-      });
+      const resolvedModel = await resolveSessionReplayModel(runtime, signal);
       throwIfRestartRequested(runtime);
       return createSessionAgentModels({
         agentFile,
@@ -175,9 +171,7 @@ async function loadModels(
           markSessionStepStart(runtime);
         },
         realtime: runtime.realtime,
-        ...(resolution.model === undefined
-          ? {}
-          : { resolvedModel: resolution.model }),
+        ...(resolvedModel === undefined ? {} : { resolvedModel }),
         ...(options.streamId === undefined
           ? {}
           : { streamId: options.streamId }),
@@ -343,8 +337,6 @@ export async function runSessionAgent(
     handoffController.signal,
   ]);
   const stepTools = new Set<AgentSessionToolName>(runtime.detail.tools);
-  // Resumed runs park at their next step boundary too; exempting them let a
-  // drain that caught one never converge.
   const stepBoundaryRequested = runtime.restartHandoffRequested;
   const currentToolNames = (): readonly AgentSessionToolName[] | undefined =>
     currentExecutionTools({
@@ -423,8 +415,6 @@ export async function runSessionAgent(
       throwIfRestartRequested(runtime);
       runtime.pendingComponent("provider_request");
       const currentModel = await discoverCurrentSessionModel(runtime, signal);
-      // Discovery may ignore cancellation and settle after the wrapper already
-      // reported timed-out; never start explanation model work afterward.
       throwIfAgentAborted(signal);
       throwIfRestartRequested(runtime);
       if (currentModel === undefined) {
