@@ -124,57 +124,45 @@ export async function answerSessionQuestionsCommand(
     answers,
     dependencies.now(),
   );
-  type AnswerResult = typeof answered;
-  type AnswerStatus = AnswerResult["status"];
-  type AlreadyAnswered = {
+  type AnswerStatus = typeof answered.status;
+  interface CommandResult {
+    readonly launchStarted: boolean;
     readonly result: string;
-    readonly status: "already_answered";
-  };
-  type SuccessfulAnswer = {
-    readonly request: {
-      readonly executionGeneration: number;
-      readonly id: string;
-      readonly sessionId: string;
-      readonly userId: string;
-    };
-    readonly result: string;
-    readonly status: "answered";
-  };
-  const handlers: Record<
-    AnswerStatus,
-    (result: never) => Promise<{
-      readonly launchStarted: boolean;
-      readonly result: string;
-      readonly status: "already_answered" | "answered";
-    }>
-  > = {
-    conflict: (result) =>
-      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
-    not_found: (result) =>
-      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
-    stale: (result) =>
-      answerFailure((result as AnswerResult).status as AnswerFailureStatus),
-    already_answered: async (result) => {
-      const value = result as AlreadyAnswered;
-      return {
+    readonly status: "already_answered" | "answered";
+  }
+  const handlers: Record<AnswerStatus, () => Promise<CommandResult>> = {
+    conflict: () => answerFailure("conflict"),
+    not_found: () => answerFailure("not_found"),
+    stale: () => answerFailure("stale"),
+    already_answered: () => {
+      if (answered.status !== "already_answered") {
+        return Promise.reject(new Error("Unexpected question answer status"));
+      }
+      return Promise.resolve({
         launchStarted: false,
-        result: value.result,
-        status: value.status,
-      };
+        result: answered.result,
+        status: answered.status,
+      });
     },
-    answered: async (result) => {
-      const value = result as SuccessfulAnswer;
+    answered: async () => {
+      if (answered.status !== "answered") {
+        throw new Error("Unexpected question answer status");
+      }
       dependencies.notify(user.id, payload.sessionId);
       const launchStarted = await dependencies.launchAnswered({
-        executionGeneration: value.request.executionGeneration,
-        requestId: value.request.id,
-        sessionId: value.request.sessionId,
-        userId: value.request.userId,
+        executionGeneration: answered.request.executionGeneration,
+        requestId: answered.request.id,
+        sessionId: answered.request.sessionId,
+        userId: answered.request.userId,
       });
-      return { launchStarted, result: value.result, status: value.status };
+      return {
+        launchStarted,
+        result: answered.result,
+        status: answered.status,
+      };
     },
   };
-  return handlers[answered.status](answered as never);
+  return handlers[answered.status]();
 }
 
 export async function recoverAnsweredQuestions(
