@@ -56,7 +56,7 @@ function normalizeWorkspaceName(name: string): string | undefined {
     : undefined;
 }
 
-export type WorkspaceRemovalResult =
+type WorkspaceRemovalResult =
   "last_workspace" | "not_found" | "removed" | "workspace_in_use";
 
 function normalizedWorkspaceName(
@@ -64,31 +64,36 @@ function normalizedWorkspaceName(
   action: (normalizedName: string) => WorkspaceSummary | undefined,
 ): WorkspaceSummary | undefined {
   const normalizedName = normalizeWorkspaceName(name);
-  return normalizedName === undefined ? undefined : action(normalizedName);
+  if (normalizedName === undefined) return undefined;
+  try {
+    return action(normalizedName);
+  } catch {
+    return undefined;
+  }
 }
 
 export interface WorkspaceStore {
-  create(
+  create: (
     userId: string,
     name: string,
     now: number,
-  ): WorkspaceSummary | undefined;
-  createDefault(userId: string, now: number): WorkspaceSummary;
-  defaultForUser(userId: string): WorkspaceSummary | undefined;
-  exists(userId: string, workspaceId: string): boolean;
-  list(userId: string): WorkspaceList;
-  rename(
+  ) => WorkspaceSummary | undefined;
+  createDefault: (userId: string, now: number) => WorkspaceSummary;
+  defaultForUser: (userId: string) => WorkspaceSummary | undefined;
+  exists: (userId: string, workspaceId: string) => boolean;
+  list: (userId: string) => WorkspaceList;
+  rename: (
     userId: string,
     workspaceId: string,
     name: string,
     now: number,
-  ): WorkspaceSummary | undefined;
-  remove(
+  ) => WorkspaceSummary | undefined;
+  remove: (
     userId: string,
     workspaceId: string,
     now: number,
-  ): WorkspaceRemovalResult;
-  setDefault(userId: string, workspaceId: string, now: number): boolean;
+  ) => WorkspaceRemovalResult;
+  setDefault: (userId: string, workspaceId: string, now: number) => boolean;
 }
 
 export function createWorkspaceStore(
@@ -103,16 +108,12 @@ export function createWorkspaceStore(
     ): WorkspaceSummary | undefined {
       return normalizedWorkspaceName(name, (normalizedName) => {
         const id = generateId(now);
-        try {
-          return insertWorkspace(database, {
-            id,
-            name: normalizedName,
-            now,
-            userId,
-          });
-        } catch {
-          return undefined;
-        }
+        return insertWorkspace(database, {
+          id,
+          name: normalizedName,
+          now,
+          userId,
+        });
       });
     },
 
@@ -174,17 +175,13 @@ export function createWorkspaceStore(
         return undefined;
       }
       return normalizedWorkspaceName(name, (normalizedName) => {
-        try {
-          const [updated] = database
-            .update(workspaces)
-            .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
-            .where(activeWorkspaceCondition(userId, workspaceId))
-            .returning(workspaceSelection())
-            .all();
-          return updated;
-        } catch {
-          return undefined;
-        }
+        const [updated] = database
+          .update(workspaces)
+          .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
+          .where(activeWorkspaceCondition(userId, workspaceId))
+          .returning(workspaceSelection())
+          .all();
+        return updated;
       });
     },
 

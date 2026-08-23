@@ -13,7 +13,7 @@ const CRITICAL_RETRY_DELAYS_MS = [100, 400, 1_500] as const;
 const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 const WRITE_STATEMENT_PATTERN = /^\s*(?:delete|insert|replace|update)\b/iu;
 
-export type DatabaseWritePriority = "critical" | "noncritical";
+type DatabaseWritePriority = "critical" | "noncritical";
 
 type DatabaseWriteAttemptRunner = <Result>(operation: () => Result) => Result;
 type RetrySleep = (delay: number) => void;
@@ -92,6 +92,16 @@ export interface DatabaseWriteResilience {
   ): Result | undefined;
 }
 
+type ResilientRun = DatabaseWriteResilience["run"];
+
+function runDatabaseWrite<Result>(
+  perform: ResilientRun,
+  priority: DatabaseWritePriority,
+  operation: () => Result,
+): Result | undefined {
+  return perform(priority, operation);
+}
+
 export function createDatabaseWriteResilience(
   options: DatabaseWriteResilienceOptions,
 ): DatabaseWriteResilience {
@@ -113,10 +123,7 @@ export function createDatabaseWriteResilience(
     close() {
       closed = true;
     },
-    run<Result>(
-      priority: DatabaseWritePriority,
-      operation: () => Result,
-    ): Result | undefined {
+    run: (priority, operation) => {
       if (closed) throw closedError();
       let attempted = perform(operation);
       if (attempted.status === "persisted") return attempted.result;
@@ -208,7 +215,11 @@ function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
         if (database.inTransaction || inResilientTransaction()) {
           return execute();
         }
-        const result = resilience.run(priorityValue, execute);
+        const result = runDatabaseWrite(
+          resilience.run.bind(resilience),
+          priorityValue,
+          execute,
+        );
         return priorityValue === "noncritical" && result === undefined
           ? defaultStatementResult(property)
           : result;
@@ -260,7 +271,11 @@ export function installDatabaseWriteResilience(
         resilientTransactionDepth -= 1;
       }
     };
-    return resilience.run(activePriority, execute);
+    return runDatabaseWrite(
+      resilience.run.bind(resilience),
+      activePriority,
+      execute,
+    );
   }
   Object.defineProperty(database, "transaction", {
     configurable: true,
@@ -278,6 +293,11 @@ export function installDatabaseWriteResilience(
       }
     },
   });
+}
+
+function closeRecoveryProbe(database: Database): void {
+  database.run("ROLLBACK TO q_mush_storage_recovery_probe");
+  database.run("RELEASE q_mush_storage_recovery_probe");
 }
 
 export function startDatabaseRecoveryWatcher(
@@ -307,8 +327,7 @@ export function startDatabaseRecoveryWatcher(
       database.run(
         `PRAGMA user_version = ${String(originalVersion === 0 ? 1 : 0)}`,
       );
-      database.run("ROLLBACK TO q_mush_storage_recovery_probe");
-      database.run("RELEASE q_mush_storage_recovery_probe");
+      closeRecoveryProbe(database);
       void Promise.resolve(recovered()).then(
         (reconciled) => {
           if (reconciled !== false) {
@@ -325,8 +344,7 @@ export function startDatabaseRecoveryWatcher(
       );
     } catch (error) {
       try {
-        database.run("ROLLBACK TO q_mush_storage_recovery_probe");
-        database.run("RELEASE q_mush_storage_recovery_probe");
+        closeRecoveryProbe(database);
       } catch {
         // The original probe error describes the storage condition.
       }
