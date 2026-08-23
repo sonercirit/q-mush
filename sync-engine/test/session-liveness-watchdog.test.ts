@@ -75,7 +75,7 @@ export function watchdogSetup(
   const notify = vi.fn();
   const reportAll = vi.fn();
   const stopChildren = vi.fn();
-  const shutdownInterrupted = new ShutdownInterruptedSessionStore({
+  const shutdownInterrupted = ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: () => "watchdog-handoff-message",
   });
@@ -234,7 +234,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
       notify: vi.fn(),
       now: () => TEST_NOW,
       runtimes: new SessionRuntimes(),
-      shutdownInterrupted: new ShutdownInterruptedSessionStore({
+      shutdownInterrupted: ShutdownInterruptedSessionStore({
         database: setup.database,
         generateId: () => "scheduler-handoff-message",
       }),

@@ -54,7 +54,7 @@ function expectInterruptedRestored(
 }
 
 function interruptedStore(setup: RestartStoreSetup) {
-  return new ShutdownInterruptedSessionStore({
+  return ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: () => `shutdown-interrupted-${crypto.randomUUID()}`,
   });
@@ -124,7 +124,7 @@ test("retains the run settings across shutdown recovery", () => {
     "The shutdown settings session is unavailable",
   );
   const snapshot = setup.store.toolSettings(running.id, running.generation);
-  const interrupted = new ShutdownInterruptedSessionStore({
+  const interrupted = ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: () => `shutdown-settings-${crypto.randomUUID()}`,
   });

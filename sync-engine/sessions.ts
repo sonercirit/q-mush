@@ -201,7 +201,7 @@ class DrizzleSessionIntegration
     const recoveryNow = this.#now();
     this.#store.repairSpawnedSessionLineage(recoveryNow);
     this.#store.recoverSpawnedSessionReservations(recoveryNow);
-    this.#shutdown = new ShutdownInterruptedSessionStore({
+    this.#shutdown = ShutdownInterruptedSessionStore({
       database,
       generateId: dependencies.randomId ?? createUuidV7,
     });

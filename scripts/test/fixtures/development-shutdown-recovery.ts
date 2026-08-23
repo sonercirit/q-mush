@@ -28,7 +28,7 @@ if (
 }
 const database = createDatabase(databasePath);
 function shutdownStore() {
-  return new ShutdownInterruptedSessionStore({
+  return ShutdownInterruptedSessionStore({
     database,
     generateId: (timestamp) => createUuidV7(timestamp),
   });
