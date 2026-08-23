@@ -153,20 +153,13 @@ class DrizzlePromptIntegration
 
   item(request: Request, promptId: string): Promise<Response> | Response {
     return this.route(request, (userId, method) => {
-      switch (method) {
-        case "GET":
-          return this.#promptResponse(this.#store.get(userId, promptId));
-        case "PUT": {
+      const handlers: Record<
+        "DELETE" | "GET" | "PUT",
+        () => Promise<Response> | Response
+      > = {
+        DELETE: () => {
           const revision = preconditionResponse(request);
-          return revision instanceof Response
-            ? revision
-            : this.#write(request, userId, promptId, revision);
-        }
-        case "DELETE": {
-          const revision = preconditionResponse(request);
-          if (revision instanceof Response) {
-            return revision;
-          }
+          if (revision instanceof Response) return revision;
           try {
             return this.#store.remove(userId, promptId, this.#now(), revision)
               ? createNoContentResponse()
@@ -176,10 +169,22 @@ class DrizzlePromptIntegration
               ? createApiError("prompt_changed", 412)
               : createApiError("storage_unavailable", 500);
           }
-        }
-        default:
-          return createMethodNotAllowedResponse("GET, PUT, DELETE");
+        },
+        GET: () => this.#promptResponse(this.#store.get(userId, promptId)),
+        PUT: () => {
+          const revision = preconditionResponse(request);
+          return revision instanceof Response
+            ? revision
+            : this.#write(request, userId, promptId, revision);
+        },
+      };
+      const handler = handlers[method as keyof typeof handlers];
+      if (handler === undefined) {
+        const unsupportedMethod: never = method as never;
+        void unsupportedMethod;
+        return createMethodNotAllowedResponse("GET, PUT, DELETE");
       }
+      return handler();
     });
   }
 
