@@ -77,15 +77,23 @@ function chatContent(
 type Role = AgentConversationMessage["role"];
 type MessageHandler<Result> = Record<Role, () => Result>;
 
+function messageHasRole<SelectedRole extends Role>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+): message is Extract<
+  AgentConversationMessage,
+  { readonly role: SelectedRole }
+> {
+  return message.role === role;
+}
+
 function messageWithRole<SelectedRole extends Role>(
   message: AgentConversationMessage,
   role: SelectedRole,
 ): Extract<AgentConversationMessage, { readonly role: SelectedRole }> {
-  if (message.role !== role) throw new Error("Unexpected message role");
-  return message as Extract<
-    AgentConversationMessage,
-    { readonly role: SelectedRole }
-  >;
+  if (!messageHasRole(message, role))
+    throw new Error("Unexpected message role");
+  return message;
 }
 
 function handleMessageRole<SelectedRole extends Role, Result>(
