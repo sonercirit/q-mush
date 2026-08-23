@@ -178,7 +178,7 @@ function isActivationReceipt(value: unknown): value is string {
 }
 
 function isPendingActivationReceipt(
-  context: RegistrationHandlerContext,
+  context: RegistrationContext,
   value: unknown,
 ): value is string {
   return (

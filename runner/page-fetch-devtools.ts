@@ -13,7 +13,7 @@ export interface DevtoolsEvent {
   readonly params: unknown;
 }
 
-export interface DevtoolsSubscription {
+interface DevtoolsSubscription {
   close(): void;
   next(): Promise<DevtoolsEvent | undefined>;
 }
@@ -40,7 +40,7 @@ function closedError(): Error {
   return new Error("Chromium closed before the page was ready");
 }
 
-export function createDevtoolsConnection(url: string) {
+function createDevtoolsConnection(url: string) {
   const events = new Map<string, Set<(params: unknown) => void>>();
   const pending = new Map<
     number,
