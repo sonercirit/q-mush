@@ -38,14 +38,12 @@ export interface ProviderHttpOptions {
 }
 
 function providerName(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "OpenAI";
-    case "openrouter":
-      return "OpenRouter";
-    case "generic":
-      return "Generic provider";
-  }
+  const names: Record<ProviderId, string> = {
+    generic: "Generic provider",
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+  };
+  return names[provider];
 }
 
 function errorDetail(body: string): string {

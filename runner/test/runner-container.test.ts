@@ -2,9 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
-import {
-  createRunnerContainerManager,
-} from "../runner-container.ts";
+import { createRunnerContainerManager } from "../runner-container.ts";
 import {
   calledArguments,
   containerOperationRun,

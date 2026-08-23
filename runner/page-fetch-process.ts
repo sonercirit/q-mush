@@ -490,7 +490,6 @@ export function createPageFetchProxy(
   };
 }
 
-
 function trackedChildProcessIds(parentId: number): readonly number[] {
   if (process.platform !== "linux") {
     return [];

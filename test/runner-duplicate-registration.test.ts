@@ -1,8 +1,6 @@
 import { expect, test } from "vitest";
 import { completeRunnerRegistration } from "../runner/runner-registration.ts";
-import {
-  observeOperationalRunnerSocket,
-} from "../runner/runner-socket.ts";
+import { observeOperationalRunnerSocket } from "../runner/runner-socket.ts";
 import {
   createRunnerStartupRestart,
   type RunnerStartupConnection,

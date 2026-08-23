@@ -15,20 +15,14 @@ export function handleRunnerRegistrationAcknowledgement(
 ): void {
   const registrationMessage = readRunnerRegistrationMessage(message);
   const id = registrationMessage.registrationId;
-  switch (registrationMessage.type) {
-    case "registration_accept":
-      registration.commit(socket, data, id);
-      return;
-    case "registration_received":
-      registration.sendActive(socket, data, id);
-      return;
-    case "registration_active_received":
-      registration.activate(socket, data, id);
-      return;
-    case "registration_finalized_received":
-      registration.acknowledgeFinalization(socket, data, id);
-      return;
-    case "registration_operational_received":
-      registration.operational(socket, data, id);
-  }
+  const handlers: Record<typeof registrationMessage.type, () => void> = {
+    registration_accept: () => registration.commit(socket, data, id),
+    registration_received: () => registration.sendActive(socket, data, id),
+    registration_active_received: () => registration.activate(socket, data, id),
+    registration_finalized_received: () =>
+      registration.acknowledgeFinalization(socket, data, id),
+    registration_operational_received: () =>
+      registration.operational(socket, data, id),
+  };
+  handlers[registrationMessage.type]();
 }

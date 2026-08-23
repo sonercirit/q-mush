@@ -5,22 +5,16 @@ import type { QueueSessionResult } from "./session-store-queue.ts";
 export function queueFailureResponse(
   result: Exclude<QueueSessionResult, { readonly status: "queued" }>,
 ): Response {
-  switch (result.status) {
-    case "busy":
-      return createApiError("session_busy", 409);
-    case "callback_pending":
-      return createApiError("callback_pending", 409);
-    case "not_found":
-      return createApiError("not_found", 404);
-    case "parent_stale":
-      return createApiError("parent_stale", 409);
-    case "pending_input_conflict":
-      return createApiError("pending_input_conflict", 409);
-    case "runner_required":
-      return createApiError("runner_required", 409);
-    case "runner_unavailable":
-      return createApiError("runner_unavailable", 409);
-  }
+  const responses: Record<typeof result.status, () => Response> = {
+    busy: () => createApiError("session_busy", 409),
+    callback_pending: () => createApiError("callback_pending", 409),
+    not_found: () => createApiError("not_found", 404),
+    parent_stale: () => createApiError("parent_stale", 409),
+    pending_input_conflict: () => createApiError("pending_input_conflict", 409),
+    runner_required: () => createApiError("runner_required", 409),
+    runner_unavailable: () => createApiError("runner_unavailable", 409),
+  };
+  return responses[result.status]();
 }
 
 export function unavailableSessionResponse(

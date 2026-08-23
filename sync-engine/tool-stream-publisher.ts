@@ -45,16 +45,16 @@ interface ActiveToolStream {
 function bytesKey(
   channel: ToolStreamChannel,
 ): "argumentBytes" | "nameBytes" | "stderrBytes" | "stdoutBytes" {
-  switch (channel) {
-    case "arguments":
-      return "argumentBytes";
-    case "name":
-      return "nameBytes";
-    case "stderr":
-      return "stderrBytes";
-    case "stdout":
-      return "stdoutBytes";
-  }
+  const keys: Record<
+    ToolStreamChannel,
+    "argumentBytes" | "nameBytes" | "stderrBytes" | "stdoutBytes"
+  > = {
+    arguments: "argumentBytes",
+    name: "nameBytes",
+    stderr: "stderrBytes",
+    stdout: "stdoutBytes",
+  };
+  return keys[channel];
 }
 
 function errorState(error: unknown): ToolStreamTerminalState {

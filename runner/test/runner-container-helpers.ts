@@ -49,7 +49,12 @@ function pendingResult(
 }
 
 interface ContainerRunOptions {
-  readonly onOutput?: (delta: Omit<import("../../shared/runner-command-broker.ts").RunnerCommandOutputDelta, "sequence">) => void;
+  readonly onOutput?: (
+    delta: Omit<
+      import("../../shared/runner-command-broker.ts").RunnerCommandOutputDelta,
+      "sequence"
+    >,
+  ) => void;
   readonly outputLimitCharacters?: number;
   readonly signal?: AbortSignal;
   readonly timeoutSeconds?: number;

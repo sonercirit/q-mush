@@ -7,7 +7,9 @@ import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-proto
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
-  return expect(failure).resolves.toMatchObject({ name: "RunnerSupersededError" });
+  return expect(failure).resolves.toMatchObject({
+    name: "RunnerSupersededError",
+  });
 }
 
 function observedSocketFailure(
