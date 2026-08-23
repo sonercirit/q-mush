@@ -37,7 +37,7 @@ import type {
   ProviderQuotaReader,
   ProviderQuotaResetter,
 } from "./provider-quota.ts";
-import { SessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
+import { createSessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
 import {
   SessionCredentialReassignmentEndpoints,
   type SessionCredentialProviderPreparationContext,
@@ -157,7 +157,7 @@ export function createProviderIntegration(options: {
   const sessionStore =
     options.configuration === undefined
       ? undefined
-      : new SessionCredentialReassignmentStore(runtime.database);
+      : createSessionCredentialReassignmentStore(runtime.database);
   const reassignment = new SessionCredentialReassignmentEndpoints({
     auth: options.auth,
     now: runtime.now,

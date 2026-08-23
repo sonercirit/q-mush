@@ -249,21 +249,26 @@ function clearReassignedSessionReplay(
     .run();
 }
 
-export class SessionCredentialReassignmentStore {
-  readonly #database: AppDatabase;
+export interface SessionCredentialReassignmentStore {
+  readonly reassign: (
+    options: SessionCredentialReassignmentOptions,
+  ) => SessionCredentialReassignmentResult | undefined;
+  readonly snapshot: (
+    selection: SessionReassignmentSelection,
+  ) => SessionCredentialReassignmentSnapshot | undefined;
+}
 
-  constructor(database: AppDatabase) {
-    this.#database = database;
-  }
-
-  snapshot(
+export function createSessionCredentialReassignmentStore(
+  database: AppDatabase,
+): SessionCredentialReassignmentStore {
+  function snapshot(
     selection: SessionReassignmentSelection,
   ): SessionCredentialReassignmentSnapshot | undefined {
-    const target = targetCredential(this.#database, selection);
+    const target = targetCredential(database, selection);
     if (
       target === undefined ||
       !targetIsAccessible(
-        this.#database,
+        database,
         selection.userId,
         selection.credentialId,
         target.isGlobal,
@@ -272,19 +277,16 @@ export class SessionCredentialReassignmentStore {
     ) {
       return undefined;
     }
-    return { sessions: sessionsToReassign(this.#database, selection) };
+    return { sessions: sessionsToReassign(database, selection) };
   }
 
-  reassign(
+  function reassign(
     options: SessionCredentialReassignmentOptions,
   ): SessionCredentialReassignmentResult | undefined {
-    return this.#database.transaction(
+    return database.transaction(
       (transaction) => {
         const target = targetCredential(transaction, options);
-
-        if (target === undefined) {
-          return undefined;
-        }
+        if (target === undefined) return undefined;
 
         const workspaceId = options.scope?.workspaceId;
         if (
@@ -313,14 +315,10 @@ export class SessionCredentialReassignmentStore {
           applyMetadataUpdates(transaction, prepared.metadataUpdates);
         }
         clearReassignedSessionReplay(transaction, options, options.now);
-
         transaction
           .update(agentSessions)
           .set({
             providerCredentialId: options.credentialId,
-            // A generic credential may point at a different endpoint whose
-            // model capabilities and output limit differ; clearing them lets
-            // the lazy pre-request refresh re-probe the new catalog.
             ...(options.provider === "generic"
               ? { adaptiveThinking: null, maxOutputTokens: null }
               : {}),
@@ -328,13 +326,16 @@ export class SessionCredentialReassignmentStore {
           })
           .where(sessionsToReassignCondition(options))
           .run();
-        const migratedSessionCount = sqliteChangeCount(
-          this.#database,
-          "SQLite did not return the reassignment count",
-        );
-        return { migratedSessionCount };
+        return {
+          migratedSessionCount: sqliteChangeCount(
+            database,
+            "SQLite did not return the reassignment count",
+          ),
+        };
       },
       { behavior: "immediate" },
     );
   }
+
+  return { reassign, snapshot };
 }
