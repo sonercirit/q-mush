@@ -30,7 +30,6 @@ import {
   type FlowCookies,
   type OAuthDependencies,
   type OAuthEndpoints,
-  type OAuthRuntime,
 } from "./oauth.ts";
 
 const GOOGLE_AUTHORIZATION_URL = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -122,66 +121,57 @@ function readGoogleUser(value: unknown): GoogleUserProfile {
   return { email, googleSubject, name };
 }
 
-class GoogleAuthentication implements GoogleAuth {
-  readonly #configuration: GoogleAuthConfiguration | undefined;
-  readonly #runtime: OAuthRuntime;
-  readonly #store: DrizzleAuthStore;
+function createGoogleAuthentication(
+  configuration: GoogleAuthConfiguration | undefined,
+  dependencies: OAuthDependencies,
+): GoogleAuth {
+  const normalizedConfiguration =
+    configuration === undefined
+      ? undefined
+      : normalizeConfiguration(configuration);
+  const runtime = createOAuthRuntime(dependencies);
+  const store = new DrizzleAuthStore(runtime.database, runtime.generateId);
 
-  constructor(
-    configuration: GoogleAuthConfiguration | undefined,
-    dependencies: OAuthDependencies,
-  ) {
-    this.#configuration =
-      configuration === undefined
-        ? undefined
-        : normalizeConfiguration(configuration);
-    this.#runtime = createOAuthRuntime(dependencies);
-    this.#store = new DrizzleAuthStore(
-      this.#runtime.database,
-      this.#runtime.generateId,
-    );
-  }
-
-  authenticatedUser(request: Request): AuthenticatedUser | null {
-    const now = this.#expireSessions();
+  const authenticatedUser = (request: Request): AuthenticatedUser | null => {
+    const now = expireSessions();
     const sessionToken = readCookie(request, SESSION_COOKIE);
 
     if (sessionToken === undefined) {
       return null;
     }
 
-    return this.#store.readSessionUser(sessionToken, now);
-  }
+    return store.readSessionUser(sessionToken, now);
+  };
 
-  revalidateUser(
+  const revalidateUser = (
     request: Request,
     expectedUserId: string,
-  ): AuthenticatedUser | null {
-    const user = this.authenticatedUser(request);
+  ): AuthenticatedUser | null => {
+    const user = authenticatedUser(request);
     return user?.id === expectedUserId ? user : null;
-  }
+  };
 
-  begin(request: Request): Response {
+  const begin = (request: Request): Response => {
     if (request.method !== "GET") {
       return createMethodNotAllowedResponse("GET");
     }
 
-    if (this.#configuration === undefined) {
+    if (normalizedConfiguration === undefined) {
       return createUnavailableResponse();
     }
 
-    const redirectUri = this.#redirectUri(request);
+    const callbackRedirectUri = redirectUri(request);
     const flow = startPkceFlowForRedirect(
-      this.#runtime,
+      runtime,
       GOOGLE_FLOW_COOKIES,
-      redirectUri,
+      callbackRedirectUri,
     );
     const authorizationUrl = new URL(GOOGLE_AUTHORIZATION_URL);
     authorizationUrl.search = new URLSearchParams({
-      client_id: this.#configuration.clientId,
+      client_id: normalizedConfiguration.clientId,
       code_challenge: flow.challenge,
       code_challenge_method: "S256",
-      redirect_uri: redirectUri,
+      redirect_uri: callbackRedirectUri,
       response_type: "code",
       scope: "openid email profile",
       state: flow.state,
@@ -189,44 +179,42 @@ class GoogleAuthentication implements GoogleAuth {
 
     const flowCookies = flow.cookies;
     return createRedirect(authorizationUrl, flowCookies);
-  }
+  };
 
-  async complete(request: Request): Promise<Response> {
+  const complete = async (request: Request): Promise<Response> => {
     if (request.method !== "GET") {
       return createMethodNotAllowedResponse("GET");
     }
 
-    const secure = this.#usesSecureCookies(request);
+    const secure = usesSecureCookiesForRequest(request);
     const clearedFlowCookies = clearPkceCookies(GOOGLE_FLOW_COOKIES, secure);
 
-    if (this.#configuration === undefined) {
+    if (normalizedConfiguration === undefined) {
       return createUnavailableResponse(clearedFlowCookies);
     }
 
     const callback = readOAuthCallback(request, GOOGLE_FLOW_COOKIES);
-    const callbackFailure =
-      callback.status === "ready"
-        ? undefined
-        : this.#appRedirect(request, callback.status, clearedFlowCookies);
-    if (callbackFailure !== undefined) return callbackFailure;
+    if (callback.status !== "ready") {
+      return appRedirect(request, callback.status, clearedFlowCookies);
+    }
 
     try {
-      const user = await this.#authenticateWithGoogle(
+      const user = await authenticateWithGoogle(
         callback.code,
         callback.verifier,
-        this.#redirectUri(request),
-        this.#configuration,
+        redirectUri(request),
+        normalizedConfiguration,
       );
-      const sessionToken = generateOAuthToken(this.#runtime.randomToken);
-      const now = this.#expireSessions();
-      this.#store.createSession(
+      const sessionToken = generateOAuthToken(runtime.randomToken);
+      const now = expireSessions();
+      store.createSession(
         sessionToken,
         user,
         now + SESSION_LIFETIME_SECONDS * 1000,
         now,
       );
 
-      return this.#appRedirect(request, undefined, [
+      return appRedirect(request, undefined, [
         ...clearedFlowCookies,
         createCookie(
           SESSION_COOKIE,
@@ -237,11 +225,11 @@ class GoogleAuthentication implements GoogleAuth {
         ),
       ]);
     } catch {
-      return this.#appRedirect(request, "failed", clearedFlowCookies);
+      return appRedirect(request, "failed", clearedFlowCookies);
     }
-  }
+  };
 
-  logout(request: Request): Response {
+  const logout = (request: Request): Response => {
     if (request.method !== "POST") {
       return createMethodNotAllowedResponse("POST");
     }
@@ -249,7 +237,7 @@ class GoogleAuthentication implements GoogleAuth {
     const sessionToken = readCookie(request, SESSION_COOKIE);
 
     if (sessionToken !== undefined) {
-      this.#store.revokeSession(sessionToken, this.#runtime.now());
+      store.revokeSession(sessionToken, runtime.now());
     }
 
     const headers = new Headers({ "cache-control": "no-store" });
@@ -260,41 +248,47 @@ class GoogleAuthentication implements GoogleAuth {
         "",
         0,
         "/",
-        this.#usesSecureCookies(request),
+        usesSecureCookiesForRequest(request),
       ),
     );
 
     return new Response(null, { headers, status: 204 });
-  }
+  };
 
-  session(request: Request): Response {
+  const session = (request: Request): Response => {
     if (request.method === "GET") {
       return createJsonResponse({
-        googleLoginAvailable: this.#configuration !== undefined,
-        user: this.authenticatedUser(request),
+        googleLoginAvailable: normalizedConfiguration !== undefined,
+        user: authenticatedUser(request),
       });
     }
 
     return createMethodNotAllowedResponse("GET");
-  }
+  };
 
-  #appRedirect(
+  const appRedirect = (
     request: Request,
     result: "denied" | "failed" | "invalid_state" | undefined,
     cookies: readonly string[],
-  ): Response {
-    const redirectUri = this.#redirectUri(request);
-    return redirectToApp(APP_PATH, redirectUri, "auth", result, cookies);
-  }
+  ): Response => {
+    const callbackRedirectUri = redirectUri(request);
+    return redirectToApp(
+      APP_PATH,
+      callbackRedirectUri,
+      "auth",
+      result,
+      cookies,
+    );
+  };
 
-  async #authenticateWithGoogle(
+  const authenticateWithGoogle = async (
     code: string,
     verifier: string,
     redirectUri: string,
     configuration: GoogleAuthConfiguration,
-  ): Promise<GoogleUserProfile> {
+  ): Promise<GoogleUserProfile> => {
     const tokenValue = await postFormJson(
-      this.#runtime,
+      runtime,
       GOOGLE_TOKEN_URL,
       {
         client_id: configuration.clientId,
@@ -311,7 +305,7 @@ class GoogleAuthentication implements GoogleAuth {
       "access_token",
       "Google",
     );
-    const userInfoResponse = await this.#runtime.fetch(GOOGLE_USERINFO_URL, {
+    const userInfoResponse = await runtime.fetch(GOOGLE_USERINFO_URL, {
       headers: {
         accept: "application/json",
         authorization: `Bearer ${accessToken}`,
@@ -324,25 +318,34 @@ class GoogleAuthentication implements GoogleAuth {
         "Google rejected the user info request",
       ),
     );
-  }
+  };
 
-  #expireSessions(): number {
-    const now = this.#runtime.now();
-    this.#store.expireSessions(now);
+  const expireSessions = (): number => {
+    const now = runtime.now();
+    store.expireSessions(now);
     return now;
-  }
+  };
 
-  #redirectUri(request: Request): string {
+  const redirectUri = (request: Request): string => {
     return resolveRedirectUri(
-      this.#configuration?.redirectUri,
+      normalizedConfiguration?.redirectUri,
       AUTH_GOOGLE_CALLBACK_PATH,
       request,
     );
-  }
+  };
 
-  #usesSecureCookies(request: Request): boolean {
-    return usesSecureCookies(this.#redirectUri(request));
-  }
+  const usesSecureCookiesForRequest = (request: Request): boolean => {
+    return usesSecureCookies(redirectUri(request));
+  };
+
+  return {
+    authenticatedUser,
+    begin,
+    complete,
+    logout,
+    revalidateUser,
+    session,
+  };
 }
 
 export function createGoogleAuthFromEnvironment(
@@ -362,7 +365,7 @@ export function createGoogleAuthFromEnvironment(
     clientSecret === undefined &&
     redirectUri === undefined
   ) {
-    return new GoogleAuthentication(undefined, dependencies);
+    return createGoogleAuthentication(undefined, dependencies);
   }
 
   if (clientId === undefined || clientSecret === undefined) {
@@ -375,5 +378,5 @@ export function createGoogleAuthFromEnvironment(
     redirectUri === undefined
       ? { clientId, clientSecret }
       : { clientId, clientSecret, redirectUri };
-  return new GoogleAuthentication(configuration, dependencies);
+  return createGoogleAuthentication(configuration, dependencies);
 }
