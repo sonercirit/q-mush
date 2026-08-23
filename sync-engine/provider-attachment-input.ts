@@ -76,100 +76,122 @@ function chatContent(
 }
 
 type Role = AgentConversationMessage["role"];
-type MessageHandler<Result> = {
-  [Kind in Role]: (
-    message: Extract<AgentConversationMessage, { readonly role: Kind }>,
-  ) => Result;
-};
+type MessageHandler<Result> = Record<Role, () => Result>;
 
 export function providerChatMessage(
   message: AgentConversationMessage,
   cached = false,
 ): unknown {
   const handlers = {
-    assistant: (item) => ({
-      content: chatContent(
-        item.content.length === 0 ? null : item.content,
-        undefined,
-        cached,
-      ),
-      role: "assistant",
-      ...(item.toolCalls.length === 0
-        ? {}
-        : {
-            tool_calls: item.toolCalls.map((call) => ({
-              function: { arguments: call.arguments, name: call.name },
-              id: call.id,
-              type: "function",
-            })),
-          }),
-    }),
+    assistant: () => {
+      if (message.role !== "assistant")
+        throw new Error("Unexpected message role");
+      const item = message;
+      return {
+        content: chatContent(
+          item.content.length === 0 ? null : item.content,
+          undefined,
+          cached,
+        ),
+        role: "assistant",
+        ...(item.toolCalls.length === 0
+          ? {}
+          : {
+              tool_calls: item.toolCalls.map((call) => ({
+                function: { arguments: call.arguments, name: call.name },
+                id: call.id,
+                type: "function",
+              })),
+            }),
+      };
+    },
     compaction_notice: () => undefined,
-    tool: (item) => ({
-      content: chatContent(item.content, undefined, cached),
-      role: "tool",
-      tool_call_id: item.toolCallId,
-    }),
-    user: (item) => ({
-      content: chatContent(
-        item.content,
-        userAttachments(item).length === 0
-          ? undefined
-          : [
-              ...textInputItems(item.content, "text"),
-              ...userAttachments(item).map((attachment) =>
-                providerAttachmentInput(attachment, false),
-              ),
-            ],
-        cached,
-      ),
-      role: "user",
-    }),
+    tool: () => {
+      if (message.role !== "tool") throw new Error("Unexpected message role");
+      const item = message;
+      return {
+        content: chatContent(item.content, undefined, cached),
+        role: "tool",
+        tool_call_id: item.toolCallId,
+      };
+    },
+    user: () => {
+      if (message.role !== "user") throw new Error("Unexpected message role");
+      const item = message;
+      return {
+        content: chatContent(
+          item.content,
+          userAttachments(item).length === 0
+            ? undefined
+            : [
+                ...textInputItems(item.content, "text"),
+                ...userAttachments(item).map((attachment) =>
+                  providerAttachmentInput(attachment, false),
+                ),
+              ],
+          cached,
+        ),
+        role: "user",
+      };
+    },
   } satisfies MessageHandler<unknown>;
-  return handlers[message.role](message as never);
+  return handlers[message.role]();
 }
 
 export function providerResponsesInput(
   message: AgentConversationMessage,
 ): readonly unknown[] {
   const handlers = {
-    assistant: (item) => [
-      ...(item.content.length === 0
-        ? []
-        : [
-            {
-              content: [{ text: item.content, type: "output_text" }],
-              role: "assistant",
-              type: "message",
-            },
-          ]),
-      ...item.toolCalls.map((call) => ({
-        arguments: call.arguments,
-        call_id: call.id,
-        name: call.name,
-        type: "function_call",
-      })),
-    ],
+    assistant: () => {
+      if (message.role !== "assistant")
+        throw new Error("Unexpected message role");
+      const item = message;
+      return [
+        ...(item.content.length === 0
+          ? []
+          : [
+              {
+                content: [{ text: item.content, type: "output_text" }],
+                role: "assistant",
+                type: "message",
+              },
+            ]),
+        ...item.toolCalls.map((call) => ({
+          arguments: call.arguments,
+          call_id: call.id,
+          name: call.name,
+          type: "function_call",
+        })),
+      ];
+    },
     compaction_notice: () => [],
-    tool: (item) => [
-      {
-        call_id: item.toolCallId,
-        output: item.content,
-        type: "function_call_output",
-      },
-    ],
-    user: (item) => [
-      {
-        content: [
-          ...textInputItems(item.content, "input_text"),
-          ...userAttachments(item).map((attachment) =>
-            providerAttachmentInput(attachment, true),
-          ),
-        ],
-        role: "user",
-        type: "message",
-      },
-    ],
+    tool: () => {
+      if (message.role !== "tool") throw new Error("Unexpected message role");
+      const item = message;
+      return [
+        {
+          call_id: item.toolCallId,
+          output: item.content,
+          type: "function_call_output",
+        },
+      ];
+    },
+    user: () => {
+      if (message.role !== "user") throw new Error("Unexpected message role");
+      const item = message;
+      return [
+        {
+          content: [
+            ...textInputItems(item.content, "input_text"),
+            ...userAttachments(item).map((attachment) =>
+              providerAttachmentInput(attachment, true),
+            ),
+          ],
+          role: "user",
+          type: "message",
+        },
+      ];
+    },
   } satisfies MessageHandler<readonly unknown[]>;
-  return handlers[message.role](message as never);
+  return handlers[message.role]();
 }
