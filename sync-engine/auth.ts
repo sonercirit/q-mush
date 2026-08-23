@@ -4,7 +4,7 @@ import {
   AUTH_GOOGLE_CALLBACK_PATH,
   AUTH_GOOGLE_PATH,
 } from "../shared/routes.ts";
-import { DrizzleAuthStore, type GoogleUserProfile } from "./auth-store.ts";
+import { createDrizzleAuthStore, type GoogleUserProfile } from "./auth-store.ts";
 import {
   appendCookies,
   createCookie,
@@ -130,7 +130,7 @@ function createGoogleAuthentication(
       ? undefined
       : normalizeConfiguration(configuration);
   const runtime = createOAuthRuntime(dependencies);
-  const store = new DrizzleAuthStore(runtime.database, runtime.generateId);
+  const store = createDrizzleAuthStore(runtime.database, runtime.generateId);
 
   const authenticatedUser = (request: Request): AuthenticatedUser | null => {
     const now = expireSessions();
