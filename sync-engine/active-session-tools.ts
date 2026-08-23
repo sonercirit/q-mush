@@ -1,6 +1,6 @@
 import { countRestartProgressTools } from "../shared/restart-progress-tools.ts";
 
-export interface ActiveToolProgress {
+interface ActiveToolProgress {
   readonly count: number;
   readonly name: string;
 }
