@@ -173,6 +173,21 @@ type RegistrationHandler = (
   registrationId: string,
 ) => void;
 
+function isActivationReceipt(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isPendingActivationReceipt(
+  context: RegistrationHandlerContext,
+  value: unknown,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value === context.state.pendingReceipt &&
+    context.startupConnection.finalizeActivation(value)
+  );
+}
+
 const registrationHandlers: Readonly<
   Record<RegistrationServerType, RegistrationHandler>
 > = {
@@ -205,7 +220,7 @@ const registrationHandlers: Readonly<
   registration_active: (context, message, registrationId) => {
     const activationReceipt = message["activationReceipt"];
     if (
-      typeof activationReceipt !== "string" ||
+      !isActivationReceipt(activationReceipt) ||
       !context.startupConnection.prepareActivation(activationReceipt)
     ) {
       invalidRegistration(context);
@@ -222,14 +237,11 @@ const registrationHandlers: Readonly<
   },
   registration_finalized: (context, message, registrationId) => {
     const activationReceipt = message["activationReceipt"];
-    if (
-      typeof activationReceipt !== "string" ||
-      activationReceipt !== context.state.pendingReceipt ||
-      !context.startupConnection.finalizeActivation(activationReceipt)
-    ) {
-      invalidRegistration(context);
-      return;
-    }
+    const receiptMatches = isPendingActivationReceipt(
+      context,
+      activationReceipt,
+    );
+    if (!receiptMatches) return invalidRegistration(context);
     acknowledgeRegistration(
       context,
       registrationId,

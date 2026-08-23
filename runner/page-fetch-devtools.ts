@@ -97,13 +97,8 @@ export function createDevtoolsConnection(url: string) {
       return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
-      socket.addEventListener(
-        "open",
-        () => {
-          resolve();
-        },
-        { once: true },
-      );
+      const opened = (): void => resolve();
+      socket.addEventListener("open", opened, { once: true });
       socket.addEventListener(
         "error",
         () => {

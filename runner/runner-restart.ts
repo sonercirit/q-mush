@@ -47,9 +47,9 @@ export interface RunnerRestartCoordinator {
   readonly pending: boolean;
   readonly pendingRestartId: string | undefined;
   restore(restartId: string): void;
-  connectionContext<Context extends { readonly restartId?: string }>(
+  readonly connectionContext: <Context extends { readonly restartId?: string }>(
     current: Context,
-  ): Context;
+  ) => Context;
   operational(restartId: string | undefined): boolean;
   request(socket: RunnerRestartSocket): Promise<string>;
 }

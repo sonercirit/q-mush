@@ -172,16 +172,21 @@ type ResolvedRunnerToolCommand = RunnerToolCommand & {
   readonly outputLimitCharacters: number;
 };
 
+type ExecuteRunnerCommandResult =
+  RunnerCommandExecutorFunction<RunnerCommandResult>;
+
+type RunnerCommandExecutorFunction<Result> = (
+  command: RunnerToolCommand,
+  signal?: AbortSignal,
+  stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
+) => Promise<Result>;
+
 export interface RunnerCommandExecutor {
-  readonly executeResult: (
-    command: RunnerToolCommand,
-    signal?: AbortSignal,
-    stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
-  ) => Promise<RunnerCommandResult>;
   readonly execute: (
     command: RunnerToolCommand,
     signal?: AbortSignal,
   ) => Promise<string>;
+  readonly executeResult: ExecuteRunnerCommandResult;
 }
 
 export function createRunnerCommandExecutor(
@@ -205,11 +210,11 @@ export function createRunnerCommandExecutor(
     };
   };
 
-  const executeResult = async (
-    command: RunnerToolCommand,
-    signal?: AbortSignal,
-    stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
-  ): Promise<RunnerCommandResult> => {
+  const executeResult: ExecuteRunnerCommandResult = async (
+    command,
+    signal,
+    stream,
+  ) => {
     const resolvedCommand = { ...command, ...toolSettings(command) };
     const result = await executeResolvedResult(resolvedCommand, {
       ...(signal === undefined ? {} : { signal }),
