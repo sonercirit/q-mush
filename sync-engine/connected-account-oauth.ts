@@ -65,7 +65,6 @@ export function createConnectedAccountOAuth(
   credentials: ProviderCredentialEndpoints,
   runtime: OAuthRuntime,
 ): ConnectedAccountOAuth {
-
   const begin = (request: Request): Response => {
     if (["GET"].includes(request.method)) {
       return credentials.authorize(request, (user) =>
@@ -85,7 +84,10 @@ export function createConnectedAccountOAuth(
     );
   };
 
-  const beginAuthorized = (request: Request, user: AuthenticatedUser): Response => {
+  const beginAuthorized = (
+    request: Request,
+    user: AuthenticatedUser,
+  ): Response => {
     const callbackUri = redirectUri(request);
     const { challenge, cookies, secure, state } = startPkceFlowForRedirect(
       runtime,
@@ -169,10 +171,7 @@ export function createConnectedAccountOAuth(
         createCookie(name, "", 0, configuration.flowCookies.path, secure),
       ),
     ];
-    const callback = readOAuthCallback(
-      request,
-      configuration.flowCookies,
-    );
+    const callback = readOAuthCallback(request, configuration.flowCookies);
 
     if (callback.status !== "ready") {
       return appRedirect(request, callback.status, clearedCookies);
@@ -181,14 +180,8 @@ export function createConnectedAccountOAuth(
     const invalidState = (): Response =>
       appRedirect(request, "invalid_state", clearedCookies);
     const flowUserId = readCookie(request, configuration.userCookie);
-    const workspaceId = readCookie(
-      request,
-      configuration.workspaceCookie,
-    );
-    const credentialId = readCookie(
-      request,
-      configuration.credentialCookie,
-    );
+    const workspaceId = readCookie(request, configuration.workspaceCookie);
+    const credentialId = readCookie(request, configuration.credentialCookie);
     if (
       flowUserId === undefined ||
       !valuesMatch(flowUserId, user.id) ||

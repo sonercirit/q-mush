@@ -55,4 +55,3 @@ export function createAuthenticatedCollectionIntegration(
   };
   return { collectionRoute, route };
 }
-
