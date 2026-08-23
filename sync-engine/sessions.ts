@@ -171,8 +171,8 @@ class DrizzleSessionIntegration
     this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;
     const credentials = createSessionCredentialAccess(providers);
-    this.#readCredential = credentials.read;
-    this.#withCredential = credentials.with;
+    this.#readCredential = (...arguments_) => credentials.read(...arguments_);
+    this.#withCredential = (...arguments_) => credentials.with(...arguments_);
     this.#credentialPool = new ModelCredentialPool({
       database,
       readCredential: this.#readCredential,
