@@ -5,7 +5,6 @@ import {
   pauseForAskQuestions,
 } from "../../sync-engine/ask-questions-pause.ts";
 import type {
-  AnswerQuestionRequestResult,
   AskQuestionsStore,
   StoredQuestionRequest,
 } from "../../sync-engine/ask-questions-store.ts";
@@ -17,6 +16,8 @@ import {
   TEST_QUESTION_ANSWERS,
   testAskQuestionsInput,
 } from "./ask-questions-test-fixtures.ts";
+
+type AnswerQuestionRequestResult = ReturnType<AskQuestionsStore["answer"]>;
 
 const USER: AuthenticatedUser = {
   email: "user@example.test",

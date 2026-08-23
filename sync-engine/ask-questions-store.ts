@@ -113,7 +113,7 @@ export interface AskQuestionsStoreResources {
   ) => ToolSettings;
 }
 
-export type AnswerQuestionRequestResult =
+type AnswerQuestionRequestResult =
   | {
       readonly request: StoredQuestionRequest;
       readonly result: string;
@@ -121,7 +121,7 @@ export type AnswerQuestionRequestResult =
     }
   | { readonly status: "conflict" | "not_found" | "stale" };
 
-export type CancelQuestionRequestResult =
+type CancelQuestionRequestResult =
   | { readonly request: StoredQuestionRequest; readonly status: "cancelled" }
   | { readonly status: "not_found" };
 
