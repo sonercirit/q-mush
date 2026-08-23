@@ -4,11 +4,21 @@ import { abortSignalError } from "../shared/validation.ts";
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const CHROMIUM_RETRY_DELAY_MILLISECONDS = 500;
 
-class ChromiumStartupError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "ChromiumStartupError";
-  }
+type ChromiumStartupError = Error & { readonly chromiumStartupError: true };
+
+function createChromiumStartupError(message: string): ChromiumStartupError {
+  return Object.assign(new Error(message), {
+    name: "ChromiumStartupError",
+    chromiumStartupError: true as const,
+  });
+}
+
+function isChromiumStartupError(error: unknown): error is ChromiumStartupError {
+  return (
+    error instanceof Error &&
+    "chromiumStartupError" in error &&
+    error.chromiumStartupError === true
+  );
 }
 
 type ChromiumRetryWait = (
@@ -61,7 +71,7 @@ function startupError(
   diagnostic: Uint8Array,
 ): ChromiumStartupError {
   const detail = boundedUtf8Tail(decodeDiagnostic(diagnostic));
-  return new ChromiumStartupError(
+  return createChromiumStartupError(
     `Chromium stopped before exposing DevTools (${exitDescription(child)}). Stderr tail: ${detail.length === 0 ? "<empty>" : detail}`,
   );
 }
@@ -155,7 +165,7 @@ export async function retryChromiumStartup<Value>(
   try {
     return await operation();
   } catch (error) {
-    if (!(error instanceof ChromiumStartupError)) {
+    if (!isChromiumStartupError(error)) {
       throw error;
     }
     firstFailure = error;

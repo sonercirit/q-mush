@@ -21,28 +21,16 @@ function controlledExecutor() {
   const completions = new Map<string, (result: RunnerCommandResult) => void>();
   const aborted: string[] = [];
   const calls: string[] = [];
-  class ControlledExecutor implements Pick<
-    RunnerCommandExecutor,
-    "executeResult"
-  > {
-    executeResult(
-      selected: RunnerToolCommand,
-      signal?: AbortSignal,
-    ): Promise<RunnerCommandResult> {
+  const executor: Pick<RunnerCommandExecutor, "executeResult"> = {
+    executeResult: (selected, signal) => {
       calls.push(selected.id);
-      signal?.addEventListener(
-        "abort",
-        () => {
-          aborted.push(selected.id);
-        },
-        { once: true },
-      );
+      signal?.addEventListener("abort", () => { aborted.push(selected.id); }, { once: true });
       return new Promise<RunnerCommandResult>((resolve) => {
         completions.set(selected.id, resolve);
       });
-    }
-  }
-  return { aborted, calls, completions, executor: new ControlledExecutor() };
+    },
+  };
+  return { aborted, calls, completions, executor };
 }
 
 function socket() {
