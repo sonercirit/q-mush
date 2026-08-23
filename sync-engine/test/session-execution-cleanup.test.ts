@@ -7,7 +7,7 @@ import {
   type RunnerCommandResult,
 } from "../../shared/runner-command-broker.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
+import { createSessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
 
 class RecordingCleanupBroker extends RunnerCommandBroker {
   readonly commands: DispatchRunnerToolCommand[] = [];
@@ -28,7 +28,7 @@ function cleanupSetup(executionEnvironment: "bare_metal" | "container") {
   const broker = new RecordingCleanupBroker();
   return {
     broker,
-    cleanup: new SessionExecutionCleanup(broker),
+    cleanup: createSessionExecutionCleanup(broker),
     detail: cleanupDetail(executionEnvironment),
   };
 }

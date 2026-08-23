@@ -36,7 +36,10 @@ import {
   permissiveWorkspaceReader,
   type SessionDependencies,
 } from "./session-dependencies.ts";
-import { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
+import {
+  createSessionExecutionCleanup,
+  type SessionExecutionCleanup,
+} from "./session-execution-cleanup.ts";
 import {
   createSessionFailureReconciler,
   type SessionFailureReconciler,
@@ -206,7 +209,7 @@ class DrizzleSessionIntegration
       requests: this.#requests,
       restartSignal: () => this.#restartController.signal,
     });
-    this.#cleanup = new SessionExecutionCleanup(this.#broker);
+    this.#cleanup = createSessionExecutionCleanup(this.#broker);
     this.#removal = new RunnerRemovalCoordinator({
       broker: this.#broker,
       now: this.#now,

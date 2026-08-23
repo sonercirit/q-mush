@@ -5,7 +5,10 @@ import {
   RunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
+import {
+  createSessionExecutionCleanup,
+  type SessionExecutionCleanup,
+} from "../../sync-engine/session-execution-cleanup.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 
@@ -58,7 +61,7 @@ async function pendingCleanup() {
     },
   };
   const broker = new RunnerCommandBroker(brokerOptions);
-  const cleanup = new SessionExecutionCleanup(broker);
+  const cleanup = createSessionExecutionCleanup(broker);
   const promise = containerCleanup(cleanup);
   await dispatched.promise;
   return { broker, cleanup, promise };
@@ -116,7 +119,7 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   // Keep cancellation inert so the first cleanup remains pending while each
   // drain deadline is advanced independently.
   vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
-  const cleanup = new SessionExecutionCleanup(broker);
+  const cleanup = createSessionExecutionCleanup(broker);
   const first = containerCleanup(cleanup);
   const shortDrain = cleanup.drainPending(new RestartDeadline(20, () => 0));
   const longDrain = cleanup.drainPending(new RestartDeadline(100, () => 0));
@@ -148,7 +151,7 @@ test("cleanup dispatch resumes after a completed development drain", async () =>
     commandId: () => "cleanup-command",
     deliver: () => true,
   });
-  const cleanup = new SessionExecutionCleanup(broker);
+  const cleanup = createSessionExecutionCleanup(broker);
 
   await drainExpired(cleanup);
   const promise = containerCleanup(cleanup);
