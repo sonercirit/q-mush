@@ -9,16 +9,18 @@ import {
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 
 export interface SessionCredentialAccess {
-  readonly readForSession: SessionCredentialRead;
-  readonly read: (
+  readForSession(
+    ...parameters: Parameters<SessionCredentialRead>
+  ): ReturnType<SessionCredentialRead>;
+  read(
     userId: string,
     selection: SessionCredentialSelection,
-  ) => Promise<ProviderCredentialAccess | undefined>;
-  readonly with: (
+  ): Promise<ProviderCredentialAccess | undefined>;
+  with(
     userId: string,
     selection: SessionCredentialSelection,
     action: SessionCredentialAction,
-  ) => Promise<Response>;
+  ): Promise<Response>;
 }
 
 export function createSessionCredentialAccess(
