@@ -268,10 +268,11 @@ const sessionAgentToolHandlers: Record<
     return actions.browseRunnerDirectories(runnerId, path, signal);
   },
   compact_session: (actions, arguments_, signal) => {
-    if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
+    const id = sessionId(arguments_);
+    if (Object.keys(arguments_).length !== 1) {
       throw new Error("compact_session received invalid arguments");
     }
-    return actions.compactSession(sessionId(arguments_), signal);
+    return actions.compactSession(id, signal);
   },
   continue_session: (actions, arguments_, signal) => {
     if (!hasOnlySessionToolArguments(arguments_, ["sessionId"])) {
