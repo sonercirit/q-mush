@@ -142,7 +142,7 @@ describe("session models and compaction", () => {
       "api_key",
       () =>
         Promise.reject(
-          new AgentModelDiscoveryError(
+          AgentModelDiscoveryError(
             "Model discovery failed with status 503",
             503,
           ),

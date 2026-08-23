@@ -331,7 +331,7 @@ export function connectedSessionSetup(
   // creation and spawn.
   const stubbedDiscovery = (): Promise<never> =>
     Promise.reject(
-      new AgentModelDiscoveryError("Discovery is stubbed in tests", 503),
+      AgentModelDiscoveryError("Discovery is stubbed in tests", 503),
     );
   const configuredDiscoverModels =
     options.modelDiscovery ?? discoverModels ?? stubbedDiscovery;

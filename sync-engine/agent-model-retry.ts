@@ -25,29 +25,47 @@ interface RetryableModelRequestErrorOptions {
   readonly retryAfterMilliseconds?: number | undefined;
 }
 
-export class RetryableModelRequestError extends Error {
+export interface RetryableModelRequestError extends Error {
   readonly failure: unknown;
   readonly rateLimited: boolean;
   readonly response: Response | undefined;
   readonly retryAfterMilliseconds: number | undefined;
+}
 
-  constructor(
+const retryableModelRequestErrors = new WeakSet<object>();
+
+export function isRetryableModelRequestError(
+  error: unknown,
+): error is RetryableModelRequestError {
+  return error instanceof Error && retryableModelRequestErrors.has(error);
+}
+
+export const RetryableModelRequestError = Object.defineProperty(
+  function RetryableModelRequestError(
     failure: unknown,
     options: RetryableModelRequestErrorOptions = {},
-  ) {
-    super(
-      failure instanceof Error
-        ? failure.message
-        : "The model request failed transiently",
-      { cause: failure },
+  ): RetryableModelRequestError {
+    const error = Object.assign(
+      new Error(
+        failure instanceof Error
+          ? failure.message
+          : "The model request failed transiently",
+        { cause: failure },
+      ),
+      {
+        failure,
+        name: "RetryableModelRequestError",
+        rateLimited: options.rateLimited ?? false,
+        response: options.response,
+        retryAfterMilliseconds: options.retryAfterMilliseconds,
+      },
     );
-    this.name = "RetryableModelRequestError";
-    this.failure = failure;
-    this.rateLimited = options.rateLimited ?? false;
-    this.response = options.response;
-    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
-  }
-}
+    retryableModelRequestErrors.add(error);
+    return error;
+  },
+  Symbol.hasInstance,
+  { value: isRetryableModelRequestError },
+);
 
 function defaultModelRequestSleep(
   milliseconds: number,
@@ -98,7 +116,7 @@ export async function fetchModelRequestAttempt(
       throw error;
     }
 
-    throw new RetryableModelRequestError(error);
+    throw RetryableModelRequestError(error);
   }
 
   if (response.status === 401 || response.status === 403) {
@@ -109,7 +127,7 @@ export async function fetchModelRequestAttempt(
   }
 
   if (modelResponseIsRetryable(response)) {
-    throw new RetryableModelRequestError(undefined, {
+    throw RetryableModelRequestError(undefined, {
       rateLimited: response.status === RATE_LIMITED_MODEL_REQUEST_STATUS,
       response,
       retryAfterMilliseconds: retryAfterMilliseconds(response),

@@ -70,7 +70,7 @@ describe("balanced session agent spawn", () => {
       },
       (_provider, credential) => {
         if (credential.id === CREDENTIAL_ID) {
-          throw new AgentModelDiscoveryError("rejected", 429);
+          throw AgentModelDiscoveryError("rejected", 429);
         }
         return Promise.resolve(testAgentModelCatalog());
       },
@@ -99,7 +99,7 @@ describe("balanced session agent spawn", () => {
       new BalancedSpawnModel(),
       { credentials: balancedCredentials() },
       () => {
-        throw new AgentModelDiscoveryError("rejected", 429);
+        throw AgentModelDiscoveryError("rejected", 429);
       },
     );
 

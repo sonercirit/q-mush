@@ -274,7 +274,7 @@ describe("session credential balancing", () => {
 
   test("rejects a transient balanced probe without creating a session", async () => {
     const sessions = sessionFixture(() =>
-      Promise.reject(new AgentModelDiscoveryError("temporary outage", 503)),
+      Promise.reject(AgentModelDiscoveryError("temporary outage", 503)),
     );
 
     await expect(balancedCreate(sessions)).rejects.toMatchObject({
@@ -289,7 +289,7 @@ describe("session credential balancing", () => {
     const sessions = sessionFixture((_provider, credential) => {
       discovered.push(credential.id);
       return credential.id === CREDENTIAL_ID
-        ? Promise.reject(new AgentModelDiscoveryError("rejected", 429))
+        ? Promise.reject(AgentModelDiscoveryError("rejected", 429))
         : Promise.resolve(TEST_CATALOG);
     });
 

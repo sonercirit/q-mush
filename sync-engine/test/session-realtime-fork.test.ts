@@ -125,7 +125,7 @@ describe("balanced session forks", () => {
     const setup = forkSetup((credentialId) => {
       discovered.push(credentialId);
       return credentialId === FIRST_CREDENTIAL_ID
-        ? Promise.reject(new AgentModelDiscoveryError("rejected", 401))
+        ? Promise.reject(AgentModelDiscoveryError("rejected", 401))
         : Promise.resolve(catalog());
     });
 
@@ -147,7 +147,7 @@ describe("balanced session forks", () => {
 
   test("returns a transient probe error without durable writes", async () => {
     const setup = forkSetup(() =>
-      Promise.reject(new AgentModelDiscoveryError("offline", 503)),
+      Promise.reject(AgentModelDiscoveryError("offline", 503)),
     );
 
     await expect(fork(setup.dependencies)).rejects.toMatchObject({
@@ -176,7 +176,7 @@ describe("balanced session forks", () => {
   test("preserves explicit credential metadata fallback", async () => {
     const storeFork = vi.fn(() => FORKED_RESULT);
     const dependencies = forkDependencies(
-      () => Promise.reject(new AgentModelDiscoveryError("offline", 503)),
+      () => Promise.reject(AgentModelDiscoveryError("offline", 503)),
       undefined,
       storeFork,
     );

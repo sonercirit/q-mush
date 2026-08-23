@@ -297,7 +297,7 @@ describe("OpenRouter session provider validation", () => {
   });
 
   test("separates strict probe failures from explicit metadata fallback", async () => {
-    const transient = new AgentModelDiscoveryError("provider unavailable", 503);
+    const transient = AgentModelDiscoveryError("provider unavailable", 503);
     const automaticInput = { ...SELECTED_INPUT, openRouterProviderTag: null };
     const discoveryFailure = {
       discoverModels: () => Promise.reject(transient),

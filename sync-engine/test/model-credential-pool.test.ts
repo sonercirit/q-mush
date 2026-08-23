@@ -245,7 +245,7 @@ describe("model credential pool", () => {
         TEST_USER_ID,
         SELECTION,
         FIRST_CREDENTIAL_ID,
-        new AgentModelDiscoveryError("rejected", 429),
+        AgentModelDiscoveryError("rejected", 429),
       ),
     ).toBe(true);
 
@@ -256,7 +256,7 @@ describe("model credential pool", () => {
         TEST_USER_ID,
         { ...SELECTION, credentialId: FIRST_CREDENTIAL_ID },
         FIRST_CREDENTIAL_ID,
-        new AgentModelDiscoveryError("rejected", 401),
+        AgentModelDiscoveryError("rejected", 401),
       ),
     ).toBe(false);
     setup.database.$client.close();

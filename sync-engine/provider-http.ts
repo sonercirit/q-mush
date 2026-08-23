@@ -105,7 +105,7 @@ function streamFailure(
     error instanceof ProviderStreamError
       ? error.retryAfterMilliseconds
       : modelResponseRetryAfterMilliseconds(response);
-  return new RetryableModelRequestError(error, { retryAfterMilliseconds });
+  return RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
 function anthropicStreamOptions(
@@ -141,7 +141,7 @@ async function readAcceptedResponse(
       return accumulator.finish();
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof TypeError) {
-        throw new RetryableModelRequestError(error, {
+        throw RetryableModelRequestError(error, {
           retryAfterMilliseconds: modelResponseRetryAfterMilliseconds(response),
         });
       }
