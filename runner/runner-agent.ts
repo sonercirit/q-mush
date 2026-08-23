@@ -9,7 +9,10 @@ import {
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import { RunnerCommandExecutions } from "./runner-command-executions.ts";
+import {
+  createRunnerCommandExecutions,
+  type RunnerCommandExecutions,
+} from "./runner-command-executions.ts";
 import {
   createRunnerCommandExecutor,
   readRunnerCommand,
@@ -492,7 +495,9 @@ async function maintainConnection(
   configurationPath: string,
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
-  const active = new RunnerCommandExecutions(activeRunnerExecution().commands);
+  const active = createRunnerCommandExecutions(
+    activeRunnerExecution().commands,
+  );
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };

@@ -50,39 +50,35 @@ function requirePositiveInteger(value: number, name: string): number {
   return value;
 }
 
-export class RunnerCommandExecutions {
-  readonly #active = new Map<string, CommandExecution>();
-  readonly #commands: CommandExecutor;
-  readonly #completedExecutionTtlMs: number;
-  readonly #log: (message: string) => void;
-  readonly #maximumCompletedExecutions: number;
-  readonly #now: () => number;
+export function createRunnerCommandExecutions(
+  commands: CommandExecutor,
+  options: RunnerCommandExecutionsOptions = {},
+) {
+  const active = new Map<string, CommandExecution>();
 
-  constructor(
-    commands: CommandExecutor,
-    options: RunnerCommandExecutionsOptions = {},
-  ) {
-    this.#commands = commands;
-    this.#completedExecutionTtlMs = requirePositiveInteger(
-      options.completedExecutionTtlMs ?? COMPLETED_EXECUTION_TTL_MILLISECONDS,
-      "The completed runner execution TTL",
-    );
-    this.#log = options.log ?? console.error;
-    this.#maximumCompletedExecutions = requirePositiveInteger(
-      options.maximumCompletedExecutions ?? MAXIMUM_COMPLETED_EXECUTIONS,
-      "The completed runner execution limit",
-    );
-    this.#now = options.now ?? Date.now;
-  }
+  commands = commands;
+  const completedExecutionTtlMs = requirePositiveInteger(
+    options.completedExecutionTtlMs ?? COMPLETED_EXECUTION_TTL_MILLISECONDS,
+    "The completed runner execution TTL",
+  );
+  const log = options.log ?? console.error;
+  const maximumCompletedExecutions = requirePositiveInteger(
+    options.maximumCompletedExecutions ?? MAXIMUM_COMPLETED_EXECUTIONS,
+    "The completed runner execution limit",
+  );
+  const now = options.now ?? Date.now;
 
-  #useSocket(execution: CommandExecution, socket: RunnerWritableSocket): void {
+  function useSocket(
+    execution: CommandExecution,
+    socket: RunnerWritableSocket,
+  ): void {
     execution.socket = socket;
     if (execution.result !== undefined) {
       sendCommandMessage(execution, execution.result);
     }
   }
 
-  #attach(
+  function attach(
     socket: RunnerWritableSocket,
     command: RunnerToolCommand,
     execution: CommandExecution,
@@ -91,12 +87,12 @@ export class RunnerCommandExecutions {
       socket.close(1008, "Conflicting command ID");
       return;
     }
-    this.#useSocket(execution, socket);
+    useSocket(execution, socket);
   }
 
-  #forget(execution: CommandExecution): void {
-    if (this.#active.get(execution.command.id) === execution) {
-      this.#active.delete(execution.command.id);
+  function forget(execution: CommandExecution): void {
+    if (active.get(execution.command.id) === execution) {
+      active.delete(execution.command.id);
     }
     if (execution.retentionTimer !== undefined) {
       clearTimeout(execution.retentionTimer);
@@ -104,60 +100,63 @@ export class RunnerCommandExecutions {
     }
   }
 
-  #discardCompleted(execution: CommandExecution, reason: string): void {
-    this.#forget(execution);
-    this.#log(
+  function discardCompleted(execution: CommandExecution, reason: string): void {
+    forget(execution);
+    log(
       `Q Mush discarded unacknowledged result for runner command ${execution.command.id} ${reason}.`,
     );
   }
 
-  #scheduleExpiry(execution: CommandExecution): void {
+  function scheduleExpiry(execution: CommandExecution): void {
     execution.retentionTimer = setTimeout(() => {
       execution.retentionTimer = undefined;
       if (
-        this.#active.get(execution.command.id) === execution &&
+        active.get(execution.command.id) === execution &&
         execution.result !== undefined
       ) {
-        this.#discardCompleted(execution, "after its retention TTL elapsed");
+        discardCompleted(execution, "after its retention TTL elapsed");
       }
-    }, this.#completedExecutionTtlMs);
+    }, completedExecutionTtlMs);
     execution.retentionTimer.unref();
   }
 
-  #prune(): void {
-    const now = this.#now();
-    const completed = [...this.#active.values()]
+  function prune(): void {
+    const currentTime = now();
+    const completed = [...active.values()]
       .filter(
         (execution): execution is CommandExecution & { completedAt: number } =>
           execution.result !== undefined && execution.completedAt !== undefined,
       )
       .sort((first, second) => first.completedAt - second.completedAt);
     for (const execution of completed) {
-      if (now - execution.completedAt >= this.#completedExecutionTtlMs) {
-        this.#discardCompleted(execution, "after its retention TTL elapsed");
+      if (currentTime - execution.completedAt >= completedExecutionTtlMs) {
+        discardCompleted(execution, "after its retention TTL elapsed");
       }
     }
     const retained = completed.filter(
-      (execution) => this.#active.get(execution.command.id) === execution,
+      (execution) => active.get(execution.command.id) === execution,
     );
-    const excess = retained.length - this.#maximumCompletedExecutions;
+    const excess = retained.length - maximumCompletedExecutions;
     for (const execution of retained.slice(0, Math.max(excess, 0))) {
-      this.#discardCompleted(execution, "after reaching the retention limit");
+      discardCompleted(execution, "after reaching the retention limit");
     }
   }
 
-  connected(socket: RunnerWritableSocket): void {
-    this.#prune();
-    for (const execution of this.#active.values()) {
-      this.#useSocket(execution, socket);
+  function connected(socket: RunnerWritableSocket): void {
+    prune();
+    for (const execution of active.values()) {
+      useSocket(execution, socket);
     }
   }
 
-  execute(socket: RunnerWritableSocket, command: RunnerToolCommand): void {
-    this.#prune();
-    const existing = this.#active.get(command.id);
+  function execute(
+    socket: RunnerWritableSocket,
+    command: RunnerToolCommand,
+  ): void {
+    prune();
+    const existing = active.get(command.id);
     if (existing !== undefined) {
-      this.#attach(socket, command, existing);
+      attach(socket, command, existing);
       return;
     }
 
@@ -170,9 +169,9 @@ export class RunnerCommandExecutions {
       retentionTimer: undefined,
       socket,
     };
-    this.#active.set(command.id, execution);
+    active.set(command.id, execution);
     let sequence = 0;
-    void this.#commands
+    void commands
       .executeResult(command, controller.signal, (delta) => {
         if (controller.signal.aborted) {
           return;
@@ -184,20 +183,20 @@ export class RunnerCommandExecutions {
       .then((result) => {
         const message = { ...result, type: "result" };
         if (!controller.signal.aborted) {
-          execution.completedAt = this.#now();
+          execution.completedAt = now();
           execution.result = message;
-          this.#scheduleExpiry(execution);
+          scheduleExpiry(execution);
           sendCommandMessage(execution, message);
-          this.#prune();
+          prune();
         }
       });
   }
 
-  cancel(socket: RunnerWritableSocket, commandId: string): void {
-    const execution = this.#active.get(commandId);
+  function cancel(socket: RunnerWritableSocket, commandId: string): void {
+    const execution = active.get(commandId);
     if (execution !== undefined) {
       execution.controller.abort();
-      this.#forget(execution);
+      forget(execution);
     }
     sendOpenRunnerSocketMessage(socket, {
       commandId,
@@ -205,18 +204,24 @@ export class RunnerCommandExecutions {
     });
   }
 
-  resultReceived(commandId: string): void {
-    const completed = this.#active.get(commandId);
+  function resultReceived(commandId: string): void {
+    const completed = active.get(commandId);
     if (completed?.result === undefined) {
       return;
     }
-    this.#forget(completed);
+    forget(completed);
   }
 
-  abortAll(): void {
-    for (const execution of this.#active.values()) {
+  function abortAll(): void {
+    for (const execution of active.values()) {
       execution.controller.abort();
     }
-    this.#active.clear();
+    active.clear();
   }
+
+  return { abortAll, cancel, connected, execute, resultReceived };
 }
+
+export type RunnerCommandExecutions = ReturnType<
+  typeof createRunnerCommandExecutions
+>;

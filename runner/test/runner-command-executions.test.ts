@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { RunnerCommandExecutions } from "../../runner/runner-command-executions.ts";
+import { createRunnerCommandExecutions } from "../../runner/runner-command-executions.ts";
 import type { RunnerCommandExecutor } from "../../runner/runner-command.ts";
 import type { RunnerWritableSocket } from "../../runner/runner-socket-send.ts";
 import { isRecord } from "../../shared/auth-model.ts";
@@ -24,7 +24,13 @@ function controlledExecutor() {
   const executor: Pick<RunnerCommandExecutor, "executeResult"> = {
     executeResult: (selected, signal) => {
       calls.push(selected.id);
-      signal?.addEventListener("abort", () => { aborted.push(selected.id); }, { once: true });
+      signal?.addEventListener(
+        "abort",
+        () => {
+          aborted.push(selected.id);
+        },
+        { once: true },
+      );
       return new Promise<RunnerCommandResult>((resolve) => {
         completions.set(selected.id, resolve);
       });
@@ -62,7 +68,7 @@ function executionSetup() {
   return {
     connected,
     controlled,
-    executions: new RunnerCommandExecutions(controlled.executor),
+    executions: createRunnerCommandExecutions(controlled.executor),
   };
 }
 
@@ -112,7 +118,7 @@ test("drops old unacknowledged results at the bounded retention cap with loud lo
   const controlled = controlledExecutor();
   const connected = socket();
   const logs: string[] = [];
-  const executions = new RunnerCommandExecutions(controlled.executor, {
+  const executions = createRunnerCommandExecutions(controlled.executor, {
     log: (message) => logs.push(message),
     maximumCompletedExecutions: 1,
   });
