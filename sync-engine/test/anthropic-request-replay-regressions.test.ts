@@ -497,6 +497,15 @@ describe("anthropic-format generic provider", () => {
   test("rejects a continuation container when the result IDs do not match", () =>
     expectReplayOutcome(containedReplayConversation("different-call"), true));
 
+  test("rejects a continuation container with an extra tool result", () => {
+    const messages = [
+      ...containedReplayConversation(),
+      { ...readToolResult("Unexpected"), toolCallId: "extra-id" },
+    ];
+
+    expect(() => directRequestBody(messages)).toThrow(UNSAFE_TOOL_REPLAY_ERROR);
+  });
+
   test("does not recover a container across a non-tool intervening turn", () => {
     const messages = [
       ...containedReplayConversation(),
