@@ -33,7 +33,10 @@ import {
   repairSpawnedSessionLineage,
   type SpawnLineageRepairResult,
 } from "./session-lineage-repair.ts";
-import { ManualCompactionStore } from "./session-manual-compaction-store.ts";
+import {
+  createManualCompactionStore,
+  type ManualCompactionStore,
+} from "./session-manual-compaction-store.ts";
 import {
   cancelPendingInput,
   enqueuePendingInput,
@@ -131,7 +134,7 @@ export class SessionStore extends SessionStoreRestarts {
     this.#resources = [database, generateId];
     this.#reportParent = reportParent;
     this.#toolSettings = toolSettings;
-    this.#manualCompactions = new ManualCompactionStore(database, generateId);
+    this.#manualCompactions = createManualCompactionStore(database, generateId);
     this.#questions = createAskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
