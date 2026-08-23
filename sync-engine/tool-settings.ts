@@ -9,7 +9,10 @@ import {
   parseJsonRequest,
 } from "./http.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
-import { ToolSettingsStore } from "./tool-settings-store.ts";
+import {
+  createToolSettingsStore,
+  type ToolSettingsStore,
+} from "./tool-settings-store.ts";
 
 export interface ToolSettingsIntegration {
   readonly store: ToolSettingsStore;
@@ -35,7 +38,7 @@ class DrizzleToolSettingsIntegration
     super(auth);
     this.#now = dependencies.now ?? Date.now;
     this.#realtime = dependencies.realtime;
-    this.store = new ToolSettingsStore(
+    this.store = createToolSettingsStore(
       dependencies.database ?? createDatabase(":memory:"),
       dependencies.generateId ?? createUuidV7,
     );

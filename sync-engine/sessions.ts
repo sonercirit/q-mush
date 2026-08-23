@@ -86,7 +86,10 @@ import {
   type SessionUserActionDependencies,
 } from "./session-user-actions.ts";
 import type { SessionWorkspaceReader } from "./session-workspace.ts";
-import { ToolSettingsStore } from "./tool-settings-store.ts";
+import {
+  createToolSettingsStore,
+  type ToolSettingsStore,
+} from "./tool-settings-store.ts";
 
 export type { SessionIntegration } from "./session-integration.ts";
 
@@ -187,7 +190,7 @@ class DrizzleSessionIntegration
       );
     };
     this.#toolSettings =
-      dependencies.toolSettings ?? new ToolSettingsStore(database);
+      dependencies.toolSettings ?? createToolSettingsStore(database);
     this.#store = new SessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
