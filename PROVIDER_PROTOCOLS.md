@@ -69,22 +69,26 @@ discovery, requests, streaming, caching, retries, or model capability handling.
   blocks, including additive fields, persist; corrupt metadata warns but leaves
   transcripts readable. Durable client-tool continuations require matching
   replay and result IDs; only the trailing tool-result turn fails closed when
-  replay is missing, stale, incomplete, unsupported, or unsigned. Older
-  incompatible tool history falls back to plain reconstruction. Trailing result
-  IDs use deduplicated, order-insensitive sets. Transient retrieval failures
-  retry later; permanent unresolved identities stay cached. Runtime conversation
-  reads resolve the model before loading persisted replay; unresolved identity
-  remains fail-closed rather than acting as a wildcard. Known resolved
-  identities flow to agent, compactor, and attachment fallback. Empty text drops
-  (whitespace stays), but content and replay are withheld together across every
-  trailing text block; a pause fails if none remain replayable. `cache_control`
-  marks only text/client `tool_use`, scanning backward; trailing replay is
-  resent verbatim. `pause_turn` validates resent blocks, replays them/container
-  without duplicate UI, sums usage, caps at five continuations, and fails
-  terminal client tools closed when replay cannot combine. The local proxy
-  tolerates unsigned tool-loop replay; strict endpoints may not. Streamed
-  reasoning deltas group by `output_index`/`summary_index`; separate summary
-  parts with paragraphs since completed responses may omit them.
+  replay is missing, stale, incomplete, unsupported, or unsigned. Generic
+  Anthropic identity prefers detail retrieval, then resolves an exact selected
+  ID through the bounded paginated model list when detail retrieval is
+  permanently unsupported or malformed; transient and authentication failures do
+  not downgrade. Older incompatible tool history falls back to plain
+  reconstruction. Trailing result IDs use deduplicated, order-insensitive sets.
+  Transient retrieval failures retry later; permanent unresolved identities stay
+  cached. Runtime conversation reads resolve the model before loading persisted
+  replay; unresolved identity remains fail-closed rather than acting as a
+  wildcard. Known resolved identities flow to agent, compactor, and attachment
+  fallback. Empty text drops (whitespace stays), but content and replay are
+  withheld together across every trailing text block; a pause fails if none
+  remain replayable. `cache_control` marks only text/client `tool_use`, scanning
+  backward; trailing replay is resent verbatim. `pause_turn` validates resent
+  blocks, replays them/container without duplicate UI, sums usage, caps at five
+  continuations, and fails terminal client tools closed when replay cannot
+  combine. The local proxy tolerates unsigned tool-loop replay; strict endpoints
+  may not. Streamed reasoning deltas group by `output_index`/`summary_index`;
+  separate summary parts with paragraphs since completed responses may omit
+  them.
 - **Admission:** Frozen clocks can collapse admission transitions; production
   cannot. Fresh sockets admit non-retained `response.*`; reused ones require an
   ID or `response.created`. WebSocket Mode expires at 60 minutes; either
