@@ -8,13 +8,11 @@ import {
 } from "../../runner/runner-update.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
-class RegistrationSocket extends RecordingTestSocket {}
-
 interface RegistrationSetup {
   readonly connection: RunnerStartupConnection;
   readonly installed: string[];
   readonly promise: Promise<void>;
-  readonly socket: RegistrationSocket;
+  readonly socket: RecordingTestSocket;
   readonly startup: RunnerStartupRestart;
 }
 
@@ -24,7 +22,7 @@ function registrationForStartup(
   installation: string,
   handlers: Parameters<typeof completeRunnerRegistration>[3] = {},
 ): RegistrationSetup {
-  const socket = new RegistrationSocket();
+  const socket = new RecordingTestSocket();
   const connection = startup.connection();
   const promise = completeRunnerRegistration(
     socket,
