@@ -4,6 +4,7 @@ import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { AgentProviderCredential } from "./agent-model-options.ts";
 import {
   fetchModelRequestAttempt,
+  isRetryableModelRequestError,
   modelResponseRetryAfterMilliseconds,
   RetryableModelRequestError,
   runModelRequestWithRetries,
@@ -188,7 +189,7 @@ export async function completeProviderHttp(
         },
       });
     } catch (error) {
-      if (streamed && error instanceof RetryableModelRequestError) {
+      if (streamed && isRetryableModelRequestError(error)) {
         options.onDelta?.({ content: "", reset: true, thinking: "" });
         options.onStreamRetry?.();
         streamed = false;
@@ -204,7 +205,7 @@ export async function completeProviderHttp(
       options.sleep,
     );
   } catch (error) {
-    if (error instanceof RetryableModelRequestError) {
+    if (isRetryableModelRequestError(error)) {
       if (error.response !== undefined) {
         throw await requestError(options.provider, error.response);
       }

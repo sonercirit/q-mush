@@ -14,8 +14,8 @@ import {
   withAnthropicCapabilities,
 } from "./agent-model-discovery-anthropic.ts";
 import {
-  AgentModelDiscoveryError,
   fetchDiscoveryJson,
+  isAgentModelDiscoveryError,
   modelDiscoveryError,
   safeAgentModelDiscoveryError,
   type AgentModelDiscoveryFetch,
@@ -434,7 +434,7 @@ export async function discoverAgentModelsWithFetch(
   } catch (error) {
     // Cancellation is the caller's own deadline or stop, not a provider
     // failure; propagate it unwrapped.
-    if (error instanceof AgentModelDiscoveryError || signal?.aborted === true) {
+    if (isAgentModelDiscoveryError(error) || signal?.aborted === true) {
       throw error;
     }
     throw modelDiscoveryError(safeAgentModelDiscoveryError(error));

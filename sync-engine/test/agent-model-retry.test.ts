@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import {
   fetchModelRequestAttempt,
-  RetryableModelRequestError,
+  isRetryableModelRequestError,
   runModelRequestWithRetries,
   type ModelRequestSleep,
 } from "../../sync-engine/agent-model-retry.ts";
@@ -10,7 +10,7 @@ import { ProviderCredentialRejectionError } from "../../sync-engine/provider-err
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 function unwrapResponse(error: unknown): Response {
-  if (error instanceof RetryableModelRequestError) {
+  if (isRetryableModelRequestError(error)) {
     if (error.response !== undefined) {
       return error.response;
     }

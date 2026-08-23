@@ -148,7 +148,7 @@ export async function runModelRequestWithRetries<T>(
     try {
       return await attempt();
     } catch (error) {
-      if (signal.aborted || !(error instanceof RetryableModelRequestError)) {
+      if (signal.aborted || !isRetryableModelRequestError(error)) {
         throw error;
       }
 

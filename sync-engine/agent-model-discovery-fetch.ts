@@ -38,7 +38,7 @@ export const AgentModelDiscoveryError = Object.defineProperty(
 export function isCredentialRejectionError(error: unknown): boolean {
   return (
     isProviderCredentialRejection(error) ||
-    (error instanceof AgentModelDiscoveryError &&
+    (isAgentModelDiscoveryError(error) &&
       (error.status === 401 ||
         error.status === 402 ||
         error.status === 403 ||
@@ -54,7 +54,7 @@ export function modelDiscoveryError(
 }
 
 export function safeAgentModelDiscoveryError(error: unknown): string {
-  return error instanceof AgentModelDiscoveryError
+  return isAgentModelDiscoveryError(error)
     ? error.message
     : "Model discovery failed because the provider is unavailable";
 }
