@@ -18,9 +18,7 @@ import {
   createNoContentResponse,
 } from "./http.ts";
 import {
-  DuplicatePromptNameError,
-  PromptChangedError,
-  PromptLimitError,
+  isPromptStoreErrorKind,
   PromptStore,
 } from "./prompt-store.ts";
 
@@ -165,7 +163,7 @@ class DrizzlePromptIntegration
               ? createNoContentResponse()
               : createApiError("not_found", 404);
           } catch (error) {
-            return error instanceof PromptChangedError
+            return isPromptStoreErrorKind(error, "prompt_changed")
               ? createApiError("prompt_changed", 412)
               : createApiError("storage_unavailable", 500);
           }
@@ -210,13 +208,13 @@ class DrizzlePromptIntegration
         this.#store.update(userId, promptId, input, this.#now(), revision),
       );
     } catch (error) {
-      if (error instanceof DuplicatePromptNameError) {
+      if (isPromptStoreErrorKind(error, "duplicate_prompt_name")) {
         return createApiError("duplicate_name", 409);
       }
-      if (error instanceof PromptChangedError) {
+      if (isPromptStoreErrorKind(error, "prompt_changed")) {
         return createApiError("prompt_changed", 412);
       }
-      if (error instanceof PromptLimitError) {
+      if (isPromptStoreErrorKind(error, "prompt_limit")) {
         return createApiError("prompt_limit_reached", 409);
       }
       return createApiError("storage_unavailable", 500);

@@ -2,9 +2,6 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { prompts } from "../../shared/database/schema.ts";
 import {
-  DuplicatePromptNameError,
-  PromptChangedError,
-  PromptLimitError,
   PromptStore,
 } from "../../sync-engine/prompt-store.ts";
 import {
@@ -95,7 +92,7 @@ function updatePrompt(
 }
 
 function expectPromptChanged(action: () => unknown): void {
-  expect(action).toThrow(PromptChangedError);
+  expect(() => action()).toThrow(expect.objectContaining({ kind: "prompt_changed" }));
 }
 
 describe("prompt store", () => {
@@ -163,7 +160,7 @@ describe("prompt store", () => {
           { body: "Duplicate", name: "RELEASE  CHECKLIST" },
           TEST_NOW + 3,
         ),
-      ).toThrow(DuplicatePromptNameError);
+      ).toThrow(expect.objectContaining({ kind: "duplicate_prompt_name" }));
       expect(store.get(TEST_USER_ID, OTHER_PROMPT_ID)).toBeUndefined();
       expect(store.get(TEST_FOREIGN_USER_ID, OTHER_PROMPT_ID)).toEqual(other);
       expect(store.remove(TEST_USER_ID, OTHER_PROMPT_ID, TEST_NOW + 4, 1)).toBe(
@@ -216,7 +213,7 @@ describe("prompt store", () => {
           { body: "Over limit", name: "Second" },
           TEST_NOW + 4,
         ),
-      ).toThrow(PromptLimitError);
+      ).toThrow(expect.objectContaining({ kind: "prompt_limit" }));
       expect(
         limited.create(
           TEST_FOREIGN_USER_ID,

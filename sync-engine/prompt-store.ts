@@ -15,25 +15,31 @@ import {
   storedPromptId,
 } from "./prompt-query.ts";
 
-export class DuplicatePromptNameError extends Error {
-  constructor() {
-    super("An active prompt with that name already exists");
-    this.name = "DuplicatePromptNameError";
-  }
+export type PromptStoreErrorKind =
+  | "duplicate_prompt_name"
+  | "prompt_changed"
+  | "prompt_limit";
+
+export type PromptStoreError = Error & { readonly kind: PromptStoreErrorKind };
+
+const promptStoreErrorMessages: Record<PromptStoreErrorKind, string> = {
+  duplicate_prompt_name: "An active prompt with that name already exists",
+  prompt_changed: "The prompt changed after it was read",
+  prompt_limit: "The active prompt limit has been reached",
+};
+
+export function createPromptStoreError(kind: PromptStoreErrorKind): PromptStoreError {
+  return Object.assign(new Error(promptStoreErrorMessages[kind]), {
+    kind,
+    name: "PromptStoreError",
+  });
 }
 
-export class PromptChangedError extends Error {
-  constructor() {
-    super("The prompt changed after it was read");
-    this.name = "PromptChangedError";
-  }
-}
-
-export class PromptLimitError extends Error {
-  constructor() {
-    super("The active prompt limit has been reached");
-    this.name = "PromptLimitError";
-  }
+export function isPromptStoreErrorKind(
+  error: unknown,
+  kind: PromptStoreErrorKind,
+): error is PromptStoreError {
+  return error instanceof Error && "kind" in error && error.kind === kind;
 }
 
 function activePromptCondition(
@@ -125,7 +131,7 @@ function rethrowPromptWriteError(error: unknown): never {
     error instanceof Error &&
     error.message.includes("UNIQUE constraint failed: prompts.user_id");
   if (duplicate) {
-    throw new DuplicatePromptNameError();
+    throw createPromptStoreError("duplicate_prompt_name");
   }
   throw error;
 }
@@ -158,7 +164,7 @@ export class PromptStore {
           .where(activePromptCondition(userId))
           .get();
         if ((storedCount?.count ?? 0) >= this.#resources.maximumCount) {
-          throw new PromptLimitError();
+          throw createPromptStoreError("prompt_limit");
         }
         const normalizedName = promptNameKey(input.name);
         if (
@@ -167,7 +173,7 @@ export class PromptStore {
             promptNameCondition(userId, normalizedName),
           ]) !== undefined
         ) {
-          throw new DuplicatePromptNameError();
+          throw createPromptStoreError("duplicate_prompt_name");
         }
         const timestamp = new Date(now);
         const inserted = transaction
@@ -252,7 +258,7 @@ export class PromptStore {
         promptNameCondition(userId, normalizedName),
       ]);
       if (duplicateId !== undefined && duplicateId !== promptId) {
-        throw new DuplicatePromptNameError();
+        throw createPromptStoreError("duplicate_prompt_name");
       }
       const [stored] = this.#database
         .update(prompts)
@@ -285,7 +291,7 @@ export class PromptStore {
       stored !== undefined &&
       (stored.isDeleted || stored.revision !== revision)
     ) {
-      throw new PromptChangedError();
+      throw createPromptStoreError("prompt_changed");
     }
   }
 }
