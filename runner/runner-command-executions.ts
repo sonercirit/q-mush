@@ -56,7 +56,6 @@ export function createRunnerCommandExecutions(
 ) {
   const active = new Map<string, CommandExecution>();
 
-  commands = commands;
   const completedExecutionTtlMs = requirePositiveInteger(
     options.completedExecutionTtlMs ?? COMPLETED_EXECUTION_TTL_MILLISECONDS,
     "The completed runner execution TTL",
