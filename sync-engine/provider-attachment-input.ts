@@ -25,6 +25,11 @@ type AttachmentInput = (
   url: string,
   responses: boolean,
 ) => unknown;
+const fileAttachmentInput: AttachmentInput = (attachment, url, responses) =>
+  responses
+    ? { file_data: url, filename: attachment.name, type: "input_file" }
+    : { file: { file_data: url, filename: attachment.name }, type: "file" };
+
 const attachmentInputs = {
   audio: (attachment) => ({
     input_audio: {
@@ -33,18 +38,12 @@ const attachmentInputs = {
     },
     type: "input_audio",
   }),
-  file: (attachment, url, responses) =>
-    responses
-      ? { file_data: url, filename: attachment.name, type: "input_file" }
-      : { file: { file_data: url, filename: attachment.name }, type: "file" },
+  file: fileAttachmentInput,
   image: (_attachment, url, responses) =>
     responses
       ? { image_url: url, type: "input_image" }
       : { image_url: { url }, type: "image_url" },
-  pdf: (attachment, url, responses) =>
-    responses
-      ? { file_data: url, filename: attachment.name, type: "input_file" }
-      : { file: { file_data: url, filename: attachment.name }, type: "file" },
+  pdf: fileAttachmentInput,
   video: (_attachment, url, responses) =>
     responses
       ? { video_url: url, type: "input_video" }
@@ -78,16 +77,34 @@ function chatContent(
 type Role = AgentConversationMessage["role"];
 type MessageHandler<Result> = Record<Role, () => Result>;
 
+function messageWithRole<SelectedRole extends Role>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+): Extract<AgentConversationMessage, { readonly role: SelectedRole }> {
+  if (message.role !== role) throw new Error("Unexpected message role");
+  return message as Extract<
+    AgentConversationMessage,
+    { readonly role: SelectedRole }
+  >;
+}
+
+function handleMessageRole<SelectedRole extends Role, Result>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+  handler: (
+    item: Extract<AgentConversationMessage, { readonly role: SelectedRole }>,
+  ) => Result,
+): Result {
+  return handler(messageWithRole(message, role));
+}
+
 export function providerChatMessage(
   message: AgentConversationMessage,
   cached = false,
 ): unknown {
   const handlers = {
-    assistant: () => {
-      if (message.role !== "assistant")
-        throw new Error("Unexpected message role");
-      const item = message;
-      return {
+    assistant: () =>
+      handleMessageRole(message, "assistant", (item) => ({
         content: chatContent(
           item.content.length === 0 ? null : item.content,
           undefined,
@@ -103,22 +120,16 @@ export function providerChatMessage(
                 type: "function",
               })),
             }),
-      };
-    },
+      })),
     compaction_notice: () => undefined,
-    tool: () => {
-      if (message.role !== "tool") throw new Error("Unexpected message role");
-      const item = message;
-      return {
+    tool: () =>
+      handleMessageRole(message, "tool", (item) => ({
         content: chatContent(item.content, undefined, cached),
         role: "tool",
         tool_call_id: item.toolCallId,
-      };
-    },
-    user: () => {
-      if (message.role !== "user") throw new Error("Unexpected message role");
-      const item = message;
-      return {
+      })),
+    user: () =>
+      handleMessageRole(message, "user", (item) => ({
         content: chatContent(
           item.content,
           userAttachments(item).length === 0
@@ -132,8 +143,7 @@ export function providerChatMessage(
           cached,
         ),
         role: "user",
-      };
-    },
+      })),
   } satisfies MessageHandler<unknown>;
   return handlers[message.role]();
 }
@@ -141,45 +151,37 @@ export function providerChatMessage(
 export function providerResponsesInput(
   message: AgentConversationMessage,
 ): readonly unknown[] {
+  const assistantInput = () =>
+    handleMessageRole(message, "assistant", (item) => [
+      ...(item.content.length === 0
+        ? []
+        : [
+            {
+              content: [{ text: item.content, type: "output_text" }],
+              role: "assistant",
+              type: "message",
+            },
+          ]),
+      ...item.toolCalls.map((call) => ({
+        arguments: call.arguments,
+        call_id: call.id,
+        name: call.name,
+        type: "function_call",
+      })),
+    ]);
   const handlers = {
-    assistant: () => {
-      if (message.role !== "assistant")
-        throw new Error("Unexpected message role");
-      const item = message;
-      return [
-        ...(item.content.length === 0
-          ? []
-          : [
-              {
-                content: [{ text: item.content, type: "output_text" }],
-                role: "assistant",
-                type: "message",
-              },
-            ]),
-        ...item.toolCalls.map((call) => ({
-          arguments: call.arguments,
-          call_id: call.id,
-          name: call.name,
-          type: "function_call",
-        })),
-      ];
-    },
+    assistant: assistantInput,
     compaction_notice: () => [],
-    tool: () => {
-      if (message.role !== "tool") throw new Error("Unexpected message role");
-      const item = message;
-      return [
+    tool: () =>
+      handleMessageRole(message, "tool", (item) => [
         {
           call_id: item.toolCallId,
           output: item.content,
           type: "function_call_output",
         },
-      ];
-    },
-    user: () => {
-      if (message.role !== "user") throw new Error("Unexpected message role");
-      const item = message;
-      return [
+      ]),
+    user: () =>
+      handleMessageRole(message, "user", (item) => [
         {
           content: [
             ...textInputItems(item.content, "input_text"),
@@ -190,8 +192,7 @@ export function providerResponsesInput(
           role: "user",
           type: "message",
         },
-      ];
-    },
+      ]),
   } satisfies MessageHandler<readonly unknown[]>;
   return handlers[message.role]();
 }
