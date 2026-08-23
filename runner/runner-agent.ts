@@ -26,7 +26,7 @@ import {
   RunnerRegistrationRejectedError,
   RunnerSupersededError,
 } from "./runner-socket.ts";
-import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
+import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
   RunnerStartupRestart,
   updateRunnerIfAvailable,
@@ -40,7 +40,7 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const RUNNER_PROCESS_NONCE = randomBytes(32).toString("base64url");
-const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
+const runnerUpdateTrigger = createRunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
 const runnerRestart = new RunnerRestartCoordinator({
   restartId: () => randomBytes(32).toString("base64url"),
 });
