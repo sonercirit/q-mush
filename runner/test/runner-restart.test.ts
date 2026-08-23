@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
-  RunnerRestartCoordinator,
+  createRunnerRestartCoordinator,
+  type RunnerRestartCoordinator,
   type RunnerRestartSocket,
 } from "../../runner/runner-restart.ts";
 
@@ -40,11 +41,11 @@ function createTestSocket(sendFailure?: Error): TestSocket {
 }
 
 function coordinator(restartId: string): RunnerRestartCoordinator {
-  return new RunnerRestartCoordinator({ restartId: () => restartId });
+  return createRunnerRestartCoordinator({ restartId: () => restartId });
 }
 
 function incrementalCoordinator(generated: { count: number }) {
-  return new RunnerRestartCoordinator({
+  return createRunnerRestartCoordinator({
     restartId: () => `restart-${String((generated.count += 1))}`,
   });
 }

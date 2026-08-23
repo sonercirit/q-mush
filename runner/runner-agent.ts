@@ -17,7 +17,7 @@ import {
 } from "./runner-connection.ts";
 import { RunnerContainerManager } from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
-import { RunnerRestartCoordinator } from "./runner-restart.ts";
+import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
   addRunnerSocketFailureListeners,
@@ -42,7 +42,7 @@ const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const RUNNER_PROCESS_NONCE = randomBytes(32).toString("base64url");
 const runnerUpdateTrigger = createRunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
-const runnerRestart = new RunnerRestartCoordinator({
+const runnerRestart = createRunnerRestartCoordinator({
   restartId: () => randomBytes(32).toString("base64url"),
 });
 

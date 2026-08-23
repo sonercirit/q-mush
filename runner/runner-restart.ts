@@ -43,64 +43,68 @@ function restartAcknowledgement(message: string, restartId: string): boolean {
   }
 }
 
-export class RunnerRestartCoordinator {
-  readonly #restartId: () => string;
-  #pending: PendingRestart | undefined;
+export interface RunnerRestartCoordinator {
+  readonly pending: boolean; readonly pendingRestartId: string | undefined;
+  restore(restartId: string): void;
+    connectionContext<Context extends { readonly restartId?: string }>(current: Context): Context;
+    operational(restartId: string | undefined): boolean;
+    request(socket: RunnerRestartSocket): Promise<string>;
+}
+export function createRunnerRestartCoordinator(options: RunnerRestartCoordinatorOptions): RunnerRestartCoordinator {
+  const restartIdFactory = options.restartId;
+  let pendingState: PendingRestart | undefined;
+  const coordinator: RunnerRestartCoordinator & { bind(p: PendingRestart, a: RestartAttempt): void; complete(p: PendingRestart): void; fail(p: PendingRestart, a: RestartAttempt, e: Error): void } = {
 
-  constructor(options: RunnerRestartCoordinatorOptions) {
-    this.#restartId = options.restartId;
-  }
-
-  restore(restartId: string): void {
+    restore(restartId: string): void {
     if (restartId.length === 0 || restartId.length > 200) {
       throw new Error("The runner restart ID is invalid");
     }
-    if (this.#pending !== undefined && this.#pending.restartId !== restartId) {
+    if (pendingState !== undefined && pendingState.restartId !== restartId) {
       throw new Error("A different runner restart is already pending");
     }
-    this.#pending ??= {
+    pendingState ??= {
       attempt: undefined,
       operational: false,
       ready: true,
       restartId,
       sent: true,
     };
-  }
+  },
 
-  get pending(): boolean {
-    return this.#pending !== undefined;
-  }
+    get pending(): boolean {
+    return pendingState !== undefined;
+  },
 
-  get pendingRestartId(): string | undefined {
-    return this.#pending?.restartId;
-  }
+    get pendingRestartId(): string | undefined {
+    return pendingState?.restartId;
+  },
 
-  connectionContext<Context extends { readonly restartId?: string }>(
+    connectionContext<Context extends { readonly restartId?: string }>(
     current: Context,
   ): Context {
-    return this.#pending?.sent === true
-      ? { ...current, restartId: this.#pending.restartId }
+    return pendingState?.sent === true
+      ? { ...current, restartId: pendingState.restartId }
       : current;
-  }
+  },
 
-  operational(restartId: string | undefined): boolean {
-    const pending = this.#pending;
+    operational(restartId: string | undefined): boolean {
+    const pending = pendingState;
     if (restartId === undefined) return pending === undefined;
     if (pending?.restartId !== restartId) return false;
     pending.operational = true;
-    this.#complete(pending);
+    coordinator.complete(pending);
     return true;
-  }
+  },
 
-  request(socket: RunnerRestartSocket): Promise<string> {
+    request(socket: RunnerRestartSocket): Promise<string> {
     if (socket.readyState !== WebSocket.OPEN) {
       return Promise.reject(
         new Error("The runner disconnected before restart was safe"),
       );
     }
-    let pending = this.#pending;
+    let pending = pendingState;
     if (pending === undefined) {
-      const restartId = this.#restartId();
+      const restartId = restartIdFactory();
       if (restartId.length === 0 || restartId.length > 200) {
         return Promise.reject(new Error("The runner restart ID is invalid"));
       }
@@ -111,7 +115,7 @@ export class RunnerRestartCoordinator {
         restartId,
         sent: false,
       };
-      this.#pending = pending;
+      pendingState = pending;
     }
     if (pending.attempt?.socket === socket) {
       try {
@@ -122,7 +126,7 @@ export class RunnerRestartCoordinator {
           }),
         );
       } catch (error) {
-        this.#fail(
+        coordinator.fail(
           pending,
           pending.attempt,
           error instanceof Error
@@ -150,24 +154,24 @@ export class RunnerRestartCoordinator {
       socket,
     };
     pending.attempt = attempt;
-    this.#bind(pending, attempt);
+    coordinator.bind(pending, attempt);
     return attempt.promise;
-  }
+  },
 
-  #bind(pending: PendingRestart, attempt: RestartAttempt): void {
+    bind(pending: PendingRestart, attempt: RestartAttempt): void {
     const { socket } = attempt;
     socket.addEventListener("message", (rawEvent) => {
       if (
         rawEvent instanceof MessageEvent &&
         typeof rawEvent.data === "string" &&
-        this.#pending === pending &&
+        pendingState === pending &&
         pending.attempt === attempt &&
         restartAcknowledgement(rawEvent.data, pending.restartId)
       ) {
         pending.attempt = undefined;
         pending.ready = true;
         attempt.resolve(pending.restartId);
-        this.#complete(pending);
+        coordinator.complete(pending);
       }
     });
     const failOnSocketEvent = (
@@ -177,7 +181,7 @@ export class RunnerRestartCoordinator {
       socket.addEventListener(
         type,
         () => {
-          this.#fail(pending, attempt, new Error(message));
+          coordinator.fail(pending, attempt, new Error(message));
         },
         { once: true },
       );
@@ -200,7 +204,7 @@ export class RunnerRestartCoordinator {
       );
       pending.sent = true;
     } catch (error) {
-      this.#fail(
+      coordinator.fail(
         pending,
         attempt,
         error instanceof Error
@@ -208,23 +212,25 @@ export class RunnerRestartCoordinator {
           : new Error("The runner restart request could not be sent"),
       );
     }
-  }
+  },
 
-  #complete(pending: PendingRestart): void {
+    complete(pending: PendingRestart): void {
     if (
-      this.#pending === pending &&
+      pendingState === pending &&
       pending.operational &&
       pending.ready &&
       pending.attempt === undefined
     ) {
-      this.#pending = undefined;
+      pendingState = undefined;
     }
-  }
+  },
 
-  #fail(pending: PendingRestart, attempt: RestartAttempt, error: Error): void {
-    if (this.#pending === pending && pending.attempt === attempt) {
+    fail(pending: PendingRestart, attempt: RestartAttempt, error: Error): void {
+    if (pendingState === pending && pending.attempt === attempt) {
       pending.attempt = undefined;
       attempt.reject(error);
     }
-  }
+  },
+  };
+  return coordinator;
 }
