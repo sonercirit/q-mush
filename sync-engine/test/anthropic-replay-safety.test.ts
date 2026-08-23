@@ -456,6 +456,39 @@ describe("Anthropic replay safety", () => {
     expect(models).toEqual([FIRST_SNAPSHOT, MOVED_SNAPSHOT]);
   });
 
+  test("fails historical signed replay closed when a listed alias has moved", async () => {
+    const requests: Request[] = [];
+    const model = testModel((request) => {
+      const url = new URL(request.url);
+      if (request.method === "POST") return modelCompletion(MOVED_SNAPSHOT);
+      if (url.pathname.endsWith(`/models/${REQUEST_ALIAS}`))
+        return new Response(null, { status: 404 });
+      return Response.json({
+        data: [{ id: REQUEST_ALIAS, type: "model" }],
+        has_more: false,
+      });
+    }, requests);
+
+    await model.complete([
+      { content: "Inspect", role: "user" },
+      aliasReplayMessage(),
+      { content: "Continue", role: "user" },
+    ]);
+
+    const completion = requests.find(({ method }) => method === "POST");
+    expect(completion).toBeDefined();
+    expect(await completion?.json()).not.toMatchObject({
+      messages: expect.arrayContaining([
+        expect.objectContaining({
+          content: expect.arrayContaining([
+            expect.objectContaining({ signature: SIGNATURE }),
+          ]),
+        }),
+      ]),
+    });
+    expectModelExchangeCounts(requests, { gets: 2, posts: 1 });
+  });
+
   test("replays an alias only while its current resolution still matches", async () => {
     const retained = await requestContainsSignature(FIRST_SNAPSHOT);
     const moved = await requestContainsSignature(MOVED_SNAPSHOT);

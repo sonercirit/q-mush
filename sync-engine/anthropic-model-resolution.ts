@@ -187,7 +187,7 @@ export async function resolveAnthropicModelAttempt(options: {
     await response.body?.cancel();
     return unresolvedModel();
   }
-  await response.body?.cancel();
+  if (!response.ok) await response.body?.cancel();
   return resolveAnthropicModelFromList({
     ...(options.signal === undefined ? {} : { callerSignal: options.signal }),
     fetch: options.fetch,
