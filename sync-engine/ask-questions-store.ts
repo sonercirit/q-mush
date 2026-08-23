@@ -125,33 +125,38 @@ export type CancelQuestionRequestResult =
   | { readonly request: StoredQuestionRequest; readonly status: "cancelled" }
   | { readonly status: "not_found" };
 
-function parseQuestions(value: string): AskQuestionsInput {
+function parseStored<Value>(
+  value: string,
+  read: (parsed: unknown) => Value | undefined,
+  invalidMessage: string,
+): Value {
   try {
     const parsed: unknown = JSON.parse(value);
-    const input = readAskQuestionsInput(parsed);
-    if (input !== undefined) {
-      return input;
-    }
+    const result = read(parsed);
+    if (result !== undefined) return result;
   } catch {
     // The common error below identifies corrupt persisted data.
   }
-  throw new Error("Stored agent questions are invalid");
+  throw new Error(invalidMessage);
+}
+
+function parseQuestions(value: string): AskQuestionsInput {
+  return parseStored(
+    value,
+    readAskQuestionsInput,
+    "Stored agent questions are invalid",
+  );
 }
 
 function parseAnswers(
   value: string,
   questions: AskQuestionsInput["questions"],
 ): AskQuestionAnswers {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    const answers = readAskQuestionAnswers(parsed, questions);
-    if (answers !== undefined) {
-      return answers;
-    }
-  } catch {
-    // The common error below identifies corrupt persisted data.
-  }
-  throw new Error("Stored agent question answers are invalid");
+  return parseStored(
+    value,
+    (parsed) => readAskQuestionAnswers(parsed, questions),
+    "Stored agent question answers are invalid",
+  );
 }
 
 function pendingRequest(stored: StoredQuestionRequest): PendingAskQuestions {
@@ -341,28 +346,31 @@ type AnsweredClaimParameters = readonly [
   now: number,
 ];
 
+type AnswerQuestion = (
+  userId: string,
+  sessionId: string,
+  requestId: string,
+  submittedAnswers: AskQuestionAnswers,
+  now: number,
+) => AnswerQuestionRequestResult;
+type CreateQuestion = (
+  userId: string,
+  sessionId: string,
+  executionGeneration: number,
+  toolCallId: string,
+  input: AskQuestionsInput,
+  now: number,
+) => PendingAskQuestions;
+
 export interface AskQuestionsStore {
-  readonly answer: (
-    userId: string,
-    sessionId: string,
-    requestId: string,
-    submittedAnswers: AskQuestionAnswers,
-    now: number,
-  ) => AnswerQuestionRequestResult;
+  readonly answer: AnswerQuestion;
   readonly cancel: (
     userId: string,
     sessionId: string,
     now: number,
   ) => CancelQuestionRequestResult;
   readonly claimAnswered: (...parameters: AnsweredClaimParameters) => boolean;
-  readonly create: (
-    userId: string,
-    sessionId: string,
-    executionGeneration: number,
-    toolCallId: string,
-    input: AskQuestionsInput,
-    now: number,
-  ) => PendingAskQuestions;
+  readonly create: CreateQuestion;
   readonly input: (
     userId: string,
     sessionId: string,
@@ -384,14 +392,14 @@ export interface AskQuestionsStore {
 export function createAskQuestionsStore(
   resources: AskQuestionsStoreResources,
 ): AskQuestionsStore {
-  const create = (
-    userId: string,
-    sessionId: string,
-    executionGeneration: number,
-    toolCallId: string,
-    input: AskQuestionsInput,
-    now: number,
-  ): PendingAskQuestions => {
+  const create: CreateQuestion = (
+    userId,
+    sessionId,
+    executionGeneration,
+    toolCallId,
+    input,
+    now,
+  ) => {
     return resources.persistence.transaction((transaction) => {
       const previous = transaction.findQuestionRequest(sessionId, toolCallId);
       if (previous !== undefined) {
@@ -492,13 +500,14 @@ export function createAskQuestionsStore(
     );
   };
 
-  const answer = (
-    userId: string,
-    sessionId: string,
-    requestId: string,
-    submittedAnswers: AskQuestionAnswers,
-    now: number,
-  ): AnswerQuestionRequestResult => {
+  const answer: AnswerQuestion = (
+    userId,
+    sessionId,
+    requestId,
+    submittedAnswers,
+    answeredAt,
+  ) => {
+    const now = answeredAt;
     return resources.persistence.transaction((transaction) => {
       const stored = transaction.findQuestionRequestById(
         userId,
@@ -593,12 +602,12 @@ export function createAskQuestionsStore(
     );
   };
 
-  const claimAnswered = (...parameters: AnsweredClaimParameters): boolean =>
-    setAnsweredClaim(...parameters, true);
-
-  const releaseAnsweredClaim = (
-    ...parameters: AnsweredClaimParameters
-  ): boolean => setAnsweredClaim(...parameters, false);
+  const answeredClaim =
+    (claimed: boolean) =>
+    (...parameters: AnsweredClaimParameters): boolean =>
+      setAnsweredClaim(...parameters, claimed);
+  const claimAnswered = answeredClaim(true);
+  const releaseAnsweredClaim = answeredClaim(false);
 
   const cancel = (
     userId: string,
