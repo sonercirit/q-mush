@@ -353,6 +353,62 @@ describe("anthropic-format generic provider", () => {
     ]);
   });
 
+  test("keeps cache breakpoints outside every merged trailing replay", () => {
+    const replayFor = (text: string) => ({
+      ...replayWithoutClientTool(),
+      blocks: replayWithoutClientTool().blocks.map((block) =>
+        block.type === "text" ? { ...block, text } : block,
+      ),
+    });
+    const firstReplay = replayFor("First reply.");
+    const secondReplay = replayFor("Second reply.");
+    const thirdReplay = replayFor("Third reply.");
+    const body = directRequestBody([
+      { content: "Before replays", role: "user" },
+      {
+        content: "First reply.",
+        providerReplay: firstReplay,
+        role: "assistant",
+        toolCalls: [],
+      },
+      {
+        content: "Second reply.",
+        providerReplay: secondReplay,
+        role: "assistant",
+        toolCalls: [],
+      },
+      {
+        content: "Third reply.",
+        providerReplay: thirdReplay,
+        role: "assistant",
+        toolCalls: [],
+      },
+    ]);
+
+    expect(body).toMatchObject({
+      messages: [
+        cachedTextMessage("user", "Before replays"),
+        {
+          content: [
+            ...firstReplay.blocks,
+            ...secondReplay.blocks,
+            ...thirdReplay.blocks,
+          ],
+          role: "assistant",
+        },
+      ],
+    });
+    if (
+      typeof body !== "object" ||
+      body === null ||
+      !("messages" in body) ||
+      !Array.isArray(body.messages)
+    ) {
+      throw new Error("The request messages were not an array");
+    }
+    expect(JSON.stringify(body.messages[1])).not.toContain("cache_control");
+  });
+
   test("omits signed replay only after rotation-sensitive identity changes", async () => {
     for (const [credential, credentialFingerprint] of [
       [
