@@ -15,7 +15,10 @@ import type {
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
 import { createAskQuestionsPersistence } from "./ask-questions-persistence.ts";
-import { AskQuestionsStore } from "./ask-questions-store.ts";
+import {
+  createAskQuestionsStore,
+  type AskQuestionsStore,
+} from "./ask-questions-store.ts";
 import {
   createCurrentSessionStore,
   type CurrentSessionStore,
@@ -129,7 +132,7 @@ export class SessionStore extends SessionStoreRestarts {
     this.#reportParent = reportParent;
     this.#toolSettings = toolSettings;
     this.#manualCompactions = new ManualCompactionStore(database, generateId);
-    this.#questions = new AskQuestionsStore({
+    this.#questions = createAskQuestionsStore({
       generateId,
       persistence: createAskQuestionsPersistence(database),
       systemActorId: SYSTEM_ID,

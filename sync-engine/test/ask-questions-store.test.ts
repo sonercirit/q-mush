@@ -2,9 +2,10 @@ import { describe, expect, test } from "vitest";
 import type { AskQuestionAnswers } from "../../shared/ask-questions.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  AskQuestionsStore,
+  createAskQuestionsStore,
   type AskQuestionsPersistence,
   type AskQuestionsPersistenceTransaction,
+  type AskQuestionsStore,
   type QuestionToolResult,
   type StoredQuestionRequest,
   type StoredQuestionSession,
@@ -187,7 +188,7 @@ function runningSession(): StoredQuestionSession {
 function setup() {
   const persistence = new MemoryAskQuestionsPersistence([runningSession()]);
   const ids = [REQUEST_ID, MESSAGE_ID];
-  const store = new AskQuestionsStore({
+  const store = createAskQuestionsStore({
     generateId: () => ids.shift() ?? "unexpected-id",
     persistence,
     systemActorId: "SYSTEM",

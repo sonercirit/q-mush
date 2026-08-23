@@ -341,22 +341,58 @@ type AnsweredClaimParameters = readonly [
   now: number,
 ];
 
-export class AskQuestionsStore {
-  readonly #resources: AskQuestionsStoreResources;
-
-  constructor(resources: AskQuestionsStoreResources) {
-    this.#resources = resources;
-  }
-
-  create(
+export interface AskQuestionsStore {
+  readonly answer: (
+    userId: string,
+    sessionId: string,
+    requestId: string,
+    submittedAnswers: AskQuestionAnswers,
+    now: number,
+  ) => AnswerQuestionRequestResult;
+  readonly cancel: (
+    userId: string,
+    sessionId: string,
+    now: number,
+  ) => CancelQuestionRequestResult;
+  readonly claimAnswered: (...parameters: AnsweredClaimParameters) => boolean;
+  readonly create: (
     userId: string,
     sessionId: string,
     executionGeneration: number,
     toolCallId: string,
     input: AskQuestionsInput,
     now: number,
-  ): PendingAskQuestions {
-    return this.#resources.persistence.transaction((transaction) => {
+  ) => PendingAskQuestions;
+  readonly input: (
+    userId: string,
+    sessionId: string,
+    requestId: string,
+  ) => AskQuestionsInput | undefined;
+  readonly pending: (
+    userId: string,
+    sessionId: string,
+  ) => PendingAskQuestions | null;
+  readonly recoverable: (
+    runnerId?: string,
+  ) => readonly RecoverableQuestionIdentity[];
+  readonly releaseAnsweredClaim: (
+    ...parameters: AnsweredClaimParameters
+  ) => boolean;
+  readonly stop: (userId: string, sessionId: string, now: number) => boolean;
+}
+
+export function createAskQuestionsStore(
+  resources: AskQuestionsStoreResources,
+): AskQuestionsStore {
+  const create = (
+    userId: string,
+    sessionId: string,
+    executionGeneration: number,
+    toolCallId: string,
+    input: AskQuestionsInput,
+    now: number,
+  ): PendingAskQuestions => {
+    return resources.persistence.transaction((transaction) => {
       const previous = transaction.findQuestionRequest(sessionId, toolCallId);
       if (previous !== undefined) {
         if (
@@ -389,7 +425,7 @@ export class AskQuestionsStore {
 
       const request = createdRequest({
         executionGeneration,
-        id: this.#resources.generateId(now),
+        id: resources.generateId(now),
         input,
         now,
         sessionId,
@@ -402,7 +438,7 @@ export class AskQuestionsStore {
           transaction,
           session,
           "paused",
-          this.#resources.systemActorId,
+          resources.systemActorId,
           now,
           true,
         )
@@ -411,16 +447,16 @@ export class AskQuestionsStore {
       }
       return pendingRequest(request);
     });
-  }
+  };
 
-  #questionRequest<Value>(
+  const questionRequest = <Value>(
     userId: string,
     sessionId: string,
     requestId: string | undefined,
     read: (stored: StoredQuestionRequest) => Value,
     missing: Value,
-  ): Value {
-    return this.#resources.persistence.transaction((transaction) => {
+  ): Value => {
+    return resources.persistence.transaction((transaction) => {
       const stored =
         requestId === undefined
           ? transaction.findPendingQuestionRequest(userId, sessionId)
@@ -433,40 +469,37 @@ export class AskQuestionsStore {
         ? read(stored)
         : missing;
     });
-  }
+  };
 
-  pending(userId: string, sessionId: string): PendingAskQuestions | null {
-    return this.#questionRequest(
-      userId,
-      sessionId,
-      undefined,
-      pendingRequest,
-      null,
-    );
-  }
+  const pending = (
+    userId: string,
+    sessionId: string,
+  ): PendingAskQuestions | null => {
+    return questionRequest(userId, sessionId, undefined, pendingRequest, null);
+  };
 
-  input(
+  const input = (
     userId: string,
     sessionId: string,
     requestId: string,
-  ): AskQuestionsInput | undefined {
-    return this.#questionRequest(
+  ): AskQuestionsInput | undefined => {
+    return questionRequest(
       userId,
       sessionId,
       requestId,
       (stored) => parseQuestions(stored.questions),
       undefined,
     );
-  }
+  };
 
-  answer(
+  const answer = (
     userId: string,
     sessionId: string,
     requestId: string,
     submittedAnswers: AskQuestionAnswers,
     now: number,
-  ): AnswerQuestionRequestResult {
-    return this.#resources.persistence.transaction((transaction) => {
+  ): AnswerQuestionRequestResult => {
+    return resources.persistence.transaction((transaction) => {
       const stored = transaction.findQuestionRequestById(
         userId,
         sessionId,
@@ -484,7 +517,7 @@ export class AskQuestionsStore {
       if (answers === undefined) {
         throw new Error("The question answers are invalid");
       }
-      const settings = this.#resources.toolSettings(
+      const settings = resources.toolSettings(
         userId,
         sessionId,
         stored.executionGeneration,
@@ -528,7 +561,7 @@ export class AskQuestionsStore {
       }
       transaction.insertToolResult({
         content: result,
-        ...createdRecordAudit(this.#resources.generateId(now), userId, now),
+        ...createdRecordAudit(resources.generateId(now), userId, now),
         sessionId,
         toolCallId: stored.toolCallId,
         toolName: "ask_questions",
@@ -539,39 +572,40 @@ export class AskQuestionsStore {
       }
       return { request: updatedRequest, result, status: "answered" as const };
     });
-  }
+  };
 
-  #setAnsweredClaim(
+  const setAnsweredClaim = (
     ...[userId, sessionId, requestId, now, claimed]: readonly [
       ...AnsweredClaimParameters,
       claimed: boolean,
     ]
-  ): boolean {
-    return this.#resources.persistence.transaction((transaction) =>
+  ): boolean => {
+    return resources.persistence.transaction((transaction) =>
       updateAnsweredClaim(
         transaction,
         userId,
         sessionId,
         requestId,
         claimed,
-        this.#resources.systemActorId,
+        resources.systemActorId,
         now,
       ),
     );
-  }
+  };
 
-  claimAnswered = (...parameters: AnsweredClaimParameters): boolean =>
-    this.#setAnsweredClaim(...parameters, true);
+  const claimAnswered = (...parameters: AnsweredClaimParameters): boolean =>
+    setAnsweredClaim(...parameters, true);
 
-  releaseAnsweredClaim = (...parameters: AnsweredClaimParameters): boolean =>
-    this.#setAnsweredClaim(...parameters, false);
+  const releaseAnsweredClaim = (
+    ...parameters: AnsweredClaimParameters
+  ): boolean => setAnsweredClaim(...parameters, false);
 
-  cancel(
+  const cancel = (
     userId: string,
     sessionId: string,
     now: number,
-  ): CancelQuestionRequestResult {
-    return this.#resources.persistence.transaction((transaction) => {
+  ): CancelQuestionRequestResult => {
+    return resources.persistence.transaction((transaction) => {
       const request = transaction.findPendingQuestionRequest(userId, sessionId);
       if (
         request === undefined ||
@@ -589,10 +623,10 @@ export class AskQuestionsStore {
         ? { request: cancelled, status: "cancelled" as const }
         : { status: "not_found" as const };
     });
-  }
+  };
 
-  stop(userId: string, sessionId: string, now: number): boolean {
-    return this.#resources.persistence.transaction((transaction) => {
+  const stop = (userId: string, sessionId: string, now: number): boolean => {
+    return resources.persistence.transaction((transaction) => {
       const session = activeQuestionSession(transaction, userId, sessionId);
       if (session === undefined) {
         return false;
@@ -629,10 +663,12 @@ export class AskQuestionsStore {
       );
       return true;
     });
-  }
+  };
 
-  recoverable(runnerId?: string): readonly RecoverableQuestionIdentity[] {
-    return this.#resources.persistence.transaction((transaction) =>
+  const recoverable = (
+    runnerId?: string,
+  ): readonly RecoverableQuestionIdentity[] => {
+    return resources.persistence.transaction((transaction) =>
       transaction
         .listRecoverableAnsweredRequests(runnerId)
         .filter(
@@ -645,5 +681,16 @@ export class AskQuestionsStore {
           userId: request.userId,
         })),
     );
-  }
+  };
+  return {
+    answer,
+    cancel,
+    claimAnswered,
+    create,
+    input,
+    pending,
+    recoverable,
+    releaseAnsweredClaim,
+    stop,
+  };
 }
