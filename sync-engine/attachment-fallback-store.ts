@@ -12,7 +12,11 @@ export interface AttachmentFallbackStoreResources {
 
 export interface AttachmentFallbackStore {
   list(userId: string): readonly AttachmentFallbackSelection[];
-  set(userId: string, selection: AttachmentFallbackSelection, now: number): void;
+  set(
+    userId: string,
+    selection: AttachmentFallbackSelection,
+    now: number,
+  ): void;
 }
 
 export function createAttachmentFallbackStore(

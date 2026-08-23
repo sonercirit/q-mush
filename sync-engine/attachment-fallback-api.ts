@@ -4,7 +4,11 @@ import {
 } from "../shared/attachment-fallback.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
-import { createApiError, createJsonResponse, parseJsonRequest } from "./http.ts";
+import {
+  createApiError,
+  createJsonResponse,
+  parseJsonRequest,
+} from "./http.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
 
 export function createAttachmentFallbackApi(options: {

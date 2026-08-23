@@ -46,10 +46,7 @@ interface DiskFullFailure extends Error {
 }
 
 export function isDiskFullFailure(error: unknown): error is DiskFullFailure {
-  return (
-    error instanceof Error &&
-    Reflect.get(error, DISK_FULL_ERROR) === true
-  );
+  return error instanceof Error && Reflect.get(error, DISK_FULL_ERROR) === true;
 }
 
 function createDiskFullFailure(cause: unknown): DiskFullFailure {

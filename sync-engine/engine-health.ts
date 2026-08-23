@@ -27,7 +27,11 @@ export function createEngineHealth(
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    degrade(reason: EngineHealthReason, message: string, error?: unknown): void {
+    degrade(
+      reason: EngineHealthReason,
+      message: string,
+      error?: unknown,
+    ): void {
       const changed = !reasons.has(reason);
       reasons.add(reason);
       warn(`Q Mush storage health DEGRADED: ${message}`, error);

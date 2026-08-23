@@ -7,8 +7,14 @@ import {
   discoverModelOption,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
-import { createAttachmentFallbackApi, type AttachmentFallbackApi } from "./attachment-fallback-api.ts";
-import { createAttachmentFallbackStore, type AttachmentFallbackStore } from "./attachment-fallback-store.ts";
+import {
+  createAttachmentFallbackApi,
+  type AttachmentFallbackApi,
+} from "./attachment-fallback-api.ts";
+import {
+  createAttachmentFallbackStore,
+  type AttachmentFallbackStore,
+} from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
