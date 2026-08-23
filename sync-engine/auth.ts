@@ -204,10 +204,11 @@ class GoogleAuthentication implements GoogleAuth {
     }
 
     const callback = readOAuthCallback(request, GOOGLE_FLOW_COOKIES);
-
-    if (callback.status !== "ready") {
-      return this.#appRedirect(request, callback.status, clearedFlowCookies);
-    }
+    const callbackFailure =
+      callback.status === "ready"
+        ? undefined
+        : this.#appRedirect(request, callback.status, clearedFlowCookies);
+    if (callbackFailure !== undefined) return callbackFailure;
 
     try {
       const user = await this.#authenticateWithGoogle(
