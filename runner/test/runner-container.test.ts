@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import {
-  RunnerContainerManager,
+  createRunnerContainerManager,
   type RunnerContainerRun,
 } from "../runner-container.ts";
 import {
@@ -57,7 +57,7 @@ function successfulFake(): {
 
 async function preparedManager() {
   const fake = successfulFake();
-  const manager = new RunnerContainerManager({ run: fake.run });
+  const manager = createRunnerContainerManager({ run: fake.run });
   await manager.prepare("session-1", temporaryDirectory());
   return { fake, manager };
 }
@@ -72,10 +72,10 @@ function createTrackingPath(value: unknown): string {
   return path;
 }
 
-describe("RunnerContainerManager", () => {
+describe("createRunnerContainerManager", () => {
   test("defaults to the Arch Linux image", async () => {
     const fake = successfulFake();
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       environment: {},
       run: fake.run,
     });
@@ -108,7 +108,7 @@ describe("RunnerContainerManager", () => {
     "explains architecture mismatches with the image override",
     async (standardError, expectGuidance) => {
       const calls: FakeCall[] = [];
-      const manager = new RunnerContainerManager({
+      const manager = createRunnerContainerManager({
         run: containerOperationRun(calls, {
           run: () =>
             Promise.resolve(processResult({ exitCode: 125, standardError })),
@@ -133,7 +133,7 @@ describe("RunnerContainerManager", () => {
   test("preserves an already-stopped startup error", async () => {
     const controller = new AbortController();
     controller.abort();
-    const manager = new RunnerContainerManager();
+    const manager = createRunnerContainerManager();
     const preparation = manager.prepare(
       "session-stopped-before-start",
       temporaryDirectory(),
@@ -146,7 +146,7 @@ describe("RunnerContainerManager", () => {
   test("starts one root container per session and maps the workspace", async () => {
     const fake = successfulFake();
     const root = temporaryDirectory();
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       environment: {
         Q_MUSH_CONTAINER_IMAGE: "example/image:latest",
         Q_MUSH_CONTAINER_RUNTIME: "podman",
@@ -260,7 +260,7 @@ describe("RunnerContainerManager", () => {
         return Promise.resolve(processResult({ termination: "stopped" }));
       },
     });
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       randomName: () => "q-mush-unique-startup",
       run,
     });
@@ -293,7 +293,7 @@ describe("RunnerContainerManager", () => {
       valid: { identifier: "container-valid_1", runtime: "podman" },
     });
     const fake = successfulFake();
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       run: fake.run,
       trackingPath: path,
     });
@@ -315,7 +315,7 @@ describe("RunnerContainerManager", () => {
       }),
     );
     const failedCalls: FakeCall[] = [];
-    const failed = new RunnerContainerManager({
+    const failed = createRunnerContainerManager({
       run: recordingContainerRun(failedCalls, () =>
         Promise.resolve(
           processResult({ exitCode: 1, standardError: "daemon unavailable" }),
@@ -330,7 +330,7 @@ describe("RunnerContainerManager", () => {
     });
 
     const successful = successfulFake();
-    const retry = new RunnerContainerManager({
+    const retry = createRunnerContainerManager({
       run: successful.run,
       trackingPath,
     });
@@ -343,7 +343,7 @@ describe("RunnerContainerManager", () => {
   });
 
   test("reports a clear error when the runtime cannot start", async () => {
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       environment: { Q_MUSH_CONTAINER_RUNTIME: "missing-runtime" },
       run: () => Promise.reject(new Error("ENOENT")),
     });
@@ -377,7 +377,7 @@ describe("RunnerContainerManager", () => {
 
   test("cleanup waits for startup and removes the resulting exact ID", async () => {
     const { calls, run, startup } = deferredContainerRun();
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       randomName: () => "q-mush-pending",
       run,
     });
@@ -411,7 +411,7 @@ describe("RunnerContainerManager", () => {
       },
     });
     const root = temporaryDirectory();
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       randomName: () => `q-mush-pending-${String(starts + 1)}`,
       run,
     });
@@ -441,7 +441,7 @@ describe("RunnerContainerManager", () => {
         session: { identifier: "container-gone", runtime: "docker" },
       }),
     );
-    const manager = new RunnerContainerManager({
+    const manager = createRunnerContainerManager({
       run: () =>
         Promise.resolve(
           processResult({

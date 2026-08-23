@@ -10,21 +10,28 @@ import {
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
 import { RunnerCommandExecutions } from "./runner-command-executions.ts";
-import { createRunnerCommandExecutor, readRunnerCommand, type RunnerCommandExecutor } from "./runner-command.ts";
 import {
-  createRunnerConnectionSettlement,
+  createRunnerCommandExecutor,
+  readRunnerCommand,
+  type RunnerCommandExecutor,
+} from "./runner-command.ts";
+import {
   createRunnerConnectionError,
+  createRunnerConnectionSettlement,
 } from "./runner-connection.ts";
-import { RunnerContainerManager } from "./runner-container.ts";
+import {
+  createRunnerContainerManager,
+  type RunnerContainerManager,
+} from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
   addRunnerSocketFailureListeners,
-  observeOperationalRunnerSocket,
-  parseSocketJsonRecord,
   isRunnerRegistrationRejectedError,
   isRunnerSupersededError,
+  observeOperationalRunnerSocket,
+  parseSocketJsonRecord,
 } from "./runner-socket.ts";
 import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
@@ -580,7 +587,7 @@ async function run(): Promise<void> {
     );
   }
   const configuration = readConfiguration(configurationPath);
-  const containers = new RunnerContainerManager({
+  const containers = createRunnerContainerManager({
     trackingPath: join(dirname(configurationPath), "owned-containers.json"),
   });
   runnerExecution = {

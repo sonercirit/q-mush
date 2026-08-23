@@ -1,5 +1,6 @@
 import {
-  RunnerContainerManager,
+  createRunnerContainerManager,
+  type RunnerContainerManager,
   type RunnerContainerRun,
 } from "../runner-container.ts";
 import type { RunnerProcessResult } from "../runner-process.ts";
@@ -133,7 +134,7 @@ export async function executeContainerShell(options: {
   readonly workspace: string;
 }): Promise<string> {
   const run = containerOperationRun(options.calls ?? [], options.handlers);
-  const manager = new RunnerContainerManager({ run });
+  const manager = createRunnerContainerManager({ run });
   return await executeFakeShell(
     manager,
     options.workspace,

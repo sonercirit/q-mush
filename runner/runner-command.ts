@@ -26,7 +26,10 @@ import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { isRecord, readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { executeAttachmentCommand } from "./runner-attachments.ts";
-import { RunnerContainerManager } from "./runner-container.ts";
+import {
+  createRunnerContainerManager,
+  type RunnerContainerManager,
+} from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
 import { runnerCommandResultFromOutput } from "./runner-process.ts";
 import {
@@ -170,14 +173,21 @@ type ResolvedRunnerToolCommand = RunnerToolCommand & {
 };
 
 export interface RunnerCommandExecutor {
-  readonly executeResult: (command: RunnerToolCommand, signal?: AbortSignal, stream?: NonNullable<RunnerToolExecutionOptions["stream"]>) => Promise<RunnerCommandResult>;
-  readonly execute: (command: RunnerToolCommand, signal?: AbortSignal) => Promise<string>;
+  readonly executeResult: (
+    command: RunnerToolCommand,
+    signal?: AbortSignal,
+    stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
+  ) => Promise<RunnerCommandResult>;
+  readonly execute: (
+    command: RunnerToolCommand,
+    signal?: AbortSignal,
+  ) => Promise<string>;
 }
 
 export function createRunnerCommandExecutor(
   providedContainers?: RunnerContainerCommands,
 ): RunnerCommandExecutor {
-  const containers = providedContainers ?? new RunnerContainerManager();
+  const containers = providedContainers ?? createRunnerContainerManager();
 
   const toolSettings = (
     command: RunnerToolCommand,
