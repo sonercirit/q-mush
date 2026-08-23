@@ -26,9 +26,7 @@ const promptStoreErrorMessages: Record<PromptStoreErrorKind, string> = {
   prompt_limit: "The active prompt limit has been reached",
 };
 
-export function createPromptStoreError(
-  kind: PromptStoreErrorKind,
-): PromptStoreError {
+function createPromptStoreError(kind: PromptStoreErrorKind): PromptStoreError {
   return Object.assign(new Error(promptStoreErrorMessages[kind]), {
     kind,
     name: "PromptStoreError",

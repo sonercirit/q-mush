@@ -44,7 +44,7 @@ export function createInvalidProviderApiKeyError(): InvalidProviderApiKeyError {
   });
 }
 
-export function isInvalidProviderApiKeyError(
+function isInvalidProviderApiKeyError(
   error: unknown,
 ): error is InvalidProviderApiKeyError {
   return (
