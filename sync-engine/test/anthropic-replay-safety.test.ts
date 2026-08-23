@@ -213,10 +213,6 @@ function expectModelExchangeCounts(
   ]).toEqual([counts.gets, counts.posts]);
 }
 
-function expectSingleModelExchange(requests: readonly Request[]): void {
-  expectModelExchangeCounts(requests, { gets: 1, posts: 1 });
-}
-
 async function completeTwice(
   model: Pick<ChatCompletionsAgentModel, "complete">,
 ): Promise<void> {
@@ -338,7 +334,7 @@ async function expectUnresolvedToolIdentityFailsClosed(
     modelCompletion(FIRST_SNAPSHOT, signedToolBlocks()),
   );
   await expectNoToolSideEffect(model);
-  expectSingleModelExchange(requests);
+  expectModelExchangeCounts(requests, { gets: 2, posts: 1 });
 }
 
 function aliasReplayMessage(): AgentConversationMessage {
@@ -486,7 +482,12 @@ describe("Anthropic replay safety", () => {
 
       await completeTwice(model);
 
-      expectModelExchangeCounts(requests, { gets: 1, posts: 2 });
+      expect(requests.map(({ method }) => method)).toEqual([
+        "GET",
+        "GET",
+        "POST",
+        "POST",
+      ]);
     },
   );
 
@@ -568,7 +569,7 @@ describe("Anthropic replay safety", () => {
     );
 
     await expectNoToolSideEffect(model);
-    expectSingleModelExchange(requests);
+    expectModelExchangeCounts(requests, { gets: 1, posts: 1 });
   });
 
   test.each(UNRESOLVED_MODEL_RESPONSES)(
@@ -590,7 +591,7 @@ describe("Anthropic replay safety", () => {
       await expect(completeInspect(model)).rejects.toThrow(
         "cannot be continued safely",
       );
-      expectSingleModelExchange(requests);
+      expectModelExchangeCounts(requests, { gets: 2, posts: 1 });
     },
   );
 

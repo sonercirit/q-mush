@@ -1,6 +1,7 @@
 import { isAgentModelId } from "../shared/agent-configuration.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
+import { readAnthropicModelList } from "./agent-model-discovery-anthropic.ts";
 import {
   usesAnthropicFormat,
   type AgentProviderCredential,
@@ -56,6 +57,73 @@ async function responseJson(response: Response): Promise<unknown> {
   }
 }
 
+function modelListPage(value: unknown): readonly unknown[] {
+  const data = isRecord(value) ? value["data"] : undefined;
+  return Array.isArray(data) ? data : [];
+}
+
+function listRequestError(retryable: boolean): Error {
+  return new Error("The Anthropic model list request failed", {
+    cause: retryable,
+  });
+}
+
+async function resolveAnthropicModelFromList(options: {
+  readonly callerSignal?: AbortSignal;
+  readonly fetch: AnthropicModelResolutionFetch;
+  readonly headers: Headers;
+  readonly listUrl: string;
+  readonly model: string;
+  readonly requestSignal: AbortSignal;
+}): Promise<AnthropicModelResolution> {
+  try {
+    const entries = await readAnthropicModelList({
+      fetchJson: async (url) => {
+        const response = await transportAttempt(
+          () =>
+            options.fetch(
+              new Request(url, {
+                headers: options.headers,
+                signal: options.requestSignal,
+              }),
+            ),
+          options.callerSignal,
+        );
+        if (response === RETRYABLE_TRANSPORT_FAILURE) {
+          throw listRequestError(true);
+        }
+        throwIfCallerAborted(options.callerSignal);
+        if (!response.ok) {
+          throw listRequestError(retryableStatus(response.status));
+        }
+        const value = await transportAttempt(
+          () => responseJson(response),
+          options.callerSignal,
+        );
+        if (value === RETRYABLE_TRANSPORT_FAILURE) {
+          throw listRequestError(true);
+        }
+        throwIfCallerAborted(options.callerSignal);
+        return value;
+      },
+      listUrl: options.listUrl,
+      pageError: (message) => new Error(message),
+      readPage: modelListPage,
+      tooManyOptionsError: () =>
+        new Error("The Anthropic model list is too large"),
+    });
+    return entries.some((entry) => {
+      const id = isRecord(entry) ? entry["id"] : undefined;
+      return isAgentModelId(id) && id === options.model;
+    })
+      ? resolvedModel(options.model)
+      : unresolvedModel();
+  } catch (error) {
+    throwIfCallerAborted(options.callerSignal);
+    return unresolvedModel(error instanceof Error && error.cause === true);
+  }
+}
+
 export async function resolveAnthropicModelAttempt(options: {
   readonly credential: AgentProviderCredential;
   readonly fetch: AnthropicModelResolutionFetch;
@@ -78,13 +146,18 @@ export async function resolveAnthropicModelAttempt(options: {
     options.signal === undefined
       ? timeout
       : AbortSignal.any([options.signal, timeout]);
+  const modelsUrl = genericProviderEndpoint(
+    options.credential.baseUrl,
+    "models",
+  );
   const response = await transportAttempt(
     () =>
       options.fetch(
-        new Request(
-          `${genericProviderEndpoint(options.credential.baseUrl, "models")}/${encodeURIComponent(options.model)}`,
-          { headers, method: "GET", signal },
-        ),
+        new Request(`${modelsUrl}/${encodeURIComponent(options.model)}`, {
+          headers,
+          method: "GET",
+          signal,
+        }),
       ),
     options.signal,
   );
@@ -92,17 +165,33 @@ export async function resolveAnthropicModelAttempt(options: {
     return unresolvedModel(true);
   }
   throwIfCallerAborted(options.signal);
-  if (!response.ok) {
-    return unresolvedModel(retryableStatus(response.status));
-  }
-  const value = await transportAttempt(
-    () => responseJson(response),
-    options.signal,
-  );
-  if (value === RETRYABLE_TRANSPORT_FAILURE) {
+  if (!response.ok && retryableStatus(response.status)) {
     return unresolvedModel(true);
   }
-  throwIfCallerAborted(options.signal);
-  const id = isRecord(value) ? value["id"] : undefined;
-  return isAgentModelId(id) ? resolvedModel(id) : unresolvedModel();
+  if (response.ok) {
+    const value = await transportAttempt(
+      () => responseJson(response),
+      options.signal,
+    );
+    if (value === RETRYABLE_TRANSPORT_FAILURE) {
+      return unresolvedModel(true);
+    }
+    throwIfCallerAborted(options.signal);
+    const id = isRecord(value) ? value["id"] : undefined;
+    if (isAgentModelId(id)) {
+      return resolvedModel(id);
+    }
+  } else if (response.status === 401 || response.status === 403) {
+    await response.body?.cancel();
+    return unresolvedModel();
+  }
+  if (!response.ok) await response.body?.cancel();
+  return resolveAnthropicModelFromList({
+    ...(options.signal === undefined ? {} : { callerSignal: options.signal }),
+    fetch: options.fetch,
+    headers,
+    listUrl: modelsUrl,
+    model: options.model,
+    requestSignal: signal,
+  });
 }
