@@ -12,7 +12,7 @@ import {
 import { ProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
-  ConnectedAccountOAuth,
+  createConnectedAccountOAuth,
   type ConnectedAccountOAuthConfiguration,
 } from "./connected-account-oauth.ts";
 import {
@@ -206,7 +206,7 @@ export function createProviderIntegration(options: {
   const connectedAccount =
     baseOAuthConfiguration === undefined
       ? undefined
-      : new ConnectedAccountOAuth(
+      : createConnectedAccountOAuth(
           {
             ...baseOAuthConfiguration,
             ...(options.configuration?.redirectUri === undefined
