@@ -113,7 +113,10 @@ async function resolveAnthropicModelFromList(options: {
         new Error("The Anthropic model list is too large"),
     });
     return entries.some(
-      (entry) => isRecord(entry) && entry["id"] === options.model,
+      (entry) => {
+        const id = isRecord(entry) ? entry["id"] : undefined;
+        return isAgentModelId(id) && id === options.model;
+      },
     )
       ? resolvedModel(options.model)
       : unresolvedModel();
@@ -181,8 +184,10 @@ export async function resolveAnthropicModelAttempt(options: {
       return resolvedModel(id);
     }
   } else if (response.status === 401 || response.status === 403) {
+    await response.body?.cancel();
     return unresolvedModel();
   }
+  await response.body?.cancel();
   return resolveAnthropicModelFromList({
     ...(options.signal === undefined ? {} : { callerSignal: options.signal }),
     fetch: options.fetch,
