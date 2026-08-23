@@ -62,107 +62,53 @@ interface ProviderErrorDetails {
   readonly status: number | undefined;
 }
 
-export interface ProviderCredentialRejectionError extends Error {
+export class ProviderCredentialRejectionError extends Error {
   readonly status: 400 | 401 | 402 | 403 | 429;
+
+  constructor(message: string, status: 400 | 401 | 402 | 403 | 429) {
+    super(message);
+    this.name = "ProviderCredentialRejectionError";
+    this.status = status;
+  }
 }
 
-type ProviderCredentialRejectionErrorConstructor = new (
-  message: string,
-  status: 400 | 401 | 402 | 403 | 429,
-) => ProviderCredentialRejectionError;
-
-export const ProviderCredentialRejectionError: ProviderCredentialRejectionErrorConstructor =
-  function ProviderCredentialRejectionError(
-    message: string,
-    status: 400 | 401 | 402 | 403 | 429,
-  ): ProviderCredentialRejectionError {
-    const error = Object.assign(new Error(message), {
-      name: "ProviderCredentialRejectionError",
+export class ProviderCredentialReauthenticationRequiredError extends ProviderCredentialRejectionError {
+  constructor(providerName: string, status: 400 | 401 | 403 = 401) {
+    super(
+      `${providerName} login has expired. Connect the account again to continue.`,
       status,
-    });
-    Object.setPrototypeOf(error, ProviderCredentialRejectionError.prototype);
-    return error;
-  } as unknown as ProviderCredentialRejectionErrorConstructor;
-Object.setPrototypeOf(
-  ProviderCredentialRejectionError.prototype,
-  Error.prototype,
-);
-
-export interface ProviderCredentialReauthenticationRequiredError extends ProviderCredentialRejectionError {}
-
-type ProviderCredentialReauthenticationRequiredErrorConstructor = new (
-  providerName: string,
-  status?: 400 | 401 | 403,
-) => ProviderCredentialReauthenticationRequiredError;
-
-export const ProviderCredentialReauthenticationRequiredError: ProviderCredentialReauthenticationRequiredErrorConstructor =
-  function ProviderCredentialReauthenticationRequiredError(
-    providerName: string,
-    status: 400 | 401 | 403 = 401,
-  ): ProviderCredentialReauthenticationRequiredError {
-    const error = Object.assign(
-      new Error(
-        `${providerName} login has expired. Connect the account again to continue.`,
-      ),
-      {
-        name: "ProviderCredentialReauthenticationRequiredError",
-        status,
-      },
     );
-    Object.setPrototypeOf(
-      error,
-      ProviderCredentialReauthenticationRequiredError.prototype,
-    );
-    return error;
-  } as unknown as ProviderCredentialReauthenticationRequiredErrorConstructor;
-Object.setPrototypeOf(
-  ProviderCredentialReauthenticationRequiredError.prototype,
-  ProviderCredentialRejectionError.prototype,
-);
+    this.name = "ProviderCredentialReauthenticationRequiredError";
+  }
+}
 
 export function isProviderCredentialRejection(
   error: unknown,
 ): error is ProviderCredentialRejectionError {
-  return (
-    error instanceof Error &&
-    (error.name === "ProviderCredentialRejectionError" ||
-      error.name === "ProviderCredentialReauthenticationRequiredError") &&
-    "status" in error
-  );
+  return error instanceof ProviderCredentialRejectionError;
 }
 
-export interface ProviderStreamError extends Error {
+export class ProviderStreamError extends Error {
   readonly authenticationFailure: boolean;
   readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly status: number | undefined;
   readonly transient: boolean;
-}
 
-type ProviderStreamErrorConstructor = new (
-  message: string,
-  transient: boolean,
-  options?: ProviderStreamErrorOptions,
-) => ProviderStreamError;
-
-export const ProviderStreamError: ProviderStreamErrorConstructor =
-  function ProviderStreamError(
+  constructor(
     message: string,
     transient: boolean,
     options: ProviderStreamErrorOptions = {},
-  ): ProviderStreamError {
-    const error = Object.assign(new Error(message), {
-      authenticationFailure: options.authenticationFailure === true,
-      name: "ProviderStreamError",
-      reconnectWebSocket: options.reconnectWebSocket === true,
-      retryAfterMilliseconds: options.retryAfterMilliseconds,
-      status: options.status,
-      transient,
-    });
-    Object.setPrototypeOf(error, ProviderStreamError.prototype);
-    return error;
-  } as unknown as ProviderStreamErrorConstructor;
-Object.setPrototypeOf(ProviderStreamError.prototype, Error.prototype);
+  ) {
+    super(message);
+    this.authenticationFailure = options.authenticationFailure === true;
+    this.name = "ProviderStreamError";
+    this.reconnectWebSocket = options.reconnectWebSocket === true;
+    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
+    this.status = options.status;
+    this.transient = transient;
+  }
+}
 
 interface ProviderStreamErrorOptions {
   readonly authenticationFailure?: boolean;
