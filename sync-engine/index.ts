@@ -30,7 +30,7 @@ import {
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
-import { DevelopmentRestartLifecycle } from "./development-restart.ts";
+import { createDevelopmentRestartLifecycle } from "./development-restart.ts";
 import { createEngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
@@ -303,7 +303,7 @@ const restartProgressReporting = (() => {
   };
 })();
 
-const lifecycle = new DevelopmentRestartLifecycle({
+const lifecycle = createDevelopmentRestartLifecycle({
   drainFailed: (error) => {
     console.warn(
       `Q Mush development restart drain failed: ${errorMessage(error)}`,

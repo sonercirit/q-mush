@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutdown.ts";
 import { RestartDeadline } from "../../shared/restart-deadline.ts";
 import { SESSION_MODELS_PATH } from "../../shared/routes.ts";
-import { DevelopmentRestartLifecycle } from "../../sync-engine/development-restart.ts";
+import { createDevelopmentRestartLifecycle } from "../../sync-engine/development-restart.ts";
 import type { RestartSetTimeout } from "../../sync-engine/session-restart-timers.ts";
 import {
   createAuthenticatedRequest,
@@ -154,7 +154,7 @@ function restartLifecycle(
   };
   return {
     events,
-    lifecycle: new DevelopmentRestartLifecycle({
+    lifecycle: createDevelopmentRestartLifecycle({
       ...events,
       sessions: setup.sessions,
     }),
