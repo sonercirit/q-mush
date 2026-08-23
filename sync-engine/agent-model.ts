@@ -98,19 +98,18 @@ function endpoint(
     return OPENAI_CODEX_RESPONSES_URL;
   }
 
-  switch (provider) {
-    case "openai":
-      return OPENAI_COMPLETIONS_URL;
-    case "openrouter":
-      return OPENROUTER_COMPLETIONS_URL;
-    case "generic":
-      return genericProviderEndpoint(
+  const providerEndpoints: Record<ProviderId, () => string> = {
+    generic: () =>
+      genericProviderEndpoint(
         credential.baseUrl,
         usesAnthropicFormat(provider, credential)
           ? "messages"
           : "chat/completions",
-      );
-  }
+      ),
+    openai: () => OPENAI_COMPLETIONS_URL,
+    openrouter: () => OPENROUTER_COMPLETIONS_URL,
+  };
+  return providerEndpoints[provider]();
 }
 
 function accessToken(
