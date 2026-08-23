@@ -329,9 +329,16 @@ function routeSessionItem(
         reassign: () => sessions.reassign(request, id),
         stop: () => sessions.stop(request, id),
       };
-      return route === undefined || !(route in routes)
-        ? undefined
-        : routes[route as keyof typeof routes]();
+      const handler =
+        route === "compact" ||
+        route === "compaction" ||
+        route === "continue" ||
+        route === "messages" ||
+        route === "reassign" ||
+        route === "stop"
+          ? routes[route]
+          : undefined;
+      return handler?.();
     },
   );
 }
@@ -353,23 +360,20 @@ function routeItemSegments(
       const routes: Readonly<
         Record<
           "default" | "scopes" | "session-reassignment",
-          (() => Promise<Response> | Response) | undefined
+          ((id: string) => Promise<Response> | Response) | undefined
         >
       > = {
-        default:
-          actions.default &&
-          (() => actions.default?.(id) as Promise<Response> | Response),
-        scopes:
-          actions.scopes &&
-          (() => actions.scopes?.(id) as Promise<Response> | Response),
-        "session-reassignment":
-          actions.sessionReassignment &&
-          (() =>
-            actions.sessionReassignment?.(id) as Promise<Response> | Response),
+        default: actions.default,
+        scopes: actions.scopes,
+        "session-reassignment": actions.sessionReassignment,
       };
-      return route === undefined || !(route in routes)
-        ? undefined
-        : routes[route as keyof typeof routes]?.();
+      const handler =
+        route === "default" ||
+        route === "scopes" ||
+        route === "session-reassignment"
+          ? routes[route]
+          : undefined;
+      return handler?.(id);
     }
     return undefined;
   });
