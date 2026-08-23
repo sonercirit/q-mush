@@ -10,11 +10,27 @@ import {
   updateStoredSessions,
 } from "./session-store-persistence.ts";
 
-export class SessionContextTokenCapError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "SessionContextTokenCapError";
-  }
+export type SessionContextTokenCapError = Error & {
+  readonly tag: "session_context_token_cap_error";
+};
+
+export function createSessionContextTokenCapError(
+  message: string,
+): SessionContextTokenCapError {
+  return Object.assign(new Error(message), {
+    name: "SessionContextTokenCapError",
+    tag: "session_context_token_cap_error" as const,
+  });
+}
+
+export function isSessionContextTokenCapError(
+  error: unknown,
+): error is SessionContextTokenCapError {
+  return (
+    error instanceof Error &&
+    "tag" in error &&
+    error.tag === "session_context_token_cap_error"
+  );
 }
 
 export function updateStoredSessionContextTokenCap(options: {
@@ -45,7 +61,7 @@ export function updateStoredSessionContextTokenCap(options: {
     options.userContextTokenCap,
     modelLimit,
   );
-  if (error !== undefined) throw new SessionContextTokenCapError(error);
+  if (error !== undefined) throw createSessionContextTokenCapError(error);
   if (existing.userContextTokenCap === options.userContextTokenCap) {
     return existing;
   }

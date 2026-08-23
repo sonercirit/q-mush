@@ -1,6 +1,6 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
-import { SessionContextTokenCapError } from "./session-context-limit-store.ts";
+import { isSessionContextTokenCapError } from "./session-context-limit-store.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import type { SessionContextTokenCapAction } from "./session-realtime-commands.ts";
 import type { SessionStore } from "./session-store.ts";
@@ -21,7 +21,7 @@ export function createSessionContextTokenCapAction(
         workspaceId,
       );
     } catch (error) {
-      if (!(error instanceof SessionContextTokenCapError)) throw error;
+      if (!isSessionContextTokenCapError(error)) throw error;
       throw new RealtimeCommandError(
         "invalid_context_token_cap",
         error.message,
