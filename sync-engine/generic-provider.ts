@@ -11,7 +11,7 @@ import {
   type OAuthRuntime,
 } from "./oauth.ts";
 import {
-  InvalidProviderApiKeyError,
+  createInvalidProviderApiKeyError,
   type ProviderCredentialInputDetails,
 } from "./provider-credentials.ts";
 import {
@@ -74,7 +74,7 @@ async function readGenericCredentialDetails(
       isAgentModelDiscoveryError(error) &&
       (error.status === 401 || error.status === 403)
     ) {
-      throw new InvalidProviderApiKeyError();
+      throw createInvalidProviderApiKeyError();
     }
     throw error;
   }

@@ -33,11 +33,25 @@ import { updateAuthenticatedConnectionScopes } from "./scoped-collection.ts";
 const API_KEY_MAXIMUM_LENGTH = 1024;
 const API_KEY_LABEL_MAXIMUM_LENGTH = 100;
 
-export class InvalidProviderApiKeyError extends Error {
-  constructor() {
-    super("The provider rejected the API key");
-    this.name = "InvalidProviderApiKeyError";
-  }
+export type InvalidProviderApiKeyError = Error & {
+  readonly kind: "invalid_provider_api_key";
+};
+
+export function createInvalidProviderApiKeyError(): InvalidProviderApiKeyError {
+  return Object.assign(new Error("The provider rejected the API key"), {
+    kind: "invalid_provider_api_key" as const,
+    name: "InvalidProviderApiKeyError",
+  });
+}
+
+export function isInvalidProviderApiKeyError(
+  error: unknown,
+): error is InvalidProviderApiKeyError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "invalid_provider_api_key"
+  );
 }
 
 function invalidApiKeyResponse(): Response {
@@ -69,7 +83,7 @@ async function readApiKeyMetadata(
   });
 
   if (response.status === 401 || response.status === 403) {
-    throw new InvalidProviderApiKeyError();
+    throw createInvalidProviderApiKeyError();
   }
 
   return readJsonRecord(response, errorMessage);
@@ -252,7 +266,7 @@ export class ProviderCredentialEndpoints {
       );
       return createJsonResponse(credential, 201);
     } catch (error) {
-      if (error instanceof InvalidProviderApiKeyError) {
+      if (isInvalidProviderApiKeyError(error)) {
         return invalidApiKeyResponse();
       }
 
