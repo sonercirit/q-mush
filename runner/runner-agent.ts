@@ -28,7 +28,8 @@ import {
 } from "./runner-socket.ts";
 import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
+  type RunnerStartupRestart,
   updateRunnerIfAvailable,
 } from "./runner-update.ts";
 
@@ -561,7 +562,7 @@ async function run(): Promise<void> {
 
   const configurationPath = readConfigurationPath();
   const runnerRestartId = readRestartId();
-  const startupRestart = new RunnerStartupRestart(runnerRestartId);
+  const startupRestart = createRunnerStartupRestart(runnerRestartId);
   if (runnerRestartId !== undefined) {
     runnerRestart.restore(runnerRestartId);
   }

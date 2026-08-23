@@ -5,7 +5,7 @@ import {
   createRunnerSupersededError,
 } from "../runner/runner-socket.ts";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
   type RunnerStartupConnection,
 } from "../runner/runner-update.ts";
 import { isRecord } from "../shared/auth-model.ts";
@@ -86,7 +86,7 @@ function fakeRunnerProcess(
   processNonce = "fake-runner-process",
 ): FakeRunnerProcess {
   const client = new FakeRunnerSocket();
-  const startup = new RunnerStartupRestart(restartId);
+  const startup = createRunnerStartupRestart(restartId);
   const startupConnection: RunnerStartupConnection = startup.connection();
   let stopped: Promise<Error> | undefined;
   const serverData: QmushWebSocketData = assertRealtimeUpgrade(

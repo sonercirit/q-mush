@@ -3,7 +3,8 @@ import { createRunnerConnectionError } from "../../runner/runner-connection.ts";
 import { completeRunnerRegistration } from "../../runner/runner-registration.ts";
 import { createRunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
+  type RunnerStartupRestart,
   type RunnerStartupConnection,
 } from "../../runner/runner-update.ts";
 import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
@@ -40,7 +41,7 @@ function registration(
   onVersion?: (version: string) => void,
 ): RegistrationSetup {
   return registrationForStartup(
-    new RunnerStartupRestart(restartId ?? undefined),
+    createRunnerStartupRestart(restartId ?? undefined),
     [],
     "operational",
     onVersion === undefined ? {} : { onVersion },
@@ -241,7 +242,7 @@ test("stores final receipt but does not consume restart identity on a pre-operat
 test("reports the settled restart identity only after operational registration", async () => {
   const operationalRestartIds: (string | undefined)[] = [];
   const setup = registrationForStartup(
-    new RunnerStartupRestart("restart-operational"),
+    createRunnerStartupRestart("restart-operational"),
     [],
     "operational",
     {
@@ -262,7 +263,7 @@ test("reports the settled restart identity only after operational registration",
 
 test("rejects registration when operational restart settlement is invalid", async () => {
   const setup = registrationForStartup(
-    new RunnerStartupRestart("restart-invalid"),
+    createRunnerStartupRestart("restart-invalid"),
     [],
     "operational",
     { onOperational: () => false },

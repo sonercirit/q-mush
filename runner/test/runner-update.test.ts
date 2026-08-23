@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
+  type RunnerStartupRestart,
   type RunnerUpdateContext,
   updateRunnerIfAvailable,
 } from "../../runner/runner-update.ts";
@@ -358,7 +359,7 @@ function runnerConnectFrame(restartId?: string): unknown {
 }
 
 test("remembers startup restart ownership after registration consumes its ID", () => {
-  const startupRestart = new RunnerStartupRestart("restart-owned-process");
+  const startupRestart = createRunnerStartupRestart("restart-owned-process");
   const connection = startupRestart.connection();
 
   connection.finalizeActivation("restart-owned-receipt");
@@ -366,20 +367,20 @@ test("remembers startup restart ownership after registration consumes its ID", (
 
   expect(startupRestart.restartId).toBeUndefined();
   expect(startupRestart.startupRestart).toBe(true);
-  expect(new RunnerStartupRestart().startupRestart).toBe(false);
+  expect(createRunnerStartupRestart().startupRestart).toBe(false);
 });
 
 test("rejects invalid startup restart identities", () => {
-  expect(() => new RunnerStartupRestart("")).toThrow(
+  expect(() => createRunnerStartupRestart("")).toThrow(
     "runner restart ID is invalid",
   );
-  expect(() => new RunnerStartupRestart("x".repeat(201))).toThrow(
+  expect(() => createRunnerStartupRestart("x".repeat(201))).toThrow(
     "runner restart ID is invalid",
   );
 });
 
 test("an exact connection consumes only its own finalized receipt", () => {
-  const startupRestart = new RunnerStartupRestart("restart-activation");
+  const startupRestart = createRunnerStartupRestart("restart-activation");
   const connection = startupRestart.connection();
 
   connection.finalizeActivation("restart-activation");
@@ -390,7 +391,7 @@ test("an exact connection consumes only its own finalized receipt", () => {
 });
 
 test("a later connection replays finalized state while fencing the prior lease", () => {
-  const startupRestart = new RunnerStartupRestart();
+  const startupRestart = createRunnerStartupRestart();
   const first = startupRestart.connection();
 
   expect(first.prepareActivation("receipt-reconnect")).toBe(true);
@@ -415,7 +416,7 @@ test("a later connection replays finalized state while fencing the prior lease",
 });
 
 test("stale or pre-finalized operational acknowledgements cannot consume activation state", () => {
-  const startupRestart = new RunnerStartupRestart("restart-operational-fence");
+  const startupRestart = createRunnerStartupRestart("restart-operational-fence");
   const connection = startupRestart.connection();
 
   expect(connection.prepareActivation("prepared-receipt")).toBe(true);
@@ -434,7 +435,7 @@ test("stale or pre-finalized operational acknowledgements cannot consume activat
 });
 
 test("retains a prepared receipt when final acknowledgement is lost", () => {
-  const startupRestart = new RunnerStartupRestart("restart-prepared");
+  const startupRestart = createRunnerStartupRestart("restart-prepared");
 
   startupRestart.prepareActivation("prepared-receipt");
 
@@ -447,7 +448,7 @@ test("retains a prepared receipt when final acknowledgement is lost", () => {
 });
 
 test("restores a prepared receipt phase across process startup", () => {
-  const startupRestart = new RunnerStartupRestart("restart-prepared-startup");
+  const startupRestart = createRunnerStartupRestart("restart-prepared-startup");
 
   startupRestart.restoreActivation("prepared-startup", "prepared");
 
@@ -459,7 +460,7 @@ test("restores a prepared receipt phase across process startup", () => {
 });
 
 test("consumes an ordinary activation receipt after activation", () => {
-  const startupRestart = new RunnerStartupRestart();
+  const startupRestart = createRunnerStartupRestart();
   startupRestart.restoreActivation("ordinary-activation");
   const connection = startupRestart.connection();
 
@@ -474,7 +475,7 @@ test("consumes an ordinary activation receipt after activation", () => {
 });
 
 test("an older connection cannot consume newer activation state", () => {
-  const startupRestart = new RunnerStartupRestart("restart-race");
+  const startupRestart = createRunnerStartupRestart("restart-race");
   const stale = startupRestart.connection();
   startupRestart.prepareActivation("prepared-newer");
 
@@ -497,7 +498,7 @@ test("preserves a startup restart until committed, then drains with a new ID", a
   );
   const launches = [firstLaunch, secondLaunch];
 
-  const startupRestart = new RunnerStartupRestart(
+  const startupRestart = createRunnerStartupRestart(
     restartIdFromLaunch(secondLaunch),
   );
   const uncommittedConnection = startupRestart.connection();
