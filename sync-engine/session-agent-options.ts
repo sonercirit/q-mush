@@ -286,26 +286,24 @@ function searchableText(option: SessionOption): string {
   ]);
 }
 
-function optionsForCategory(
-  input: GetSessionOptionsToolInput,
+type SessionOptionDispatchCategory = GetSessionOptionsToolInput["category"];
+type SessionOptionReader = (
   source: SessionOptionsSource,
-): readonly BoundedOption<SessionOption>[] {
-  switch (input.category) {
-    case "credentials":
-      return source.credentials.map(boundedCredential);
-    case "models":
-      return source.models.map(boundedModel);
-    case "reasoning_efforts":
-      return source.reasoningEfforts.map((effort) => ({
+) => readonly BoundedOption<SessionOption>[];
+
+const sessionOptionReaders: Record<SessionOptionDispatchCategory, SessionOptionReader> =
+  {
+    credentials: (source) => source.credentials.map(boundedCredential),
+    models: (source) => source.models.map(boundedModel),
+    reasoning_efforts: (source) =>
+      source.reasoningEfforts.map((effort) => ({
         option: { effort },
         truncated: false,
-      }));
-    case "runners":
-      return source.runners.flatMap(
+      })),
+    runners: (source) =>
+      source.runners.flatMap(
         (runner): readonly BoundedOption<SessionOption>[] => {
-          if (runner.status !== "online") {
-            return [];
-          }
+          if (runner.status !== "online") return [];
           const architecture = boundedNullableText(runner.architecture);
           const id = boundedText(runner.id);
           const name = boundedNullableText(runner.name);
@@ -328,24 +326,28 @@ function optionsForCategory(
             },
           ];
         },
-      );
-    case "tools":
-      return source.tools.map(
-        ({ classification, description, label, name }) => {
-          const boundedDescription = boundedText(description);
-          const boundedLabel = boundedText(label);
-          return {
-            option: {
-              classification,
-              description: boundedDescription.option,
-              label: boundedLabel.option,
-              name,
-            },
-            truncated: boundedDescription.truncated || boundedLabel.truncated,
-          };
-        },
-      );
-  }
+      ),
+    tools: (source) =>
+      source.tools.map(({ classification, description, label, name }) => {
+        const boundedDescription = boundedText(description);
+        const boundedLabel = boundedText(label);
+        return {
+          option: {
+            classification,
+            description: boundedDescription.option,
+            label: boundedLabel.option,
+            name,
+          },
+          truncated: boundedDescription.truncated || boundedLabel.truncated,
+        };
+      }),
+  };
+
+function optionsForCategory(
+  input: GetSessionOptionsToolInput,
+  source: SessionOptionsSource,
+): readonly BoundedOption<SessionOption>[] {
+  return sessionOptionReaders[input.category](source);
 }
 
 interface MatchingPage {
