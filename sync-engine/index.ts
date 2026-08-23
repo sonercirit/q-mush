@@ -31,7 +31,7 @@ import {
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
 import { DevelopmentRestartLifecycle } from "./development-restart.ts";
-import { EngineHealth } from "./engine-health.ts";
+import { createEngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -66,7 +66,7 @@ import { createSessionIntegration } from "./sessions.ts";
 import { createToolSettingsIntegration } from "./tool-settings.ts";
 
 const databasePath = readDatabasePath(Bun.env);
-const health = new EngineHealth();
+const health = createEngineHealth();
 const database = openDatabaseAndCleanupRepairSnapshots(databasePath, {
   health,
 });

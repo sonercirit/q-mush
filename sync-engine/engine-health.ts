@@ -5,60 +5,40 @@ import type {
 
 type EngineHealthListener = (snapshot: EngineHealthSnapshot) => void;
 
-export class EngineHealth {
-  readonly #listeners = new Set<EngineHealthListener>();
-  readonly #reasons = new Set<EngineHealthReason>();
-  readonly #warn: (message: string, error?: unknown) => void;
-
-  constructor(
-    warn: (message: string, error?: unknown) => void = (message, error) => {
-      if (error === undefined) {
-        console.warn(message);
-      } else {
-        console.warn(message, error);
-      }
+export function createEngineHealth(
+  warn: (message: string, error?: unknown) => void = (message, error) => {
+    if (error === undefined) console.warn(message);
+    else console.warn(message, error);
+  },
+) {
+  const listeners = new Set<EngineHealthListener>();
+  const reasons = new Set<EngineHealthReason>();
+  const snapshot = (): EngineHealthSnapshot => ({
+    degraded: reasons.size > 0,
+    reasons: [...reasons],
+  });
+  const publish = () => {
+    const current = snapshot();
+    for (const listener of listeners) listener(current);
+  };
+  return {
+    snapshot,
+    onChange(listener: EngineHealthListener): () => void {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
-  ) {
-    this.#warn = warn;
-  }
-
-  snapshot(): EngineHealthSnapshot {
-    return {
-      degraded: this.#reasons.size > 0,
-      reasons: [...this.#reasons],
-    };
-  }
-
-  onChange(listener: EngineHealthListener): () => void {
-    this.#listeners.add(listener);
-    return () => {
-      this.#listeners.delete(listener);
-    };
-  }
-
-  degrade(reason: EngineHealthReason, message: string, error?: unknown): void {
-    const changed = !this.#reasons.has(reason);
-    this.#reasons.add(reason);
-    this.#warn(`Q Mush storage health DEGRADED: ${message}`, error);
-    if (changed) {
-      this.#publish();
-    }
-  }
-
-  restore(reason: EngineHealthReason): void {
-    if (!this.#reasons.delete(reason)) {
-      return;
-    }
-    if (this.#reasons.size === 0) {
-      this.#warn("Q Mush storage health recovered");
-    }
-    this.#publish();
-  }
-
-  #publish(): void {
-    const snapshot = this.snapshot();
-    for (const listener of this.#listeners) {
-      listener(snapshot);
-    }
-  }
+    degrade(reason: EngineHealthReason, message: string, error?: unknown): void {
+      const changed = !reasons.has(reason);
+      reasons.add(reason);
+      warn(`Q Mush storage health DEGRADED: ${message}`, error);
+      if (changed) publish();
+    },
+    restore(reason: EngineHealthReason): void {
+      if (!reasons.delete(reason)) return;
+      if (reasons.size === 0) warn("Q Mush storage health recovered");
+      publish();
+    },
+  };
 }
+
+export type EngineHealth = ReturnType<typeof createEngineHealth>;

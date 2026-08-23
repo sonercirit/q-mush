@@ -9,7 +9,7 @@ import {
   runNoncriticalDatabaseWrite,
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth, type EngineHealth } from "../engine-health.ts";
 
 const resilienceFixture = sqliteTable("resilience_fixture", {
   payload: blob("payload").notNull(),
@@ -32,7 +32,7 @@ function adjustPageLimit(database: AppDatabase, pages: number): void {
 }
 
 function newHealth(): EngineHealth {
-  return new EngineHealth(vi.fn());
+  return createEngineHealth(vi.fn());
 }
 
 type ResilienceFactory = (

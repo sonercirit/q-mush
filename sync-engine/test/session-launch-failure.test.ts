@@ -6,7 +6,7 @@ import {
   DatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth } from "../engine-health.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
@@ -101,7 +101,7 @@ test.each([
     vi.useFakeTimers();
     let diskFull = true;
     let writeAttempts = 0;
-    const health = new EngineHealth(vi.fn());
+    const health = createEngineHealth(vi.fn());
     const fullError = Object.assign(new Error("database or disk is full"), {
       code: "SQLITE_FULL",
     });
