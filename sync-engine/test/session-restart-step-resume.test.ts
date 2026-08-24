@@ -3,7 +3,6 @@ import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { TEST_AUTHENTICATED_USER } from "./authenticated-integration-test-helpers.ts";
@@ -56,52 +55,56 @@ function includesContent(
   return messages.some((message) => message.content.includes(content));
 }
 
-class ReportCompactionModel implements AgentModel {
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    expect(includesContent(messages, COMPLETION_REPORT)).toBe(true);
-    return Promise.resolve(providerStep(COMPACTION_REPORT_SUMMARY));
-  }
+function createReportCompactionModel(): AgentModel {
+  return {
+    complete(messages) {
+      expect(includesContent(messages, COMPLETION_REPORT)).toBe(true);
+      return Promise.resolve(providerStep(COMPACTION_REPORT_SUMMARY));
+    },
+  };
 }
 
-class RestartedSpawnModel implements AgentModel {
-  readonly requests: AgentConversationMessage[][] = [];
+interface RestartedSpawnModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+}
 
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    this.requests.push([...messages]);
-    if (includesContent(messages, COMPLETION_REPORT)) {
+function createRestartedSpawnModel(): RestartedSpawnModel {
+  const requests: AgentConversationMessage[][] = [];
+  return {
+    requests,
+    complete(messages) {
+      requests.push([...messages]);
+      if (includesContent(messages, COMPLETION_REPORT)) {
+        return Promise.resolve(
+          providerStep("The parent received the true child completion."),
+        );
+      }
+      if (includesContent(messages, CHILD_PROMPT)) {
+        return Promise.resolve(
+          includesContent(messages, CHILD_TOOL_OUTPUT)
+            ? providerStep(CHILD_SUMMARY)
+            : providerStep("The child is using a tool.", {
+                toolCalls: [
+                  toolCall("bash", { command: "printf child", timeout: 30 }),
+                ],
+              }),
+        );
+      }
+      if (
+        messages.some(
+          (message) =>
+            message.role === "tool" && message.toolName === "spawn_session",
+        )
+      ) {
+        return Promise.resolve(providerStep("The parent is waiting."));
+      }
       return Promise.resolve(
-        providerStep("The parent received the true child completion."),
+        providerStep("The parent delegated the work.", {
+          toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
+        }),
       );
-    }
-    if (includesContent(messages, CHILD_PROMPT)) {
-      return Promise.resolve(
-        includesContent(messages, CHILD_TOOL_OUTPUT)
-          ? providerStep(CHILD_SUMMARY)
-          : providerStep("The child is using a tool.", {
-              toolCalls: [
-                toolCall("bash", { command: "printf child", timeout: 30 }),
-              ],
-            }),
-      );
-    }
-    if (
-      messages.some(
-        (message) =>
-          message.role === "tool" && message.toolName === "spawn_session",
-      )
-    ) {
-      return Promise.resolve(providerStep("The parent is waiting."));
-    }
-    return Promise.resolve(
-      providerStep("The parent delegated the work.", {
-        toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
-      }),
-    );
-  }
+    },
+  };
 }
 
 async function startChildToolSession(model: AgentModel) {
@@ -166,7 +169,7 @@ function completeCurrentRunnerCommand(
 }
 
 test("a spawned session resumes its interrupted step after server recreation", async () => {
-  const model = new RestartedSpawnModel();
+  const model = createRestartedSpawnModel();
   const { childId, setup: initial } = await startChildToolSession(model);
 
   const drain = initial.sessions.drain();
@@ -215,7 +218,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
 });
 
 test("a reported child event survives parent compaction and is consumed on resume", async () => {
-  const childModel = new RestartedSpawnModel();
+  const childModel = createRestartedSpawnModel();
   const { childId, setup: initial } = await startChildToolSession(childModel);
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
   await waitForCompletedChild(initial, childId);
@@ -223,7 +226,7 @@ test("a reported child event survives parent compaction and is consumed on resum
   await completeWokenParent(initial);
   expect(completionReports(initial)).toHaveLength(1);
 
-  const compacted = recreateSessionSetup(new ReportCompactionModel(), initial);
+  const compacted = recreateSessionSetup(createReportCompactionModel(), initial);
   const response = await compacted.sessions.realtimeCommands.compactForUser(
     TEST_AUTHENTICATED_USER,
     SESSION_ID,
