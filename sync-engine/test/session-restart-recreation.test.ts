@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { CredentialCipher } from "../../shared/credential-cipher.ts";
+import { createCredentialCipherFromKey } from "../../shared/credential-cipher.ts";
 import {
   agentSessions,
   providerCredentials,
@@ -187,7 +187,7 @@ test("recreated runtimes recover a durable runner handoff only through its exact
 test("restart recovery enforces the pending session workspace credential scope", async () => {
   const { identity, setup } = pausedRunnerRestartStore("restart-scope");
   const running = requireCompactionSession(setup.store);
-  const cipher = new CredentialCipher(
+  const cipher = createCredentialCipherFromKey(
     Uint8Array.from({ length: 32 }, () => 0),
     (size) => new Uint8Array(size),
   );

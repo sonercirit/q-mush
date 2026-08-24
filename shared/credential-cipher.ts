@@ -18,75 +18,76 @@ function decodeBase64Url(value: string, allowEmpty = false): Buffer {
   return Buffer.from(value, "base64url");
 }
 
-export class CredentialCipher {
-  readonly #key: Buffer;
-  readonly #randomBytes: NonceGenerator;
+export interface CredentialCipher {
+  readonly open: (value: string, context: string) => string;
+  readonly seal: (value: string, context: string) => string;
+}
 
-  constructor(
-    key: Uint8Array,
-    nonceGenerator: NonceGenerator = randomBytes,
-    keyName = "Credential encryption key",
-  ) {
-    if (key.byteLength !== 32) {
-      throw new Error(`${keyName} must be a 32-byte base64url value`);
-    }
-
-    this.#key = Buffer.from(key);
-    this.#randomBytes = nonceGenerator;
+export function createCredentialCipherFromKey(
+  keyValue: Uint8Array,
+  nonceGenerator: NonceGenerator = randomBytes,
+  keyName = "Credential encryption key",
+): CredentialCipher {
+  if (keyValue.byteLength !== 32) {
+    throw new Error(`${keyName} must be a 32-byte base64url value`);
   }
+  const key = Buffer.from(keyValue);
 
-  open(value: string, context: string): string {
-    const parts = value.split(".");
+  return {
+    open(value: string, context: string): string {
+      const parts = value.split(".");
 
-    if (parts.length !== 4) {
-      throw new Error("The encrypted credential is malformed");
-    }
+      if (parts.length !== 4) {
+        throw new Error("The encrypted credential is malformed");
+      }
 
-    const [version = "", nonceValue = "", tagValue = "", payloadValue = ""] =
-      parts;
-    const nonce = decodeBase64Url(nonceValue);
-    const tag = decodeBase64Url(tagValue);
-    const payload = decodeBase64Url(payloadValue, true);
+      const [version = "", nonceValue = "", tagValue = "", payloadValue = ""] =
+        parts;
+      const nonce = decodeBase64Url(nonceValue);
+      const tag = decodeBase64Url(tagValue);
+      const payload = decodeBase64Url(payloadValue, true);
 
-    if (
-      version !== CIPHER_VERSION ||
-      nonce.byteLength !== NONCE_LENGTH ||
-      tag.byteLength !== AUTH_TAG_LENGTH
-    ) {
-      throw new Error("The encrypted credential is malformed");
-    }
+      if (
+        version !== CIPHER_VERSION ||
+        nonce.byteLength !== NONCE_LENGTH ||
+        tag.byteLength !== AUTH_TAG_LENGTH
+      ) {
+        throw new Error("The encrypted credential is malformed");
+      }
 
-    const decipher = createDecipheriv(ENCRYPTION_ALGORITHM, this.#key, nonce);
-    decipher.setAAD(Buffer.from(context));
-    decipher.setAuthTag(tag);
+      const decipher = createDecipheriv(ENCRYPTION_ALGORITHM, key, nonce);
+      decipher.setAAD(Buffer.from(context));
+      decipher.setAuthTag(tag);
 
-    return Buffer.concat([decipher.update(payload), decipher.final()]).toString(
-      "utf8",
-    );
-  }
+      return Buffer.concat([
+        decipher.update(payload),
+        decipher.final(),
+      ]).toString("utf8");
+    },
 
-  seal(value: string, context: string): string {
-    const nonce = Buffer.from(this.#randomBytes(NONCE_LENGTH));
+    seal(value: string, context: string): string {
+      const nonce = Buffer.from(nonceGenerator(NONCE_LENGTH));
 
-    if (nonce.byteLength !== NONCE_LENGTH) {
-      throw new Error("The credential nonce generator returned invalid data");
-    }
+      if (nonce.byteLength !== NONCE_LENGTH) {
+        throw new Error("The credential nonce generator returned invalid data");
+      }
 
-    const cipher = createCipheriv(ENCRYPTION_ALGORITHM, this.#key, nonce);
-    cipher.setAAD(Buffer.from(context));
-    const payload = Buffer.concat([
-      cipher.update(value, "utf8"),
-      cipher.final(),
-    ]);
-    const tag = cipher.getAuthTag();
+      const cipher = createCipheriv(ENCRYPTION_ALGORITHM, key, nonce);
+      cipher.setAAD(Buffer.from(context));
+      const payload = Buffer.concat([
+        cipher.update(value, "utf8"),
+        cipher.final(),
+      ]);
+      const tag = cipher.getAuthTag();
 
-    return [
-      CIPHER_VERSION,
-      nonce.toString("base64url"),
-      tag.toString("base64url"),
-      payload.toString("base64url"),
-    ].join(".");
-  }
+      return [
+        CIPHER_VERSION,
+        nonce.toString("base64url"),
+        tag.toString("base64url"),
+        payload.toString("base64url"),
+      ].join(".");
+    },
+  };
 }
 
 export function createCredentialCipher(
@@ -97,7 +98,7 @@ export function createCredentialCipher(
     throw new Error(`${keyName} must be a 32-byte base64url value`);
   }
 
-  return new CredentialCipher(
+  return createCredentialCipherFromKey(
     Buffer.from(encodedKey, "base64url"),
     randomBytes,
     keyName,
