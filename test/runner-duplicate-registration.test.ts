@@ -34,40 +34,57 @@ import {
 const RUNNER_ID = "runner-1";
 const RESTART_ID = "restart-duplicate-race";
 
-class FakeRunnerSocket extends EventTarget {
-  received: string[] = [];
-  readyState: number = WebSocket.OPEN;
-  #sendToEngine: (message: string) => void = () => {
+interface FakeRunnerSocket extends EventTarget {
+  readonly received: string[];
+  readyState: number;
+  close(code?: number, reason?: string): void;
+  connect(send: (message: string) => void): void;
+  receive(message: string): number;
+  send(message: string): void;
+}
+
+function createFakeRunnerSocket(): FakeRunnerSocket {
+  const socket = new EventTarget();
+  const received: string[] = [];
+  let readyState: number = WebSocket.OPEN;
+  let sendToEngine: (message: string) => void = () => {
     throw new Error("The fake runner process is not connected");
   };
-
-  connect(send: (message: string) => void): void {
-    this.#sendToEngine = send;
-  }
-
-  close(code = 1000, reason = ""): void {
-    if (this.readyState === WebSocket.CLOSED) return;
-    this.readyState = WebSocket.CLOSED;
-    this.dispatchEvent(new CloseEvent("close", { code, reason }));
-  }
-
-  receive(message: string): number {
-    if (this.readyState !== WebSocket.OPEN) return 0;
-    this.received.push(message);
-    queueMicrotask(() => {
-      if (this.readyState === WebSocket.OPEN) {
-        this.dispatchEvent(new MessageEvent("message", { data: message }));
+  const fakeSocket: FakeRunnerSocket = Object.assign(socket, {
+    received,
+    readyState,
+    connect(send: (message: string) => void): void {
+      sendToEngine = send;
+    },
+    close(code = 1000, reason = ""): void {
+      if (readyState === WebSocket.CLOSED) return;
+      readyState = WebSocket.CLOSED;
+      socket.dispatchEvent(new CloseEvent("close", { code, reason }));
+    },
+    receive(message: string): number {
+      if (readyState !== WebSocket.OPEN) return 0;
+      received.push(message);
+      queueMicrotask(() => {
+        if (readyState === WebSocket.OPEN) {
+          socket.dispatchEvent(new MessageEvent("message", { data: message }));
+        }
+      });
+      return 1;
+    },
+    send(message: string): void {
+      if (readyState !== WebSocket.OPEN) {
+        throw new Error("The fake runner process is disconnected");
       }
-    });
-    return 1;
-  }
-
-  send(message: string): void {
-    if (this.readyState !== WebSocket.OPEN) {
-      throw new Error("The fake runner process is disconnected");
-    }
-    this.#sendToEngine(message);
-  }
+      sendToEngine(message);
+    },
+  });
+  Object.defineProperty(fakeSocket, "readyState", {
+    get: () => readyState,
+    set: (value: number) => {
+      readyState = value;
+    },
+  });
+  return fakeSocket;
 }
 
 interface FakeRunnerProcess {
@@ -82,7 +99,7 @@ function fakeRunnerProcess(
   restartId?: string,
   processNonce = "fake-runner-process",
 ): FakeRunnerProcess {
-  const client = new FakeRunnerSocket();
+  const client = createFakeRunnerSocket();
   const startup = createRunnerStartupRestart(restartId);
   const startupConnection: RunnerStartupConnection = startup.connection();
   let stopped: Promise<Error> | undefined;
