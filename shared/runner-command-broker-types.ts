@@ -17,7 +17,7 @@ export interface RejectedCommand {
   readonly error: Error;
 }
 
-export type DispatchCommand = (
+type DispatchCommand = (
   input: DispatchRunnerToolCommand,
   signal?: AbortSignal,
   stream?: RunnerCommandStream,
@@ -29,9 +29,7 @@ export type DeliverCommandArguments = [
   deliverCancellation: (commandId: string) => boolean,
   connectionGeneration?: number,
 ];
-export type DeliverCommands = (
-  ...parameters: DeliverCommandArguments
-) => boolean;
+type DeliverCommands = (...parameters: DeliverCommandArguments) => boolean;
 
 export interface RunnerCommandBroker {
   dispatch: DispatchCommand;

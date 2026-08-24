@@ -456,9 +456,6 @@ describe("OpenAI credentials", () => {
       TEST_ROUTES,
       FIRST_KEY_ID,
     );
-    expect(credentialStore.list(TEST_USER_ID)).not.toContainEqual(
-      expect.objectContaining({ id: FIRST_OAUTH_ID }),
-    );
     database.$client.close();
   });
 

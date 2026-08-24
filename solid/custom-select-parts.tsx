@@ -5,7 +5,7 @@ export const CONTROL_CLASSES =
   "mt-2 flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-left text-sm text-white transition hover:border-white/20 focus:border-emerald-300/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
 export const OPTION_CLASSES =
   "flex min-h-11 w-full min-w-0 items-center rounded-lg px-3 py-2.5 text-left text-sm transition";
-export const PAGE_BUTTON_CLASSES =
+const PAGE_BUTTON_CLASSES =
   "min-h-10 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40";
 
 export type InitialOption = "first" | "last" | "selected";

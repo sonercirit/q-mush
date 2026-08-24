@@ -32,7 +32,6 @@ export interface CustomSelectProps {
   readonly selectedValue: string;
 }
 
-import type { InitialOption, OpenFocus } from "./custom-select-parts.tsx";
 import {
   CONTROL_CLASSES,
   indexForValue,
@@ -41,6 +40,8 @@ import {
   PAGE_SIZE,
   PageControls,
   selectedPage,
+  type InitialOption,
+  type OpenFocus,
 } from "./custom-select-parts.tsx";
 export function CustomSelect(props: CustomSelectProps): JSX.Element {
   const listboxId = (): string => `${props.id}-options`;

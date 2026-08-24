@@ -2,8 +2,8 @@ import { describe, expect, test } from "vitest";
 import { executeWithAbortSignal, hasOnlyKeys } from "../validation.ts";
 
 test("hasOnlyKeys ignores inherited prototype properties", () => {
-  const value = Object.create({ inherited: true }) as Record<string, unknown>;
-  value["expected"] = true;
+  const value: Record<string, unknown> = { expected: true };
+  Object.setPrototypeOf(value, { inherited: true });
   expect(hasOnlyKeys(value, ["expected"])).toBe(true);
 });
 
