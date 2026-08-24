@@ -186,59 +186,39 @@ function launchMutation(
 
 function validSessionMutationPayload(mutation: SessionMutation): boolean {
   const payload = mutation.payload;
-  if (launchMutation(mutation.operation)) {
-    return Object.keys(payload).length === 1;
-  }
-  switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.stop:
-      return (
-        Object.keys(payload).length ===
-          (payload["cascade"] === undefined ? 1 : 2) &&
-        (payload["cascade"] === undefined ||
-          typeof payload["cascade"] === "boolean")
-      );
-    case SESSION_REALTIME_OPERATIONS.followUp:
-    case SESSION_REALTIME_OPERATIONS.steer:
-      return (
-        validOptionalImagePayload(payload, 4) &&
-        typeof payload["clientRequestId"] === "string" &&
-        typeof payload["prompt"] === "string" &&
-        (payload["kind"] === "follow_up" || payload["kind"] === "steer")
-      );
-    case SESSION_REALTIME_OPERATIONS.reassign:
-      return (
-        Object.keys(payload).length === 3 &&
-        typeof payload["runnerId"] === "string" &&
-        typeof payload["workingDirectory"] === "string"
-      );
-    case SESSION_REALTIME_OPERATIONS.send:
-      return (
-        validOptionalImagePayload(payload, 2) &&
-        typeof payload["prompt"] === "string"
-      );
-    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
-      return (
-        Object.keys(payload).length === 2 &&
-        (payload["userContextTokenCap"] === null ||
-          (typeof payload["userContextTokenCap"] === "number" &&
-            Number.isSafeInteger(payload["userContextTokenCap"]) &&
-            payload["userContextTokenCap"] > 0))
-      );
-    case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
-      return (
-        Object.keys(payload).length === 2 &&
-        typeof payload["autoCompact"] === "boolean"
-      );
-    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
-      return (
-        Object.keys(payload).length === 2 &&
-        typeof payload["idleCompact"] === "boolean"
-      );
-    case SESSION_REALTIME_OPERATIONS.updateProvider:
-      return false;
-    default:
-      return false;
-  }
+  const followUp = (): boolean =>
+    validOptionalImagePayload(payload, 4) &&
+    typeof payload["clientRequestId"] === "string" &&
+    typeof payload["prompt"] === "string" &&
+    (payload["kind"] === "follow_up" || payload["kind"] === "steer");
+  const handlers: Record<SessionMutationOperation, () => boolean> = {
+    [SESSION_REALTIME_OPERATIONS.compact]: () => Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () => Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.continue]: () => Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.followUp]: followUp,
+    [SESSION_REALTIME_OPERATIONS.reassign]: () =>
+      Object.keys(payload).length === 3 &&
+      typeof payload["runnerId"] === "string" &&
+      typeof payload["workingDirectory"] === "string",
+    [SESSION_REALTIME_OPERATIONS.send]: () =>
+      validOptionalImagePayload(payload, 2) && typeof payload["prompt"] === "string",
+    [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
+      Object.keys(payload).length === 2 && typeof payload["autoCompact"] === "boolean",
+    [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: () =>
+      Object.keys(payload).length === 2 &&
+      (payload["userContextTokenCap"] === null ||
+        (typeof payload["userContextTokenCap"] === "number" &&
+          Number.isSafeInteger(payload["userContextTokenCap"]) &&
+          payload["userContextTokenCap"] > 0)),
+    [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
+      Object.keys(payload).length === 2 && typeof payload["idleCompact"] === "boolean",
+    [SESSION_REALTIME_OPERATIONS.steer]: followUp,
+    [SESSION_REALTIME_OPERATIONS.stop]: () =>
+      Object.keys(payload).length === (payload["cascade"] === undefined ? 1 : 2) &&
+      (payload["cascade"] === undefined || typeof payload["cascade"] === "boolean"),
+    [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
+  };
+  return handlers[mutation.operation]();
 }
 
 export function sessionMutationOutcomeIsUnknown(error: unknown): boolean {
