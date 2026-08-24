@@ -270,6 +270,12 @@ async function setupConnectedCredential() {
   };
 }
 
+function listedCredential(
+  store: ProviderCredentialStore,
+): ReturnType<ProviderCredentialStore["list"]>[number] | undefined {
+  return store.list(TEST_USER_ID).find(({ id }) => id === FIRST_OAUTH_ID);
+}
+
 function markForReconnect(store: ProviderCredentialStore): string | undefined {
   store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
   return store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID);
@@ -444,12 +450,15 @@ describe("OpenAI credentials", () => {
       refresh_token: "oauth-refresh-token-one",
     });
 
+    expect(providerRequests.at(-1)?.method).toBe("POST");
     expectRemovedProviderCredential(
       { database, integration, providerRequests },
       TEST_ROUTES,
       FIRST_KEY_ID,
     );
-    expect(database.$client.open).toBe(true);
+    expect(store.list(TEST_USER_ID)).not.toContainEqual(
+      expect.objectContaining({ id: FIRST_OAUTH_ID }),
+    );
     database.$client.close();
   });
 
@@ -465,9 +474,7 @@ describe("OpenAI credentials", () => {
     try {
       const reconnect = beginReconnect(integration, SECOND_STATE);
       await expectWrongAccount(integration, reconnect);
-      const credentialAfterRejection = store
-        .list(TEST_USER_ID)
-        .find(({ id }) => id === FIRST_OAUTH_ID);
+      const credentialAfterRejection = listedCredential(store);
       expect(credentialAfterRejection?.accountId).toBe("chatgpt-workspace-one");
       expect(credentialAfterRejection?.requiresReauthentication).toBe(true);
       expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
@@ -502,9 +509,7 @@ describe("OpenAI credentials", () => {
       await integration.complete(reconnect.callbackRequest),
       "http://localhost:3000/app?openai=connected",
     );
-    const reconnectedCredential = store
-      .list(TEST_USER_ID)
-      .find(({ id }) => id === FIRST_OAUTH_ID);
+    const reconnectedCredential = listedCredential(store);
     expect(reconnectedCredential).toEqual(
       expect.objectContaining({
         accountId: "chatgpt-workspace-one",
