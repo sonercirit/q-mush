@@ -1,5 +1,5 @@
 import {
-  ReconciliationScenario,
+  unloadedCreationReconciliationScenario,
   registerReconciliationTests,
   sessionDetail,
   startedHydrationScenario,
@@ -34,7 +34,7 @@ registerReconciliationTests({
 
   "does not create before an authoritative session baseline is loaded":
     async () => {
-      const scenario = ReconciliationScenario.unloadedCreation();
+      const scenario = unloadedCreationReconciliationScenario();
       await scenario.controller.create();
 
       scenario.expectCommandCount("create", 0);
@@ -87,7 +87,7 @@ registerReconciliationTests({
   },
 
   "does not create after the initial session list fails to load": async () => {
-    const scenario = ReconciliationScenario.unloadedCreation();
+    const scenario = unloadedCreationReconciliationScenario();
     await scenario.failInitialLoad("transport unavailable");
     await scenario.controller.create();
 

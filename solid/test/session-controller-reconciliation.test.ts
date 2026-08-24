@@ -2,7 +2,7 @@ import {
   createdSessionDetail,
   expectCompletedGenerationReconciliation,
   expectMismatchedCreationBlocked,
-  ReconciliationScenario,
+  selectedReconciliationScenario,
   registerReconciliationTests,
   sessionDetail,
   sessionUserMessage,
@@ -109,7 +109,7 @@ registerReconciliationTests({
 
   "reconciles a fast completed send by generation and a new message":
     async () => {
-      const scenario = ReconciliationScenario.selected();
+      const scenario = selectedReconciliationScenario();
       scenario.controller.setFollowUp("Fast follow-up");
       const mutation = await scenario.startMutation("send");
       await mutation.reconcile(
@@ -130,7 +130,7 @@ registerReconciliationTests({
         "Repeated follow-up",
         2,
       );
-      const scenario = ReconciliationScenario.selected(
+      const scenario = selectedReconciliationScenario(
         sessionDetail({ messages: [previous] }),
       );
       scenario.controller.setFollowUp(previous.content);

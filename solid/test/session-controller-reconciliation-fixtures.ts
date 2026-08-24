@@ -296,210 +296,216 @@ function createUnknownCreationReconciliation(
   };
 }
 
-export class ReconciliationScenario {
+export interface ReconciliationScenario {
   readonly controller: SessionController;
-  readonly #transport: ControlledSessionTransport;
+  completeCreationReconciliation(detail: AgentSessionDetail, sessions?: readonly AgentSessionDetail[]): Promise<void>;
+  completeHydration(detail: AgentSessionDetail): Promise<void>;
+  expectCommandCount(name: OperationName, count: number): void;
+  expectCreationBlocked(prompt: string, draft?: Readonly<Record<string, unknown>>): void;
+  expectCreatedSessionSelected(sessionId: string): void;
+  expectEventuallyCreatedSessionSelected(sessionId: string): Promise<void>;
+  expectDetailSnapshotIgnored(title: string): void;
+  expectError(fragment: string): void;
+  expectEventuallyError(fragment: string): Promise<void>;
+  expectEventuallyState(expected: StateMatch): Promise<void>;
+  expectListTitleNot(title: string): void;
+  expectMutationBlocked(name: ControllerMutationName): Promise<void>;
+  expectPending(flag: PendingFlag, expected?: boolean): void;
+  expectSessionIds(expected: readonly string[]): void;
+  expectSnapshotsIgnored(listTitle: string, detailTitle: string): void;
+  expectState(expected: StateMatch): void;
+  failInitialLoad(message: string): Promise<void>;
+  pauseForUnexpectedRetry(): Promise<void>;
+  publishSessionList(command: PendingSessionCommand, sessions: readonly AgentSessionDetail[]): Promise<PendingSessionCommand>;
+  reconnect(): void;
+  startHydration(): Promise<PendingSessionCommand>;
+  startMutation(name: SessionMutationName): Promise<StartedSessionMutation>;
+  startUnknownCreation(prompt: string, message?: string): Promise<UnknownCreationReconciliation>;
+  takeRead(): Promise<PendingSessionCommand>;
+}
 
-  private constructor(state: SessionViewState) {
-    this.#transport = createControlledSessionTransport();
-    this.controller = new SessionController(
-      createReactiveState(state),
-      undefined,
-      null,
-      this.#transport,
-    );
-  }
-
-  static active(): ReconciliationScenario {
-    const running = sessionDetail({ status: "running" });
-    return new ReconciliationScenario(
-      selectedState({
-        detail: running,
-        sessions: [summaryFromDetail(running)],
-      }),
-    );
-  }
-
-  static creation(
-    prompt = "Frozen creation",
-    options: CreationScenarioOptions = {},
-  ): ReconciliationScenario {
-    return new ReconciliationScenario(creationState(prompt, options));
-  }
-
-  static selected(
-    detail: AgentSessionDetail = sessionDetail(),
-  ): ReconciliationScenario {
-    return new ReconciliationScenario(selectedState({ detail }));
-  }
-
-  static unloadedCreation(): ReconciliationScenario {
-    return ReconciliationScenario.creation("Frozen creation", {
-      sessions: undefined,
-    });
-  }
-
+function createReconciliationScenario(state: SessionViewState): ReconciliationScenario {
+  const transport = createControlledSessionTransport();
+  const controller = new SessionController(createReactiveState(state), undefined, null, transport);
+  const takeSessionList = () => transport.take("subscribe");
+  const scenario: ReconciliationScenario & { failLoadCommand(loading: Promise<void>, message: string): Promise<void> } = {
+    controller,
   async completeCreationReconciliation(
     detail: AgentSessionDetail,
     sessions?: readonly AgentSessionDetail[],
   ): Promise<void> {
-    const list = await this.#takeSessionList();
+    const list = await takeSessionList();
     await publishDetail(
-      (published) => this.publishSessionList(list, published),
+      (published) => scenario.publishSessionList(list, published),
       detail,
       sessions ?? [detail],
     );
-  }
+  },
 
   async completeHydration(detail: AgentSessionDetail): Promise<void> {
-    const list = await this.#takeSessionList();
+    const list = await takeSessionList();
     list.resolveSummaries(detail);
-    const read = await this.#transport.take("read");
+    const read = await transport.take("read");
     read.resolve(detail);
-    await this.expectEventuallyState({ detail: { title: detail.title } });
-  }
+    await scenario.expectEventuallyState({ detail: { title: detail.title } });
+  },
 
   expectCommandCount(name: OperationName, count: number): void {
-    this.#transport.expectCount(name, count);
-  }
+    transport.expectCount(name, count);
+  },
 
   expectCreationBlocked(
     prompt: string,
     draft: Readonly<Record<string, unknown>> = {},
   ): void {
-    this.expectState({
+    scenario.expectState({
       creating: true,
       draft: { ...draft, prompt },
       sessions: [],
     });
-  }
+  },
 
   expectCreatedSessionSelected(sessionId: string): void {
-    this.expectState(createdSelectionState(sessionId));
-  }
+    scenario.expectState(createdSelectionState(sessionId));
+  },
 
   async expectEventuallyCreatedSessionSelected(
     sessionId: string,
   ): Promise<void> {
     await vi.waitFor(() => {
-      this.expectCreatedSessionSelected(sessionId);
+      scenario.expectCreatedSessionSelected(sessionId);
     });
-  }
+  },
 
   expectDetailSnapshotIgnored(title: string): void {
-    this.controller.applyDetail(sessionDetail({ title }));
-    expect(this.controller.state.detail?.title).not.toBe(title);
-  }
+    controller.applyDetail(sessionDetail({ title }));
+    expect(controller.state.detail?.title).not.toBe(title);
+  },
 
   expectError(fragment: string): void {
-    expect(this.controller.state.error).toContain(fragment);
-  }
+    expect(controller.state.error).toContain(fragment);
+  },
 
   async expectEventuallyError(fragment: string): Promise<void> {
     await vi.waitFor(() => {
-      this.expectError(fragment);
+      scenario.expectError(fragment);
     });
-  }
+  },
 
   expectEventuallyState(expected: StateMatch): Promise<void> {
     return vi.waitFor(() => {
-      this.expectState(expected);
+      scenario.expectState(expected);
     });
-  }
+  },
 
   expectListTitleNot(title: string): void {
-    expect(this.controller.state.sessions?.[0]?.title).not.toBe(title);
-  }
+    expect(controller.state.sessions?.[0]?.title).not.toBe(title);
+  },
 
   async expectMutationBlocked(name: ControllerMutationName): Promise<void> {
-    const count = this.#transport.count(MUTATION_OPERATIONS[name]);
-    await this.controller[name]();
-    this.expectCommandCount(MUTATION_OPERATIONS[name], count);
-  }
+    const count = transport.count(MUTATION_OPERATIONS[name]);
+    await controller[name]();
+    scenario.expectCommandCount(MUTATION_OPERATIONS[name], count);
+  },
 
   expectPending(flag: PendingFlag, expected = true): void {
-    expect(this.controller.state[flag]).toBe(expected);
-  }
+    expect(controller.state[flag]).toBe(expected);
+  },
 
   expectSessionIds(expected: readonly string[]): void {
-    expect(this.controller.state.sessions?.map(({ id }) => id)).toEqual(
+    expect(controller.state.sessions?.map(({ id }) => id)).toEqual(
       expected,
     );
-  }
+  },
 
   expectSnapshotsIgnored(listTitle: string, detailTitle: string): void {
-    this.controller.applyRealtime([
+    controller.applyRealtime([
       summaryFromDetail(sessionDetail({ title: listTitle })),
     ]);
-    this.expectDetailSnapshotIgnored(detailTitle);
-    this.expectListTitleNot(listTitle);
-  }
+    scenario.expectDetailSnapshotIgnored(detailTitle);
+    scenario.expectListTitleNot(listTitle);
+  },
 
   expectState(expected: StateMatch): void {
-    expect(this.controller.state).toMatchObject(expected);
-  }
+    expect(controller.state).toMatchObject(expected);
+  },
 
   failInitialLoad(message: string): Promise<void> {
-    return this.#failLoad(this.controller.load(), message);
-  }
+    return scenario.failLoadCommand(controller.load(), message);
+  },
 
-  async #failLoad(loading: Promise<void>, message: string): Promise<void> {
-    const list = await this.#takeSessionList();
+  async failLoadCommand(loading: Promise<void>, message: string): Promise<void> {
+    const list = await takeSessionList();
     await rejectCommand(list, loading, message);
-  }
+  },
 
-  #takeSessionList(): Promise<PendingSessionCommand> {
-    return this.#transport.take("subscribe");
-  }
+
 
   async pauseForUnexpectedRetry(): Promise<void> {
     await new Promise<void>((resolve) => {
       setTimeout(resolve, 10);
     });
-  }
+  },
 
   async publishSessionList(
     command: PendingSessionCommand,
     sessions: readonly AgentSessionDetail[],
   ): Promise<PendingSessionCommand> {
     command.resolveSummaries(...sessions);
-    return this.#transport.take("read");
-  }
+    return transport.take("read");
+  },
 
   reconnect(): void {
-    this.#transport.reconnect();
-  }
+    transport.reconnect();
+  },
 
   async startHydration(): Promise<PendingSessionCommand> {
-    this.reconnect();
-    return this.#transport.take("subscribe");
-  }
+    scenario.reconnect();
+    return transport.take("subscribe");
+  },
 
   async startMutation(
     name: SessionMutationName,
   ): Promise<StartedSessionMutation> {
-    const completion = this.controller[name]();
-    const command = await this.#transport.take(MUTATION_OPERATIONS[name]);
-    return createStartedSessionMutation(this, completion, command);
-  }
+    const completion = controller[name]();
+    const command = await transport.take(MUTATION_OPERATIONS[name]);
+    return createStartedSessionMutation(scenario, completion, command);
+  },
 
   async startUnknownCreation(
     prompt: string,
     message = "outcome_unknown",
   ): Promise<UnknownCreationReconciliation> {
-    const completion = this.controller.create();
-    const mutation = await this.#transport.take("create");
+    const completion = controller.create();
+    const mutation = await transport.take("create");
     mutation.reject(message);
-    const list = await this.#transport.take("subscribe");
+    const list = await transport.take("subscribe");
     return createUnknownCreationReconciliation(
-      this, completion, mutation, list, prompt,
+      scenario, completion, mutation, list, prompt,
     );
-  }
+  },
 
   async takeRead(): Promise<PendingSessionCommand> {
-    return this.#transport.take("read");
-  }
+    return transport.take("read");
+  },
+  };
+  return scenario;
 }
+
+export function activeReconciliationScenario(): ReconciliationScenario {
+  const running = sessionDetail({ status: "running" });
+  return createReconciliationScenario(selectedState({ detail: running, sessions: [summaryFromDetail(running)] }));
+}
+export function creationReconciliationScenario(prompt = "Frozen creation", options: CreationScenarioOptions = {}): ReconciliationScenario {
+  return createReconciliationScenario(creationState(prompt, options));
+}
+export function selectedReconciliationScenario(detail: AgentSessionDetail = sessionDetail()): ReconciliationScenario {
+  return createReconciliationScenario(selectedState({ detail }));
+}
+export function unloadedCreationReconciliationScenario(): ReconciliationScenario {
+  return creationReconciliationScenario("Frozen creation", { sessions: undefined });
+}
+
 
 interface StartedActiveMutation {
   readonly mutation: StartedSessionMutation;
@@ -521,7 +527,7 @@ export async function uncertainStopScenario(
 export async function startedActiveMutation(
   action: SessionMutationName,
 ): Promise<StartedActiveMutation> {
-  const scenario = ReconciliationScenario.active();
+  const scenario = activeReconciliationScenario();
   return { mutation: await scenario.startMutation(action), scenario };
 }
 
@@ -529,12 +535,12 @@ export async function uncertainCreationScenario(
   prompt = "Frozen creation",
   options: CreationScenarioOptions = {},
 ): Promise<UnknownCreationReconciliation> {
-  const scenario = ReconciliationScenario.creation(prompt, options);
+  const scenario = creationReconciliationScenario(prompt, options);
   return scenario.startUnknownCreation(prompt);
 }
 
 export async function startedHydrationScenario(): Promise<StartedHydration> {
-  const scenario = ReconciliationScenario.active();
+  const scenario = activeReconciliationScenario();
   return { list: await scenario.startHydration(), scenario };
 }
 
@@ -542,7 +548,7 @@ export async function expectCompletedGenerationReconciliation(
   action: "compact" | "continueSession",
   pending: "compacting" | "sending",
 ): Promise<void> {
-  const scenario = ReconciliationScenario.selected();
+  const scenario = selectedReconciliationScenario();
   const mutation = await scenario.startMutation(action);
   await mutation.reconcile({ generation: 1, status: "idle" });
   scenario.expectPending(pending, false);
