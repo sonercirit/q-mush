@@ -181,11 +181,13 @@ const QUESTION_READERS: Record<QuestionType, QuestionReader> = {
     };
   },
   single_choice: (value, id, prompt) => {
-    const options = readOptions(value["options"]);
-    return options === undefined ||
-      !hasOnlyKeys(value, ["id", "options", "prompt", "type"])
+    if (!hasOnlyKeys(value, ["id", "options", "prompt", "type"])) {
+      return undefined;
+    }
+    const choices = readOptions(value["options"]);
+    return choices === undefined
       ? undefined
-      : { id, options, prompt, type: "single_choice" };
+      : { id, options: choices, prompt, type: "single_choice" };
   },
 };
 
