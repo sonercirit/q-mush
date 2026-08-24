@@ -25,7 +25,7 @@ export interface StreamingRealtimeFixture {
 
 export type StreamingRealtimeFixtureOptions = Pick<
   RealtimeTestSetupOptions,
-  "now" | "selectedSession" | "toolSync"
+  "now" | "selectedSession" | "streamBuffer" | "toolSync"
 >;
 
 export function streamingRealtimeFixture(

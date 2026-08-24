@@ -9,7 +9,7 @@ import {
   type ProviderCredential,
 } from "../provider-credential-model.ts";
 import {
-  RealtimeStreamBuffer,
+  createRealtimeStreamBuffer,
   type RealtimeClientEvent,
 } from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
@@ -234,7 +234,7 @@ test("streaming tool updates do not invalidate the controlled new-session input"
   });
   draftReads = 0;
 
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   for (let sequence = 0; sequence < 40; sequence += 1) {
     buffer.queue({
       callId: "call-typing-profile",

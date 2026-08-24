@@ -24,10 +24,11 @@ import {
   type ToolSyncTracker,
 } from "./realtime-client-tool-sync.ts";
 import {
-  RealtimeStreamBuffer,
+  createRealtimeStreamBuffer,
   type RealtimeClientEvent,
   type RealtimeStreamBarrier,
   type RealtimeStreamBatch,
+  type RealtimeStreamBuffer,
 } from "./realtime-stream-buffer.ts";
 import { sessionIsActive } from "./session-controller-guards.ts";
 interface BrowserWebSocket extends EventTarget {
@@ -105,7 +106,7 @@ export class RealtimeConnection {
   readonly #stateBarriers = new Map<string, RealtimeStreamBarrier>();
   readonly #stateWaiters: ((available: boolean) => void)[] = [];
   #generation = 0;
-  readonly #buffer = new RealtimeStreamBuffer();
+  readonly #buffer: RealtimeStreamBuffer;
   #streamFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
   readonly #toolSync: ToolSyncTracker;
@@ -120,10 +121,12 @@ export class RealtimeConnection {
       readonly now?: () => number;
       readonly requestFrame?: FrameCallback;
       readonly selectedSession?: () => string | undefined;
+      readonly streamBuffer?: RealtimeStreamBuffer;
       readonly setTimeout?: (callback: () => void, delay: number) => number;
       readonly toolSync?: ToolSyncTracker;
     } = {},
   ) {
+    this.#buffer = options.streamBuffer ?? createRealtimeStreamBuffer();
     this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
     this.#listener = listener;
     this.#location = options.location ?? window.location;

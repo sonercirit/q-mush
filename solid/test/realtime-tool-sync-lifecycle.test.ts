@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { createToolSyncTracker } from "../realtime-client-tool-sync.ts";
-import { RealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
+import { createRealtimeStreamBuffer } from "../realtime-stream-buffer.ts";
 import {
   orderedToolDelta,
   preparingToolDelta,
@@ -29,17 +29,13 @@ function flushOne(stream: ReturnType<typeof streamingRealtimeFixture>): void {
 }
 
 test("reconnect deduplicates remembered, active, and resync tool streams", () => {
-  const activeSpy = vi.spyOn(
-    RealtimeStreamBuffer.prototype,
-    "activeToolStreams",
-  );
-  const resyncSpy = vi.spyOn(
-    RealtimeStreamBuffer.prototype,
-    "takeToolResyncRequests",
-  );
+  const streamBuffer = createRealtimeStreamBuffer();
+  const activeSpy = vi.spyOn(streamBuffer, "activeToolStreams");
+  const resyncSpy = vi.spyOn(streamBuffer, "takeToolResyncRequests");
   const toolSync = createToolSyncTracker();
   const pendingSpy = vi.spyOn(toolSync, "pending");
   const stream = streamingRealtimeFixture("deduplicated-reconnect", undefined, {
+    streamBuffer,
     toolSync,
   });
   const callId = "deduplicated-call";

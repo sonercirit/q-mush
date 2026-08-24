@@ -1,5 +1,8 @@
 import { RealtimeConnection } from "../../solid/realtime-client.ts";
-import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
+import type {
+  RealtimeClientEvent,
+  RealtimeStreamBuffer,
+} from "../../solid/realtime-stream-buffer.ts";
 import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
 
@@ -13,6 +16,7 @@ export interface RealtimeTestSetupOptions {
   readonly now?: () => number;
   readonly requestFrame?: (callback: () => void) => number;
   readonly selectedSession?: () => string | undefined;
+  readonly streamBuffer?: RealtimeStreamBuffer;
   readonly toolSync?: ToolSyncTracker;
 }
 
@@ -50,6 +54,9 @@ export function realtimeTestSetup(
         timers.push(callback);
         return timers.length;
       },
+      ...(options.streamBuffer === undefined
+        ? {}
+        : { streamBuffer: options.streamBuffer }),
       ...(options.toolSync === undefined ? {} : { toolSync: options.toolSync }),
       ...(options.selectedSession === undefined
         ? {}
