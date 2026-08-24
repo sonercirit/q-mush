@@ -1,4 +1,4 @@
-import { createSignal, type Accessor } from "solid-js";
+import { createSignal } from "solid-js";
 import { WORKSPACES_PATH, workspaceDefaultPath } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { request, requestJson } from "./browser-http.ts";
@@ -7,21 +7,14 @@ import { createReactiveState } from "./reactive-state.ts";
 import {
   createWorkspaceViewState,
   readWorkspaces,
+  type WorkspacePanelController,
   type WorkspaceViewState,
 } from "./workspace-client.tsx";
 
-export interface WorkspaceController {
+export interface WorkspaceController extends WorkspacePanelController {
   readonly selectedId: string;
-  readonly selectedIdView: Accessor<string>;
   readonly state: WorkspaceViewState;
-  readonly view: Accessor<WorkspaceViewState>;
-  create(name: string): Promise<void>;
-  load(): Promise<void>;
-  remove(workspaceId: string): Promise<void>;
-  rename(workspaceId: string, name: string): Promise<void>;
   reset(): void;
-  select(workspaceId: string): void;
-  setDefault(workspaceId: string): Promise<void>;
 }
 
 export function createWorkspaceController(
