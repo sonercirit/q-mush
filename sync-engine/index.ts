@@ -8,7 +8,7 @@ import {
   isDevelopmentRestartRequestMessage,
   RESTART_PROGRESS_INTERVAL_MS,
 } from "../shared/development-shutdown.ts";
-import { createRestartDeadline } from "../shared/restart-deadline.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -341,7 +341,7 @@ async function shutDown(): Promise<void> {
 
 process.on("message", (message) => {
   if (isDevelopmentRestartRequestMessage(message)) {
-    void lifecycle.restart(createRestartDeadline(message.deadlineAt));
+    void lifecycle.restart(new RestartDeadline(message.deadlineAt));
   } else if (message === DEVELOPMENT_RESTART_ESCALATE_MESSAGE) {
     sessions.escalateDrain();
   } else if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) {

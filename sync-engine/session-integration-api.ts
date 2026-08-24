@@ -1,7 +1,7 @@
 import type { PendingAskQuestions } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../shared/development-shutdown.ts";
-import { createRestartDeadline } from "../shared/restart-deadline.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
@@ -250,7 +250,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
   }
 
   async drain(
-    deadline = createRestartDeadline(
+    deadline = new RestartDeadline(
       this.resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
       this.resources.now,
     ),

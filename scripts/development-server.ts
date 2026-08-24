@@ -12,7 +12,7 @@ import {
   FINAL_SHUTDOWN_REQUEST_MESSAGE,
   isDevelopmentRestartProgressMessage,
 } from "../shared/development-shutdown.ts";
-import { createRestartDeadline } from "../shared/restart-deadline.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import { restartProgressReport } from "../shared/restart-progress.ts";
 
 const DEFAULT_SHUTDOWN_FORCE_MILLISECONDS = DEVELOPMENT_RESTART_FORCE_KILL_MS;
@@ -193,7 +193,7 @@ export function startDevelopmentServer(
   };
 
   const drainChild = async (): Promise<void> => {
-    const restartDeadline = createRestartDeadline(
+    const restartDeadline = new RestartDeadline(
       Date.now() + preparationMilliseconds,
     );
     sendChild({

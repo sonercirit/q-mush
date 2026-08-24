@@ -4,10 +4,7 @@ import type {
   ProviderCredentialAccess,
   ProviderId,
 } from "../shared/provider-credential-store.ts";
-import {
-  createRestartDeadline,
-  type RestartDeadline,
-} from "../shared/restart-deadline.ts";
+import { RestartDeadline } from "../shared/restart-deadline.ts";
 import { countRestartProgressTools } from "../shared/restart-progress-tools.ts";
 import {
   restartProgressReport,
@@ -188,7 +185,7 @@ export function createSessionRestartControl(
     scope: RestartScope,
     restartId: string,
     durable: boolean,
-    deadline = createRestartDeadline(
+    deadline = new RestartDeadline(
       now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
       now,
     ),
@@ -265,7 +262,7 @@ export function createSessionRestartControl(
       }
       serverDeadline ??=
         deadline ??
-        createRestartDeadline(now() + DEVELOPMENT_RESTART_LIFECYCLE_MS, now);
+        new RestartDeadline(now() + DEVELOPMENT_RESTART_LIFECYCLE_MS, now);
       await boundedDrain(
         { kind: "server" },
         nextServerRestartId(),
