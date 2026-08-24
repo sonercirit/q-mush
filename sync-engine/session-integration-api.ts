@@ -56,7 +56,7 @@ type SessionModelsForUser = (
   user: AuthenticatedUser,
 ) => Promise<Response>;
 
-export interface SessionIntegrationApiResources {
+interface SessionIntegrationApiResources {
   readonly auth: GoogleAuth;
   readonly broker: RunnerCommandBroker;
   readonly compactForUser: (
@@ -114,7 +114,7 @@ function isCollectionMethod(method: string): method is CollectionMethod {
   return method === "GET" || method === "POST";
 }
 
-export interface SessionIntegrationApi extends SessionDetailReader {
+interface SessionIntegrationApi extends SessionDetailReader {
   collection(request: Request): Response | Promise<Response>;
 }
 
