@@ -25,23 +25,21 @@ interface CandidateOptions {
   readonly userId: string;
 }
 
+type SelectModelCredentials = (
+  userId: string,
+  selection: ModelCredentialSelection,
+  signal?: AbortSignal,
+) => Promise<readonly ProviderCredentialAccess[]>;
+
 export interface ModelCredentialPool {
-  readonly candidates: (
-    userId: string,
-    selection: ModelCredentialSelection,
-    signal?: AbortSignal,
-  ) => Promise<readonly ProviderCredentialAccess[]>;
+  readonly candidates: SelectModelCredentials;
   readonly reject: (
     userId: string,
     selection: ModelCredentialSelection,
     credentialId: string,
     error: unknown,
   ) => boolean;
-  readonly representative: (
-    userId: string,
-    selection: ModelCredentialSelection,
-    signal?: AbortSignal,
-  ) => Promise<readonly ProviderCredentialAccess[]>;
+  readonly representative: SelectModelCredentials;
 }
 
 export function createModelCredentialPool(
