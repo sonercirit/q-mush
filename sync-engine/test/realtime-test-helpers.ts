@@ -22,16 +22,28 @@ export const REALTIME_TEST_USER: AuthenticatedUser = {
   picture: "https://example.test/avatar.png",
 };
 
-export class RealtimeUpgradeServer {
+export interface RealtimeUpgradeServer {
   data: QmushWebSocketData | undefined;
-
   upgrade(
-    _request: Request,
+    request: Request,
     options: { readonly data: QmushWebSocketData },
-  ): boolean {
-    this.data = options.data;
-    return true;
-  }
+  ): boolean;
+}
+
+export function createRealtimeUpgradeServer(): RealtimeUpgradeServer {
+  let data: QmushWebSocketData | undefined;
+  return {
+    get data() {
+      return data;
+    },
+    set data(value) {
+      data = value;
+    },
+    upgrade: (_request, options) => {
+      data = options.data;
+      return true;
+    },
+  };
 }
 
 export function realtimeTestAuth(user: AuthenticatedUser | null): GoogleAuth {
@@ -203,102 +215,104 @@ function realtimeTestRunners(
   };
 }
 
-class RealtimeTestSessionCommands implements SessionRealtimeCommands {
-  answerQuestionsForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+function createRealtimeTestSessionCommands(): SessionRealtimeCommands {
+  return {
+    answerQuestionsForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  cancelPendingInputForUser() {
-    return {
-      detail: REALTIME_TEST_SESSION_DETAIL,
-      input: realtimeTestPendingInput(),
-    };
-  }
+    cancelPendingInputForUser() {
+      return {
+        detail: REALTIME_TEST_SESSION_DETAIL,
+        input: realtimeTestPendingInput(),
+      };
+    },
 
-  compactForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    compactForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  compactAndContinueForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    compactAndContinueForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  continueForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    continueForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  createForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    createForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  forkForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    forkForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  spawnForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    spawnForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  historyForUser() {
-    return realtimeTestHistoryPage();
-  }
+    historyForUser() {
+      return realtimeTestHistoryPage();
+    },
 
-  messageForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    messageForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  modelsForUser() {
-    return emptyTestModelCatalog();
-  }
+    modelsForUser() {
+      return emptyTestModelCatalog();
+    },
 
-  pendingInputForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    pendingInputForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  previewToolUpdateForUser() {
-    return Promise.resolve({
-      cacheDisposition: "preserved" as const,
-      currentGeneration: 0,
-      tools: REALTIME_TEST_SESSION_DETAIL.tools,
-      warning: null,
-    });
-  }
+    previewToolUpdateForUser() {
+      return Promise.resolve({
+        cacheDisposition: "preserved" as const,
+        currentGeneration: 0,
+        tools: REALTIME_TEST_SESSION_DETAIL.tools,
+        warning: null,
+      });
+    },
 
-  detailForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    detailForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  reassignForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    reassignForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  setAutoCompactionForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    setAutoCompactionForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  setIdleCompactionForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    setIdleCompactionForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  setContextTokenCapForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    setContextTokenCapForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  stopForUser() {
-    return REALTIME_TEST_SESSION_DETAIL;
-  }
+    stopForUser() {
+      return REALTIME_TEST_SESSION_DETAIL;
+    },
 
-  summariesForUser() {
-    return [REALTIME_TEST_SESSION_DETAIL];
-  }
+    summariesForUser() {
+      return [REALTIME_TEST_SESSION_DETAIL];
+    },
 
-  updateProviderForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    updateProviderForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
 
-  updateToolsForUser() {
-    return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
-  }
+    updateToolsForUser() {
+      return Promise.resolve(REALTIME_TEST_SESSION_DETAIL);
+    },
+  };
 }
 
 export type RealtimeSessionOverrides = Partial<
@@ -357,7 +371,7 @@ export function realtimeTestSessions(
     hasPendingDatabaseWrites: () => false,
     reconcileDatabaseWrites: () => true,
     pendingRunnerRestart: () => ({ status: "none" }),
-    realtimeCommands: new RealtimeTestSessionCommands(),
+    realtimeCommands: createRealtimeTestSessionCommands(),
     reassign: () => Promise.resolve(new Response()),
     replaceRunnerConnection: () => undefined,
     acknowledgeRunnerCancellation: () => false,

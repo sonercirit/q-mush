@@ -20,10 +20,10 @@ import {
 import {
   configuredRealtimeTestIntegration,
   connectedRunnerRealtimeTestIntegration,
+  createRealtimeUpgradeServer,
   REALTIME_TEST_USER,
   realtimeRunnerLifecycle,
   realtimeTestAuth,
-  RealtimeUpgradeServer,
 } from "./realtime-test-helpers.ts";
 import {
   connectedRecordedRunnerRealtimeTestSocket,
@@ -392,7 +392,7 @@ test("revokes a passive browser socket when its session expires", () => {
       return nextTimer;
     },
   });
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   expect(
     realtime.upgrade(
       new Request("http://localhost/api/realtime?workspaceId=workspace-1", {

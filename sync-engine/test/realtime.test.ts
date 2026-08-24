@@ -28,11 +28,11 @@ import {
   configuredRealtimeTestIntegration,
   connectedRunnerRealtimeTestIntegration,
   createRealtimeTestIntegration,
+  createRealtimeUpgradeServer,
   REALTIME_TEST_USER,
   realtimeRunnerConnection,
   realtimeTestAuth,
   realtimeTestSessions,
-  RealtimeUpgradeServer,
   type RealtimeRunnerOverrides,
   type RealtimeSessionOverrides,
 } from "./realtime-test-helpers.ts";
@@ -145,7 +145,7 @@ function expectUpgrade(
 }
 
 test("upgrades an authenticated browser request", () => {
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   expect(
     realtimeTestUpgrade(integration(USER), "/api/realtime", server),
   ).toBeUndefined();
@@ -160,7 +160,7 @@ test("rejects invalid browser scopes", () => {
       workspaceId !== GLOBAL_WORKSPACE_ID && workspaceId === "workspace-1",
   });
 
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
 
   for (const path of [
     "/api/realtime?",
@@ -180,7 +180,7 @@ test("rejects invalid browser scopes", () => {
 
 test("requires a same-origin browser request", () => {
   const realtime = integration(USER);
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   const request = (origin?: string) =>
     new Request("http://localhost/api/realtime?workspaceId=workspace-1", {
       headers: {
@@ -197,7 +197,7 @@ test("requires a same-origin browser request", () => {
 });
 
 test("rejects invalid realtime requests", () => {
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   const unauthorized = realtimeTestUpgrade(
     integration(null),
     "/api/realtime",
@@ -218,7 +218,7 @@ test.each(["zero", "throw"] as const)(
   "closes when browser snapshot delivery returns %s",
   (failure) => {
     const realtime = integration(USER);
-    const server = new RealtimeUpgradeServer();
+    const server = createRealtimeUpgradeServer();
     expect(
       realtimeTestUpgrade(realtime, "/api/realtime", server),
     ).toBeUndefined();
