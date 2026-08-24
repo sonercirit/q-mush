@@ -15,16 +15,24 @@ function testImageFile(name = TEST_AGENT_IMAGE.name): File {
     value.charCodeAt(0),
   );
   return name.length === 0
-    ? new EmptyNameFile([bytes], TEST_AGENT_IMAGE.name, {
+    ? createEmptyNameFile([bytes], TEST_AGENT_IMAGE.name, {
         type: TEST_AGENT_IMAGE.mediaType,
       })
     : new File([bytes], name, { type: TEST_AGENT_IMAGE.mediaType });
 }
 
-class EmptyNameFile extends File {
-  override get name(): string {
-    return "";
-  }
+interface EmptyNameFile extends File {
+  readonly name: string;
+}
+
+function createEmptyNameFile(
+  fileBits: BlobPart[],
+  fileName: string,
+  options: FilePropertyBag,
+): EmptyNameFile {
+  const file = new File(fileBits, fileName, options);
+  Object.defineProperty(file, "name", { value: "" });
+  return file;
 }
 
 function clipboardEvent(options: {
