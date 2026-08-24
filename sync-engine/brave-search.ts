@@ -3,7 +3,7 @@ import { createCredentialCipher } from "../shared/credential-cipher.ts";
 import { createCredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
-import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
+import { createProviderCredentialStore } from "../shared/provider-credential-store.ts";
 import { optionalSignal } from "../shared/validation.ts";
 import { isWorkspaceId } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
@@ -159,7 +159,7 @@ function createBraveSearchSkill(
   const store =
     encodedCredentialKey === undefined
       ? undefined
-      : new ProviderCredentialStore(
+      : createProviderCredentialStore(
           dependencies.database ?? createDatabase(":memory:"),
           createCredentialCipher(
             encodedCredentialKey,

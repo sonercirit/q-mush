@@ -1,6 +1,6 @@
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import {
-  ToolStreamHubState,
+  createToolStreamHubState,
   type ToolStreamDeltaFrame,
 } from "../shared/tool-stream.ts";
 
@@ -73,7 +73,7 @@ export function createRealtimeHub(): RealtimeHub {
     runner: new Map(),
     user: new Map(),
   };
-  const toolStreams = new ToolStreamHubState();
+  const toolStreams = createToolStreamHubState();
   const userKey = (userId: string, workspaceId?: string): string =>
     `user:${userId}:${workspaceId ?? "*"}`;
   const parseUserKey = (

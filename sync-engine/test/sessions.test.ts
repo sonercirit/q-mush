@@ -12,7 +12,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   createSessionRequest,
@@ -85,7 +85,7 @@ function emptySessionSetup(
   options?: Parameters<typeof connectedSessionSetup>[3],
 ) {
   return connectedSessionSetup(
-    new ScriptedAgentModel([]),
+    createScriptedAgentModel([]),
     "api_key",
     undefined,
     options ?? {},
@@ -93,7 +93,7 @@ function emptySessionSetup(
 }
 
 function completingSessionSetup(content: string) {
-  const model = new ScriptedAgentModel([{ content, toolCalls: [] }]);
+  const model = createScriptedAgentModel([{ content, toolCalls: [] }]);
   return { model, ...connectedSessionSetup(model) };
 }
 
@@ -132,7 +132,7 @@ describe("agent sessions", () => {
     const recoveryNow = TEST_NOW + 9_876;
 
     const setup = connectedSessionSetup(
-      new ScriptedAgentModel([]),
+      createScriptedAgentModel([]),
       "api_key",
       undefined,
       { database: seeded.database, now: () => recoveryNow },
@@ -305,7 +305,7 @@ describe("agent sessions", () => {
   test("persists images and timing and sends them to the model", async () => {
     const expiry = TEST_NOW + 7 * 86_400_000;
     let now = TEST_NOW;
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Screenshot implemented.", toolCalls: [] },
     ]);
     const database = createAuthenticatedTestDatabase({ expiresAt: expiry });
@@ -339,7 +339,7 @@ describe("agent sessions", () => {
   });
 
   test("loads the workspace agent file before starting the model", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Instructions followed.", toolCalls: [] },
     ]);
     const setup = await startSessionWithAgentFile(model, {
@@ -362,7 +362,7 @@ describe("agent sessions", () => {
   });
 
   test("accepts agent instructions without a runner-result size limit", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Large instructions loaded.", toolCalls: [] },
     ]);
     const content = "x".repeat(600 * 1_024);
@@ -376,7 +376,10 @@ describe("agent sessions", () => {
   });
 
   test("browses directories through an owned online runner", async () => {
-    const setup = connectedSessionSetup(new ScriptedAgentModel([]), "api_key");
+    const setup = connectedSessionSetup(
+      createScriptedAgentModel([]),
+      "api_key",
+    );
     const browseResponse = setup.sessions.directories(
       createAuthenticatedRequest(
         runnerDirectoriesPath(RUNNER_ID),
@@ -418,7 +421,7 @@ describe("agent sessions", () => {
   });
 
   test("runs a session with only its selected tools and skills", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Selection respected.", toolCalls: [] },
     ]);
     const setup = connectedSessionSetup(model);
@@ -452,7 +455,7 @@ describe("agent sessions", () => {
       id: "restart-call",
       name: "bash",
     };
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Requesting a development restart.",
         toolCalls: [restartCall],

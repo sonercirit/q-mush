@@ -1,7 +1,10 @@
 import { Buffer } from "node:buffer";
 import { afterEach, describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  type ProviderCredentialStore,
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import { isProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
 import {
@@ -48,7 +51,7 @@ function setupRefresh(
   response: Response | Promise<Response> | (() => Response | Promise<Response>),
 ) {
   const { auth, database } = openAiRefreshTestContext();
-  const store = new ProviderCredentialStore(
+  const store = createProviderCredentialStore(
     database,
     createCredentialCipher(CREDENTIAL_KEY),
     "openai",
@@ -256,7 +259,7 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
     addTestProviderCredential(database, "openrouter-credential", "openrouter", {
       source: "oauth",
     });
-    const openAiStore = new ProviderCredentialStore(
+    const openAiStore = createProviderCredentialStore(
       database,
       createCredentialCipher(CREDENTIAL_KEY),
       "openai",

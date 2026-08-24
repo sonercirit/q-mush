@@ -1,6 +1,10 @@
 import { expect } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+  type ScriptedStep,
+} from "./scripted-agent-model.ts";
 import { findToolResultContents } from "./session-agent-tool-helpers.ts";
 import {
   connectedSessionSetup,
@@ -114,8 +118,6 @@ export function waitForToolResults(
   );
 }
 
-export function scriptedModel(
-  steps: ConstructorParameters<typeof ScriptedAgentModel>[0],
-): ScriptedAgentModel {
-  return new ScriptedAgentModel(steps);
+export function scriptedModel(steps: ScriptedStep[]): ScriptedAgentModel {
+  return createScriptedAgentModel(steps);
 }

@@ -16,7 +16,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
   createStore,
@@ -36,7 +36,7 @@ function startupSessionSetup(
   now: () => number,
 ) {
   return connectedSessionSetup(
-    new ScriptedAgentModel([]),
+    createScriptedAgentModel([]),
     "api_key",
     undefined,
     {

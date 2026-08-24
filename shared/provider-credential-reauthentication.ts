@@ -22,6 +22,8 @@ interface CredentialStateOptions {
   readonly userId: string;
 }
 
+const CREDENTIAL_IDENTITY_CHANGED = new Error("Credential identity changed");
+
 function credentialStateUpdated(
   options: CredentialStateOptions,
   values: Partial<typeof providerCredentials.$inferInsert>,
@@ -36,33 +38,49 @@ function credentialStateUpdated(
     return false;
   }
 
-  const changed = options.database
-    .update(providerCredentials)
-    .set(values)
-    .where(
-      and(
-        ownedActiveCredentialCondition(options),
-        requireReauthentication
-          ? eq(providerCredentials.requiresReauthentication, true)
-          : undefined,
-        accountId === undefined
-          ? undefined
-          : eq(providerCredentials.providerAccountId, accountId),
-        endpoint === undefined
-          ? undefined
-          : endpoint.apiFormat === null
-            ? isNull(providerCredentials.apiFormat)
-            : eq(providerCredentials.apiFormat, endpoint.apiFormat),
-        endpoint === undefined
-          ? undefined
-          : endpoint.baseUrl === null
-            ? isNull(providerCredentials.baseUrl)
-            : eq(providerCredentials.baseUrl, endpoint.baseUrl),
-      ),
-    )
-    .returning({ id: providerCredentials.id })
-    .all();
-  return changed.some(({ id }) => id === options.credentialId);
+  try {
+    return options.database.transaction((transaction) => {
+      const changed = transaction
+        .update(providerCredentials)
+        .set(values)
+        .where(
+          and(
+            ownedActiveCredentialCondition(options),
+            requireReauthentication
+              ? eq(providerCredentials.requiresReauthentication, true)
+              : undefined,
+            accountId === undefined
+              ? undefined
+              : eq(providerCredentials.providerAccountId, accountId),
+            endpoint === undefined
+              ? undefined
+              : endpoint.apiFormat === null
+                ? isNull(providerCredentials.apiFormat)
+                : eq(providerCredentials.apiFormat, endpoint.apiFormat),
+            endpoint === undefined
+              ? undefined
+              : endpoint.baseUrl === null
+                ? isNull(providerCredentials.baseUrl)
+                : eq(providerCredentials.baseUrl, endpoint.baseUrl),
+          ),
+        )
+        .returning({
+          accountId: providerCredentials.providerAccountId,
+          id: providerCredentials.id,
+        })
+        .all();
+      if (
+        accountId !== undefined &&
+        changed.some((credential) => credential.accountId !== accountId)
+      ) {
+        throw CREDENTIAL_IDENTITY_CHANGED;
+      }
+      return changed.some(({ id }) => id === options.credentialId);
+    });
+  } catch (error) {
+    if (error === CREDENTIAL_IDENTITY_CHANGED) return false;
+    throw error;
+  }
 }
 
 export function markCredentialRequiresReauthentication(

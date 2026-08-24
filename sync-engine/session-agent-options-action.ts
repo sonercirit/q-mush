@@ -6,7 +6,9 @@ import {
   isBalancedCredentialId,
 } from "../shared/provider-credential-pool.ts";
 import {
-  ProviderCredentialStore,
+  hasActiveModelCredential,
+  listActiveModelCredentials,
+  listModelCredentials,
   type ProviderCredentialAccess,
 } from "../shared/provider-credential-store.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
@@ -91,7 +93,7 @@ async function modelOptions(
   );
   if (
     !balanced &&
-    !ProviderCredentialStore.hasActiveModelCredential(
+    !hasActiveModelCredential(
       dependencies.database,
       userId,
       selection.provider,
@@ -143,7 +145,7 @@ function balancedCredentials(
   workspaceId: string,
 ): SessionOptionsSource["credentials"] {
   return (["openai", "openrouter", "generic"] as const).flatMap((provider) => {
-    const count = ProviderCredentialStore.listActiveModelCredentials(
+    const count = listActiveModelCredentials(
       dependencies.database,
       userId,
       provider,
@@ -190,7 +192,7 @@ function credentialOptions(
     1,
     SESSION_OPTIONS_PAGE_SIZE - Math.max(0, balanced.length - offset),
   );
-  const regular = ProviderCredentialStore.listModelCredentials(
+  const regular = listModelCredentials(
     dependencies.database,
     userId,
     regularOffset,

@@ -26,7 +26,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { DeferredAgentModel } from "./deferred-agent-model.ts";
+import { createDeferredAgentModel } from "./deferred-agent-model.ts";
 import {
   createFakeProviderSockets,
   expectProviderSocketReleased,
@@ -38,7 +38,7 @@ import {
   openUserRealtimeTestSocket,
   parseRealtimeMessages,
 } from "./realtime-test-socket-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { startToolSessionSetup } from "./session-agent-tool-setup.ts";
 import {
   connectedSessionSetup,
@@ -110,7 +110,7 @@ async function createStalledSession(
   const clock = testLivenessClock(1_000, 100, true);
   let model: StalledReusedSocketModel | undefined;
   const setup = connectedSessionSetup(
-    new DeferredAgentModel(),
+    createDeferredAgentModel(),
     "api_key",
     undefined,
     {
@@ -404,7 +404,7 @@ test("process recreation fails the running row without replaying durable tools",
   closeLivenessSession(run.setup);
 
   const reopened = createAuthenticatedTestDatabase({ path: databasePath });
-  const resumedModel = new ScriptedAgentModel([
+  const resumedModel = createScriptedAgentModel([
     { content: "Recovered from durable tool output.", toolCalls: [] },
   ]);
   const recreated = connectedSessionSetup(resumedModel, "api_key", undefined, {

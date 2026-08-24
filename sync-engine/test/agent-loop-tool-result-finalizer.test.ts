@@ -10,7 +10,7 @@ import {
   unicodeCharacterCount,
 } from "../../shared/tool-output-limits.ts";
 import type { RunnerCommandResult } from "../../shared/tool-stream.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 
 interface FinalizerFixture {
   readonly arguments: string;
@@ -55,7 +55,7 @@ test.each(FINALIZER_FIXTURES)(
       id: `call-${fixture.name}`,
       name: "write",
     };
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "",
         toolCalls: [call],

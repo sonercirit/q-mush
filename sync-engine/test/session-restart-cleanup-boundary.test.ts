@@ -2,7 +2,8 @@ import { expect, onTestFinished, test, vi } from "vitest";
 import { createRestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
@@ -48,7 +49,7 @@ function drainExpired(cleanup: SessionExecutionCleanup): Promise<void> {
 
 async function pendingCleanup() {
   const dispatched = Promise.withResolvers<undefined>();
-  const brokerOptions: ConstructorParameters<typeof RunnerCommandBroker>[0] = {
+  const brokerOptions: Parameters<typeof createRunnerCommandBroker>[0] = {
     commandId: () => "cleanup-command",
     deliver: (_runnerId, command) => {
       if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
@@ -57,7 +58,7 @@ async function pendingCleanup() {
       return true;
     },
   };
-  const broker = new RunnerCommandBroker(brokerOptions);
+  const broker = createRunnerCommandBroker(brokerOptions);
   const cleanup = new SessionExecutionCleanup(broker);
   const promise = containerCleanup(cleanup);
   await dispatched.promise;
@@ -109,7 +110,7 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   );
   vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
   let commandSequence = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => `cleanup-${String(++commandSequence)}`,
     deliver: () => true,
   });
@@ -144,7 +145,7 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
 });
 
 test("cleanup dispatch resumes after a completed development drain", async () => {
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "cleanup-command",
     deliver: () => true,
   });

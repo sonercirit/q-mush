@@ -1,7 +1,7 @@
 import { expect } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import { sessionDetail } from "./session-integration-helpers.ts";
 import {
@@ -25,7 +25,7 @@ export function credentialRaceSetup(idleSession = true): CredentialRace {
   const gate = deferred();
   const read = deferred();
   const setup = connectedSessionSetup(
-    new ScriptedAgentModel([{ content: "unused", toolCalls: [] }]),
+    createScriptedAgentModel([{ content: "unused", toolCalls: [] }]),
     "api_key",
     undefined,
     {

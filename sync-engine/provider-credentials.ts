@@ -6,6 +6,7 @@ import {
   type ProviderCredentialDetails,
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
+  type ReadProviderCredential,
 } from "../shared/provider-credential-store.ts";
 import { isProviderApiFormat } from "../shared/provider-id.ts";
 import {
@@ -99,12 +100,6 @@ export type ReadCredentialDetails = (
   details: ProviderCredentialInputDetails,
 ) => Promise<ProviderCredentialDetails>;
 
-type ReadCredential = (
-  userId: string,
-  credentialId: string,
-  workspaceId?: string,
-) => ProviderCredentialAccess | undefined;
-
 export interface ProviderCredentialEndpoints {
   readonly addConnectedAccount: (
     user: AuthenticatedUser,
@@ -114,7 +109,7 @@ export interface ProviderCredentialEndpoints {
   ) => ProviderCredentialSummary;
   readonly authorize: Authenticate;
   readonly credentials: (request: Request) => Promise<Response>;
-  readonly readCredential: ReadCredential;
+  readonly readCredential: ReadProviderCredential;
   readonly readCredentialMetadata: (
     userId: string,
     credentialId: string,

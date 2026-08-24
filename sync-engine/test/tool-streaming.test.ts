@@ -3,14 +3,15 @@ import {
   MAXIMUM_TOOL_STREAM_DELTA_BYTES,
   MAXIMUM_TOOL_STREAM_FIELD_BYTES,
   TOOL_STREAM_TRUNCATED_MARKER,
-  ToolStreamHubState,
   applyToolStreamDelta,
+  createToolStreamHubState,
   isProviderToolCallDelta,
   isRunnerCommandOutputDelta,
   isRunnerCommandResult,
   isToolStreamDeltaFrame,
   isToolStreamSnapshotFrame,
   type ToolStreamDeltaFrame,
+  type ToolStreamHubState,
   type ToolStreamTerminalState,
 } from "../../shared/tool-stream.ts";
 import {
@@ -21,22 +22,32 @@ import {
 const SESSION_ID = "session-stream";
 const USER_ID = "user-stream";
 
-class RecordingTransport implements ToolStreamTransport {
-  readonly frames: ToolStreamDeltaFrame[] = [];
-  readonly store = new ToolStreamHubState();
-  readonly users: string[] = [];
+interface RecordingTransport extends ToolStreamTransport {
+  readonly frames: ToolStreamDeltaFrame[];
+  readonly store: ToolStreamHubState;
+  readonly users: string[];
+}
 
-  publishToolStream(userId: string, frame: ToolStreamDeltaFrame): void {
-    this.users.push(userId);
-    this.frames.push(frame);
-    if (!this.store.apply(userId, frame)) {
-      throw new Error("publisher emitted an invalid stream transition");
-    }
-  }
+function createRecordingTransport(): RecordingTransport {
+  const frames: ToolStreamDeltaFrame[] = [];
+  const store = createToolStreamHubState();
+  const users: string[] = [];
+  return {
+    frames,
+    store,
+    users,
+    publishToolStream: (userId, frame) => {
+      users.push(userId);
+      frames.push(frame);
+      if (!store.apply(userId, frame)) {
+        throw new Error("publisher emitted an invalid stream transition");
+      }
+    },
+  };
 }
 
 function createPublisher(streamId = "step-1") {
-  const transport = new RecordingTransport();
+  const transport = createRecordingTransport();
   return {
     publisher: new ToolStreamPublisher({
       sessionId: SESSION_ID,
@@ -123,7 +134,7 @@ function beginProviderReconciliation(streamId: string) {
 }
 
 function populateCappedHub(options?: { maximumStreamsPerUser: number }) {
-  const hub = new ToolStreamHubState({
+  const hub = createToolStreamHubState({
     maximumStreamsPerSession: 2,
     ...options,
   });
@@ -497,7 +508,7 @@ test("per-user hub state bounds sessions and isolates users", () => {
 });
 
 test("reconnect snapshots replace stale state without rolling back newer deltas", () => {
-  const store = new ToolStreamHubState();
+  const store = createToolStreamHubState();
   const apply = (delta: ToolStreamDeltaFrame): boolean =>
     store.apply(USER_ID, delta);
   apply(frame("step-reconnect", "current-call", 1, 0, { state: "preparing" }));

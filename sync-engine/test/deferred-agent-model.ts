@@ -21,26 +21,30 @@ export function deferredSessionSetup(): Readonly<{
   model: DeferredAgentModel;
   setup: ReturnType<typeof connectedSessionSetup>;
 }> {
-  const model = new DeferredAgentModel();
+  const model = createDeferredAgentModel();
   return { model, setup: connectedSessionSetup(model) };
 }
 
-export class DeferredAgentModel implements AgentModel {
-  readonly requests: AgentConversationMessage[][] = [];
-  readonly #result = Promise.withResolvers<AgentModelStep>();
+export interface DeferredAgentModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  resolve(step: AgentModelStep): void;
+  resolveContent(content: string): void;
+}
 
-  resolve(step: AgentModelStep): void {
-    this.#result.resolve(step);
-  }
-
-  readonly complete = (
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> => {
-    recordAgentModelRequest(this.requests, messages);
-    return this.#result.promise;
+export function createDeferredAgentModel(): DeferredAgentModel {
+  const requests: AgentConversationMessage[][] = [];
+  const result = Promise.withResolvers<AgentModelStep>();
+  return {
+    complete(messages): Promise<AgentModelStep> {
+      recordAgentModelRequest(requests, messages);
+      return result.promise;
+    },
+    requests,
+    resolve(step): void {
+      result.resolve(step);
+    },
+    resolveContent(content): void {
+      result.resolve(terminalAgentStep(content));
+    },
   };
-
-  resolveContent(content: string): void {
-    this.resolve(terminalAgentStep(content));
-  }
 }

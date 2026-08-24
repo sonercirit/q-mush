@@ -15,17 +15,18 @@ export interface InstrumentedAbortController extends AbortController {
 }
 
 export function createInstrumentedAbortController(): InstrumentedAbortController {
-  const controller = new AbortController();
+  const controller = Object.assign(new AbortController(), {
+    abortListenerCount: 0,
+  });
   const signal = controller.signal;
   const add = signal.addEventListener.bind(signal);
   const remove = signal.removeEventListener.bind(signal);
-  const instrumented = Object.assign(controller, { abortListenerCount: 0 });
   signal.addEventListener = (
     type: string,
     listener: EventListenerOrEventListenerObject,
     options?: AddEventListenerOptions | boolean,
   ) => {
-    if (type === "abort") instrumented.abortListenerCount += 1;
+    if (type === "abort") controller.abortListenerCount += 1;
     add(type, listener, options);
   };
   signal.removeEventListener = (
@@ -33,12 +34,11 @@ export function createInstrumentedAbortController(): InstrumentedAbortController
     listener: EventListenerOrEventListenerObject,
     options?: EventListenerOptions | boolean,
   ) => {
-    if (type === "abort") instrumented.abortListenerCount -= 1;
+    if (type === "abort") controller.abortListenerCount -= 1;
     remove(type, listener, options);
   };
-  return instrumented;
+  return controller;
 }
-
 export function completeWithSignal(
   model: ChatCompletionsAgentModel,
   signal: AbortSignal,

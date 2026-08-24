@@ -1,13 +1,16 @@
 import { eq } from "drizzle-orm";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   createCredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { providerCredentials } from "../../shared/database/schema.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  type ProviderCredentialStore,
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -259,7 +262,7 @@ async function setupConnectedCredential() {
   );
   return {
     ...setup,
-    store: new ProviderCredentialStore(
+    store: createProviderCredentialStore(
       setup.database,
       createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
       "openai",
@@ -290,166 +293,204 @@ async function expectWrongAccount(
 }
 
 describe("OpenAI credentials", () => {
-  test("connects multiple accounts with OAuth PKCE and stores multiple API keys", async () => {
-    const { database, integration, providerRequests } = setupIntegration({
-      [FIRST_MANUAL_KEY]: {
-        email: "manual-one@example.com",
-        id: "openai-user-one",
-        name: "First OpenAI user",
+  const databaseLifecycleCases = [
+    {
+      name: "connects multiple accounts with OAuth PKCE and stores multiple API keys",
+      run: async () => {
+        const { database, integration, providerRequests } = setupIntegration({
+          [FIRST_MANUAL_KEY]: {
+            email: "manual-one@example.com",
+            id: "openai-user-one",
+            name: "First OpenAI user",
+          },
+          [SECOND_MANUAL_KEY]: {
+            email: "manual-two@example.com",
+            id: "openai-user-two",
+            name: "Second OpenAI user",
+          },
+        });
+        const firstConnection = await connectAccount(
+          integration,
+          FIRST_STATE,
+          "authorization-code-one",
+        );
+
+        expect(firstConnection.response.status).toBe(302);
+        expect(firstConnection.authorizationUrl.origin).toBe(
+          "https://auth.openai.com",
+        );
+        expect(firstConnection.authorizationUrl.pathname).toBe(
+          "/oauth/authorize",
+        );
+        expect(
+          firstConnection.authorizationUrl.searchParams.get("client_id"),
+        ).toBe(CLIENT_ID);
+        expect(
+          firstConnection.authorizationUrl.searchParams.get("redirect_uri"),
+        ).toBe(CALLBACK_URL);
+        expect(firstConnection.authorizationUrl.searchParams.get("scope")).toBe(
+          "openid profile email offline_access",
+        );
+        expect(firstConnection.authorizationUrl.searchParams.get("state")).toBe(
+          FIRST_STATE,
+        );
+        expect(
+          firstConnection.authorizationUrl.searchParams.get("originator"),
+        ).toBe("q_mush");
+        expectPkceParameters(
+          firstConnection.authorizationUrl,
+          createHash("sha256").update(FIRST_VERIFIER).digest("base64url"),
+        );
+        expectRedirect(
+          firstConnection.response,
+          "http://localhost:3000/app?openai=connected",
+        );
+
+        const secondConnection = await connectAccount(
+          integration,
+          SECOND_STATE,
+          "authorization-code-two",
+        );
+        expectRedirect(
+          secondConnection.response,
+          "http://localhost:3000/app?openai=connected",
+        );
+
+        await addProviderApiKeys(integration, TEST_ROUTES.credentialsPath, [
+          FIRST_MANUAL_KEY,
+          SECOND_MANUAL_KEY,
+        ]);
+
+        const listResponse = await integration.credentials(
+          createAuthenticatedRequest(TEST_ROUTES.credentialsPath),
+        );
+        expect(await listResponse.json()).toEqual(
+          credentialSummaries([
+            FIRST_OAUTH_CREDENTIAL,
+            SECOND_OAUTH_CREDENTIAL,
+            FIRST_MANUAL_CREDENTIAL,
+            SECOND_MANUAL_CREDENTIAL,
+          ]),
+        );
+
+        const storedCredentials = readStoredProviderCredentials(
+          database,
+          "openai",
+        );
+        expect(storedCredentials).toHaveLength(4);
+        const secrets = [
+          ...OAUTH_ACCOUNTS.flatMap(
+            ({ accessToken, idToken, refreshToken }) => [
+              accessToken,
+              idToken,
+              refreshToken,
+            ],
+          ),
+          FIRST_MANUAL_KEY,
+          SECOND_MANUAL_KEY,
+        ];
+        expect(
+          storedCredentials.every(({ encryptedCredential }) =>
+            secrets.every((secret) => !encryptedCredential.includes(secret)),
+          ),
+        ).toBe(true);
+
+        expect(providerRequests[0]?.headers.get("content-type")).toContain(
+          "application/x-www-form-urlencoded",
+        );
+        expect(await readFormBody(providerRequests[0])).toEqual({
+          client_id: CLIENT_ID,
+          code: "authorization-code-one",
+          code_verifier: FIRST_VERIFIER,
+          grant_type: "authorization_code",
+          redirect_uri: CALLBACK_URL,
+        });
+        expect(providerRequests).toHaveLength(4);
+        const credentialStore = createProviderCredentialStore(
+          database,
+          createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
+          "openai",
+        );
+        expect(
+          JSON.parse(
+            credentialStore.readSecret(TEST_USER_ID, FIRST_OAUTH_ID) ?? "null",
+          ),
+        ).toEqual({
+          access: "oauth-access-token-one",
+          expires: TEST_NOW + 3_600_000,
+          refresh: "oauth-refresh-token-one",
+        });
+
+        credentialStore.updateSecret(
+          TEST_USER_ID,
+          FIRST_OAUTH_ID,
+          JSON.stringify({
+            access: "expired-access-token",
+            expires: TEST_NOW,
+            refresh: "oauth-refresh-token-one",
+          }),
+          TEST_NOW,
+        );
+        const refreshed = await integration.readCredential(
+          TEST_USER_ID,
+          FIRST_OAUTH_ID,
+        );
+        const refreshedSecret = refreshed?.secret ?? "";
+        expect(JSON.parse(refreshedSecret || "null")).toEqual({
+          access: "refreshed-access-token",
+          expires: TEST_NOW + 7_200_000,
+          refresh: "refreshed-refresh-token",
+        });
+        const refreshedStored = readStoredProviderCredentials(
+          database,
+          "openai",
+        ).find(({ id }) => id === FIRST_OAUTH_ID);
+        expect(refreshedStored?.credentialFingerprint).toBe(
+          fingerprintProviderCredential(refreshedSecret),
+        );
+        expect(await readFormBody(providerRequests.at(-1))).toEqual({
+          client_id: CLIENT_ID,
+          grant_type: "refresh_token",
+          refresh_token: "oauth-refresh-token-one",
+        });
+
+        try {
+          expectRemovedProviderCredential(
+            { database, integration, providerRequests },
+            TEST_ROUTES,
+            FIRST_KEY_ID,
+          );
+        } finally {
+          database.$client.close();
+        }
       },
-      [SECOND_MANUAL_KEY]: {
-        email: "manual-two@example.com",
-        id: "openai-user-two",
-        name: "Second OpenAI user",
+    },
+    {
+      name: "rejects an account changed during the callback",
+      run: async () => {
+        const setup = await setupConnectedCredential();
+        const { database, integration, store } = setup;
+        const unchangedSecret = markForReconnect(store);
+        database.$client.run(`CREATE TRIGGER change_account_during_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN UPDATE provider_credentials SET provider_account_id = 'chatgpt-workspace-two'
+      WHERE id = '${FIRST_OAUTH_ID}'; END`);
+
+        try {
+          const reconnect = beginReconnect(integration, SECOND_STATE);
+          await expectWrongAccount(integration, reconnect);
+          expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
+            unchangedSecret,
+          );
+        } finally {
+          database.$client.close();
+        }
       },
-    });
-    const firstConnection = await connectAccount(
-      integration,
-      FIRST_STATE,
-      "authorization-code-one",
-    );
+    },
+  ];
 
-    expect(firstConnection.response.status).toBe(302);
-    expect(firstConnection.authorizationUrl.origin).toBe(
-      "https://auth.openai.com",
-    );
-    expect(firstConnection.authorizationUrl.pathname).toBe("/oauth/authorize");
-    expect(firstConnection.authorizationUrl.searchParams.get("client_id")).toBe(
-      CLIENT_ID,
-    );
-    expect(
-      firstConnection.authorizationUrl.searchParams.get("redirect_uri"),
-    ).toBe(CALLBACK_URL);
-    expect(firstConnection.authorizationUrl.searchParams.get("scope")).toBe(
-      "openid profile email offline_access",
-    );
-    expect(firstConnection.authorizationUrl.searchParams.get("state")).toBe(
-      FIRST_STATE,
-    );
-    expect(
-      firstConnection.authorizationUrl.searchParams.get("originator"),
-    ).toBe("q_mush");
-    expectPkceParameters(
-      firstConnection.authorizationUrl,
-      createHash("sha256").update(FIRST_VERIFIER).digest("base64url"),
-    );
-    expectRedirect(
-      firstConnection.response,
-      "http://localhost:3000/app?openai=connected",
-    );
-
-    const secondConnection = await connectAccount(
-      integration,
-      SECOND_STATE,
-      "authorization-code-two",
-    );
-    expectRedirect(
-      secondConnection.response,
-      "http://localhost:3000/app?openai=connected",
-    );
-
-    await addProviderApiKeys(integration, TEST_ROUTES.credentialsPath, [
-      FIRST_MANUAL_KEY,
-      SECOND_MANUAL_KEY,
-    ]);
-
-    const listResponse = await integration.credentials(
-      createAuthenticatedRequest(TEST_ROUTES.credentialsPath),
-    );
-    expect(await listResponse.json()).toEqual(
-      credentialSummaries([
-        FIRST_OAUTH_CREDENTIAL,
-        SECOND_OAUTH_CREDENTIAL,
-        FIRST_MANUAL_CREDENTIAL,
-        SECOND_MANUAL_CREDENTIAL,
-      ]),
-    );
-
-    const storedCredentials = readStoredProviderCredentials(database, "openai");
-    expect(storedCredentials).toHaveLength(4);
-    const secrets = [
-      ...OAUTH_ACCOUNTS.flatMap(({ accessToken, idToken, refreshToken }) => [
-        accessToken,
-        idToken,
-        refreshToken,
-      ]),
-      FIRST_MANUAL_KEY,
-      SECOND_MANUAL_KEY,
-    ];
-    expect(
-      storedCredentials.every(({ encryptedCredential }) =>
-        secrets.every((secret) => !encryptedCredential.includes(secret)),
-      ),
-    ).toBe(true);
-
-    expect(providerRequests[0]?.headers.get("content-type")).toContain(
-      "application/x-www-form-urlencoded",
-    );
-    expect(await readFormBody(providerRequests[0])).toEqual({
-      client_id: CLIENT_ID,
-      code: "authorization-code-one",
-      code_verifier: FIRST_VERIFIER,
-      grant_type: "authorization_code",
-      redirect_uri: CALLBACK_URL,
-    });
-    expect(providerRequests).toHaveLength(4);
-    const credentialStore = new ProviderCredentialStore(
-      database,
-      createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
-      "openai",
-    );
-    expect(
-      JSON.parse(
-        credentialStore.readSecret(TEST_USER_ID, FIRST_OAUTH_ID) ?? "null",
-      ),
-    ).toEqual({
-      access: "oauth-access-token-one",
-      expires: TEST_NOW + 3_600_000,
-      refresh: "oauth-refresh-token-one",
-    });
-
-    credentialStore.updateSecret(
-      TEST_USER_ID,
-      FIRST_OAUTH_ID,
-      JSON.stringify({
-        access: "expired-access-token",
-        expires: TEST_NOW,
-        refresh: "oauth-refresh-token-one",
-      }),
-      TEST_NOW,
-    );
-    const refreshed = await integration.readCredential(
-      TEST_USER_ID,
-      FIRST_OAUTH_ID,
-    );
-    const refreshedSecret = refreshed?.secret ?? "";
-    expect(JSON.parse(refreshedSecret || "null")).toEqual({
-      access: "refreshed-access-token",
-      expires: TEST_NOW + 7_200_000,
-      refresh: "refreshed-refresh-token",
-    });
-    const refreshedStored = readStoredProviderCredentials(
-      database,
-      "openai",
-    ).find(({ id }) => id === FIRST_OAUTH_ID);
-    expect(refreshedStored?.credentialFingerprint).toBe(
-      fingerprintProviderCredential(refreshedSecret),
-    );
-    expect(await readFormBody(providerRequests.at(-1))).toEqual({
-      client_id: CLIENT_ID,
-      grant_type: "refresh_token",
-      refresh_token: "oauth-refresh-token-one",
-    });
-
-    try {
-      expectRemovedProviderCredential(
-        { database, integration, providerRequests },
-        TEST_ROUTES,
-        FIRST_KEY_ID,
-      );
-    } finally {
-      database.$client.close();
-    }
+  test.each(databaseLifecycleCases)("$name", async ({ run }) => {
+    await run();
   });
 
   test("reconnects only the flagged credential for the same verified account", async () => {
@@ -485,9 +526,9 @@ describe("OpenAI credentials", () => {
       }),
     );
 
-    const endpointReconnect = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockReturnValue(true);
+    database.$client.run(`CREATE TRIGGER reject_unexpected_endpoint_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN SELECT RAISE(ABORT, 'unexpected endpoint reconnect'); END`);
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
     const unflagged = beginReconnect(integration, "openai-state-six");
     database
@@ -516,40 +557,8 @@ describe("OpenAI credentials", () => {
       "openai-state-eight",
     );
     await expectWrongAccount(integration, missingStoredIdentity);
-    expect(endpointReconnect).not.toHaveBeenCalled();
-    endpointReconnect.mockRestore();
+    database.$client.run("DROP TRIGGER reject_unexpected_endpoint_reconnect");
     database.$client.close();
-  });
-
-  test("rejects an account changed during the callback", async () => {
-    const setup = await setupConnectedCredential();
-    const { database, integration, store } = setup;
-    const unchangedSecret = markForReconnect(store);
-    const originalUpdateSecret = store.updateSecret.bind(store);
-    const updateSecret = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockImplementation((...parameters) => {
-        const reconnectOnly = parameters[4] === true;
-        if (reconnectOnly) {
-          database
-            .update(providerCredentials)
-            .set({ providerAccountId: "chatgpt-workspace-two" })
-            .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
-            .run();
-        }
-        return originalUpdateSecret(...parameters);
-      });
-
-    try {
-      const reconnect = beginReconnect(integration, SECOND_STATE);
-      await expectWrongAccount(integration, reconnect);
-      expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
-        unchangedSecret,
-      );
-    } finally {
-      updateSecret.mockRestore();
-      database.$client.close();
-    }
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>

@@ -4,10 +4,7 @@ import {
   observeOperationalRunnerSocket,
 } from "../../runner/runner-socket.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
-import {
-  closeEventWithCode,
-  RecordingTestSocket,
-} from "../../shared/test/websocket-fixtures.ts";
+import { createRecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
   return expect(failure).resolves.toMatchObject({
@@ -18,7 +15,7 @@ function expectSuperseded(failure: Promise<Error>): Promise<void> {
 function observedSocketFailure(
   message: Readonly<Record<string, unknown>>,
 ): Promise<Error> {
-  const socket = new RecordingTestSocket();
+  const socket = createRecordingTestSocket();
   const failure = observeOperationalRunnerSocket(socket);
   socket.receive(message);
   return failure;
@@ -35,9 +32,9 @@ test("reports an explicit supersession frame distinctly", () => {
 });
 
 test("reports a supersession close distinctly when its frame is lost", () => {
-  const socket = new RecordingTestSocket({
-    closeEvent: closeEventWithCode(RUNNER_SUPERSEDED_CLOSE_CODE),
-  });
+  const supersededClose = (): Event =>
+    new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE });
+  const socket = createRecordingTestSocket({ closeEvent: supersededClose });
   const failure = observeOperationalRunnerSocket(socket);
 
   socket.close();

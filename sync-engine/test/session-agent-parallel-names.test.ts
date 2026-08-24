@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { findToolResultContent } from "./session-agent-tool-helpers.ts";
 import {
   completedParentDetail,
@@ -14,7 +14,7 @@ import { waitForSessionValue } from "./session-integration-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 
 test("parallel accepts provider-namespaced runner recipients", async () => {
-  const model = new ScriptedAgentModel([
+  const model = createScriptedAgentModel([
     {
       content: "Read both files in parallel.",
       toolCalls: [

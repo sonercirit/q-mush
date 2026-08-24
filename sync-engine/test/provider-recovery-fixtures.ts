@@ -1,14 +1,15 @@
 import { expect, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import {
-  closeEventWithCode,
-  RecordingTestSocket,
+  createRecordingTestSocket,
+  type RecordingTestSocket,
 } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import {
   createChatCompletionsAgentModel,
   type ChatCompletionsAgentModel,
+  type ChatCompletionsAgentModelOptions,
 } from "../../sync-engine/agent-model.ts";
 import type { ProviderRequestLifecycleOptions } from "../../sync-engine/provider-request-lifecycle.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
@@ -48,62 +49,84 @@ export interface FakeProviderSocket extends RecordingTestSocket {
   closeCount: number;
   closeReason: string | undefined;
   readonly headers: Readonly<Record<string, string>>;
-  close: (code?: number, reason?: string) => void;
-  readonly listenerCount: (type: string) => number;
-  readonly fail: () => void;
-  readonly open: () => void;
+  listenerCount(type: string): number;
+  fail(): void;
+  open(): void;
 }
 
 export function createFakeProviderSocket(
   headers: Readonly<Record<string, string>> = {},
 ): FakeProviderSocket {
-  const socket = new RecordingTestSocket({
-    closeEvent: closeEventWithCode(1000),
+  const providerCloseEvent = (): Event =>
+    new CloseEvent("close", { code: 1000 });
+  const socket = createRecordingTestSocket({
+    closeEvent: providerCloseEvent,
     readyState: WebSocket.CONNECTING,
   });
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
-  const add = socket.addEventListener.bind(socket);
-  const remove = socket.removeEventListener.bind(socket);
-  const close = socket.close.bind(socket);
+  const baseAdd = socket.addEventListener.bind(socket);
+  const baseRemove = socket.removeEventListener.bind(socket);
+  let closeCode: number | undefined;
+  let closeCount = 0;
+  let closeReason: string | undefined;
+  const baseClose = socket.close.bind(socket);
   const changeListener = (
     action: "add" | "remove",
     type: string,
     callback: EventListenerOrEventListenerObject,
   ): void => {
-    const entries = listeners.get(type) ?? new Set();
+    const callbacks = listeners.get(type) ?? new Set();
     if (action === "add") {
-      entries.add(callback);
-      listeners.set(type, entries);
-      return;
+      callbacks.add(callback);
+      listeners.set(type, callbacks);
+    } else {
+      callbacks.delete(callback);
+      if (callbacks.size === 0) listeners.delete(type);
     }
-    entries.delete(callback);
-    if (entries.size === 0) listeners.delete(type);
   };
-  const state: {
-    closeCode: number | undefined;
-    closeCount: number;
-    closeReason: string | undefined;
-  } = { closeCode: undefined, closeCount: 0, closeReason: undefined };
-  const result: FakeProviderSocket = Object.assign(socket, state, {
+
+  const state = {
+    get closeCode(): number | undefined {
+      return closeCode;
+    },
+    set closeCode(value: number | undefined) {
+      closeCode = value;
+    },
+    get closeCount(): number {
+      return closeCount;
+    },
+    set closeCount(value: number) {
+      closeCount = value;
+    },
+    get closeReason(): string | undefined {
+      return closeReason;
+    },
+    set closeReason(value: string | undefined) {
+      closeReason = value;
+    },
+  };
+  const result = Object.assign(socket, state, {
     addEventListener(
       type: string,
       callback: EventListenerOrEventListenerObject | null,
       options?: AddEventListenerOptions | boolean,
     ): void {
-      add(type, callback, options);
+      baseAdd(type, callback, options);
       if (callback !== null) changeListener("add", type, callback);
     },
     close(code?: number, reason?: string): void {
-      result.closeCode = code;
-      result.closeCount += 1;
-      result.closeReason = reason;
-      close();
+      closeCode = code;
+      closeCount += 1;
+      closeReason = reason;
+      baseClose();
     },
     fail(): void {
       socket.dispatchEvent(new Event("error"));
     },
     headers,
-    listenerCount: (type: string) => listeners.get(type)?.size ?? 0,
+    listenerCount(type: string): number {
+      return listeners.get(type)?.size ?? 0;
+    },
     open(): void {
       socket.readyState = WebSocket.OPEN;
       socket.dispatchEvent(new Event("open"));
@@ -113,15 +136,36 @@ export function createFakeProviderSocket(
       callback: EventListenerOrEventListenerObject | null,
       options?: EventListenerOptions | boolean,
     ): void {
-      remove(type, callback, options);
+      baseRemove(type, callback, options);
       if (callback !== null) changeListener("remove", type, callback);
+    },
+  });
+  Object.defineProperties(result, {
+    ...Object.getOwnPropertyDescriptors(state),
+    closeCode: {
+      get: () => closeCode,
+      set: (value: number | undefined) => {
+        closeCode = value;
+      },
+    },
+    closeCount: {
+      get: () => closeCount,
+      set: (value: number) => {
+        closeCount = value;
+      },
+    },
+    closeReason: {
+      get: () => closeReason,
+      set: (value: string | undefined) => {
+        closeReason = value;
+      },
     },
   });
   return result;
 }
 
 type WebSocketFactory = NonNullable<
-  Parameters<typeof createChatCompletionsAgentModel>[0]["webSocket"]
+  ChatCompletionsAgentModelOptions["webSocket"]
 >;
 
 export function expectProviderSocketReleased(socket: FakeProviderSocket): void {
@@ -161,7 +205,7 @@ export function recordDelay(delays: number[]): ModelRequestSleep {
 export interface FakeProviderSockets {
   readonly created: FakeProviderSocket[];
   readonly create: WebSocketFactory;
-  readonly waitForAttempt: (index: number) => Promise<void>;
+  waitForAttempt(index: number): Promise<void>;
 }
 
 export function createFakeProviderSockets(): FakeProviderSockets {
@@ -173,7 +217,7 @@ export function createFakeProviderSockets(): FakeProviderSockets {
       created.push(socket);
       return socket;
     },
-    async waitForAttempt(index) {
+    async waitForAttempt(index: number): Promise<void> {
       await vi.waitFor(() => {
         expect(created).toHaveLength(index + 1);
       });

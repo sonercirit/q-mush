@@ -3,7 +3,7 @@ import {
   type CredentialCipher,
 } from "../shared/credential-cipher.ts";
 import {
-  ProviderCredentialStore,
+  createProviderCredentialStore,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
@@ -136,7 +136,7 @@ export function createProviderIntegration(options: {
   const store =
     options.configuration === undefined
       ? undefined
-      : new ProviderCredentialStore(
+      : createProviderCredentialStore(
           runtime.database,
           options.configuration.cipher,
           options.provider,

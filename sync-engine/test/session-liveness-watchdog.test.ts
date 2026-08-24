@@ -1,7 +1,10 @@
 import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions, runners } from "../../shared/database/schema.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
@@ -13,7 +16,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { DeferredAgentModel } from "./deferred-agent-model.ts";
+import { createDeferredAgentModel } from "./deferred-agent-model.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
 import {
@@ -82,7 +85,7 @@ export function watchdogSetup(
   const watchdog = new SessionLivenessWatchdog({
     actions: options.actions ?? { finished, reportAll, stopChildren },
     allowUnsafeTestTiming: options.allowUnsafeTestTiming ?? true,
-    broker: options.broker ?? new RunnerCommandBroker(),
+    broker: options.broker ?? createRunnerCommandBroker(),
     cleanup: options.cleanup ?? vi.fn(),
     database: setup.database,
     generateId: () => "watchdog-failure-message",
@@ -224,7 +227,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
         reportAll: vi.fn(),
         stopChildren: vi.fn(),
       },
-      broker: new RunnerCommandBroker(),
+      broker: createRunnerCommandBroker(),
       cleanup: vi.fn(),
       database: setup.database,
       dependencies: {
@@ -273,7 +276,7 @@ test("stops the default global scan interval", () => {
 test("stops an injected scan interval once across repeated shutdowns", async () => {
   const cleared: unknown[] = [];
   const setup = connectedSessionSetup(
-    new DeferredAgentModel(),
+    createDeferredAgentModel(),
     "api_key",
     undefined,
     {
@@ -390,7 +393,7 @@ test("preserves early acknowledgement", () => {
 test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "startup");
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "undispatched-command",
   });
   const queuedCommand = dispatchBash(setup, broker);
@@ -487,7 +490,7 @@ test("a watchdog-failed child reports failure to its parent exactly once", () =>
   closeSetup(setup);
 });
 async function deferredLivenessSession() {
-  const model = new DeferredAgentModel();
+  const model = createDeferredAgentModel();
   return { model, ...(await createUnsafeLivenessSession(model)) };
 }
 test("compacts an opted-in idle session after a liveness scan", async () => {
@@ -560,7 +563,7 @@ test("does not time out a twenty-minute command on a live runner connection", as
     currentRuntimes,
     setup.detail.generation,
   );
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "twenty-minute-command",
     deliver: () => true,
   });

@@ -1,5 +1,8 @@
 import { expect } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ActiveSessionTools } from "../active-session-tools.ts";
 import type { SessionAgentRuntimeDependencies } from "../session-agent-runtime.ts";
@@ -22,7 +25,7 @@ export function completingTestBroker(
   onDeliver: (tool: string) => void = () => undefined,
 ): RunnerCommandBroker {
   let commandId = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => `command-${String((commandId += 1))}`,
     deliver: (runnerId, command) => {
       onDeliver(command.tool);

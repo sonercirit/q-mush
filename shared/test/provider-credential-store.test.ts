@@ -8,9 +8,10 @@ import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
+  createProviderCredentialStore,
   isDuplicateProviderCredentialError,
-  ProviderCredentialStore,
   type ProviderCredentialAccess,
+  type ProviderCredentialStore,
 } from "../../shared/provider-credential-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
@@ -104,7 +105,7 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
       database.$client.close();
     },
     database,
-    store: new ProviderCredentialStore(
+    store: createProviderCredentialStore(
       database,
       cipher,
       "openrouter",

@@ -10,7 +10,7 @@ import {
   TEST_COMPACTION_REQUEST_MESSAGE,
 } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 
 const PARTIAL_ANSWER = {
   content: "Partial answer",
@@ -37,7 +37,7 @@ describe("agent conversation compaction", () => {
   });
 
   test("appends the handoff request without changing the conversation prefix", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: " Keep the current changes and run tests. ",
         contextTokens: 12_345,
@@ -78,7 +78,7 @@ describe("agent conversation compaction", () => {
   });
 
   test("sends a truncation marker only to the compactor", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "The prior answer was truncated.", toolCalls: [] },
     ]);
     const compactor = createModelConversationCompactor(model);

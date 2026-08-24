@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { runnerDirectoriesPath } from "../../shared/routes.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { SessionRequestHelpers } from "../session-request-helpers.ts";
 import {
   createAuthenticatedRequest,
@@ -11,7 +11,7 @@ test("returns an HTTP response when directory browsing is canceled", async () =>
   const { auth, database } = createAuthenticatedTestContext();
   const canceledCommands: string[] = [];
   const delivered = Promise.withResolvers<string>();
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     cancel: (_runnerId, commandId) => {
       canceledCommands.push(commandId);
     },
