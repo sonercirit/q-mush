@@ -51,30 +51,38 @@ function replaceMatching<Value>(
   return true;
 }
 
-class MemoryAskQuestionsPersistence implements AskQuestionsPersistence {
+interface MemoryAskQuestionsPersistence extends AskQuestionsPersistence {
   readonly state: MemoryQuestionState;
-  #busy = false;
+}
 
-  constructor(sessions: readonly StoredQuestionSession[] = []) {
-    this.state = { requests: [], sessions: [...sessions], toolResults: [] };
-  }
-
-  transaction<Result>(
-    action: (transaction: AskQuestionsPersistenceTransaction) => Result,
-  ): Result {
-    if (this.#busy) {
-      throw new Error("Nested memory question transactions are unsupported");
-    }
-    this.#busy = true;
-    const draft = cloneState(this.state);
-    try {
-      const result = action(transactionFor(draft));
-      replaceState(this.state, draft);
-      return result;
-    } finally {
-      this.#busy = false;
-    }
-  }
+function createMemoryAskQuestionsPersistence(
+  sessions: readonly StoredQuestionSession[] = [],
+): MemoryAskQuestionsPersistence {
+  const state: MemoryQuestionState = {
+    requests: [],
+    sessions: [...sessions],
+    toolResults: [],
+  };
+  let busy = false;
+  return {
+    state,
+    transaction: <Result>(
+      action: (transaction: AskQuestionsPersistenceTransaction) => Result,
+    ): Result => {
+      if (busy) {
+        throw new Error("Nested memory question transactions are unsupported");
+      }
+      busy = true;
+      const draft = cloneState(state);
+      try {
+        const result = action(transactionFor(draft));
+        replaceState(state, draft);
+        return result;
+      } finally {
+        busy = false;
+      }
+    },
+  };
 }
 
 function activeRequest(
@@ -186,7 +194,7 @@ function runningSession(): StoredQuestionSession {
 }
 
 function setup() {
-  const persistence = new MemoryAskQuestionsPersistence([runningSession()]);
+  const persistence = createMemoryAskQuestionsPersistence([runningSession()]);
   const ids = [REQUEST_ID, MESSAGE_ID];
   const store = createAskQuestionsStore({
     generateId: () => ids.shift() ?? "unexpected-id",
