@@ -130,6 +130,8 @@ export function createModelConversationCompactor(
       onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
       let step: AgentModelStep;
       try {
+        // Compaction is a model step: restart the visible step clock at its
+        // request instead of letting the previous step keep timing.
         model.startStep?.();
         step = await model.complete(providerInput, signal);
       } finally {
