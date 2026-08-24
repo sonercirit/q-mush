@@ -287,10 +287,10 @@ interface UnknownCreationReconciliation {
   readonly created: AgentSessionDetail;
   readonly scenario: ReconciliationScenario;
   confirm(sessions?: readonly AgentSessionDetail[]): Promise<void>;
-  confirmAs(
+  confirmAs: (
     detail: AgentSessionDetail,
     sessions?: readonly AgentSessionDetail[],
-  ): Promise<void>;
+  ) => Promise<void>;
   expectPayload(expected: object): void;
   finishPublished(
     read: PendingSessionCommand,
@@ -396,10 +396,7 @@ function createReconciliationScenario(
     failLoadCommand(loading: Promise<void>, message: string): Promise<void>;
   } = {
     controller,
-    async completeCreationReconciliation(
-      detail: AgentSessionDetail,
-      sessions?: readonly AgentSessionDetail[],
-    ): Promise<void> {
+    completeCreationReconciliation: async (detail, sessions) => {
       const list = await takeSessionList();
       await publishDetail(
         (published) => scenario.publishSessionList(list, published),
