@@ -172,9 +172,7 @@ export function createPromptController(
 
   function isBusy(): boolean {
     return (
-      state().loading ||
-      state().removingId !== undefined ||
-      state().saving
+      state().loading || state().removingId !== undefined || state().saving
     );
   }
 
@@ -316,9 +314,7 @@ export function createPromptController(
         prompts: state().prompts?.filter(({ id }) => id !== promptId),
         removingId: undefined,
         selectedId:
-          state().selectedId === promptId
-            ? undefined
-            : state().selectedId,
+          state().selectedId === promptId ? undefined : state().selectedId,
       }));
     } catch (error) {
       if (hasHttpStatus(error, 412)) {
@@ -354,7 +350,9 @@ export function createPromptController(
     select,
     setCreateField,
     setEditField,
-    get state() { return state(); },
+    get state() {
+      return state();
+    },
     view: viewState.accessor,
   };
 }

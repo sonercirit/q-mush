@@ -1,5 +1,8 @@
 import { afterEach, expect, test } from "vitest";
-import { createPromptController, type PromptController } from "../../solid/prompt-controller.ts";
+import {
+  createPromptController,
+  type PromptController,
+} from "../../solid/prompt-controller.ts";
 import { createPromptViewState } from "../../solid/prompt-state.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { installFetch } from "./controller-test-helpers.ts";
