@@ -25,31 +25,32 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
 
-class ParentGenerationDeliveryModel implements AgentModel {
-  #requestCount = 0;
-
-  complete(): Promise<AgentModelStep> {
-    this.#requestCount += 1;
-    const step = [
-      {
-        content: "Delegating before another parent step.",
-        toolCalls: [spawnCall("Complete after the parent advances")],
-      },
-      { content: "The parent is initially idle.", toolCalls: [] },
-      { content: "The parent advanced while the child ran.", toolCalls: [] },
-      { content: "The child completed after that advance.", toolCalls: [] },
-      {
-        content: "The advanced parent received the child report.",
-        toolCalls: [],
-      },
-    ][this.#requestCount - 1];
-    if (step === undefined) {
-      throw new Error("The delivery model ran out of steps");
-    }
-    return Promise.resolve(
-      providerStep(step.content, { toolCalls: step.toolCalls }),
-    );
-  }
+function createParentGenerationDeliveryModel(): AgentModel {
+  let requestCount = 0;
+  return {
+    complete(): Promise<AgentModelStep> {
+      requestCount += 1;
+      const step = [
+        {
+          content: "Delegating before another parent step.",
+          toolCalls: [spawnCall("Complete after the parent advances")],
+        },
+        { content: "The parent is initially idle.", toolCalls: [] },
+        { content: "The parent advanced while the child ran.", toolCalls: [] },
+        { content: "The child completed after that advance.", toolCalls: [] },
+        {
+          content: "The advanced parent received the child report.",
+          toolCalls: [],
+        },
+      ][requestCount - 1];
+      if (step === undefined) {
+        throw new Error("The delivery model ran out of steps");
+      }
+      return Promise.resolve(
+        providerStep(step.content, { toolCalls: step.toolCalls }),
+      );
+    },
+  };
 }
 
 function isRunnerCommand(value: unknown): value is RunnerToolCommand {
@@ -83,7 +84,7 @@ async function latestCommandFor(
 
 test("delivers and runs an idle parent after its generation advances", async () => {
   let commandSequence = 0;
-  const setup = await startToolSession(new ParentGenerationDeliveryModel(), {
+  const setup = await startToolSession(createParentGenerationDeliveryModel(), {
     commandId: () =>
       commandSequence++ === 0
         ? "agent-command-1"
