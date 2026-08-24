@@ -22,22 +22,32 @@ import {
 const SESSION_ID = "session-stream";
 const USER_ID = "user-stream";
 
-class RecordingTransport implements ToolStreamTransport {
-  readonly frames: ToolStreamDeltaFrame[] = [];
-  readonly store = createToolStreamHubState();
-  readonly users: string[] = [];
+interface RecordingTransport extends ToolStreamTransport {
+  readonly frames: ToolStreamDeltaFrame[];
+  readonly store: ToolStreamHubState;
+  readonly users: string[];
+}
 
-  publishToolStream(userId: string, frame: ToolStreamDeltaFrame): void {
-    this.users.push(userId);
-    this.frames.push(frame);
-    if (!this.store.apply(userId, frame)) {
-      throw new Error("publisher emitted an invalid stream transition");
-    }
-  }
+function createRecordingTransport(): RecordingTransport {
+  const frames: ToolStreamDeltaFrame[] = [];
+  const store = createToolStreamHubState();
+  const users: string[] = [];
+  return {
+    frames,
+    store,
+    users,
+    publishToolStream: (userId, frame) => {
+      users.push(userId);
+      frames.push(frame);
+      if (!store.apply(userId, frame)) {
+        throw new Error("publisher emitted an invalid stream transition");
+      }
+    },
+  };
 }
 
 function createPublisher(streamId = "step-1") {
-  const transport = new RecordingTransport();
+  const transport = createRecordingTransport();
   return {
     publisher: new ToolStreamPublisher({
       sessionId: SESSION_ID,

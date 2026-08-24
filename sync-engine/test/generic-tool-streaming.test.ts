@@ -22,12 +22,18 @@ const EXPECTED_TOOL_CALL = {
   name: "read",
 };
 
-class RecordingToolStreamTransport implements ToolStreamTransport {
-  readonly frames: ToolStreamDeltaFrame[] = [];
+interface RecordingToolStreamTransport extends ToolStreamTransport {
+  readonly frames: ToolStreamDeltaFrame[];
+}
 
-  publishToolStream(_userId: string, frame: ToolStreamDeltaFrame): void {
-    this.frames.push(frame);
-  }
+function createRecordingToolStreamTransport(): RecordingToolStreamTransport {
+  const frames: ToolStreamDeltaFrame[] = [];
+  return {
+    frames,
+    publishToolStream: (_userId, frame) => {
+      frames.push(frame);
+    },
+  };
 }
 
 function chatEvent(value: unknown): string {
@@ -111,7 +117,7 @@ function genericSession(response: Response): {
   readonly frames: ToolStreamDeltaFrame[];
   readonly run: () => ReturnType<ChatCompletionsAgentModel["complete"]>;
 } {
-  const transport = new RecordingToolStreamTransport();
+  const transport = createRecordingToolStreamTransport();
   const toolStream = new ToolStreamPublisher({
     sessionId: TEST_SESSION_DETAIL.id,
     streamId: "initial-step",
