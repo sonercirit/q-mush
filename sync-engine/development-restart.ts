@@ -37,11 +37,15 @@ export function createDevelopmentRestartLifecycle(
       await options.sessions.drain(deadline);
     } catch (error) {
       pending = undefined;
-      // Final shutdown deliberately keeps maintenance stopped and the gate closed.
+      // A final shutdown that started while this drain was in flight already
+      // stopped maintenance and closed the restart gate on purpose, so the
+      // abandoned development restart must not undo any of it.
       if (kind === "final") {
         options.drainFailed(error);
         return;
       }
+      // The process keeps serving traffic, so every irreversible step the
+      // drain took has to be undone before normal operation resumes.
       options.sessions.restoreDevelopmentDrainRecovery();
       options.startMaintenance();
       kind = undefined;

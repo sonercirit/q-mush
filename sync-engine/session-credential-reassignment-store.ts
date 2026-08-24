@@ -140,9 +140,9 @@ function applyMetadataUpdates(
   transaction: Pick<AppDatabase, "update">,
   updates: readonly SessionCredentialMetadataUpdate[],
 ): void {
-  // Only OpenRouter reassignments produce updates; generic reassignments
-  // instead clear the output limit below so the lazy pre-request refresh
-  // re-probes the possibly different endpoint's catalog.
+  // A generic credential may point at a different endpoint whose model
+  // capabilities and output limit differ; clearing them lets the lazy
+  // pre-request refresh re-probe the new catalog.
   for (const update of updates) {
     transaction
       .update(agentSessions)

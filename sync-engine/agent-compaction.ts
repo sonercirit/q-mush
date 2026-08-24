@@ -135,6 +135,8 @@ export function createModelConversationCompactor(
       } finally {
         model.close?.();
       }
+      // A truncated summary would replace the whole conversation with an
+      // incomplete handoff; reject it like any other invalid summary.
       if (
         step.toolCalls.length > 0 ||
         step.content.trim().length === 0 ||

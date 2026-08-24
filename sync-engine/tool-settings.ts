@@ -49,6 +49,7 @@ export function createToolSettingsIntegration(
       return createApiError("invalid_tool_settings", 400);
     }
     const saved = store.set(userId, settings, now());
+    // User-wide publication reaches this user's connected workspace tabs only.
     realtime?.publishUserAllWorkspaces(userId, {
       settings: saved,
       type: "tool_settings",

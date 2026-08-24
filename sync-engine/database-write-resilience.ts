@@ -136,7 +136,8 @@ export function createDatabaseWriteResilience(
       );
       if (priority === "noncritical") return undefined;
       // SQLite writes are synchronous, so bounded synchronous retries preserve
-      // an honest result for callers without monopolizing the loop indefinitely.
+      // an honest result without monopolizing the loop indefinitely; callers
+      // then receive DiskFullError.
       for (const delay of CRITICAL_RETRY_DELAYS_MS) {
         sleep(delay);
         attempted = perform(operation);

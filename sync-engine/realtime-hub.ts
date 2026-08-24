@@ -168,6 +168,7 @@ export function createRealtimeHub(): RealtimeHub {
       publish(sockets("user", userKey(userId, workspaceId)), payload);
     },
     publishUserAllWorkspaces: (userId, payload) => {
+      // User-wide publication reaches this user's connected workspace tabs only.
       const recipients = new Set<RealtimeSocket>();
       for (const [key, connected] of connections.user)
         if (parseUserKey(key)?.userId === userId)
