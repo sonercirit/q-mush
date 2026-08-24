@@ -43,10 +43,15 @@ import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-class RejectingModelCredentialPool extends ModelCredentialPool {
-  override candidates(): Promise<never> {
-    return Promise.reject(new Error("candidate boom"));
-  }
+function createRejectingModelCredentialPool(
+  database: AppDatabase,
+): ModelCredentialPool {
+  const pool = new ModelCredentialPool({
+    database,
+    readCredential: () => Promise.resolve(undefined),
+  });
+  pool.candidates = () => Promise.reject(new Error("candidate boom"));
+  return pool;
 }
 
 export const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
@@ -211,10 +216,7 @@ export function authoritySetup(options: {
     launchSession: launch,
     ...(options.rejectCandidates === true
       ? {
-          modelCredentialPool: new RejectingModelCredentialPool({
-            database,
-            readCredential: () => Promise.resolve(undefined),
-          }),
+          modelCredentialPool: createRejectingModelCredentialPool(database),
         }
       : {}),
     notify,
