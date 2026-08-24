@@ -468,104 +468,108 @@ function boundedMaximum(
     : Math.max(1, Math.min(value, maximum));
 }
 
-class ToolStreamSnapshotStore {
-  readonly #entries = new Map<string, ToolStreamEntry>();
-  readonly #maximumStreams: number;
-  readonly #sessionId: string;
+export interface ToolStreamSnapshotStore {
+  readonly size: number;
+  apply(delta: ToolStreamDelta): boolean;
+  snapshot(streamId: string): ToolStreamSnapshotFrame;
+  replace(snapshot: ToolStreamSnapshotFrame): boolean;
+  clear(): void;
+  deleteOldest(): boolean;
+}
 
-  constructor(options: ToolStreamSnapshotStoreOptions) {
-    this.#maximumStreams = boundedMaximum(
-      options.maximumStreams,
-      MAXIMUM_TOOL_STREAMS_PER_SESSION,
-      MAXIMUM_TOOL_STREAMS_PER_SESSION,
-    );
-    this.#sessionId = options.sessionId;
-  }
+export function createToolStreamSnapshotStore(
+  options: ToolStreamSnapshotStoreOptions,
+): ToolStreamSnapshotStore {
+  const entries = new Map<string, ToolStreamEntry>();
+  const maximumStreams = boundedMaximum(
+    options.maximumStreams,
+    MAXIMUM_TOOL_STREAMS_PER_SESSION,
+    MAXIMUM_TOOL_STREAMS_PER_SESSION,
+  );
+  const sessionId = options.sessionId;
 
-  get size(): number {
-    return this.#entries.size;
-  }
+  const deleteOldest = (): boolean => {
+    const oldest = entries.keys().next().value;
+    return oldest === undefined ? false : entries.delete(oldest);
+  };
 
-  apply(delta: ToolStreamDelta): boolean {
-    if (delta.sessionId !== this.#sessionId) {
-      return false;
-    }
-    const currentKey = this.#findKey(delta);
-    const current =
-      currentKey === undefined ? undefined : this.#entries.get(currentKey);
-    const result = applyToolStreamDelta(current, delta);
-    if (!result.accepted) {
-      return false;
-    }
-    if (currentKey !== undefined) {
-      this.#entries.delete(currentKey);
-    }
-    if (!result.terminal) {
-      this.#entries.set(
-        entryKey(result.entry.streamId, result.entry.index),
-        result.entry,
-      );
-      this.#trim();
-    }
-    return true;
-  }
-
-  snapshot(streamId: string): ToolStreamSnapshotFrame {
-    return createToolStreamSnapshotFrame(
-      this.#sessionId,
-      streamId,
-      [...this.#entries.values()].filter(
-        (entry) => entry.streamId === streamId,
-      ),
-    );
-  }
-
-  replace(snapshot: ToolStreamSnapshotFrame): boolean {
-    if (
-      snapshot.sessionId !== this.#sessionId ||
-      !isToolStreamSnapshotFrame(snapshot)
-    ) {
-      return false;
-    }
-    const reconciled = snapshot.streams.map((entry) => {
-      const current = this.#entries.get(entryKey(entry.streamId, entry.index));
-      return current !== undefined && current.sequence > entry.sequence
-        ? current
-        : { ...entry };
-    });
-    for (const [key, entry] of this.#entries) {
-      if (entry.streamId === snapshot.streamId) {
-        this.#entries.delete(key);
-      }
-    }
-    for (const entry of reconciled) {
-      this.#entries.set(entryKey(entry.streamId, entry.index), entry);
-    }
-    this.#trim();
-    return true;
-  }
-
-  clear(): void {
-    this.#entries.clear();
-  }
-
-  deleteOldest(): boolean {
-    const oldest = this.#entries.keys().next().value;
-    return oldest === undefined ? false : this.#entries.delete(oldest);
-  }
-
-  #findKey(delta: ToolStreamDelta): string | undefined {
-    const key = entryKey(delta.streamId, delta.index);
-    return this.#entries.has(key) ? key : undefined;
-  }
-
-  #trim(): void {
-    while (this.#entries.size > this.#maximumStreams) {
-      if (!this.deleteOldest()) {
+  const trim = (): void => {
+    while (entries.size > maximumStreams) {
+      if (!deleteOldest()) {
         return;
       }
     }
-  }
+  };
+
+  return {
+    get size(): number {
+      return entries.size;
+    },
+
+    apply(delta): boolean {
+      if (delta.sessionId !== sessionId) {
+        return false;
+      }
+      const key = entryKey(delta.streamId, delta.index);
+      const currentKey = entries.has(key) ? key : undefined;
+      const current =
+        currentKey === undefined ? undefined : entries.get(currentKey);
+      const result = applyToolStreamDelta(current, delta);
+      if (!result.accepted) {
+        return false;
+      }
+      if (currentKey !== undefined) {
+        entries.delete(currentKey);
+      }
+      if (!result.terminal) {
+        entries.set(
+          entryKey(result.entry.streamId, result.entry.index),
+          result.entry,
+        );
+        trim();
+      }
+      return true;
+    },
+
+    snapshot(streamId): ToolStreamSnapshotFrame {
+      return createToolStreamSnapshotFrame(
+        sessionId,
+        streamId,
+        [...entries.values()].filter((entry) => entry.streamId === streamId),
+      );
+    },
+
+    replace(snapshot): boolean {
+      if (
+        snapshot.sessionId !== sessionId ||
+        !isToolStreamSnapshotFrame(snapshot)
+      ) {
+        return false;
+      }
+      const reconciled = snapshot.streams.map((entry) => {
+        const current = entries.get(entryKey(entry.streamId, entry.index));
+        return current !== undefined && current.sequence > entry.sequence
+          ? current
+          : { ...entry };
+      });
+      for (const [key, entry] of entries) {
+        if (entry.streamId === snapshot.streamId) {
+          entries.delete(key);
+        }
+      }
+      for (const entry of reconciled) {
+        entries.set(entryKey(entry.streamId, entry.index), entry);
+      }
+      trim();
+      return true;
+    },
+
+    clear(): void {
+      entries.clear();
+    },
+
+    deleteOldest,
+  };
 }
 
 export interface ToolStreamHubStateOptions {
@@ -620,7 +624,7 @@ export class ToolStreamHubState {
       existing,
       store:
         existing ??
-        new ToolStreamSnapshotStore({
+        createToolStreamSnapshotStore({
           maximumStreams: this.#maximumStreamsPerSession,
           sessionId,
         }),
