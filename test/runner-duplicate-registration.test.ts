@@ -10,7 +10,7 @@ import {
   RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import {
   RUNNER_SUPERSEDED_CLOSE_CODE,
   runnerConnectMessage,
@@ -266,7 +266,7 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
     name: "RunnerSupersededError",
   });
   await expect(commandRejection).resolves.toEqual(
-    new RunnerDisconnectedError(
+    createRunnerDisconnectedError(
       "The runner connection was superseded before the command returned",
     ),
   );

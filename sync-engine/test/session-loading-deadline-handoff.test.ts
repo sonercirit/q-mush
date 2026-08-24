@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitMilliseconds,
@@ -97,7 +97,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
       toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
     );
     expect(vi.getTimerCount()).toBe(0);
-    disconnected.reject(new RunnerDisconnectedError());
+    disconnected.reject(createRunnerDisconnectedError());
     await run;
 
     expect(requireCompactionSession(setup.store)).toMatchObject({

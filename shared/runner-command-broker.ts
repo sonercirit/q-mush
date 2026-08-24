@@ -20,7 +20,7 @@ import {
   type RunnerCommandTransport,
   type RunnerToolCommand,
 } from "./runner-command.ts";
-import { RunnerDisconnectedError } from "./runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "./runner-disconnected-error.ts";
 import type { RunnerCommandResult } from "./tool-stream.ts";
 import { abortSignalError, errorFromUnknown } from "./validation.ts";
 
@@ -242,7 +242,7 @@ export class RunnerCommandBroker {
     pending: PendingRunnerCommand,
   ): void {
     if (input.queueIfUnavailable === false) {
-      this.#reject(pending.command.id, new RunnerDisconnectedError());
+      this.#reject(pending.command.id, createRunnerDisconnectedError());
       return;
     }
     this.#requeue(pending);
@@ -292,7 +292,7 @@ export class RunnerCommandBroker {
       for (const commandId of lostIds) {
         this.#reject(
           commandId,
-          new RunnerDisconnectedError(
+          createRunnerDisconnectedError(
             "The runner process restarted before the command returned",
           ),
           false,
@@ -524,7 +524,7 @@ export class RunnerCommandBroker {
     for (const pending of inFlight) {
       this.#reject(
         pending.command.id,
-        new RunnerDisconnectedError(
+        createRunnerDisconnectedError(
           "The runner connection was superseded before the command returned",
         ),
         false,
@@ -540,7 +540,7 @@ export class RunnerCommandBroker {
     );
     if (!retry) {
       for (const pending of disconnected) {
-        this.#reject(pending.command.id, new RunnerDisconnectedError());
+        this.#reject(pending.command.id, createRunnerDisconnectedError());
       }
       return;
     }
