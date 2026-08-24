@@ -317,26 +317,26 @@ function reconciliationSettled(
       : patch[reconciliation.options.pending] === false;
 }
 
+type CreationReconciliationArguments = [
+  number,
+  unknown,
+  ReadonlySet<string>,
+  SessionCreationDescriptor,
+];
+type DetailReconciliationArguments = [
+  number,
+  unknown,
+  DetailMutationOptions,
+  AgentSessionDetail,
+];
+type ForkReconciliationArguments = [number, unknown, ReadonlySet<string>];
+
 export interface SessionReconciliationController {
-  readonly creation: (
-    revision: number,
-    error: unknown,
-    baseline: ReadonlySet<string>,
-    descriptor: SessionCreationDescriptor,
-  ) => Promise<void>;
-  readonly detail: (
-    revision: number,
-    error: unknown,
-    options: DetailMutationOptions,
-    baseline: AgentSessionDetail,
-  ) => Promise<void>;
-  readonly fork: (
-    revision: number,
-    error: unknown,
-    baseline: ReadonlySet<string>,
-  ) => Promise<void>;
-  readonly reconnect: () => void;
-  readonly reset: () => void;
+  creation(...args: CreationReconciliationArguments): Promise<void>;
+  detail(...args: DetailReconciliationArguments): Promise<void>;
+  fork(...args: ForkReconciliationArguments): Promise<void>;
+  reconnect(): void;
+  reset(): void;
 }
 
 export function createSessionReconciliationController(
@@ -421,9 +421,9 @@ export function createSessionReconciliationController(
   };
 
   const reset = (): void => {
+    state.pending = undefined;
     state.generation += 1;
     state.activeGeneration = undefined;
-    state.pending = undefined;
     state.reconnectGeneration = 0;
     state.retryPending = false;
   };
