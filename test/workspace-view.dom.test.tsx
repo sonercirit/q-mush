@@ -31,7 +31,7 @@ import {
 import { TEST_PROMPT } from "../solid/test/prompt-fixtures.ts";
 import { ToolSettingsController } from "../solid/tool-settings-controller.ts";
 import { createWorkspaceViewState } from "../solid/workspace-client.tsx";
-import { WorkspaceController } from "../solid/workspace-controller.ts";
+import { createWorkspaceController } from "../solid/workspace-controller.ts";
 import { Workspace } from "../solid/workspace-view.tsx";
 
 const DISPOSALS: (() => void)[] = [];
@@ -120,7 +120,7 @@ test("discovers global fallbacks through the mounted workspace", async () => {
         toolSettings={new ToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}
         workspaces={
-          new WorkspaceController(
+          createWorkspaceController(
             undefined,
             createReactiveState(
               createWorkspaceViewState({

@@ -46,7 +46,7 @@ import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
 import { ToolSettingsController } from "./tool-settings-controller.ts";
-import { WorkspaceController } from "./workspace-controller.ts";
+import { createWorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
@@ -408,7 +408,7 @@ function App(): JSX.Element {
       load,
     ).catch(() => undefined);
   };
-  const workspaces = new WorkspaceController(reloadScopedData);
+  const workspaces = createWorkspaceController(reloadScopedData);
 
   const resetWorkspaceConnections = (): void => {
     scopedLoadRevision += 1;
