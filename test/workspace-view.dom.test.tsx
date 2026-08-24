@@ -3,7 +3,7 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { testAgentModelOption } from "../shared/test/agent-model-fixtures.ts";
 import { TEST_WORKSPACE_LIST } from "../shared/test/workspace-fixtures.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import { PromptController } from "../solid/prompt-controller.ts";
+import { createPromptController } from "../solid/prompt-controller.ts";
 import { createPromptViewState } from "../solid/prompt-state.ts";
 import {
   BRAVE_SEARCH_PANEL,
@@ -94,7 +94,7 @@ test("discovers global fallbacks through the mounted workspace", async () => {
       ),
     );
   const openRouterState = createReactiveState(createProviderViewState([]));
-  const prompts = new PromptController(
+  const prompts = createPromptController(
     createReactiveState(createPromptViewState([TEST_PROMPT])),
   );
   const container = mountTestView(

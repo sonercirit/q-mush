@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { PromptBank } from "../../solid/prompt-client.tsx";
-import { PromptController } from "../../solid/prompt-controller.ts";
+import { createPromptController } from "../../solid/prompt-controller.ts";
 import {
   createPromptViewState,
   type PromptViewState,
@@ -16,7 +16,7 @@ test("renders prompt creation, selection, editing, and deletion controls", () =>
     editingId: TEST_PROMPT.id,
     selectedId: TEST_PROMPT.id,
   };
-  const controller = new PromptController(createReactiveState(state));
+  const controller = createPromptController(createReactiveState(state));
   const html = renderSolidToString(() => (
     <PromptBank controller={controller} onInsert={() => true} />
   ));
@@ -33,10 +33,10 @@ test("renders prompt creation, selection, editing, and deletion controls", () =>
 });
 
 test("renders loading, empty, and error states", () => {
-  const loading = new PromptController(
+  const loading = createPromptController(
     createReactiveState(createPromptViewState(undefined)),
   );
-  const empty = new PromptController(
+  const empty = createPromptController(
     createReactiveState<PromptViewState>({
       ...createPromptViewState([]),
       error: "A prompt with that name already exists.",

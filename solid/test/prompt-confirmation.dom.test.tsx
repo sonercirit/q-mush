@@ -1,7 +1,7 @@
 import type { JSX } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import { PromptBank } from "../prompt-client.tsx";
-import { PromptController } from "../prompt-controller.ts";
+import { createPromptController } from "../prompt-controller.ts";
 import { createPromptViewState } from "../prompt-state.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import {
@@ -25,7 +25,7 @@ function mountPromptBank(
   const reactive = createReactiveState(
     createPromptViewState([TEST_PROMPT, SECOND_PROMPT]),
   );
-  const controller = new PromptController(reactive);
+  const controller = createPromptController(reactive);
   const renderBank = (): JSX.Element => (
     <PromptBank controller={controller} onInsert={onInsert} />
   );

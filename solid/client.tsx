@@ -22,7 +22,7 @@ import {
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
-import { PromptController } from "./prompt-controller.ts";
+import { createPromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
   GENERIC_PANEL,
@@ -301,7 +301,7 @@ function App(): JSX.Element {
   const generic = new ProviderController(GENERIC_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
-  const prompts = new PromptController();
+  const prompts = createPromptController();
   const runners = new RunnerController();
   const toolSettings = createToolSettingsController();
   const realtime: RealtimeConnection = new RealtimeConnection(

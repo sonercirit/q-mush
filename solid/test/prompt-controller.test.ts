@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { PromptController } from "../../solid/prompt-controller.ts";
+import { createPromptController, type PromptController } from "../../solid/prompt-controller.ts";
 import { createPromptViewState } from "../../solid/prompt-state.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { installFetch } from "./controller-test-helpers.ts";
@@ -38,7 +38,7 @@ function collection(prompts: readonly (typeof TEST_PROMPT)[]): Response {
 }
 
 async function loadedController(): Promise<PromptController> {
-  const controller = new PromptController();
+  const controller = createPromptController();
   await controller.load();
   return controller;
 }
@@ -159,7 +159,7 @@ test("refreshes stale deletes and keeps the prompt", async () => {
 });
 
 test("inserts a copy rather than a link to later edits", () => {
-  const controller = new PromptController(
+  const controller = createPromptController(
     createReactiveState(createPromptViewState([TEST_PROMPT])),
   );
   controller.select(TEST_PROMPT.id);
