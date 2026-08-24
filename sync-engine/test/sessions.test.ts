@@ -40,10 +40,12 @@ import {
 } from "./session-store-test-fixtures.ts";
 
 const SECOND_WORKSPACE_ID = "018bcfe5-6800-7000-8000-000000000081";
-class FailingModel implements AgentModel {
-  complete(): Promise<AgentModelStep> {
-    return Promise.reject(new Error("Provider unavailable"));
-  }
+function createFailingModel(): AgentModel {
+  return {
+    complete(): Promise<AgentModelStep> {
+      return Promise.reject(new Error("Provider unavailable"));
+    },
+  };
 }
 
 async function startSessionWithAgentFile(
@@ -232,7 +234,7 @@ describe("agent sessions", () => {
     // Account for the shared injected timestamp read by startup repair/recovery.
     let now = TEST_NOW - 3_000;
     const setup = connectedSessionSetup(
-      new FailingModel(),
+      createFailingModel(),
       "api_key",
       undefined,
       { now: () => (now += 3_000) },
