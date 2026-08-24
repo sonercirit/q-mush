@@ -3,13 +3,16 @@ import { TEST_SESSION_FORK_SELECTION } from "../../shared/test/session-fork-fixt
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 import { selectedSessionViewState } from "./session-selected-state.ts";
 
 type ForkCommand = NonNullable<
-  ConstructorParameters<typeof SessionController>[3]
+  Parameters<typeof createSessionController>[3]
 >["command"];
 
 function forkedSession() {
@@ -22,7 +25,7 @@ function forkedSession() {
 
 function forkController(command: ForkCommand): SessionController {
   const state = initialSessionViewState();
-  return new SessionController(
+  return createSessionController(
     createReactiveState<SessionViewState>(selectedSessionViewState(state)),
     undefined,
     null,

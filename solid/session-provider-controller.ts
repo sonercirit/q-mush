@@ -1,7 +1,7 @@
 import type { OpenRouterProviderCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
-import { DiscoveryCache } from "./discovery-cache.ts";
+import { createDiscoveryCache } from "./discovery-cache.ts";
 import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -13,111 +13,57 @@ function discoveryKey(credential: string, model: string): string {
   return `${credential}\n${model}`;
 }
 
-export class SessionProviderController {
-  readonly #catalogs = new DiscoveryCache<OpenRouterProviderCatalog>();
-  readonly #state: RevisionState<SessionViewState>;
-  #workspaceId = "";
+export interface SessionProviderController {
+  clear(): void;
+  ensure(credentialValue: string, model: string, force?: boolean): void;
+  reset(): void;
+  setWorkspace(workspaceId: string): void;
+}
 
-  constructor(state: RevisionState<SessionViewState>) {
-    this.#state = state;
-  }
-
-  clear(): void {
-    this.#catalogs.delete();
-    const draft = this.#state.value.draft;
-    if (
-      draft.openRouterProviderTag.length > 0 ||
-      this.#state.value.providerDiscovery.key !== undefined
-    ) {
-      this.#state.patch({
-        draft: { ...draft, openRouterProviderTag: "" },
-        openSelect:
-          this.#state.value.openSelect === "openRouterProviderTag"
-            ? undefined
-            : this.#state.value.openSelect,
-        providerDiscovery: sessionProviderDiscoveryState(undefined, false),
-      });
-    }
-  }
-
-  ensure(credentialValue: string, model: string, force = false): void {
-    const credential = selectedSessionCredential(credentialValue);
-    if (
-      credential?.provider !== "openrouter" ||
-      model.length === 0 ||
-      !this.#matchesDraft(credentialValue, model)
-    ) {
-      this.clear();
-      return;
-    }
-
-    const key = discoveryKey(credentialValue, model);
-    const discovery = this.#state.value.providerDiscovery;
-    if (
-      !shouldDiscover({
-        currentKey: discovery.key,
-        expectedKey: key,
-        force,
-        state: discovery,
-      })
-    ) {
-      return;
-    }
-    const applyCached = (
-      cachedKey: string,
-      catalog: OpenRouterProviderCatalog,
-    ): void => {
-      this.#apply(cachedKey, catalog);
-    };
-    this.#catalogs.begin(key, force, applyCached, (request) => {
-      this.#state.patch({
-        draft: { ...this.#state.value.draft, openRouterProviderTag: "" },
-        openSelect: undefined,
-        providerDiscovery: sessionProviderDiscoveryState(key, true),
-      });
-      void this.#load(
-        request,
-        key,
-        credentialValue,
-        credential.credentialId,
-        model,
-      );
+export function createSessionProviderController(
+  state: RevisionState<SessionViewState>,
+): SessionProviderController {
+  const catalogs = createDiscoveryCache<OpenRouterProviderCatalog>();
+  let workspaceId = "";
+  const matchesDraft = (credential: string, model: string): boolean =>
+    state.value.draft.credential === credential &&
+    state.value.draft.model === model;
+  const apply = (key: string, catalog: OpenRouterProviderCatalog): void => {
+    state.patch({
+      openSelect: undefined,
+      providerDiscovery: sessionProviderDiscoveryState(key, false, catalog),
     });
-  }
-
-  async #load(
+  };
+  async function load(
     request: number,
     key: string,
     credentialValue: string,
     credentialId: string,
     model: string,
   ): Promise<void> {
-    const query = new URLSearchParams({
-      credentialId,
-      model,
-      workspaceId: this.#workspaceId,
-    });
+    const query = new URLSearchParams();
+    query.set("credentialId", credentialId);
+    query.set("model", model);
+    query.set("workspaceId", workspaceId);
     try {
       const catalog = readOpenRouterProviderCatalog(
         await requestJson(
           `${SESSION_OPENROUTER_PROVIDERS_PATH}?${query.toString()}`,
         ),
       );
-      this.#catalogs.resolve(
+      catalogs.resolve(
         request,
         key,
         catalog,
-        () => this.#matchesDraft(credentialValue, model),
-        (resolvedKey, resolvedCatalog) => {
-          this.#apply(resolvedKey, resolvedCatalog);
-        },
+        () => matchesDraft(credentialValue, model),
+        apply,
       );
     } catch {
-      this.#catalogs.handleFailure(
+      catalogs.handleFailure(
         request,
-        () => this.#matchesDraft(credentialValue, model),
+        () => matchesDraft(credentialValue, model),
         () => {
-          this.#state.patch({
+          state.patch({
             providerDiscovery: sessionProviderDiscoveryState(
               key,
               false,
@@ -129,27 +75,68 @@ export class SessionProviderController {
       );
     }
   }
-
-  reset(): void {
-    this.#catalogs.clear();
-    this.#workspaceId = "";
-  }
-
-  setWorkspace(workspaceId: string): void {
-    this.#catalogs.clear();
-    this.clear();
-    this.#workspaceId = workspaceId;
-  }
-
-  #apply(key: string, catalog: OpenRouterProviderCatalog): void {
-    this.#state.patch({
-      openSelect: undefined,
-      providerDiscovery: sessionProviderDiscoveryState(key, false, catalog),
-    });
-  }
-
-  #matchesDraft(credential: string, model: string): boolean {
-    const draft = this.#state.value.draft;
-    return draft.credential === credential && draft.model === model;
-  }
+  const controller: SessionProviderController = {
+    clear() {
+      catalogs.delete();
+      const draft = state.value.draft;
+      if (
+        draft.openRouterProviderTag.length > 0 ||
+        state.value.providerDiscovery.key !== undefined
+      )
+        state.patch({
+          draft: { ...draft, openRouterProviderTag: "" },
+          openSelect:
+            state.value.openSelect === "openRouterProviderTag"
+              ? undefined
+              : state.value.openSelect,
+          providerDiscovery: sessionProviderDiscoveryState(undefined, false),
+        });
+    },
+    ensure(credentialValue, model, force = false) {
+      const credential = selectedSessionCredential(credentialValue);
+      if (
+        credential?.provider !== "openrouter" ||
+        model.length === 0 ||
+        !matchesDraft(credentialValue, model)
+      ) {
+        controller.clear();
+        return;
+      }
+      const key = discoveryKey(credentialValue, model);
+      const discovery = state.value.providerDiscovery;
+      if (
+        !shouldDiscover({
+          currentKey: discovery.key,
+          expectedKey: key,
+          force,
+          state: discovery,
+        })
+      )
+        return;
+      catalogs.begin(key, force, apply, (request) => {
+        state.patch({
+          draft: { ...state.value.draft, openRouterProviderTag: "" },
+          openSelect: undefined,
+          providerDiscovery: sessionProviderDiscoveryState(key, true),
+        });
+        void load(
+          request,
+          key,
+          credentialValue,
+          credential.credentialId,
+          model,
+        );
+      });
+    },
+    reset() {
+      catalogs.clear();
+      workspaceId = "";
+    },
+    setWorkspace(nextWorkspaceId) {
+      catalogs.clear();
+      controller.clear();
+      workspaceId = nextWorkspaceId;
+    },
+  };
+  return controller;
 }

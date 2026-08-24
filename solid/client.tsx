@@ -22,30 +22,38 @@ import {
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
-import { PromptController } from "./prompt-controller.ts";
+import { createPromptController } from "./prompt-controller.ts";
 import {
   BRAVE_SEARCH_PANEL,
   GENERIC_PANEL,
   OPENAI_PANEL,
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
-import { ProviderController } from "./provider-controller.ts";
-import { RealtimeConnection } from "./realtime-client.ts";
+import { createProviderController } from "./provider-controller.ts";
 import {
+  createRealtimeConnection,
+  type RealtimeConnection,
+} from "./realtime-client.ts";
+import type { RealtimeClientEvent } from "./realtime-stream-buffer.ts";
+import {
+  createRenderDebugView,
   renderDebugBoundary,
   RenderDebugLegend,
   RenderDebugProvider,
   RenderDebugToggle,
-  RenderDebugView,
+  type RenderDebugView,
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
-import { RunnerController } from "./runner-controller.ts";
-import { SessionController } from "./session-controller.ts";
+import { createRunnerController } from "./runner-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
-import { ToolSettingsController } from "./tool-settings-controller.ts";
-import { WorkspaceController } from "./workspace-controller.ts";
+import { createToolSettingsController } from "./tool-settings-controller.ts";
+import { createWorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
 
 function readAuthenticatedUser(value: unknown): AuthenticatedUser | null {
@@ -273,6 +281,18 @@ function SignIn(props: {
   );
 }
 
+function dispatchRealtimeEvent<Type extends RealtimeClientEvent["type"]>(
+  event: Extract<RealtimeClientEvent, { readonly type: Type }>,
+  expectedType: Type,
+  handlers: {
+    [Kind in RealtimeClientEvent["type"]]: (
+      matched: Extract<RealtimeClientEvent, { readonly type: Kind }>,
+    ) => void;
+  },
+): void {
+  handlers[expectedType](event);
+}
+
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
@@ -282,62 +302,68 @@ function App(): JSX.Element {
     createSignal<EngineHealthSnapshot>();
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
-  const debug = new RenderDebugView();
-  const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
-  const generic = new ProviderController(GENERIC_PANEL);
-  const openAi = new ProviderController(OPENAI_PANEL);
-  const openRouter = new ProviderController(OPENROUTER_PANEL);
-  const prompts = new PromptController();
-  const runners = new RunnerController();
-  const toolSettings = new ToolSettingsController();
-  const realtime: RealtimeConnection = new RealtimeConnection(
+  const debug = createRenderDebugView();
+  const braveSearch = createProviderController(BRAVE_SEARCH_PANEL);
+  const generic = createProviderController(GENERIC_PANEL);
+  const openAi = createProviderController(OPENAI_PANEL);
+  const openRouter = createProviderController(OPENROUTER_PANEL);
+  const prompts = createPromptController();
+  const runners = createRunnerController();
+  const toolSettings = createToolSettingsController();
+  const realtime: RealtimeConnection = createRealtimeConnection(
     (event) => {
-      switch (event.type) {
-        case "health":
-          setStorageHealth(event.health);
-          break;
-        case "development_restart_progress":
-          setRestartProgress(event.progress);
-          break;
-        case "runners":
-          runners.applyRealtime(event.runners);
-          break;
-        case "tool_settings":
-          toolSettings.apply(event.settings);
-          break;
-        case "sessions":
-          agentSessions.applyRealtime(event.sessions);
-          break;
-        case "session":
-          agentSessions.applyDetail(event.session);
-          break;
-        case "session_questions":
-          agentSessions.applyQuestions(event);
-          break;
-        case "sessions_changed":
+      const handlers: {
+        [Type in RealtimeClientEvent["type"]]: (
+          matched: Extract<RealtimeClientEvent, { readonly type: Type }>,
+        ) => void;
+      } = {
+        command_error: () => undefined,
+        command_success: () => undefined,
+        development_restart_progress: (matched) => {
+          setRestartProgress(matched.progress);
+        },
+        health: (matched) => {
+          setStorageHealth(matched.health);
+        },
+        ready: () => undefined,
+        runners: (matched) => {
+          runners.applyRealtime(matched.runners);
+        },
+        session: (matched) => {
+          agentSessions.applyDetail(matched.session);
+        },
+        session_compaction_request: (matched) => {
+          agentSessions.applyCompaction(matched);
+        },
+        session_compaction_settled: (matched) => {
+          agentSessions.applyCompaction(matched);
+        },
+        session_questions: (matched) => {
+          agentSessions.applyQuestions(matched);
+        },
+        sessions: (matched) => {
+          agentSessions.applyRealtime(matched.sessions);
+        },
+        sessions_changed: () => {
           void agentSessions.refresh();
-          break;
-        case "session_compaction_request":
-        case "session_compaction_settled":
-          agentSessions.applyCompaction(event);
-          break;
-        case "stream_batch":
-          agentSessions.applyStreamBatch(event);
-          break;
-        case "tool_stream_snapshot":
-          agentSessions.applyToolSnapshot(event);
-          break;
-        case "command_error":
-        case "command_success":
-        case "ready":
-          break;
-      }
+        },
+        stream_batch: (matched) => {
+          agentSessions.applyStreamBatch(matched);
+        },
+        tool_settings: (matched) => {
+          toolSettings.apply(matched.settings);
+        },
+        tool_stream_snapshot: (matched) => {
+          agentSessions.applyToolSnapshot(matched);
+        },
+      };
+      dispatchRealtimeEvent(event, event.type, handlers);
     },
     {
       selectedSession: (): string | undefined => agentSessions.state.selectedId,
     },
   );
-  const agentSessions: SessionController = new SessionController(
+  const agentSessions: SessionController = createSessionController(
     undefined,
     undefined,
     undefined,
@@ -389,7 +415,7 @@ function App(): JSX.Element {
       load,
     ).catch(() => undefined);
   };
-  const workspaces = new WorkspaceController(reloadScopedData);
+  const workspaces = createWorkspaceController(reloadScopedData);
 
   const resetWorkspaceConnections = (): void => {
     scopedLoadRevision += 1;

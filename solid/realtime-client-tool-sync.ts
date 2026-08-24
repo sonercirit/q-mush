@@ -8,72 +8,74 @@ export interface ToolSyncRequest {
   readonly streamId: string;
 }
 
+export interface ToolSyncTracker {
+  clear(): void;
+  pending(): readonly ToolSyncRequest[];
+  remember(request: ToolSyncRequest): void;
+  resolve(request: ToolSyncRequest): void;
+  resolveSession(sessionId: string): void;
+  unresolved(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[];
+}
+
 export function toolSyncKey(request: ToolSyncRequest): string {
   return JSON.stringify([request.sessionId, request.streamId]);
 }
 
-export class ToolSyncTracker {
-  readonly #pending = new Map<string, ToolSyncRequest>();
-  readonly #sessionCounts = new Map<string, number>();
-
-  clear(): void {
-    this.#pending.clear();
-    this.#sessionCounts.clear();
-  }
-
-  pending(): readonly ToolSyncRequest[] {
-    return [...this.#pending.values()];
-  }
-
-  #delete(key: string): void {
-    const request = this.#pending.get(key);
+export function createToolSyncTracker(): ToolSyncTracker {
+  const pending = new Map<string, ToolSyncRequest>();
+  const sessionCounts = new Map<string, number>();
+  const deleteRequest = (key: string): void => {
+    const request = pending.get(key);
     if (request === undefined) return;
-    this.#pending.delete(key);
-    const count = (this.#sessionCounts.get(request.sessionId) ?? 1) - 1;
-    if (count === 0) this.#sessionCounts.delete(request.sessionId);
-    else this.#sessionCounts.set(request.sessionId, count);
-  }
-
-  remember(request: ToolSyncRequest): void {
-    const key = toolSyncKey(request);
-    this.#delete(key);
-    this.#pending.set(key, request);
-    this.#sessionCounts.set(
-      request.sessionId,
-      (this.#sessionCounts.get(request.sessionId) ?? 0) + 1,
-    );
-    while (
-      (this.#sessionCounts.get(request.sessionId) ?? 0) >
-      MAXIMUM_TOOL_STREAMS_PER_SESSION
-    ) {
-      for (const [candidateKey, pending] of this.#pending) {
-        if (pending.sessionId !== request.sessionId) continue;
-        this.#delete(candidateKey);
-        break;
+    pending.delete(key);
+    const count = (sessionCounts.get(request.sessionId) ?? 1) - 1;
+    if (count === 0) sessionCounts.delete(request.sessionId);
+    else sessionCounts.set(request.sessionId, count);
+  };
+  return {
+    clear() {
+      pending.clear();
+      sessionCounts.clear();
+    },
+    pending: () => [...pending.values()],
+    remember(request) {
+      const key = toolSyncKey(request);
+      deleteRequest(key);
+      pending.set(key, request);
+      sessionCounts.set(
+        request.sessionId,
+        (sessionCounts.get(request.sessionId) ?? 0) + 1,
+      );
+      while (
+        (sessionCounts.get(request.sessionId) ?? 0) >
+        MAXIMUM_TOOL_STREAMS_PER_SESSION
+      ) {
+        for (const [candidateKey, candidate] of pending) {
+          if (candidate.sessionId !== request.sessionId) continue;
+          deleteRequest(candidateKey);
+          break;
+        }
       }
-    }
-    while (this.#pending.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
-      const oldest = this.#pending.keys().next().value;
-      if (oldest === undefined) break;
-      this.#delete(oldest);
-    }
-  }
-
-  resolve(request: ToolSyncRequest): void {
-    this.#delete(toolSyncKey(request));
-  }
-
-  resolveSession(sessionId: string): void {
-    for (const [key, request] of this.#pending) {
-      if (request.sessionId === sessionId) this.#delete(key);
-    }
-  }
-
-  unresolved(requests: readonly ToolSyncRequest[]): readonly ToolSyncRequest[] {
-    const unique = new Map<string, ToolSyncRequest>();
-    for (const request of requests) unique.set(toolSyncKey(request), request);
-    return [...unique].flatMap(([key, request]) =>
-      this.#pending.has(key) ? [] : [request],
-    );
-  }
+      while (pending.size > MAXIMUM_TOOL_STREAMS_PER_USER) {
+        const oldest = pending.keys().next().value;
+        if (oldest === undefined) break;
+        deleteRequest(oldest);
+      }
+    },
+    resolve(request) {
+      deleteRequest(toolSyncKey(request));
+    },
+    resolveSession(sessionId) {
+      for (const [key, request] of pending) {
+        if (request.sessionId === sessionId) deleteRequest(key);
+      }
+    },
+    unresolved(requests) {
+      const unique = new Map<string, ToolSyncRequest>();
+      for (const request of requests) unique.set(toolSyncKey(request), request);
+      return [...unique].flatMap(([key, request]) =>
+        pending.has(key) ? [] : [request],
+      );
+    },
+  };
 }

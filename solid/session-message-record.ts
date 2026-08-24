@@ -8,19 +8,24 @@ export function readMessageRecord(
   return requireRecord(value, message);
 }
 
+const MESSAGE_ROLES: Record<AgentSessionMessage["role"], true> = {
+  assistant: true,
+  compaction_request: true,
+  error: true,
+  system: true,
+  thinking: true,
+  tool: true,
+  user: true,
+};
+
+function isSessionMessageRole(
+  value: unknown,
+): value is AgentSessionMessage["role"] {
+  return typeof value === "string" && Object.hasOwn(MESSAGE_ROLES, value);
+}
+
 export function sessionMessageRole(
   value: unknown,
 ): AgentSessionMessage["role"] | undefined {
-  switch (value) {
-    case "assistant":
-    case "compaction_request":
-    case "error":
-    case "system":
-    case "thinking":
-    case "tool":
-    case "user":
-      return value;
-    default:
-      return undefined;
-  }
+  return isSessionMessageRole(value) ? value : undefined;
 }

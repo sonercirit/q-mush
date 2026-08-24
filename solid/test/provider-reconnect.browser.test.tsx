@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "vitest";
-import { ProviderController } from "../provider-controller.ts";
+import { createProviderController } from "../provider-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import "../styles.css";
 import { providerViewState } from "./client-state-fixtures.ts";
@@ -12,7 +12,7 @@ import {
 afterEach(resetProviderDomTestMocks);
 
 test("an OpenAI OAuth credential without a verified identity cannot reconnect", () => {
-  const controller = new ProviderController(
+  const controller = createProviderController(
     OPENAI_PANEL,
     createReactiveState(
       providerViewState([

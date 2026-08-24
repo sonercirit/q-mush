@@ -9,21 +9,17 @@ import { renderDebugBoundary } from "./render-debug.tsx";
 import { renderToolArguments } from "./session-sleep-renderer.tsx";
 import { renderLiveToolResult } from "./session-tool-result.tsx";
 
+const TOOL_STATE_LABELS: Readonly<Record<ToolStreamState, string>> = {
+  canceled: "Canceled",
+  completed: "Completed",
+  failed: "Failed",
+  preparing: "Preparing",
+  running: "Running",
+  "timed-out": "Timed out",
+};
+
 function toolStateLabel(state: ToolStreamState): string {
-  switch (state) {
-    case "preparing":
-      return "Preparing";
-    case "running":
-      return "Running";
-    case "completed":
-      return "Completed";
-    case "failed":
-      return "Failed";
-    case "canceled":
-      return "Canceled";
-    case "timed-out":
-      return "Timed out";
-  }
+  return TOOL_STATE_LABELS[state];
 }
 
 function LiveToolOutput(props: {

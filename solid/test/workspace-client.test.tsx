@@ -7,13 +7,13 @@ import {
   WorkspaceSwitcher,
   createWorkspaceViewState,
 } from "../../solid/workspace-client.tsx";
-import { WorkspaceController } from "../../solid/workspace-controller.ts";
+import { createWorkspaceController } from "../../solid/workspace-controller.ts";
 import { renderSolidToString } from "./render-solid.tsx";
 
 const LIST = TEST_WORKSPACE_LIST;
 
 test("renders virtual Global selection and ordinary workspace management", () => {
-  const controller = new WorkspaceController(
+  const controller = createWorkspaceController(
     undefined,
     createReactiveState(createWorkspaceViewState(LIST)),
   );

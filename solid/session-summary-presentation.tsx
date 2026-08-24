@@ -95,17 +95,18 @@ function formatSessionCost(costUsd: number): string {
   return costUsd < 0.01 ? `$${costUsd.toFixed(4)}` : `$${costUsd.toFixed(2)}`;
 }
 
+const SESSION_COST_TEXT: Readonly<
+  Record<AgentSessionSummary["costBasis"], (costUsd: number) => string>
+> = {
+  estimated: (costUsd) => `Estimated cost: ${formatSessionCost(costUsd)}`,
+  none: () => "Cost: Not available",
+  reported: (costUsd) => `Cost: ${formatSessionCost(costUsd)}`,
+};
+
 function sessionCostText(
   session: Pick<AgentSessionSummary, "costBasis" | "costUsd">,
 ): string {
-  switch (session.costBasis) {
-    case "estimated":
-      return `Estimated cost: ${formatSessionCost(session.costUsd)}`;
-    case "none":
-      return "Cost: Not available";
-    case "reported":
-      return `Cost: ${formatSessionCost(session.costUsd)}`;
-  }
+  return SESSION_COST_TEXT[session.costBasis](session.costUsd);
 }
 
 function liveDuration(now: number, startedAt: number): string {

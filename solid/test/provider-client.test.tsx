@@ -5,7 +5,7 @@ import {
   OPENROUTER_PANEL,
   ProviderPanel,
 } from "../../solid/provider-client.tsx";
-import { ProviderController } from "../../solid/provider-controller.ts";
+import { createProviderController } from "../../solid/provider-controller.ts";
 import type { ProviderPanelConfiguration } from "../../solid/provider-panel-configuration.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import { providerViewState } from "./client-state-fixtures.ts";
@@ -32,7 +32,7 @@ function renderedProviderPanel(
   configuration: ProviderPanelConfiguration,
   state: ReturnType<typeof providerViewState>,
 ): string {
-  const controller = new ProviderController(
+  const controller = createProviderController(
     configuration,
     createReactiveState(state),
   );
@@ -59,7 +59,7 @@ const STATE = providerViewState([
 ]);
 
 test("renders a generic endpoint form with an optional API key", () => {
-  const controller = new ProviderController(
+  const controller = createProviderController(
     GENERIC_PANEL,
     createReactiveState(
       providerViewState([
@@ -160,7 +160,7 @@ test.each([
 );
 
 test("renders provider default controls", () => {
-  const controller = new ProviderController(
+  const controller = createProviderController(
     OPENAI_PANEL,
     createReactiveState(STATE),
   );

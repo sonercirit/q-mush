@@ -11,6 +11,7 @@ import {
 import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
+import type { RunnerController } from "./runner-controller.ts";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
 
 export interface RunnerSetupInstructions {
@@ -132,17 +133,14 @@ export function readCreatedRunner(value: unknown): CreatedRunnerSetup {
   };
 }
 
+const PLATFORM_LABELS: Readonly<Record<string, string>> = {
+  darwin: "macOS",
+  linux: "Linux",
+  win32: "Windows",
+};
+
 function platformLabel(value: string): string {
-  switch (value) {
-    case "darwin":
-      return "macOS";
-    case "linux":
-      return "Linux";
-    case "win32":
-      return "Windows";
-    default:
-      return value;
-  }
+  return PLATFORM_LABELS[value] ?? value;
 }
 
 function runnerDetails(runner: RunnerSummary): string {
@@ -168,7 +166,7 @@ function runnerActivity(runner: RunnerSummary): string {
 }
 
 interface RunnerItemProps {
-  readonly controller: RunnerPanelController;
+  readonly controller: RunnerController;
   readonly runner: RunnerSummary;
   readonly state: Accessor<RunnerViewState>;
   readonly workspaces?: Accessor<WorkspaceList | undefined>;
@@ -244,7 +242,7 @@ function RunnerItem(props: RunnerItemProps): JSX.Element {
 }
 
 interface RunnerPanelProps {
-  readonly controller: RunnerPanelController;
+  readonly controller: RunnerController;
   readonly state: RunnerViewState;
 }
 
@@ -294,7 +292,7 @@ function RunnerSetup(props: RunnerPanelProps): JSX.Element {
 }
 
 interface RunnerControllerProps {
-  readonly controller: RunnerPanelController;
+  readonly controller: RunnerController;
   readonly workspaces?: Accessor<WorkspaceList | undefined>;
 }
 
@@ -377,14 +375,4 @@ export function RunnerPanel(props: RunnerControllerProps): JSX.Element {
       />
     </section>
   );
-}
-
-interface RunnerPanelController {
-  readonly view: Accessor<RunnerViewState>;
-  copyCommand(): Promise<void>;
-  create(): Promise<void>;
-  load(): Promise<void>;
-  remove(runnerId: string): Promise<void>;
-  setDefault(runnerId: string): Promise<void>;
-  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void>;
 }

@@ -110,22 +110,27 @@ interface ActivePendingInputAttempt {
   readonly revision: number;
 }
 
-export class SessionPendingInputController {
-  #activeAttempt: ActivePendingInputAttempt | undefined;
-  readonly #options: PendingInputControllerOptions;
+export interface SessionPendingInputController {
+  cancel(inputId: string): Promise<void>;
+  reconcile(detail: AgentSessionDetail): void;
+  reset(): void;
+  retry(clientRequestId: string): Promise<void>;
+  submit(kind: AgentSessionPendingInputKind): Promise<void>;
+}
 
-  constructor(options: PendingInputControllerOptions) {
-    this.#options = options;
-  }
+export function createSessionPendingInputController(
+  options: PendingInputControllerOptions,
+): SessionPendingInputController {
+  let activeAttempt: ActivePendingInputAttempt | undefined;
 
-  #sessionInput():
+  function sessionInput():
     | {
         readonly detail: NonNullable<SessionViewState["detail"]>;
         readonly sessionId: string;
         readonly state: SessionViewState;
       }
     | undefined {
-    const state = this.#options.view.value;
+    const state = options.view.value;
     const detail = state.detail;
     const sessionId = state.selectedId;
     return sessionId !== undefined && detail?.id === sessionId
@@ -133,34 +138,34 @@ export class SessionPendingInputController {
       : undefined;
   }
 
-  #startMutation(): number {
-    const revision = this.#options.view.begin({
+  function startMutation(): number {
+    const revision = options.view.begin({
       error: undefined,
       sending: true,
     });
-    this.#options.loader.noteMutationStarted();
-    const sessionId = this.#options.view.value.selectedId;
-    if (sessionId !== undefined) this.#options.realtime.rebaseStream(sessionId);
+    options.loader.noteMutationStarted();
+    const sessionId = options.view.value.selectedId;
+    if (sessionId !== undefined) options.realtime.rebaseStream(sessionId);
     return revision;
   }
 
-  #finishMutation(): void {
-    this.#options.loader.continueHydration();
+  function finishMutation(): void {
+    options.loader.continueHydration();
   }
 
-  #withoutAttempt(attempt: PendingInputAttempt) {
+  function withoutAttempt(attempt: PendingInputAttempt) {
     return withoutOptimisticPendingInput(
-      this.#options.view.value.optimisticPendingInputs,
+      options.view.value.optimisticPendingInputs,
       attempt.clientRequestId,
     );
   }
 
-  reset(): void {
-    this.#activeAttempt = undefined;
+  function reset(): void {
+    activeAttempt = undefined;
   }
 
-  reconcile(detail: AgentSessionDetail): void {
-    const active = this.#activeAttempt;
+  function reconcile(detail: AgentSessionDetail): void {
+    const active = activeAttempt;
     if (
       active?.attempt.sessionId !== detail.id ||
       !detail.pendingInputs.some(
@@ -173,26 +178,26 @@ export class SessionPendingInputController {
     active.confirmed = true;
     active.confirmedDetail = detail;
     active.confirm?.(detail);
-    if (this.#activeAttempt === active) {
-      this.#activeAttempt = undefined;
+    if (activeAttempt === active) {
+      activeAttempt = undefined;
     }
-    this.#options.view.patchCurrent(active.revision, { sending: false });
-    this.#finishMutation();
+    options.view.patchCurrent(active.revision, { sending: false });
+    finishMutation();
   }
 
-  async cancel(inputId: string): Promise<void> {
-    const selected = this.#sessionInput();
+  async function cancel(inputId: string): Promise<void> {
+    const selected = sessionInput();
     if (
-      this.#options.transport === undefined ||
+      options.transport === undefined ||
       selected === undefined ||
       sessionMutationPending(selected.state) ||
       !selected.detail.pendingInputs.some((input) => input.id === inputId)
     ) {
       return;
     }
-    const revision = this.#startMutation();
+    const revision = startMutation();
     try {
-      const value = await this.#options.transport.command(
+      const value = await options.transport.command(
         SESSION_REALTIME_OPERATIONS.cancelPendingInput,
         { inputId, sessionId: selected.sessionId },
         crypto.randomUUID(),
@@ -204,16 +209,16 @@ export class SessionPendingInputController {
       }
       const authoritative = readSessionDetail(value["detail"]);
       const input = readSessionPendingInput(value["input"]);
-      if (input.id !== inputId || !this.#options.view.isCurrent(revision)) {
+      if (input.id !== inputId || !options.view.isCurrent(revision)) {
         return;
       }
-      this.#applyAuthoritative(revision, authoritative, {
+      applyAuthoritative(revision, authoritative, {
         followUp: input.content,
         followUpImages: input.images,
         sending: false,
       });
     } catch (error) {
-      this.#options.view.patchCurrent(revision, {
+      options.view.patchCurrent(revision, {
         sending: false,
         error: sessionMutationError(
           normalizedSessionMutationError(error),
@@ -221,25 +226,25 @@ export class SessionPendingInputController {
         ),
       });
     } finally {
-      this.#finishMutation();
+      finishMutation();
     }
   }
 
-  #applyAuthoritative(
+  function applyAuthoritative(
     revision: number,
     detail: AgentSessionDetail,
     patch: Partial<SessionViewState>,
   ): void {
-    this.#options.realtime.applyDetail(detail);
-    this.#options.view.patchCurrent(revision, patch);
+    options.realtime.applyDetail(detail);
+    options.view.patchCurrent(revision, patch);
   }
 
-  async #sendAttempt(
+  async function sendAttempt(
     attempt: PendingInputAttempt,
     restoreDraft: boolean,
   ): Promise<void> {
     const optimistic = optimisticPendingInput(attempt, Date.now());
-    const revision = this.#startMutation();
+    const revision = startMutation();
     const active: ActivePendingInputAttempt = {
       attempt,
       confirm: undefined,
@@ -247,29 +252,29 @@ export class SessionPendingInputController {
       confirmedDetail: undefined,
       revision,
     };
-    this.#activeAttempt = active;
-    this.#options.view.patchCurrent(revision, {
+    activeAttempt = active;
+    options.view.patchCurrent(revision, {
       ...(restoreDraft ? {} : { followUp: "", followUpImages: [] }),
-      optimisticPendingInputs: [...this.#withoutAttempt(attempt), optimistic],
+      optimisticPendingInputs: [...withoutAttempt(attempt), optimistic],
     });
     try {
-      const transport = this.#options.transport;
+      const transport = options.transport;
       if (transport === undefined) {
         return;
       }
       const pending = requestPendingInputWithTimeout(
         transport,
         attempt,
-        this.#options.timer ?? DEFAULT_PENDING_INPUT_TIMER,
+        options.timer ?? DEFAULT_PENDING_INPUT_TIMER,
       );
       active.confirm = pending.confirm;
       if (active.confirmedDetail !== undefined) {
         pending.confirm(active.confirmedDetail);
       }
       const authoritative = readSessionDetail(await pending.result);
-      if (this.#options.view.isCurrent(revision)) {
-        this.#applyAuthoritative(revision, authoritative, {
-          optimisticPendingInputs: this.#withoutAttempt(attempt),
+      if (options.view.isCurrent(revision)) {
+        applyAuthoritative(revision, authoritative, {
+          optimisticPendingInputs: withoutAttempt(attempt),
           sending: false,
         });
       }
@@ -282,12 +287,12 @@ export class SessionPendingInputController {
       const draft = restoreDraft
         ? {}
         : { followUp: attempt.prompt, followUpImages: attempt.images };
-      this.#options.view.patchCurrent(revision, {
+      options.view.patchCurrent(revision, {
         ...(outcomeUnknown
           ? {
               ...draft,
               optimisticPendingInputs:
-                this.#options.view.value.optimisticPendingInputs.map((input) =>
+                options.view.value.optimisticPendingInputs.map((input) =>
                   input.clientRequestId === attempt.clientRequestId
                     ? { ...input, status: "unconfirmed" }
                     : input,
@@ -295,7 +300,7 @@ export class SessionPendingInputController {
             }
           : {
               ...draft,
-              optimisticPendingInputs: this.#withoutAttempt(attempt),
+              optimisticPendingInputs: withoutAttempt(attempt),
             }),
         sending: false,
         error: sessionMutationError(
@@ -306,21 +311,21 @@ export class SessionPendingInputController {
         ),
       });
     } finally {
-      if (this.#activeAttempt === active) {
-        this.#activeAttempt = undefined;
+      if (activeAttempt === active) {
+        activeAttempt = undefined;
       }
-      this.#finishMutation();
+      finishMutation();
     }
   }
 
-  async retry(clientRequestId: string): Promise<void> {
-    const selected = this.#sessionInput();
+  async function retry(clientRequestId: string): Promise<void> {
+    const selected = sessionInput();
     const blocked =
       selected === undefined || sessionMutationPending(selected.state);
-    if (blocked || this.#options.transport === undefined) {
+    if (blocked || options.transport === undefined) {
       return;
     }
-    const input = this.#options.view.value.optimisticPendingInputs.find(
+    const input = options.view.value.optimisticPendingInputs.find(
       (candidate) =>
         candidate.clientRequestId === clientRequestId &&
         candidate.status === "unconfirmed",
@@ -331,7 +336,7 @@ export class SessionPendingInputController {
     ) {
       return;
     }
-    await this.#sendAttempt(
+    await sendAttempt(
       {
         clientRequestId: input.clientRequestId,
         images: input.images,
@@ -343,13 +348,13 @@ export class SessionPendingInputController {
     );
   }
 
-  async submit(kind: AgentSessionPendingInputKind): Promise<void> {
-    const selected = this.#sessionInput();
-    const state = selected?.state ?? this.#options.view.value;
+  async function submit(kind: AgentSessionPendingInputKind): Promise<void> {
+    const selected = sessionInput();
+    const state = selected?.state ?? options.view.value;
     const prompt = state.followUp.trim();
     const images = state.followUpImages;
     if (
-      this.#options.transport === undefined ||
+      options.transport === undefined ||
       selected === undefined ||
       selected.detail.runnerRequired ||
       sessionMutationPending(state) ||
@@ -368,6 +373,8 @@ export class SessionPendingInputController {
       ...requested,
       clientRequestId: crypto.randomUUID(),
     };
-    await this.#sendAttempt(attempt, false);
+    await sendAttempt(attempt, false);
   }
+
+  return { cancel, reconcile, reset, retry, submit };
 }

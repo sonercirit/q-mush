@@ -6,7 +6,10 @@ import {
 } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { SessionController } from "../../solid/session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import type { SessionCommandTransport } from "../../solid/session-transport.ts";
@@ -385,7 +388,7 @@ function createReconciliationScenario(
   state: SessionViewState,
 ): ReconciliationScenario {
   const transport = createControlledSessionTransport();
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState(state),
     undefined,
     null,

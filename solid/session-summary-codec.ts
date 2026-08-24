@@ -17,19 +17,32 @@ import {
   readFiniteNumber,
 } from "../shared/validation.ts";
 
+const STATUS_READERS: Readonly<
+  Record<AgentSessionStatus, () => AgentSessionStatus>
+> = {
+  completed: () => "completed",
+  failed: () => "failed",
+  idle: () => "idle",
+  paused: () => "paused",
+  queued: () => "queued",
+  running: () => "running",
+  stopped: () => "stopped",
+};
+
+function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
+  return (
+    value === "completed" ||
+    value === "failed" ||
+    value === "idle" ||
+    value === "paused" ||
+    value === "queued" ||
+    value === "running" ||
+    value === "stopped"
+  );
+}
+
 function readStatus(value: unknown): AgentSessionStatus | undefined {
-  switch (value) {
-    case "completed":
-    case "failed":
-    case "idle":
-    case "paused":
-    case "queued":
-    case "running":
-    case "stopped":
-      return value;
-    default:
-      return undefined;
-  }
+  return isAgentSessionStatus(value) ? STATUS_READERS[value]() : undefined;
 }
 
 function exactObjectKeys(value: object, expected: readonly string[]): boolean {
@@ -88,19 +101,31 @@ function readRestartHandoff(
     : undefined;
 }
 
+type RuntimePendingComponent = NonNullable<
+  AgentSessionSummary["runtimePending"]
+>["component"];
+
+const RUNTIME_PENDING_COMPONENTS: Readonly<
+  Record<RuntimePendingComponent, true>
+> = {
+  engine_tool: true,
+  provider_admission: true,
+  provider_request: true,
+  runner_command: true,
+  startup: true,
+};
+
 function isRuntimePendingComponent(
   value: unknown,
-): value is NonNullable<AgentSessionSummary["runtimePending"]>["component"] {
-  switch (value) {
-    case "engine_tool":
-    case "provider_admission":
-    case "provider_request":
-    case "runner_command":
-    case "startup":
-      return true;
-    default:
-      return false;
-  }
+): value is RuntimePendingComponent {
+  return (
+    (value === "engine_tool" ||
+      value === "provider_admission" ||
+      value === "provider_request" ||
+      value === "runner_command" ||
+      value === "startup") &&
+    RUNTIME_PENDING_COMPONENTS[value]
+  );
 }
 
 function readRuntimePending(

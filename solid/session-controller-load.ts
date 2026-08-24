@@ -93,100 +93,109 @@ function createdSessionsForKind(
     : created;
 }
 
-export class SessionLoadController {
-  #generation = 0;
-  #hydrating = false;
-  #hydrationPending = false;
-  #loadRevision = 0;
-  readonly #realtime: SessionRealtimeState;
-  readonly #transport: SessionCommandTransport | undefined;
-  readonly #view: RevisionState<SessionViewState>;
+export interface SessionLoadController {
+  readonly continueHydration: () => void;
+  readonly hydrateAfterReconnect: () => void;
+  readonly load: () => Promise<void>;
+  readonly noteMutationStarted: () => void;
+  readonly reconcileDetail: (
+    sessionId: string,
+  ) => Promise<AgentSessionDetail | undefined>;
+  readonly reconcileSessions: (
+    previousIds: ReadonlySet<string>,
+    kind?: SessionCreationKind,
+  ) => Promise<SessionCreationReconciliation | undefined>;
+  readonly refresh: () => Promise<void>;
+  readonly reset: () => void;
+  readonly select: (sessionId: string) => Promise<void>;
+}
 
-  constructor(
-    view: RevisionState<SessionViewState>,
-    realtime: SessionRealtimeState,
-    transport?: SessionCommandTransport,
-  ) {
-    this.#view = view;
-    this.#realtime = realtime;
-    this.#transport = transport;
-  }
+export function createSessionLoadController(
+  view: RevisionState<SessionViewState>,
+  realtime: SessionRealtimeState,
+  transport?: SessionCommandTransport,
+): SessionLoadController {
+  const state = {
+    generation: 0,
+    hydrating: false,
+    hydrationPending: false,
+    loadRevision: 0,
+  };
+  const hydrateAfterReconnect = (): void => {
+    state.hydrationPending = true;
+    continueHydration();
+  };
 
-  hydrateAfterReconnect(): void {
-    this.#hydrationPending = true;
-    this.continueHydration();
-  }
-
-  continueHydration(): void {
+  const continueHydration = (): void => {
     if (
-      !this.#hydrationPending ||
-      this.#hydrating ||
-      this.#transport === undefined ||
-      sessionMutationPending(this.#view.value)
+      !state.hydrationPending ||
+      state.hydrating ||
+      transport === undefined ||
+      sessionMutationPending(view.value)
     ) {
       return;
     }
-    this.#startHydration();
-  }
+    startHydration();
+  };
 
-  #startHydration(): void {
-    this.#generation += 1;
-    this.#hydrationPending = false;
-    this.#hydrating = true;
-    void this.#hydrate().finally(() => {
-      this.#hydrating = false;
-      this.continueHydration();
+  const startHydration = (): void => {
+    state.generation += 1;
+    state.hydrationPending = false;
+    state.hydrating = true;
+    void hydrate().finally(() => {
+      state.hydrating = false;
+      continueHydration();
     });
-  }
+  };
 
-  noteMutationStarted(): void {
-    if (this.#hydrating) {
-      this.#generation += 1;
-      this.#hydrationPending = true;
+  const noteMutationStarted = (): void => {
+    if (state.hydrating) {
+      state.generation += 1;
+      state.hydrationPending = true;
     }
-  }
+  };
 
-  reset(): void {
-    this.#generation += 1;
-    this.#hydrating = false;
-    this.#hydrationPending = false;
-    this.#loadRevision += 1;
-  }
+  const reset = (): void => {
+    state.generation += 1;
+    state.hydrating = false;
+    state.hydrationPending = false;
+    state.loadRevision += 1;
+  };
 
-  async reconcileDetail(
+  const reconcileDetail = async (
     sessionId: string,
-  ): Promise<AgentSessionDetail | undefined> {
-    const transport = this.#transport;
-    const generation = this.#generation;
-    if (transport === undefined || this.#view.value.selectedId !== sessionId) {
+  ): Promise<AgentSessionDetail | undefined> => {
+    const activeTransport = transport;
+    const generation = state.generation;
+    if (activeTransport === undefined || view.value.selectedId !== sessionId) {
       return undefined;
     }
     try {
-      const detail = await loadSessionDetail(sessionId, transport);
+      const detail = await loadSessionDetail(sessionId, activeTransport);
       if (
-        generation !== this.#generation ||
-        this.#view.value.selectedId !== sessionId ||
-        !sessionMutationPending(this.#view.value)
+        generation !== state.generation ||
+        view.value.selectedId !== sessionId ||
+        !sessionMutationPending(view.value)
       ) {
         return undefined;
       }
-      this.#realtime.applyDetail(detail);
+      realtime.applyDetail(detail);
       return detail;
     } catch {
       return undefined;
     }
-  }
+  };
 
-  async reconcileSessions(
+  const reconcileSessions = async (
     previousIds: ReadonlySet<string>,
     kind: SessionCreationKind = "create",
-  ): Promise<SessionCreationReconciliation | undefined> {
+  ): Promise<SessionCreationReconciliation | undefined> => {
     const pending = kind === "create" ? "creating" : "forking";
-    const source = kind === "fork" ? this.#view.value.detail : undefined;
-    const reconciliationGeneration = this.#generation;
-    const sessions = await this.#loadRealtimeSummaries();
+    const source = kind === "fork" ? view.value.detail : undefined;
+    const reconciliationGeneration = state.generation;
+    const sessions = await loadRealtimeSummaries();
     if (
-      reconciliationGeneration !== this.#generation ||
+      reconciliationGeneration !== state.generation ||
       sessions === undefined
     ) {
       return undefined;
@@ -201,7 +210,7 @@ export class SessionLoadController {
       if (createdSessions.length > 1) {
         return { status: "ambiguous" };
       }
-      if (!this.#view.value[pending]) {
+      if (!view.value[pending]) {
         return undefined;
       }
       const created = createdSessions[0];
@@ -209,82 +218,82 @@ export class SessionLoadController {
         return { sessions, status: "not_created" };
       }
       const reconciledId = created.id;
-      const detail = await loadSessionDetail(reconciledId, this.#transport);
-      return reconciliationGeneration === this.#generation
+      const detail = await loadSessionDetail(reconciledId, transport);
+      return reconciliationGeneration === state.generation
         ? { detail, sessions, status: "created" }
         : undefined;
     } catch {
       return undefined;
     }
-  }
+  };
 
-  async #loadRealtimeSummaries(): Promise<
+  const loadRealtimeSummaries = async (): Promise<
     readonly AgentSessionSummary[] | undefined
-  > {
-    const transport = this.#transport;
-    if (transport === undefined) {
+  > => {
+    const activeTransport = transport;
+    if (activeTransport === undefined) {
       return undefined;
     }
     try {
-      return await loadSessionSummaries(transport);
+      return await loadSessionSummaries(activeTransport);
     } catch {
       return undefined;
     }
-  }
+  };
 
-  async #hydrate(): Promise<void> {
-    const generation = this.#generation;
-    const sessions = await this.#loadRealtimeSummaries();
-    if (generation !== this.#generation) {
+  const hydrate = async (): Promise<void> => {
+    const generation = state.generation;
+    const sessions = await loadRealtimeSummaries();
+    if (generation !== state.generation) {
       return;
     }
     if (sessions === undefined) {
       return;
     }
-    if ((await this.#transport?.yieldToStateApplication?.()) === false) {
+    if ((await transport?.yieldToStateApplication?.()) === false) {
       return;
     }
-    if (generation !== this.#generation) {
+    if (generation !== state.generation) {
       return;
     }
     try {
-      if (sessionMutationPending(this.#view.value)) {
-        this.#hydrationPending = true;
+      if (sessionMutationPending(view.value)) {
+        state.hydrationPending = true;
         return;
       }
-      this.#realtime.applySessions(sessions);
-      const selectedId = this.#view.value.selectedId;
+      realtime.applySessions(sessions);
+      const selectedId = view.value.selectedId;
       if (selectedId === undefined) {
         return;
       }
-      const detail = await loadSessionDetail(selectedId, this.#transport);
+      const detail = await loadSessionDetail(selectedId, transport);
       if (
-        generation === this.#generation &&
-        !sessionMutationPending(this.#view.value) &&
-        this.#view.value.selectedId === selectedId
+        generation === state.generation &&
+        !sessionMutationPending(view.value) &&
+        view.value.selectedId === selectedId
       ) {
         // The durable request lives in the old segment after compaction;
         // reconnect hydration drops its transient copy unless the stream base
         // still proves that compaction is active.
-        this.#realtime.applyReconnectDetail(detail);
+        realtime.applyReconnectDetail(detail);
       } else {
-        this.#hydrationPending = true;
+        state.hydrationPending = true;
       }
     } catch {
       // A reconnect or mutation race that arrived during this request remains
       // queued; ordinary transport failures add no retry of their own.
     }
-  }
+  };
 
-  #beginView(patch: Partial<SessionViewState>): number {
-    this.#generation += 1;
-    this.#loadRevision += 1;
-    this.#view.begin(patch);
-    return this.#loadRevision;
-  }
+  const beginView = (patch: Partial<SessionViewState>): number => {
+    state.generation += 1;
+    state.loadRevision += 1;
+    view.begin(patch);
+    return state.loadRevision;
+  };
 
-  async load(): Promise<void> {
-    const revision = this.#beginView({
+  const load = async (): Promise<void> => {
+    const revision = beginView({
       detail: undefined,
       error: undefined,
       loadingDetail: false,
@@ -292,49 +301,49 @@ export class SessionLoadController {
       sessions: undefined,
       toolStreams: [],
     });
-    if (this.#transport !== undefined) {
-      await this.#loadRealtimeSessions(revision);
-      this.continueHydration();
+    if (transport !== undefined) {
+      await loadRealtimeSessions(revision);
+      continueHydration();
       return;
     }
-    await this.#loadSessions(revision, true);
-  }
+    await loadSessions(revision, true);
+  };
 
-  async refresh(): Promise<void> {
-    const revision = this.#loadRevision;
-    const selectedId = this.#view.value.selectedId;
+  const refresh = async (): Promise<void> => {
+    const revision = state.loadRevision;
+    const selectedId = view.value.selectedId;
     const detailRequest =
       selectedId === undefined
         ? undefined
-        : loadSessionDetail(selectedId, this.#transport).catch(() => undefined);
-    await this.#loadSessions(revision, false);
+        : loadSessionDetail(selectedId, transport).catch(() => undefined);
+    await loadSessions(revision, false);
     const detail = await detailRequest;
     if (
       detail !== undefined &&
-      revision === this.#loadRevision &&
-      this.#view.value.selectedId === selectedId &&
-      (this.#view.value.detail?.updatedAt ?? -1) <= detail.updatedAt
+      revision === state.loadRevision &&
+      view.value.selectedId === selectedId &&
+      (view.value.detail?.updatedAt ?? -1) <= detail.updatedAt
     ) {
-      this.#applyDetail(detail, revision, false);
+      applyDetail(detail, revision, false);
     }
-  }
+  };
 
-  async select(sessionId: string): Promise<void> {
+  const select = async (sessionId: string): Promise<void> => {
     return runUnlessSessionMutation(
-      this.#view.value,
-      () => this.#select(sessionId),
+      view.value,
+      () => selectInternal(sessionId),
       Promise.resolve(),
     );
-  }
+  };
 
-  async #select(sessionId: string): Promise<void> {
+  const selectInternal = async (sessionId: string): Promise<void> => {
     if (
-      sessionId === this.#view.value.selectedId &&
-      this.#view.value.detail !== undefined
+      sessionId === view.value.selectedId &&
+      view.value.detail !== undefined
     ) {
       return;
     }
-    const revision = this.#beginView({
+    const revision = beginView({
       detail: undefined,
       error: undefined,
       followUp: "",
@@ -344,64 +353,69 @@ export class SessionLoadController {
       selectedId: sessionId,
       toolStreams: [],
     });
-    await this.#readDetail(sessionId, revision, true);
-  }
+    await readDetail(sessionId, revision, true);
+  };
 
-  #patchRecentDirectory(sessions: readonly AgentSessionSummary[]): void {
-    if (this.#view.value.creating) {
+  const patchRecentDirectory = (
+    sessions: readonly AgentSessionSummary[],
+  ): void => {
+    if (view.value.creating) {
       return;
     }
-    this.#view.patch({
+    view.patch({
       draft: {
-        ...this.#view.value.draft,
+        ...view.value.draft,
         workingDirectory: mostRecentSessionDirectory(sessions),
       },
     });
-  }
+  };
 
-  #applySessions(
+  const applySessions = (
     sessions: readonly AgentSessionSummary[],
     selectedId: string | undefined,
-  ): void {
-    this.#patchRecentDirectory(sessions);
-    this.#view.patch({ selectedId, sessions });
-  }
+  ): void => {
+    patchRecentDirectory(sessions);
+    view.patch({ selectedId, sessions });
+  };
 
-  #reportInitialLoadFailure(revision: number): void {
-    if (revision === this.#loadRevision) {
-      this.#view.patch({
+  const reportInitialLoadFailure = (revision: number): void => {
+    if (revision === state.loadRevision) {
+      view.patch({
         error: "We could not load your agent sessions. Please try again.",
       });
     }
-  }
+  };
 
-  async #loadRealtimeSessions(revision: number): Promise<void> {
-    const sessions = await this.#loadRealtimeSummaries();
+  const loadRealtimeSessions = async (revision: number): Promise<void> => {
+    const sessions = await loadRealtimeSummaries();
     if (sessions === undefined) {
-      this.#reportInitialLoadFailure(revision);
+      reportInitialLoadFailure(revision);
       return;
     }
     try {
-      if (revision !== this.#loadRevision) {
+      if (revision !== state.loadRevision) {
         return;
       }
       const selectedId = sessions[0]?.id;
-      this.#applySessions(sessions, selectedId);
+      applySessions(sessions, selectedId);
       if (selectedId !== undefined) {
-        await this.#readDetail(selectedId, revision, true);
+        await readDetail(selectedId, revision, true);
       }
     } catch {
-      this.#reportInitialLoadFailure(revision);
+      reportInitialLoadFailure(revision);
     }
-  }
+  };
 
-  async #loadSessions(revision: number, initial: boolean): Promise<void> {
+  const loadSessions = async (
+    revision: number,
+    initial: boolean,
+  ): Promise<void> => {
     try {
       const sessions = await loadSessionSummaries();
-      if (revision !== this.#loadRevision) {
+      if (revision !== state.loadRevision) {
         return;
       }
-      const previousId = initial ? undefined : this.#view.value.selectedId;
+      const previousId = initial ? undefined : view.value.selectedId;
       const selectedId =
         previousId !== undefined && sessions.some(({ id }) => id === previousId)
           ? previousId
@@ -409,71 +423,82 @@ export class SessionLoadController {
       const visibleSessions = mergeNewerSelectedSessionSummary(
         sessions,
         selectedId,
-        this.#view.value.detail,
+        view.value.detail,
       );
       if (
-        selectedId !== this.#view.value.selectedId ||
-        !sessionSummariesMatch(this.#view.value.sessions, visibleSessions)
+        selectedId !== view.value.selectedId ||
+        !sessionSummariesMatch(view.value.sessions, visibleSessions)
       ) {
-        this.#applySessions(visibleSessions, selectedId);
+        applySessions(visibleSessions, selectedId);
       }
       if (selectedId === undefined) {
-        if (this.#view.value.detail !== undefined) {
-          this.#view.patch({ detail: undefined });
+        if (view.value.detail !== undefined) {
+          view.patch({ detail: undefined });
         }
       } else if (initial) {
-        await this.#readDetail(selectedId, revision, true);
+        await readDetail(selectedId, revision, true);
       }
     } catch {
       if (initial) {
-        this.#reportInitialLoadFailure(revision);
+        reportInitialLoadFailure(revision);
       }
     }
-  }
+  };
 
-  #applyDetail(
+  const applyDetail = (
     detail: AgentSessionDetail,
     revision: number,
     showLoading: boolean,
-  ): void {
-    if (revision !== this.#loadRevision) {
+  ): void => {
+    if (revision !== state.loadRevision) {
       return;
     }
-    const detailState = sessionDetailState(this.#view.value, detail, {
+    const detailState = sessionDetailState(view.value, detail, {
       loadingDetail: false,
     });
     if (
       !showLoading &&
-      !this.#view.value.loadingDetail &&
-      sessionDataMatches(this.#view.value.detail, detail) &&
-      sessionSummariesMatch(this.#view.value.sessions, detailState.sessions)
+      !view.value.loadingDetail &&
+      sessionDataMatches(view.value.detail, detail) &&
+      sessionSummariesMatch(view.value.sessions, detailState.sessions)
     ) {
       return;
     }
-    this.#view.patch(detailState);
-    this.#realtime.applyDetail(detail);
-  }
+    view.patch(detailState);
+    realtime.applyDetail(detail);
+  };
 
-  async #readDetail(
+  const readDetail = async (
     sessionId: string,
     revision: number,
     showLoading: boolean,
-  ): Promise<void> {
+  ): Promise<void> => {
     if (showLoading) {
-      this.#view.patch({ detail: undefined, loadingDetail: true });
+      view.patch({ detail: undefined, loadingDetail: true });
     }
     try {
-      const detail = await loadSessionDetail(sessionId, this.#transport);
-      if (this.#view.value.selectedId === sessionId) {
-        this.#applyDetail(detail, revision, showLoading);
+      const detail = await loadSessionDetail(sessionId, transport);
+      if (view.value.selectedId === sessionId) {
+        applyDetail(detail, revision, showLoading);
       }
     } catch {
-      if (showLoading && revision === this.#loadRevision) {
-        this.#view.patch({
+      if (showLoading && revision === state.loadRevision) {
+        view.patch({
           error: "We could not load that session transcript.",
           loadingDetail: false,
         });
       }
     }
-  }
+  };
+  return {
+    continueHydration,
+    hydrateAfterReconnect,
+    load,
+    noteMutationStarted,
+    reconcileDetail,
+    reconcileSessions,
+    refresh,
+    reset,
+    select,
+  };
 }

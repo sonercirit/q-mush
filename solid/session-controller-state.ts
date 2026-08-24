@@ -65,14 +65,34 @@ function toolStreamsMatch(
   return true;
 }
 
-export class SessionRealtimeState {
-  readonly #compactionRequests = new Map<string, AgentSessionMessage>();
-  readonly #mutationRebases = new Set<string>();
-  readonly #streamedContent = new Map<string, StreamedSessionContent>();
-  readonly #view: RevisionState<SessionViewState>;
+type CompactionEvent = Extract<
+  RealtimeServerEvent,
+  { type: "session_compaction_request" | "session_compaction_settled" }
+>;
 
-  #oldestEvictableSession(ids: Iterable<string>): string | undefined {
-    const view = this.#view.value;
+export interface SessionRealtimeState {
+  applyCompaction(event: CompactionEvent): void;
+  applyDetail(detail: AgentSessionDetail): void;
+  applyReconnectDetail(detail: AgentSessionDetail): void;
+  applySessions(sessions: readonly AgentSessionSummary[]): void;
+  applyStreamBatch(event: RealtimeStreamBatch): void;
+  applyToolSnapshot(
+    event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
+  ): void;
+  freezeStreamBatch(event: RealtimeStreamBatch): void;
+  rebaseStream(sessionId: string): void;
+  reset(): void;
+}
+
+export function createSessionRealtimeState(
+  revisionView: RevisionState<SessionViewState>,
+): SessionRealtimeState {
+  const compactionRequests = new Map<string, AgentSessionMessage>();
+  const mutationRebases = new Set<string>();
+  const streamedContents = new Map<string, StreamedSessionContent>();
+
+  function oldestEvictableSession(ids: Iterable<string>): string | undefined {
+    const view = revisionView.value;
     for (const candidate of ids) {
       if (candidate !== view.selectedId && candidate !== view.detail?.id) {
         return candidate;
@@ -81,35 +101,35 @@ export class SessionRealtimeState {
     return undefined;
   }
 
-  #retainMutationRebase(sessionId: string): void {
-    this.#mutationRebases.delete(sessionId);
-    this.#mutationRebases.add(sessionId);
-    while (this.#mutationRebases.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
-      const oldest = this.#oldestEvictableSession(this.#mutationRebases);
+  function retainMutationRebase(sessionId: string): void {
+    mutationRebases.delete(sessionId);
+    mutationRebases.add(sessionId);
+    while (mutationRebases.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
+      const oldest = oldestEvictableSession(mutationRebases);
       // Only the selected and rendered sessions are protected, and the cap
       // accommodates both, so an eviction candidate exists when over cap.
       if (oldest === undefined) break;
-      this.#mutationRebases.delete(oldest);
+      mutationRebases.delete(oldest);
     }
   }
 
-  #retainStreamedContent(
+  function retainStreamedContent(
     sessionId: string,
     content: StreamedSessionContent,
   ): void {
-    this.#streamedContent.delete(sessionId);
-    this.#streamedContent.set(sessionId, content);
-    while (this.#streamedContent.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
-      const oldest = this.#oldestEvictableSession(this.#streamedContent.keys());
+    streamedContents.delete(sessionId);
+    streamedContents.set(sessionId, content);
+    while (streamedContents.size > MAXIMUM_STREAMED_SESSIONS_PER_USER) {
+      const oldest = oldestEvictableSession(streamedContents.keys());
       // Only the selected and rendered sessions are protected, and the cap
       // accommodates both, so an eviction candidate exists when over cap.
       if (oldest === undefined) break;
-      this.#streamedContent.delete(oldest);
+      streamedContents.delete(oldest);
     }
   }
 
-  #toolStreamAllowed(sessionId: string): boolean {
-    const view = this.#view.value;
+  function toolStreamAllowed(sessionId: string): boolean {
+    const view = revisionView.value;
     return (
       !view.stopping &&
       view.selectedId === sessionId &&
@@ -118,86 +138,82 @@ export class SessionRealtimeState {
     );
   }
 
-  constructor(view: RevisionState<SessionViewState>) {
-    this.#view = view;
+  function clearCompaction(sessionId: string): void {
+    compactionRequests.delete(sessionId);
+    streamedContents.delete(sessionId);
   }
 
-  #clearCompaction(sessionId: string): void {
-    this.#compactionRequests.delete(sessionId);
-    this.#streamedContent.delete(sessionId);
-  }
-
-  #sessionId(update: RealtimeStreamUpdate): string {
+  function sessionId(update: RealtimeStreamUpdate): string {
     return update.type === "tool_update"
       ? update.entry.sessionId
       : update.sessionId;
   }
 
-  #forStreamSessions(
+  function forStreamSessions(
     event: RealtimeStreamBatch,
     apply: (sessionId: string) => void,
   ): void {
-    for (const update of event.updates) apply(this.#sessionId(update));
+    for (const update of event.updates) apply(sessionId(update));
   }
 
-  #applyMutationStreamSessions(
+  function applyMutationStreamSessions(
     event: RealtimeStreamBatch,
     freeze: boolean,
   ): void {
-    this.#forStreamSessions(event, (sessionId) => {
-      if (freeze) this.#retainMutationRebase(sessionId);
-      else this.#rebaseMutationStream(sessionId);
+    forStreamSessions(event, (sessionId) => {
+      if (freeze) retainMutationRebase(sessionId);
+      else rebaseMutationStream(sessionId);
     });
   }
 
-  freezeStreamBatch(event: RealtimeStreamBatch): void {
-    this.#applyMutationStreamSessions(event, true);
+  function freezeStreamBatch(event: RealtimeStreamBatch): void {
+    applyMutationStreamSessions(event, true);
   }
 
-  rebaseStream(sessionId: string): void {
-    this.#retainMutationRebase(sessionId);
+  function rebaseStream(sessionId: string): void {
+    retainMutationRebase(sessionId);
   }
 
-  #rebaseMutationStream(sessionId: string): void {
-    if (!this.#mutationRebases.delete(sessionId)) return;
-    this.#clearCompaction(sessionId);
-    const view = this.#view.value;
+  function rebaseMutationStream(sessionId: string): void {
+    if (!mutationRebases.delete(sessionId)) return;
+    clearCompaction(sessionId);
+    const view = revisionView.value;
     if (view.selectedId !== sessionId || view.detail?.id !== sessionId) return;
     const detail = persistedDetail(view.detail);
     const clearTools = view.toolStreams.length > 0;
     if (detail !== view.detail || clearTools) {
-      this.#view.patch({
+      revisionView.patch({
         ...(detail === view.detail ? {} : { detail }),
         ...(clearTools ? { toolStreams: [] } : {}),
       });
     }
   }
 
-  applyReconnectDetail(detail: AgentSessionDetail): void {
-    const current = this.#streamedContent.get(detail.id);
+  function applyReconnectDetail(detail: AgentSessionDetail): void {
+    const current = streamedContents.get(detail.id);
     const messages = persistedMessages(detail);
     const base =
       current?.baseMessageId === null
         ? messages.length === 0
         : messages.some(({ id }) => id === current?.baseMessageId);
-    if (this.#compactionRequests.has(detail.id) && !base) {
-      this.#clearCompaction(detail.id);
+    if (compactionRequests.has(detail.id) && !base) {
+      clearCompaction(detail.id);
     }
-    this.applyDetail(detail);
+    applyDetail(detail);
   }
 
-  applyDetail(detail: AgentSessionDetail): void {
-    this.#rebaseMutationStream(detail.id);
+  function applyDetail(detail: AgentSessionDetail): void {
+    rebaseMutationStream(detail.id);
     const persistable = persistedDetail(detail);
     const active = sessionDetailIsActive(persistable);
     if (!active) {
-      this.#clearCompaction(detail.id);
+      clearCompaction(detail.id);
     }
     const clearToolStreams =
       !active &&
-      this.#view.value.selectedId === detail.id &&
-      this.#view.value.toolStreams.length > 0;
-    const currentStream = this.#streamedContent.get(detail.id);
+      revisionView.value.selectedId === detail.id &&
+      revisionView.value.toolStreams.length > 0;
+    const currentStream = streamedContents.get(detail.id);
     const resolved =
       currentStream === undefined
         ? undefined
@@ -208,7 +224,7 @@ export class SessionRealtimeState {
       : { messages: persistable.messages, persisted: true };
 
     if (retainCompactionStream(currentStream, reconciled) && streamed) {
-      this.#retainStreamedContent(detail.id, streamed);
+      retainStreamedContent(detail.id, streamed);
     } else if (
       !retainCompactionStream(currentStream, reconciled) &&
       resolved?.provisional !== true
@@ -218,21 +234,21 @@ export class SessionRealtimeState {
       // collides with the end of persisted text. A retained stale buffer
       // can surface as a transient if a later snapshot advances past the
       // matched step; the next delta or a terminal status clears it.
-      this.#streamedContent.delete(detail.id);
+      streamedContents.delete(detail.id);
     }
-    if (this.#view.value.selectedId !== detail.id) return;
-    const current = this.#view.value.detail;
+    if (revisionView.value.selectedId !== detail.id) return;
+    const current = revisionView.value.detail;
     const confirmedRequestIds = new Set(
       persistable.pendingInputs.map(({ clientRequestId }) => clientRequestId),
     );
     const retainedOptimisticInputs =
-      this.#view.value.optimisticPendingInputs.filter(
+      revisionView.value.optimisticPendingInputs.filter(
         ({ clientRequestId }) => !confirmedRequestIds.has(clientRequestId),
       );
     const optimisticPendingInputs =
       retainedOptimisticInputs.length ===
-      this.#view.value.optimisticPendingInputs.length
-        ? this.#view.value.optimisticPendingInputs
+      revisionView.value.optimisticPendingInputs.length
+        ? revisionView.value.optimisticPendingInputs
         : retainedOptimisticInputs;
     const visibleDetail = retainUnchangedSessionData(current, {
       ...persistable,
@@ -241,40 +257,35 @@ export class SessionRealtimeState {
     const detailUnchanged =
       current !== undefined && sessionDataMatches(current, visibleDetail);
     const optimisticUnchanged =
-      optimisticPendingInputs === this.#view.value.optimisticPendingInputs;
+      optimisticPendingInputs === revisionView.value.optimisticPendingInputs;
     if (detailUnchanged && optimisticUnchanged && !clearToolStreams) return;
 
-    this.#view.patch({
+    revisionView.patch({
       ...(detailUnchanged ? {} : { detail: visibleDetail }),
       loadingDetail: false,
       optimisticPendingInputs,
       sessions: replaceSessionSummary(
-        this.#view.value.sessions ?? [],
+        revisionView.value.sessions ?? [],
         persistable,
       ),
       ...(clearToolStreams ? { toolStreams: [] } : {}),
     });
   }
 
-  applyCompaction(
-    event: Extract<
-      RealtimeServerEvent,
-      { type: "session_compaction_request" | "session_compaction_settled" }
-    >,
-  ): void {
+  function applyCompaction(event: CompactionEvent): void {
     if (event.type === "session_compaction_settled") {
-      this.#clearCompaction(event.sessionId);
-      const detail = this.#view.value.detail;
+      clearCompaction(event.sessionId);
+      const detail = revisionView.value.detail;
       if (
-        this.#view.value.selectedId === event.sessionId &&
+        revisionView.value.selectedId === event.sessionId &&
         detail?.id === event.sessionId
       ) {
         const persisted = persistedDetail(detail);
-        if (persisted !== detail) this.#view.patch({ detail: persisted });
+        if (persisted !== detail) revisionView.patch({ detail: persisted });
       }
       return;
     }
-    const view = this.#view.value;
+    const view = revisionView.value;
     const detail =
       view.selectedId === event.sessionId && view.detail?.id === event.sessionId
         ? view.detail
@@ -288,21 +299,21 @@ export class SessionRealtimeState {
       id: `stream:${event.streamId}:compaction-request`,
       role: "compaction_request",
     });
-    this.#compactionRequests.set(event.sessionId, request);
-    this.#retainStreamedContent(event.sessionId, {
+    compactionRequests.set(event.sessionId, request);
+    retainStreamedContent(event.sessionId, {
       baseMessageId: messages.at(-1)?.id ?? null,
       compactionRequest: request,
       content: "",
       streamId: event.streamId,
       thinking: "",
     });
-    this.#view.patch({
+    revisionView.patch({
       detail: { ...detail, messages: [...messages, request] },
     });
   }
-  applyStreamBatch(event: RealtimeStreamBatch): void {
-    this.#applyMutationStreamSessions(event, false);
-    const view = this.#view.value;
+  function applyStreamBatch(event: RealtimeStreamBatch): void {
+    applyMutationStreamSessions(event, false);
+    const view = revisionView.value;
     let detail = view.detail;
     let streamedDetailChanged = false;
     let toolStreams = view.toolStreams;
@@ -342,14 +353,14 @@ export class SessionRealtimeState {
         continue;
 
       const initialDetail = active ? selectedDetail : undefined;
-      const previous = this.#streamedContent.get(delta.sessionId);
+      const previous = streamedContents.get(delta.sessionId);
       const next = streamedContent(
         previous,
         initialDetail,
         delta,
-        this.#compactionRequests.get(delta.sessionId),
+        compactionRequests.get(delta.sessionId),
       );
-      this.#retainStreamedContent(delta.sessionId, next);
+      retainStreamedContent(delta.sessionId, next);
 
       if (!active || !visibleSelectedDetail) continue;
       const visibleMessages = streamMessages(
@@ -362,18 +373,18 @@ export class SessionRealtimeState {
     }
 
     if (!streamedDetailChanged && !toolStreamsChanged) return;
-    this.#view.patch({
+    revisionView.patch({
       ...(streamedDetailChanged && detail !== undefined ? { detail } : {}),
       ...(toolStreamsChanged ? { toolStreams } : {}),
     });
   }
-  applyToolSnapshot(
+  function applyToolSnapshot(
     event: Extract<RealtimeServerEvent, { type: "tool_stream_snapshot" }>,
   ): void {
-    this.#rebaseMutationStream(event.sessionId);
-    if (!this.#toolStreamAllowed(event.sessionId)) return;
+    rebaseMutationStream(event.sessionId);
+    if (!toolStreamAllowed(event.sessionId)) return;
     const current = new Map(
-      this.#view.value.toolStreams
+      revisionView.value.toolStreams
         .filter((entry) => entry.streamId === event.streamId)
         .map((entry) => [toolStreamKey(entry), entry]),
     );
@@ -383,28 +394,40 @@ export class SessionRealtimeState {
         ? local
         : entry;
     });
-    const retained = this.#view.value.toolStreams.filter(
+    const retained = revisionView.value.toolStreams.filter(
       (entry) => entry.streamId !== event.streamId,
     );
     const toolStreams = orderedToolStreams([...retained, ...streams]);
-    if (toolStreamsMatch(this.#view.value.toolStreams, toolStreams)) return;
-    this.#view.patch({ toolStreams });
+    if (toolStreamsMatch(revisionView.value.toolStreams, toolStreams)) return;
+    revisionView.patch({ toolStreams });
   }
 
-  applySessions(sessions: readonly AgentSessionSummary[]): void {
-    if (this.#view.value.sessions === undefined) return;
-    if (sessionMutationPending(this.#view.value)) return;
-    if (sessionSummariesMatch(this.#view.value.sessions, sessions)) return;
+  function applySessions(sessions: readonly AgentSessionSummary[]): void {
+    if (revisionView.value.sessions === undefined) return;
+    if (sessionMutationPending(revisionView.value)) return;
+    if (sessionSummariesMatch(revisionView.value.sessions, sessions)) return;
 
-    this.#view.patch({ sessions });
+    revisionView.patch({ sessions });
   }
 
-  reset(): void {
-    this.#compactionRequests.clear();
-    this.#mutationRebases.clear();
-    this.#streamedContent.clear();
-    if (this.#view.value.toolStreams.length > 0) {
-      this.#view.patch({ toolStreams: [] });
+  function reset(): void {
+    compactionRequests.clear();
+    mutationRebases.clear();
+    streamedContents.clear();
+    if (revisionView.value.toolStreams.length > 0) {
+      revisionView.patch({ toolStreams: [] });
     }
   }
+
+  return {
+    applyCompaction,
+    applyDetail,
+    applyReconnectDetail,
+    applySessions,
+    applyStreamBatch,
+    applyToolSnapshot,
+    freezeStreamBatch,
+    rebaseStream,
+    reset,
+  };
 }

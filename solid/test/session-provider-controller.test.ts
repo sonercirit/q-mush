@@ -1,9 +1,9 @@
 import { createRoot } from "solid-js";
 import { expect, test, vi } from "vitest";
 import { createReactiveState } from "../../solid/reactive-state.ts";
-import { RevisionState } from "../../solid/revision-state.ts";
+import { createRevisionState } from "../../solid/revision-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { SessionProviderController } from "../../solid/session-provider-controller.ts";
+import { createSessionProviderController } from "../../solid/session-provider-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import { restoreFetchAfterEach } from "./controller-test-helpers.ts";
 
@@ -31,8 +31,8 @@ test("scopes discovery and reports malformed successful catalogs", async () => {
     { preconnect: globalThis.fetch.preconnect },
   );
   const reactive = createReactiveState(selectedState());
-  const state = new RevisionState(reactive.state, reactive.setState);
-  const controller = createRoot(() => new SessionProviderController(state));
+  const state = createRevisionState(reactive.state, reactive.setState);
+  const controller = createRoot(() => createSessionProviderController(state));
   controller.setWorkspace("workspace-1");
 
   controller.ensure("openrouter:credential-1", "vendor/model");

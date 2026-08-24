@@ -1,6 +1,6 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
-import { HttpResponseError } from "./browser-http.ts";
+import { isHttpResponseError } from "./browser-http.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail } from "./session-codec.ts";
 import type { SessionMutationAcknowledgement } from "./session-mutation-acknowledgement.ts";
@@ -184,61 +184,78 @@ function launchMutation(
   );
 }
 
+function payloadHasKeyCount(
+  payload: Readonly<Record<string, unknown>>,
+  count: number,
+): boolean {
+  return Object.keys(payload).length === count;
+}
+
+function pendingInputMatches(
+  detail: AgentSessionDetail,
+  payload: Readonly<Record<string, unknown>>,
+): boolean {
+  return detail.pendingInputs.some(
+    ({ clientRequestId }) => clientRequestId === payload["clientRequestId"],
+  );
+}
+
+function settingMatches(
+  detailValue: boolean | number | null,
+  payload: Readonly<Record<string, unknown>>,
+  payloadKey: "autoCompact" | "idleCompact" | "userContextTokenCap",
+): boolean {
+  return detailValue === payload[payloadKey];
+}
+
+function runMutationHandler(
+  operation: SessionMutationOperation,
+  handlers: Record<SessionMutationOperation, () => boolean>,
+): boolean {
+  return handlers[operation]();
+}
+
 function validSessionMutationPayload(mutation: SessionMutation): boolean {
   const payload = mutation.payload;
-  if (launchMutation(mutation.operation)) {
-    return Object.keys(payload).length === 1;
-  }
-  switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.stop:
-      return (
-        Object.keys(payload).length ===
-          (payload["cascade"] === undefined ? 1 : 2) &&
-        (payload["cascade"] === undefined ||
-          typeof payload["cascade"] === "boolean")
-      );
-    case SESSION_REALTIME_OPERATIONS.followUp:
-    case SESSION_REALTIME_OPERATIONS.steer:
-      return (
-        validOptionalImagePayload(payload, 4) &&
-        typeof payload["clientRequestId"] === "string" &&
-        typeof payload["prompt"] === "string" &&
-        (payload["kind"] === "follow_up" || payload["kind"] === "steer")
-      );
-    case SESSION_REALTIME_OPERATIONS.reassign:
-      return (
-        Object.keys(payload).length === 3 &&
-        typeof payload["runnerId"] === "string" &&
-        typeof payload["workingDirectory"] === "string"
-      );
-    case SESSION_REALTIME_OPERATIONS.send:
-      return (
-        validOptionalImagePayload(payload, 2) &&
-        typeof payload["prompt"] === "string"
-      );
-    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
-      return (
-        Object.keys(payload).length === 2 &&
-        (payload["userContextTokenCap"] === null ||
-          (typeof payload["userContextTokenCap"] === "number" &&
-            Number.isSafeInteger(payload["userContextTokenCap"]) &&
-            payload["userContextTokenCap"] > 0))
-      );
-    case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
-      return (
-        Object.keys(payload).length === 2 &&
-        typeof payload["autoCompact"] === "boolean"
-      );
-    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
-      return (
-        Object.keys(payload).length === 2 &&
-        typeof payload["idleCompact"] === "boolean"
-      );
-    case SESSION_REALTIME_OPERATIONS.updateProvider:
-      return false;
-    default:
-      return false;
-  }
+  const followUp = (): boolean =>
+    validOptionalImagePayload(payload, 4) &&
+    typeof payload["clientRequestId"] === "string" &&
+    typeof payload["prompt"] === "string" &&
+    (payload["kind"] === "follow_up" || payload["kind"] === "steer");
+  return runMutationHandler(mutation.operation, {
+    [SESSION_REALTIME_OPERATIONS.compact]: () => payloadHasKeyCount(payload, 1),
+    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () =>
+      payloadHasKeyCount(payload, 1),
+    [SESSION_REALTIME_OPERATIONS.continue]: () =>
+      payloadHasKeyCount(payload, 1),
+    [SESSION_REALTIME_OPERATIONS.followUp]: followUp,
+    [SESSION_REALTIME_OPERATIONS.reassign]: () =>
+      Object.keys(payload).length === 3 &&
+      typeof payload["runnerId"] === "string" &&
+      typeof payload["workingDirectory"] === "string",
+    [SESSION_REALTIME_OPERATIONS.send]: () =>
+      validOptionalImagePayload(payload, 2) &&
+      typeof payload["prompt"] === "string",
+    [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
+      Object.keys(payload).length === 2 &&
+      typeof payload["autoCompact"] === "boolean",
+    [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: () =>
+      Object.keys(payload).length === 2 &&
+      (payload["userContextTokenCap"] === null ||
+        (typeof payload["userContextTokenCap"] === "number" &&
+          Number.isSafeInteger(payload["userContextTokenCap"]) &&
+          payload["userContextTokenCap"] > 0)),
+    [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
+      Object.keys(payload).length === 2 &&
+      typeof payload["idleCompact"] === "boolean",
+    [SESSION_REALTIME_OPERATIONS.steer]: followUp,
+    [SESSION_REALTIME_OPERATIONS.stop]: () =>
+      Object.keys(payload).length ===
+        (payload["cascade"] === undefined ? 1 : 2) &&
+      (payload["cascade"] === undefined ||
+        typeof payload["cascade"] === "boolean"),
+    [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
+  });
 }
 
 export function sessionMutationOutcomeIsUnknown(error: unknown): boolean {
@@ -291,21 +308,18 @@ function mutationIsReconciled(
   if (launchMutation(mutation.operation)) {
     return generationAdvanced;
   }
-  switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.followUp:
-    case SESSION_REALTIME_OPERATIONS.steer:
-      return detail.pendingInputs.some(
-        ({ clientRequestId }) =>
-          clientRequestId === mutation.payload["clientRequestId"],
-      );
-    case SESSION_REALTIME_OPERATIONS.reassign:
-      return (
-        generationAdvanced &&
-        detail.runnerId === mutation.payload["runnerId"] &&
-        detail.workingDirectory === mutation.payload["workingDirectory"] &&
-        !detail.runnerRequired
-      );
-    case SESSION_REALTIME_OPERATIONS.send: {
+  return runMutationHandler(mutation.operation, {
+    [SESSION_REALTIME_OPERATIONS.compact]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.continue]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.followUp]: () =>
+      pendingInputMatches(detail, mutation.payload),
+    [SESSION_REALTIME_OPERATIONS.reassign]: () =>
+      generationAdvanced &&
+      detail.runnerId === mutation.payload["runnerId"] &&
+      detail.workingDirectory === mutation.payload["workingDirectory"] &&
+      !detail.runnerRequired,
+    [SESSION_REALTIME_OPERATIONS.send]: () => {
       const prompt = mutation.payload["prompt"];
       const images = mutation.payload["images"] ?? [];
       const previousMessageIds = new Set(baseline.messages.map(({ id }) => id));
@@ -321,22 +335,22 @@ function mutationIsReconciled(
             serializedValuesMatch(message.images, images),
         )
       );
-    }
-    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
-      return (
-        detail.userContextTokenCap === mutation.payload["userContextTokenCap"]
-      );
-    case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
-      return detail.autoCompact === mutation.payload["autoCompact"];
-    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
-      return detail.idleCompact === mutation.payload["idleCompact"];
-    case SESSION_REALTIME_OPERATIONS.stop:
-      return detail.status === "stopped";
-    case SESSION_REALTIME_OPERATIONS.updateProvider:
-      return false;
-    default:
-      return false;
-  }
+    },
+    [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
+      settingMatches(detail.autoCompact, mutation.payload, "autoCompact"),
+    [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: () =>
+      settingMatches(
+        detail.userContextTokenCap,
+        mutation.payload,
+        "userContextTokenCap",
+      ),
+    [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
+      settingMatches(detail.idleCompact, mutation.payload, "idleCompact"),
+    [SESSION_REALTIME_OPERATIONS.steer]: () =>
+      pendingInputMatches(detail, mutation.payload),
+    [SESSION_REALTIME_OPERATIONS.stop]: () => detail.status === "stopped",
+    [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
+  });
 }
 
 export function acknowledgeSessionMutation(
@@ -384,7 +398,7 @@ export function sessionMutationError(error: unknown, action: string): string {
     );
   }
   if (
-    (error instanceof HttpResponseError && error.status === 409) ||
+    (isHttpResponseError(error) && error.status === 409) ||
     (code !== undefined &&
       [
         "request_conflict",

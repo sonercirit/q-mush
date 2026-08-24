@@ -2,7 +2,7 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH } from "../shared/routes.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { requestJson } from "./browser-http.ts";
-import { DiscoveryCache } from "./discovery-cache.ts";
+import { createDiscoveryCache } from "./discovery-cache.ts";
 import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -12,41 +12,37 @@ import { draftWithModelCatalog } from "./session-form.ts";
 import { sessionModelDiscoveryState } from "./session-state.ts";
 import type { SessionCommandTransport } from "./session-transport.ts";
 
-export class SessionModelController {
-  readonly #catalogs = new DiscoveryCache<AgentModelCatalog>();
-  readonly #state: RevisionState<SessionViewState>;
-  readonly #transport: SessionCommandTransport | undefined;
+export interface SessionModelController {
+  reset(): void;
+  ensure(credentialValue: string, force?: boolean): void;
+}
 
-  constructor(
-    state: RevisionState<SessionViewState>,
-    transport?: SessionCommandTransport,
-  ) {
-    this.#state = state;
-    this.#transport = transport;
-  }
-
-  reset(): void {
-    this.#catalogs.clear();
-  }
-
-  ensure(credentialValue: string, force = false): void {
-    this.#ensure(credentialValue, force);
-  }
-
-  #ensure(credentialValue: string, force: boolean): void {
+export function createSessionModelController(
+  state: RevisionState<SessionViewState>,
+  transport?: SessionCommandTransport,
+): SessionModelController {
+  const catalogs = createDiscoveryCache<AgentModelCatalog>();
+  const apply = (credential: string, catalog: AgentModelCatalog): void => {
+    state.patch({
+      draft: draftWithModelCatalog(state.value, credential, catalog),
+      modelDiscovery: sessionModelDiscoveryState(credential, false, catalog),
+      openSelect: undefined,
+    });
+  };
+  const ensure = (credentialValue: string, force: boolean): void => {
     const applyCached = (key: string, catalog: AgentModelCatalog): void => {
-      this.#apply(key, catalog);
+      apply(key, catalog);
     };
     const credential = selectedSessionCredential(credentialValue);
     if (credential === undefined) {
       return;
     }
 
-    if (this.#state.value.draft.credential !== credentialValue) {
-      this.#state.replaceSilently({
-        ...this.#state.value,
+    if (state.value.draft.credential !== credentialValue) {
+      state.replaceSilently({
+        ...state.value,
         draft: {
-          ...this.#state.value.draft,
+          ...state.value.draft,
           credential: credentialValue,
           model: "",
           openRouterProviderTag: "",
@@ -55,7 +51,7 @@ export class SessionModelController {
       });
     }
 
-    const discovery = this.#state.value.modelDiscovery;
+    const discovery = state.value.modelDiscovery;
     if (
       !shouldDiscover({
         currentKey: discovery.credential,
@@ -67,44 +63,44 @@ export class SessionModelController {
       return;
     }
 
-    this.#catalogs.begin(credentialValue, force, applyCached, (request) => {
-      this.#state.patch({
+    catalogs.begin(credentialValue, force, applyCached, (request) => {
+      state.patch({
         modelDiscovery: sessionModelDiscoveryState(credentialValue, true),
       });
-      void this.#load(request, credentialValue, credential, applyCached);
+      void load(request, credentialValue, credential, applyCached);
     });
-  }
+  };
 
-  async #load(
+  const load = async (
     request: number,
     credentialValue: string,
     credential: NonNullable<ReturnType<typeof selectedSessionCredential>>,
     applyCached: (key: string, catalog: AgentModelCatalog) => void,
-  ): Promise<void> {
+  ): Promise<void> => {
     try {
       const catalog = readAgentModelCatalog(
-        this.#transport === undefined
+        transport === undefined
           ? await requestJson(
               `${SESSION_MODELS_PATH}?${new URLSearchParams(credential).toString()}`,
             )
-          : await this.#transport.command(
+          : await transport.command(
               SESSION_REALTIME_OPERATIONS.models,
               credential,
             ),
       );
-      this.#catalogs.resolve(
+      catalogs.resolve(
         request,
         credentialValue,
         catalog,
-        () => this.#state.value.draft.credential === credentialValue,
+        () => state.value.draft.credential === credentialValue,
         applyCached,
       );
     } catch {
-      this.#catalogs.handleFailure(
+      catalogs.handleFailure(
         request,
-        () => this.#state.value.draft.credential === credentialValue,
+        () => state.value.draft.credential === credentialValue,
         () => {
-          this.#state.patch({
+          state.patch({
             modelDiscovery: sessionModelDiscoveryState(
               credentialValue,
               false,
@@ -115,13 +111,13 @@ export class SessionModelController {
         },
       );
     }
-  }
-
-  #apply(credential: string, catalog: AgentModelCatalog): void {
-    this.#state.patch({
-      draft: draftWithModelCatalog(this.#state.value, credential, catalog),
-      modelDiscovery: sessionModelDiscoveryState(credential, false, catalog),
-      openSelect: undefined,
-    });
-  }
+  };
+  return {
+    reset: () => {
+      catalogs.clear();
+    },
+    ensure: (credentialValue, force = false) => {
+      ensure(credentialValue, force);
+    },
+  };
 }

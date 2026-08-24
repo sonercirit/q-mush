@@ -5,7 +5,10 @@ import {
   RunnerPanel,
   type RunnerViewState,
 } from "../runner-client.tsx";
-import { RunnerController } from "../runner-controller.ts";
+import {
+  createRunnerController,
+  type RunnerController,
+} from "../runner-controller.ts";
 import {
   expectTestText,
   findTestButton,
@@ -22,7 +25,7 @@ function mountRunnerPanel(): Readonly<{
   const reactive = createReactiveState<RunnerViewState>(
     createRunnerViewState([runnerSummary(1)]),
   );
-  const controller = new RunnerController(reactive);
+  const controller = createRunnerController(reactive);
   return {
     container: mountTestView(
       () => <RunnerPanel controller={controller} />,

@@ -1,5 +1,12 @@
-import { RealtimeConnection } from "../../solid/realtime-client.ts";
-import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
+import {
+  createRealtimeConnection,
+  type RealtimeConnection,
+} from "../../solid/realtime-client.ts";
+import type {
+  RealtimeClientEvent,
+  RealtimeStreamBuffer,
+} from "../../solid/realtime-stream-buffer.ts";
+import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import {
   createRealtimeTestSocket,
   type RealtimeTestSocket,
@@ -10,11 +17,13 @@ const LOCATION = {
   protocol: "https:",
 };
 
-interface RealtimeTestSetupOptions {
+export interface RealtimeTestSetupOptions {
   readonly listener?: (event: RealtimeClientEvent) => void;
   readonly now?: () => number;
   readonly requestFrame?: (callback: () => void) => number;
   readonly selectedSession?: () => string | undefined;
+  readonly streamBuffer?: RealtimeStreamBuffer;
+  readonly toolSync?: ToolSyncTracker;
 }
 
 interface RealtimeTestSetup {
@@ -30,7 +39,7 @@ export function realtimeTestSetup(
   const requestFrames: (() => void)[] = [];
   const sockets: RealtimeTestSocket[] = [];
   const timers: (() => void)[] = [];
-  const connection = new RealtimeConnection(
+  const connection = createRealtimeConnection(
     options.listener ?? (() => undefined),
     {
       clearTimeout: () => undefined,
@@ -51,6 +60,10 @@ export function realtimeTestSetup(
         timers.push(callback);
         return timers.length;
       },
+      ...(options.streamBuffer === undefined
+        ? {}
+        : { streamBuffer: options.streamBuffer }),
+      ...(options.toolSync === undefined ? {} : { toolSync: options.toolSync }),
       ...(options.selectedSession === undefined
         ? {}
         : { selectedSession: options.selectedSession }),

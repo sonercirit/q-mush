@@ -546,20 +546,14 @@ export function appendMarkdownBlocks(
   }
 }
 
+const HEADING_CLASSES: Readonly<Record<number, string>> = {
+  1: "text-lg font-semibold text-white",
+  2: "text-base font-semibold text-white",
+  3: "text-sm font-semibold text-white",
+};
+
 function headingClasses(level: number): string {
-  switch (level) {
-    case 1:
-      return "text-lg font-semibold text-white";
-    case 2:
-      return "text-base font-semibold text-white";
-    case 3:
-      return "text-sm font-semibold text-white";
-    case 4:
-    case 5:
-    case 6:
-    default:
-      return "text-sm font-medium text-slate-100";
-  }
+  return HEADING_CLASSES[level] ?? "text-sm font-medium text-slate-100";
 }
 
 function renderMarkdownList(block: MarkdownListBlock): JSX.Element {
@@ -647,45 +641,52 @@ function renderMarkdownTable(block: MarkdownTableBlock): JSX.Element {
   );
 }
 
+type MarkdownBlockType = MarkdownBlock["type"];
+type MarkdownBlockOf<Type extends MarkdownBlockType> = Extract<
+  MarkdownBlock,
+  { readonly type: Type }
+>;
+type MarkdownBlockRenderer = {
+  readonly [Type in MarkdownBlockType]: (
+    block: MarkdownBlockOf<Type>,
+  ) => JSX.Element;
+};
+
+const markdownBlockRenderers: MarkdownBlockRenderer = {
+  code: (block) =>
+    renderHighlightedCodeWith(block.code, block.language, renderMarkdown),
+  heading: (block) => (
+    <h2 class={headingClasses(block.level)}>{renderInline(block.text)}</h2>
+  ),
+  list: renderMarkdownList,
+  paragraph: (block) =>
+    renderStructuredTextWith(
+      block.text,
+      (text) => <p>{renderInline(text)}</p>,
+      renderMarkdown,
+    ),
+  preserved: (block) => (
+    <p class="whitespace-pre-wrap">{renderInline(block.text)}</p>
+  ),
+  quote: (block) => (
+    <blockquote class="border-l-2 border-cyan-300/40 pl-3 text-slate-400 italic">
+      {renderInline(block.text)}
+    </blockquote>
+  ),
+  raw: (block) =>
+    renderStructuredTextWith(block.text, renderPlainText, renderMarkdown),
+  rule: () => <hr class="border-white/10" />,
+  table: renderMarkdownTable,
+};
+
+function renderTypedMarkdownBlock<Type extends MarkdownBlockType>(
+  block: MarkdownBlockOf<Type>,
+): JSX.Element {
+  return markdownBlockRenderers[block.type](block);
+}
+
 export function renderMarkdownBlock(block: MarkdownBlock): JSX.Element {
-  switch (block.type) {
-    case "code":
-      return renderHighlightedCodeWith(
-        block.code,
-        block.language,
-        renderMarkdown,
-      );
-    case "heading":
-      return (
-        <h2 class={headingClasses(block.level)}>{renderInline(block.text)}</h2>
-      );
-    case "list":
-      return renderMarkdownList(block);
-    case "paragraph":
-      return renderStructuredTextWith(
-        block.text,
-        (text) => <p>{renderInline(text)}</p>,
-        renderMarkdown,
-      );
-    case "preserved":
-      return <p class="whitespace-pre-wrap">{renderInline(block.text)}</p>;
-    case "quote":
-      return (
-        <blockquote class="border-l-2 border-cyan-300/40 pl-3 text-slate-400 italic">
-          {renderInline(block.text)}
-        </blockquote>
-      );
-    case "raw":
-      return renderStructuredTextWith(
-        block.text,
-        renderPlainText,
-        renderMarkdown,
-      );
-    case "rule":
-      return <hr class="border-white/10" />;
-    case "table":
-      return renderMarkdownTable(block);
-  }
+  return renderTypedMarkdownBlock(block);
 }
 
 export function renderMarkdown(

@@ -9,12 +9,15 @@ import {
   type ProviderCredential,
 } from "../provider-credential-model.ts";
 import {
-  RealtimeStreamBuffer,
+  createRealtimeStreamBuffer,
   type RealtimeClientEvent,
 } from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { mountTestView } from "./dom-test-helpers.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
@@ -67,7 +70,7 @@ const TEST_CREDENTIAL: ProviderCredential = {
 };
 
 function mountRealSessionPanel(detail: AgentSessionDetail) {
-  const controller = new SessionController(
+  const controller = createSessionController(
     sessionDetailState(detail, sessionSnapshot(detail, 100)),
   );
   const provider = () => createProviderViewState([TEST_CREDENTIAL]);
@@ -234,7 +237,7 @@ test("streaming tool updates do not invalidate the controlled new-session input"
   });
   draftReads = 0;
 
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   for (let sequence = 0; sequence < 40; sequence += 1) {
     buffer.queue({
       callId: "call-typing-profile",

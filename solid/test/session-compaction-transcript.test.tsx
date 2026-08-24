@@ -2,7 +2,10 @@ import { createRoot } from "solid-js";
 import { expect, test, vi } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
-import { SessionController } from "../../solid/session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../../solid/session-controller.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { DEFAULT_SESSION_TRANSCRIPT_FILTERS } from "../../solid/session-transcript-filters.ts";
 import { SessionTranscript } from "../../solid/session-transcript.tsx";
@@ -20,7 +23,7 @@ async function selectedController(
   selected: AgentSessionDetail,
 ): Promise<SessionController> {
   installFetch(createResponseFetch(selected));
-  const controller = createRoot(() => new SessionController());
+  const controller = createRoot(() => createSessionController());
   await controller.select(selected.id);
   return controller;
 }
@@ -52,7 +55,7 @@ async function reconnectableCompactionController(
     },
   };
   const controller = createRoot(() => {
-    return new SessionController(undefined, undefined, null, transport);
+    return createSessionController(undefined, undefined, null, transport);
   });
   await controller.select(detail.id);
 

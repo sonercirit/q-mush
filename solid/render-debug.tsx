@@ -5,7 +5,6 @@ import {
   useContext,
   type Accessor,
   type JSX,
-  type Setter,
 } from "solid-js";
 
 type RenderHeat = "green" | "lime" | "orange" | "red" | "yellow";
@@ -36,53 +35,44 @@ function renderHeat(count: number): RenderHeat {
   return count >= 3 ? "lime" : "green";
 }
 
-export class RenderDebugView {
-  readonly #counts = new Map<string, number>();
-  readonly #enabled: Accessor<boolean>;
-  readonly #revision: Accessor<number>;
-  readonly #setEnabled: Setter<boolean>;
-  readonly #setRevision: Setter<number>;
+export interface RenderDebugView {
+  readonly enabled: boolean;
+  readonly enabledView: Accessor<boolean>;
+  readonly revisionView: Accessor<number>;
+  measurement(key: string): RenderMeasurement;
+  record(key: string): RenderMeasurement;
+  reset(): void;
+  toggle(): void;
+}
 
-  constructor() {
-    const [enabled, setEnabled] = createSignal(false);
-    const [revision, setRevision] = createSignal(0);
-    this.#enabled = enabled;
-    this.#revision = revision;
-    this.#setEnabled = setEnabled;
-    this.#setRevision = setRevision;
-  }
-
-  get enabled(): boolean {
-    return this.#enabled();
-  }
-
-  get enabledView(): Accessor<boolean> {
-    return this.#enabled;
-  }
-
-  get revisionView(): Accessor<number> {
-    return this.#revision;
-  }
-
-  measurement(key: string): RenderMeasurement {
-    const count = this.#counts.get(key) ?? 0;
+export function createRenderDebugView(): RenderDebugView {
+  const counts = new Map<string, number>();
+  const [enabled, setEnabled] = createSignal(false);
+  const [revision, setRevision] = createSignal(0);
+  const measurement = (key: string): RenderMeasurement => {
+    const count = counts.get(key) ?? 0;
     return { count, heat: renderHeat(count) };
-  }
-
-  record(key: string): RenderMeasurement {
-    const count = (this.#counts.get(key) ?? 0) + 1;
-    this.#counts.set(key, count);
-    return { count, heat: renderHeat(count) };
-  }
-
-  reset(): void {
-    this.#counts.clear();
-    this.#setRevision((revision) => revision + 1);
-  }
-
-  toggle(): void {
-    this.#setEnabled((enabled) => !enabled);
-  }
+  };
+  return {
+    get enabled() {
+      return enabled();
+    },
+    enabledView: enabled,
+    revisionView: revision,
+    measurement,
+    record(key) {
+      const count = (counts.get(key) ?? 0) + 1;
+      counts.set(key, count);
+      return { count, heat: renderHeat(count) };
+    },
+    reset() {
+      counts.clear();
+      setRevision((value) => value + 1);
+    },
+    toggle() {
+      setEnabled((value) => !value);
+    },
+  };
 }
 
 const RenderDebugContext = createContext<RenderDebugView>();

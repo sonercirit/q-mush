@@ -1,15 +1,31 @@
-export class HttpResponseError extends Error {
+export interface HttpResponseError extends Error {
   readonly code: string | undefined;
   readonly detail: string | undefined;
+  readonly kind: "http_response_error";
   readonly status: number;
+}
 
-  constructor(status: number, code?: string, detail?: string) {
-    super(`The HTTP request failed with status ${String(status)}`);
-    this.code = code;
-    this.detail = detail;
-    this.name = "HttpResponseError";
-    this.status = status;
-  }
+function createHttpResponseError(
+  status: number,
+  code?: string,
+  detail?: string,
+): HttpResponseError {
+  return Object.assign(
+    new Error(`The HTTP request failed with status ${String(status)}`),
+    { code, detail, kind: "http_response_error" as const, status },
+  );
+}
+
+export function isHttpResponseError(
+  error: unknown,
+): error is HttpResponseError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "http_response_error" &&
+    "status" in error &&
+    typeof error.status === "number"
+  );
 }
 
 export function hasHttpError(
@@ -18,7 +34,7 @@ export function hasHttpError(
   code?: string,
 ): boolean {
   return (
-    error instanceof HttpResponseError &&
+    isHttpResponseError(error) &&
     error.status === status &&
     (code === undefined || error.code === code)
   );
@@ -64,7 +80,7 @@ export async function request(
     } catch {
       // Not every failed response has a JSON API body.
     }
-    throw new HttpResponseError(response.status, code, detail);
+    throw createHttpResponseError(response.status, code, detail);
   }
 
   return response;

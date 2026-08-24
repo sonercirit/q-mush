@@ -3,7 +3,7 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { testAgentModelOption } from "../shared/test/agent-model-fixtures.ts";
 import { TEST_WORKSPACE_LIST } from "../shared/test/workspace-fixtures.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import { PromptController } from "../solid/prompt-controller.ts";
+import { createPromptController } from "../solid/prompt-controller.ts";
 import { createPromptViewState } from "../solid/prompt-state.ts";
 import {
   BRAVE_SEARCH_PANEL,
@@ -11,7 +11,10 @@ import {
   OPENAI_PANEL,
   OPENROUTER_PANEL,
 } from "../solid/provider-client.tsx";
-import { ProviderController } from "../solid/provider-controller.ts";
+import {
+  createProviderController,
+  type ProviderController,
+} from "../solid/provider-controller.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -19,8 +22,8 @@ import {
 import type { ProviderPanelConfiguration } from "../solid/provider-panel-configuration.ts";
 import { createReactiveState } from "../solid/reactive-state.ts";
 import { createRunnerViewState } from "../solid/runner-client.tsx";
-import { RunnerController } from "../solid/runner-controller.ts";
-import { SessionController } from "../solid/session-controller.ts";
+import { createRunnerController } from "../solid/runner-controller.ts";
+import { createSessionController } from "../solid/session-controller.ts";
 import { initialSessionViewState } from "../solid/session-state.ts";
 import {
   clickTestButton,
@@ -29,9 +32,9 @@ import {
   mountTestView,
 } from "../solid/test/dom-test-helpers.ts";
 import { TEST_PROMPT } from "../solid/test/prompt-fixtures.ts";
-import { ToolSettingsController } from "../solid/tool-settings-controller.ts";
+import { createToolSettingsController } from "../solid/tool-settings-controller.ts";
 import { createWorkspaceViewState } from "../solid/workspace-client.tsx";
-import { WorkspaceController } from "../solid/workspace-controller.ts";
+import { createWorkspaceController } from "../solid/workspace-controller.ts";
 import { Workspace } from "../solid/workspace-view.tsx";
 
 const DISPOSALS: (() => void)[] = [];
@@ -48,7 +51,7 @@ const OPENROUTER_CREDENTIAL: ProviderCredential = {
 function providerController(
   configuration: ProviderPanelConfiguration,
 ): ProviderController {
-  return new ProviderController(
+  return createProviderController(
     configuration,
     createReactiveState(createProviderViewState([])),
   );
@@ -94,42 +97,38 @@ test("discovers global fallbacks through the mounted workspace", async () => {
       ),
     );
   const openRouterState = createReactiveState(createProviderViewState([]));
-  const prompts = new PromptController(
+  const prompts = createPromptController(
     createReactiveState(createPromptViewState([TEST_PROMPT])),
   );
   const container = mountTestView(
     () => (
       <Workspace
-        agentSessions={
-          new SessionController(
-            createReactiveState(initialSessionViewState()),
-            undefined,
-            null,
-          )
-        }
+        agentSessions={createSessionController(
+          createReactiveState(initialSessionViewState()),
+          undefined,
+          null,
+        )}
         braveSearch={providerController(BRAVE_SEARCH_PANEL)}
         generic={providerController(GENERIC_PANEL)}
         logout={() => Promise.resolve()}
         logoutPending={false}
         openAi={providerController(OPENAI_PANEL)}
-        openRouter={new ProviderController(OPENROUTER_PANEL, openRouterState)}
+        openRouter={createProviderController(OPENROUTER_PANEL, openRouterState)}
         prompts={prompts}
-        runners={
-          new RunnerController(createReactiveState(createRunnerViewState([])))
-        }
-        toolSettings={new ToolSettingsController()}
+        runners={createRunnerController(
+          createReactiveState(createRunnerViewState([])),
+        )}
+        toolSettings={createToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}
-        workspaces={
-          new WorkspaceController(
-            undefined,
-            createReactiveState(
-              createWorkspaceViewState({
-                defaultWorkspaceId: TEST_WORKSPACE_LIST.defaultWorkspaceId,
-                workspaces: TEST_WORKSPACE_LIST.workspaces.slice(0, 1),
-              }),
-            ),
-          )
-        }
+        workspaces={createWorkspaceController(
+          undefined,
+          createReactiveState(
+            createWorkspaceViewState({
+              defaultWorkspaceId: TEST_WORKSPACE_LIST.defaultWorkspaceId,
+              workspaces: TEST_WORKSPACE_LIST.workspaces.slice(0, 1),
+            }),
+          ),
+        )}
       />
     ),
     DISPOSALS,

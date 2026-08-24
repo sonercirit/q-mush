@@ -2,7 +2,10 @@ import { afterEach, expect, test } from "vitest";
 import { createReactiveState } from "../reactive-state.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { SessionPendingInputs } from "../session-pending-client.tsx";
 import { reconcilePendingInputs } from "../session-pending-input.ts";
 import { initialSessionViewState } from "../session-state.ts";
@@ -129,7 +132,7 @@ test("acknowledges a send locally without waiting for persistence, echo, or comm
   const socket = setup.sockets[0];
   if (socket === undefined) throw new TypeError("Missing realtime socket");
   socket.open("latency-instance");
-  const controller = new SessionController(reactive, undefined, null, {
+  const controller = createSessionController(reactive, undefined, null, {
     command: (operation, payload, idempotencyKey) =>
       connection.command(operation, payload, idempotencyKey),
   });
