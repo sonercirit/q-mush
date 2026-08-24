@@ -468,7 +468,7 @@ function boundedMaximum(
     : Math.max(1, Math.min(value, maximum));
 }
 
-export interface ToolStreamSnapshotStore {
+interface ToolStreamSnapshotStore {
   readonly size: number;
   apply(delta: ToolStreamDelta): boolean;
   snapshot(streamId: string): ToolStreamSnapshotFrame;
@@ -477,7 +477,7 @@ export interface ToolStreamSnapshotStore {
   deleteOldest(): boolean;
 }
 
-export function createToolStreamSnapshotStore(
+function createToolStreamSnapshotStore(
   options: ToolStreamSnapshotStoreOptions,
 ): ToolStreamSnapshotStore {
   const entries = new Map<string, ToolStreamEntry>();

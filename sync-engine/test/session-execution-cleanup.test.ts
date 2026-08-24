@@ -3,9 +3,9 @@ import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
   createRunnerCommandBroker,
-  type DispatchRunnerToolCommand,
   type RunnerCommandResult,
 } from "../../shared/runner-command-broker.ts";
+import type { DispatchRunnerToolCommand } from "../../shared/runner-command.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
 

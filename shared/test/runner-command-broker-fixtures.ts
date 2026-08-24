@@ -1,11 +1,11 @@
 import { expect } from "vitest";
 import {
-  type DispatchRunnerToolCommand,
   type RunnerCommandBroker,
   type RunnerCommandResult,
   type RunnerToolCommand,
   createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
+import type { DispatchRunnerToolCommand } from "../../shared/runner-command.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 
 export const TEST_RUNNER_ID = "runner-1";

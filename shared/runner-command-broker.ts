@@ -29,7 +29,6 @@ export {
   readRunnerExecutionEnvironment,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
-  type DispatchRunnerToolCommand,
   type RunnerCommandArguments,
   type RunnerExecutionEnvironment,
   type RunnerToolCommand,
