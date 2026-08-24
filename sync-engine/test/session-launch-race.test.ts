@@ -210,6 +210,16 @@ interface LaunchableSessionContext {
 
 type LaunchableSessionHandler = (context: LaunchableSessionContext) => void;
 
+function transitionLaunchableSession(
+  context: LaunchableSessionContext,
+  status: "idle" | "running",
+): void {
+  transitionTestSession(context.setup, context.created, "running", context.now);
+  if (status === "idle") {
+    transitionTestSession(context.setup, context.created, status, context.now);
+  }
+}
+
 const launchableSessionHandlers: Record<
   AgentSessionStatus,
   LaunchableSessionHandler
@@ -218,9 +228,8 @@ const launchableSessionHandlers: Record<
   failed: ({ created, now, setup }) => {
     failCreatedSession(setup, created, now);
   },
-  idle: ({ created, now, setup }) => {
-    transitionTestSession(setup, created, "running", now);
-    transitionTestSession(setup, created, "idle", now);
+  idle: (context) => {
+    transitionLaunchableSession(context, "idle");
   },
   paused: ({ created, now, setup }) => {
     expect(
@@ -234,8 +243,8 @@ const launchableSessionHandlers: Record<
     ).toBe(true);
   },
   queued: () => undefined,
-  running: ({ created, now, setup }) => {
-    transitionTestSession(setup, created, "running", now);
+  running: (context) => {
+    transitionLaunchableSession(context, "running");
   },
   stopped: ({ created, now, setup }) => {
     expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);

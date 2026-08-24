@@ -247,12 +247,36 @@ function expectRecoverableRequest(
   expect(store.recoverable()).toEqual(expected);
 }
 
+function createQuestion(
+  store: AskQuestionsStore,
+  toolCallId: string,
+  now: number,
+  generation = 3,
+) {
+  return store.create(
+    USER_ID,
+    SESSION_ID,
+    generation,
+    toolCallId,
+    input,
+    now,
+  );
+}
+
+function selectedAnswer(value: string): AskQuestionAnswers {
+  return { answers: [{ questionId: "decision", value }] };
+}
+
 function answerQuestion(
   store: AskQuestionsStore,
   now = NOW + 30,
   selectedAnswers = answers,
 ) {
   return store.answer(USER_ID, SESSION_ID, REQUEST_ID, selectedAnswers, now);
+}
+
+function configuredPendingQuestion() {
+  return setupWithQuestion();
 }
 
 function answeredQuestion() {
@@ -264,22 +288,8 @@ function answeredQuestion() {
 describe("ask questions store", () => {
   test("persists one audited pending call and returns it idempotently", () => {
     const { persistence, store } = setup();
-    const created = store.create(
-      USER_ID,
-      SESSION_ID,
-      3,
-      "call-question",
-      input,
-      NOW + 20,
-    );
-    const repeated = store.create(
-      USER_ID,
-      SESSION_ID,
-      3,
-      "call-question",
-      input,
-      NOW + 30,
-    );
+    const created = createQuestion(store, "call-question", NOW + 20);
+    const repeated = createQuestion(store, "call-question", NOW + 30);
 
     expect(repeated).toEqual(created);
     expect(store.pending(USER_ID, SESSION_ID)).toEqual(created);
@@ -307,7 +317,7 @@ describe("ask questions store", () => {
     };
 
     expect(() =>
-      store.create(USER_ID, SESSION_ID, 3, "call-other", input, NOW + 30),
+      createQuestion(store, "call-other", NOW + 30),
     ).toThrow("already has pending questions");
     expect(persistence.state.requests).toHaveLength(1);
   });
@@ -315,7 +325,7 @@ describe("ask questions store", () => {
   test("does not persist a request when the generation is stale", () => {
     const { persistence, store } = setup();
     expect(() =>
-      store.create(USER_ID, SESSION_ID, 2, "call-question", input, NOW + 20),
+      createQuestion(store, "call-question", NOW + 20, 2),
     ).toThrow("not running");
     expect(persistence.state.requests).toEqual([]);
   });
@@ -390,19 +400,16 @@ describe("ask questions store", () => {
     ]);
     expect(persistence.state.toolResults).toHaveLength(1);
     expect(
-      answerQuestion(store, NOW + 50, {
-        answers: [{ questionId: "decision", value: "stop" }],
-      }),
+      answerQuestion(store, NOW + 50, selectedAnswer("stop")),
     ).toEqual({ status: "conflict" });
   });
 
   test("delivers a custom answer in the tool result", () => {
-    const { persistence, store } = setupWithQuestion();
+    const configured = configuredPendingQuestion();
+    const { persistence, store } = configured;
 
     expect(
-      answerQuestion(store, NOW + 30, {
-        answers: [{ questionId: "decision", value: "wait for approval" }],
-      }),
+      answerQuestion(store, NOW + 30, selectedAnswer("wait for approval")),
     ).toMatchObject({ status: "answered" });
     expect(persistence.state.toolResults[0]?.content).toContain(
       '"value": "wait for approval"',
@@ -410,12 +417,11 @@ describe("ask questions store", () => {
   });
 
   test("rejects invalid answers without changing pending state", () => {
-    const { persistence, store } = setupWithQuestion();
+    const pending = configuredPendingQuestion();
+    const { persistence, store } = pending;
 
     expect(() =>
-      answerQuestion(store, NOW + 30, {
-        answers: [{ questionId: "decision", value: "   " }],
-      }),
+      answerQuestion(store, NOW + 30, selectedAnswer("   ")),
     ).toThrow("invalid");
     expect(pendingQuestionStatus(store)).not.toBeNull();
     expect(persistence.state.toolResults).toEqual([]);
