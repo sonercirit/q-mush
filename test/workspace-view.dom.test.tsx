@@ -19,7 +19,7 @@ import {
 import type { ProviderPanelConfiguration } from "../solid/provider-panel-configuration.ts";
 import { createReactiveState } from "../solid/reactive-state.ts";
 import { createRunnerViewState } from "../solid/runner-client.tsx";
-import { RunnerController } from "../solid/runner-controller.ts";
+import { createRunnerController } from "../solid/runner-controller.ts";
 import { SessionController } from "../solid/session-controller.ts";
 import { initialSessionViewState } from "../solid/session-state.ts";
 import {
@@ -115,7 +115,7 @@ test("discovers global fallbacks through the mounted workspace", async () => {
         openRouter={new ProviderController(OPENROUTER_PANEL, openRouterState)}
         prompts={prompts}
         runners={
-          new RunnerController(createReactiveState(createRunnerViewState([])))
+          createRunnerController(createReactiveState(createRunnerViewState([])))
         }
         toolSettings={createToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}

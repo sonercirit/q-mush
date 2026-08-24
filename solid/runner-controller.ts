@@ -10,7 +10,6 @@ import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
   createControllerState,
   jsonRequestInit,
-  type ControllerState,
 } from "./controller-mutation.ts";
 import { createReactiveState } from "./reactive-state.ts";
 import {
@@ -87,96 +86,100 @@ function runnerListsMatch(
   );
 }
 
-export class RunnerController {
-  readonly #state: ControllerState<RunnerViewState>;
-  #workspaceId = GLOBAL_WORKSPACE_ID;
-  #pendingRemovalRunners: readonly RunnerSummary[] | undefined;
+export interface RunnerController {
+  readonly state: RunnerViewState;
+  readonly view: Accessor<RunnerViewState>;
+  applyRealtime(runners: readonly RunnerSummary[]): void;
+  copyCommand(): Promise<void>;
+  create(): Promise<void>;
+  load(): Promise<void>;
+  remove(runnerId: string): Promise<void>;
+  reset(): void;
+  setDefault(runnerId: string): Promise<void>;
+  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void>;
+  setWorkspace(workspaceId: string): void;
+}
 
-  constructor(view = createReactiveState(initialRunnerState())) {
-    this.#state = createControllerState(view);
-  }
+export function createRunnerController(
+  view = createReactiveState(initialRunnerState()),
+): RunnerController {
+  const stateController = createControllerState(view);
+  let workspaceId = GLOBAL_WORKSPACE_ID;
+  let pendingRemovalRunners: readonly RunnerSummary[] | undefined;
 
-  get state(): RunnerViewState {
-    return this.#state.value;
-  }
-
-  get view(): Accessor<RunnerViewState> {
-    return this.#state.accessor;
-  }
-
-  applyRealtime(runners: readonly RunnerSummary[]): void {
-    const removingId = this.state.removingId;
+  function applyRealtime(runners: readonly RunnerSummary[]): void {
+    const removingId = stateController.value.removingId;
     if (removingId !== undefined) {
       if (!runners.some(({ id }) => id === removingId)) {
-        this.#pendingRemovalRunners = runners;
+        pendingRemovalRunners = runners;
       }
       return;
     }
-    if (this.state.creating || this.state.settingDefaultId !== undefined) {
+    if (stateController.value.creating || stateController.value.settingDefaultId !== undefined) {
       return;
     }
 
-    this.#applyList(runners);
+    applyList(runners);
   }
 
-  copyCommand(): Promise<void> {
-    return this.#copyCommand();
+  function copyCommandAction(): Promise<void> {
+    return copyCommand();
   }
 
-  create(): Promise<void> {
-    return this.#createRunner();
+  function create(): Promise<void> {
+    return createRunner();
   }
 
-  load(): Promise<void> {
-    return this.#readList(true);
+  function load(): Promise<void> {
+    return readList(true);
   }
 
-  remove(runnerId: string): Promise<void> {
-    return this.#mutate("remove", runnerId);
+  function remove(runnerId: string): Promise<void> {
+    return mutate("remove", runnerId);
   }
 
-  setWorkspace(workspaceId: string): void {
-    this.#workspaceId = workspaceId;
-    this.#pendingRemovalRunners = undefined;
-    this.#state.reset(initialRunnerState());
+  function setWorkspace(nextWorkspaceId: string): void {
+    workspaceId = nextWorkspaceId;
+    pendingRemovalRunners = undefined;
+    stateController.reset(initialRunnerState());
   }
 
-  reset(): void {
-    this.setWorkspace(GLOBAL_WORKSPACE_ID);
+  function reset(): void {
+    setWorkspace(GLOBAL_WORKSPACE_ID);
   }
 
-  setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void> {
-    return this.#state.mutation(
+  function setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void> {
+    return stateController.mutation(
       connectionScopesPath(RUNNERS_PATH, runnerId),
       jsonRequestInit({ workspaceIds }, "PUT"),
       request,
       () => ({ error: "We could not update that runner scope." }),
       { error: undefined },
       {},
-      () => this.#readList(false),
+      () => readList(false),
     );
   }
 
-  setDefault(runnerId: string): Promise<void> {
-    return this.#mutate("default", runnerId);
+  function setDefault(runnerId: string): Promise<void> {
+    return mutate("default", runnerId);
   }
 
-  #applyList(runners: readonly RunnerSummary[]): void {
-    const setup = setupAfterRefresh(this.state.setup, runners);
+  function applyList(runners: readonly RunnerSummary[]): void {
+    const setup = setupAfterRefresh(stateController.value.setup, runners);
 
     if (
-      runnerListsMatch(this.state.runners, runners) &&
-      this.state.setup === setup
+      runnerListsMatch(stateController.value.runners, runners) &&
+      stateController.value.setup === setup
     ) {
-      this.#state.replace({ ...this.state, runners });
+      stateController.replace({ ...stateController.value, runners });
       return;
     }
 
-    this.#patch({ error: undefined, runners, setup });
+    patch({ error: undefined, runners, setup });
   }
 
-  async #copyCommand(): Promise<void> {
-    const command = this.state.setup?.command;
+  async function copyCommand(): Promise<void> {
+    const command = stateController.value.setup?.command;
 
     if (command === undefined) {
       return;
@@ -184,9 +187,9 @@ export class RunnerController {
 
     try {
       await navigator.clipboard.writeText(command);
-      this.#patch({ copied: true, error: undefined });
+      patch({ copied: true, error: undefined });
     } catch {
-      this.#patch({
+      patch({
         copied: false,
         error:
           "The command could not be copied. Select it and copy it manually.",
@@ -194,8 +197,8 @@ export class RunnerController {
     }
   }
 
-  async #createRunner(): Promise<void> {
-    const revision = this.#begin({
+  async function createRunner(): Promise<void> {
+    const revision = begin({
       copied: false,
       creating: true,
       error: undefined,
@@ -204,23 +207,23 @@ export class RunnerController {
     try {
       const created = readCreatedRunner(
         await requestJson(
-          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(workspaceId)}`,
           { method: "POST" },
         ),
       );
 
-      if (this.#isCurrent(revision)) {
-        const current = this.state.runners ?? [];
-        this.#patch({
+      if (isCurrent(revision)) {
+        const current = stateController.value.runners ?? [];
+        patch({
           creating: false,
           runners: [...current, created.runner],
           setup: created.setup,
         });
       }
     } catch (error) {
-      if (this.#isCurrent(revision)) {
+      if (isCurrent(revision)) {
         const unavailable = isHttpResponseError(error) && error.status === 503;
-        this.#patch({
+        patch({
           creating: false,
           error: unavailable
             ? "Runner setup is not available on this server."
@@ -230,41 +233,41 @@ export class RunnerController {
     }
   }
 
-  #begin(patch: Partial<RunnerViewState>): number {
-    const revision = this.#state.revision.begin();
-    this.#patch(patch);
+  function begin(statePatch: Partial<RunnerViewState>): number {
+    const revision = stateController.revision.begin();
+    patch(statePatch);
     return revision;
   }
 
-  #isCurrent(revision: number): boolean {
-    return this.#state.revision.isCurrent(revision);
+  function isCurrent(revision: number): boolean {
+    return stateController.revision.isCurrent(revision);
   }
 
-  async #readList(showLoading: boolean): Promise<void> {
+  async function readList(showLoading: boolean): Promise<void> {
     const revision = showLoading
-      ? this.#begin({ error: undefined, runners: undefined })
-      : this.#state.revision.begin();
+      ? begin({ error: undefined, runners: undefined })
+      : stateController.revision.begin();
 
     try {
       const runners = readRunners(
         await requestJson(
-          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          `${RUNNERS_PATH}?workspaceId=${encodeURIComponent(workspaceId)}`,
         ),
       );
 
-      if (this.#isCurrent(revision)) {
-        this.#applyList(runners);
+      if (isCurrent(revision)) {
+        applyList(runners);
       }
     } catch {
-      if (this.#isCurrent(revision) && showLoading) {
-        this.#patch({
+      if (isCurrent(revision) && showLoading) {
+        patch({
           error: "We could not load your runners. Please try again.",
         });
       }
     }
   }
 
-  #mutationConfiguration(
+  function mutationConfiguration(
     mutation: RunnerMutation,
     runnerId: string,
   ): RunnerMutationConfiguration {
@@ -275,7 +278,7 @@ export class RunnerController {
           method: "POST",
           pending: "settingDefaultId",
           success: (id) => ({
-            runners: defaultedRunners(this.state.runners, id),
+            runners: defaultedRunners(stateController.value.runners, id),
             settingDefaultId: undefined,
           }),
         }
@@ -286,18 +289,18 @@ export class RunnerController {
           pending: "removingId",
           success: (id) => ({
             removingId: undefined,
-            runners: this.state.runners?.filter((runner) => runner.id !== id),
-            setup: setupWithoutRunner(this.state.setup, id),
+            runners: stateController.value.runners?.filter((runner) => runner.id !== id),
+            setup: setupWithoutRunner(stateController.value.setup, id),
           }),
         };
   }
 
-  async #mutate(mutation: RunnerMutation, runnerId: string): Promise<void> {
-    const configuration = this.#mutationConfiguration(mutation, runnerId);
+  async function mutate(mutation: RunnerMutation, runnerId: string): Promise<void> {
+    const configuration = mutationConfiguration(mutation, runnerId);
     if (mutation === "remove") {
-      this.#pendingRemovalRunners = undefined;
+      pendingRemovalRunners = undefined;
     }
-    const revision = this.#begin({
+    const revision = begin({
       error: undefined,
       [configuration.pending]: runnerId,
     });
@@ -305,34 +308,40 @@ export class RunnerController {
     try {
       await request(configuration.input, { method: configuration.method });
 
-      if (this.#isCurrent(revision)) {
-        this.#patch(configuration.success(runnerId));
+      if (isCurrent(revision)) {
+        patch(configuration.success(runnerId));
         if (mutation === "remove") {
-          this.#applyPendingRemovalList();
+          applyPendingRemovalList();
         }
       }
     } catch {
-      if (this.#isCurrent(revision)) {
-        this.#patch({
+      if (isCurrent(revision)) {
+        patch({
           error: configuration.failure,
           [configuration.pending]: undefined,
         });
         if (mutation === "remove") {
-          this.#applyPendingRemovalList();
+          applyPendingRemovalList();
         }
       }
     }
   }
 
-  #applyPendingRemovalList(): void {
-    const realtime = this.#pendingRemovalRunners;
-    this.#pendingRemovalRunners = undefined;
+  function applyPendingRemovalList(): void {
+    const realtime = pendingRemovalRunners;
+    pendingRemovalRunners = undefined;
     if (realtime !== undefined) {
-      this.#applyList(realtime);
+      applyList(realtime);
     }
   }
 
-  #patch(patch: Partial<RunnerViewState>): void {
-    this.#state.patch(patch);
+  function patch(patch: Partial<RunnerViewState>): void {
+    stateController.patch(patch);
   }
+  return {
+    get state() { return stateController.value; },
+    get view() { return stateController.accessor; },
+    applyRealtime, copyCommand: copyCommandAction, create, load, remove, reset, setDefault,
+    setScopes, setWorkspace,
+  };
 }

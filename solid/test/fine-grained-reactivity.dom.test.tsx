@@ -18,7 +18,7 @@ import {
   createRunnerViewState,
   type RunnerViewState,
 } from "../runner-client.tsx";
-import { RunnerController } from "../runner-controller.ts";
+import { createRunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
 import { SessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
@@ -142,7 +142,7 @@ test("realtime runner changes update the list without remounting the panel", () 
   const reactive = createReactiveState<RunnerViewState>(
     createRunnerViewState([]),
   );
-  const controller = new RunnerController(reactive);
+  const controller = createRunnerController(reactive);
   const container = mount(() => <RunnerPanel controller={controller} />);
   const panel = query(container, "[data-runner-panel='true']");
 

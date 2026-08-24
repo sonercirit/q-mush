@@ -41,7 +41,7 @@ import {
   type RenderDebugView,
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
-import { RunnerController } from "./runner-controller.ts";
+import { createRunnerController } from "./runner-controller.ts";
 import { SessionController } from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
@@ -302,7 +302,7 @@ function App(): JSX.Element {
   const openAi = new ProviderController(OPENAI_PANEL);
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = createPromptController();
-  const runners = new RunnerController();
+  const runners = createRunnerController();
   const toolSettings = createToolSettingsController();
   const realtime: RealtimeConnection = new RealtimeConnection(
     (event) => {
