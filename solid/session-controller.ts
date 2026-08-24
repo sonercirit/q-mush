@@ -689,4 +689,6 @@ export function createSessionController(
 
 type SessionControllerSurface = ReturnType<typeof createSessionController>;
 
-export interface SessionController extends SessionControllerSurface {}
+export interface SessionController extends SessionControllerSurface {
+  readonly state: SessionViewState;
+}
