@@ -79,7 +79,10 @@ import {
 } from "./session-request-helpers.ts";
 import { createSessionRestartAbort } from "./session-restart-abort.ts";
 import { createSessionRestartControl } from "./session-restart-control.ts";
-import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
+import {
+  createSessionRestartCoordinator,
+  type SessionRestartCoordinator,
+} from "./session-restart-coordinator.ts";
 import {
   createRunnerRemovalCoordinator,
   type RunnerRemovalCoordinator,
@@ -329,7 +332,7 @@ class DrizzleSessionIntegration
         runnerId,
       );
     };
-    this.#restartGate = new SessionRestartCoordinator({
+    this.#restartGate = createSessionRestartCoordinator({
       launch: this.#launch,
       providers: this.#providers,
       recoverInterrupted: recover,
