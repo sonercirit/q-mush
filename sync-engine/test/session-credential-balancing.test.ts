@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -70,14 +71,15 @@ function createRestartPinnedModel(blockedRequest?: number): RestartPinnedModel {
   let blockRequest = blockedRequest;
   const entered = Promise.withResolvers<undefined>();
   const release = Promise.withResolvers<undefined>();
-  const requests: AgentConversationMessage[][] = [];
+  const recorder = createAgentRequestRecorder();
+  const { requests } = recorder;
   return {
     entered,
     release,
     requests,
     complete: async (messages) => {
       const step = requests.length + 1;
-      requests.push([...messages]);
+      recorder.record(messages);
       if (step === blockRequest) {
         entered.resolve(undefined);
         await release.promise;

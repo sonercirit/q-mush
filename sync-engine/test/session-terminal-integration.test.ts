@@ -5,6 +5,10 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
+import {
+  assistantPrefillError,
+  createAgentRequestRecorder,
+} from "./assistant-prefill-test-helpers.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
@@ -66,11 +70,12 @@ interface SleepWakeCallbackModel extends AgentModel {
 function createPrefillRejectingSleepWakeCallbackModel(): SleepWakeCallbackModel {
   const childCompletion = Promise.withResolvers<undefined>();
   const sleepStep = Promise.withResolvers<undefined>();
-  const requests: AgentConversationMessage[][] = [];
+  const recorder = createAgentRequestRecorder(true);
+  const { requests } = recorder;
   return {
     requests,
     async complete(messages) {
-      requests.push(Array.from(messages, (message) => ({ ...message })));
+      recorder.record(messages);
       const initial = messages[0]?.content;
       if (initial === "Complete during the parent sleep") {
         await childCompletion.promise;
@@ -92,11 +97,8 @@ function createPrefillRejectingSleepWakeCallbackModel(): SleepWakeCallbackModel 
           toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
         });
       }
-      if (messages.at(-1)?.role !== "user") {
-        throw new Error(
-          "This model does not support assistant message prefill. The conversation must end with a user message.",
-        );
-      }
+      const prefillError = assistantPrefillError(messages);
+      if (prefillError !== undefined) throw prefillError;
       return terminalAgentStep("Callback handled once.");
     },
     finishChild() {
@@ -148,21 +150,16 @@ interface SteeringModel extends AgentModel {
 
 function createPrefillRejectingSteeringModel(): SteeringModel {
   const firstStep = Promise.withResolvers<AgentModelStep>();
-  const requests: AgentConversationMessage[][] = [];
+  const recorder = createAgentRequestRecorder();
   return {
-    requests,
+    requests: recorder.requests,
     complete(messages) {
-      requests.push([...messages]);
-      if (requests.length === 1) {
+      recorder.record(messages);
+      if (recorder.requests.length === 1) {
         return firstStep.promise;
       }
-      if (messages.at(-1)?.role !== "user") {
-        return Promise.reject(
-          new Error(
-            "This model does not support assistant message prefill. The conversation must end with a user message.",
-          ),
-        );
-      }
+      const prefillError = assistantPrefillError(messages);
+      if (prefillError !== undefined) return Promise.reject(prefillError);
       return Promise.resolve(terminalAgentStep("Steer handled safely."));
     },
     resolveFirstStep() {

@@ -1,5 +1,6 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -69,11 +70,9 @@ interface RestartedSpawnModel extends AgentModel {
 }
 
 function createRestartedSpawnModel(): RestartedSpawnModel {
-  const requests: AgentConversationMessage[][] = [];
-  return {
-    requests,
-    complete(messages) {
-      requests.push([...messages]);
+  const recorder = createAgentRequestRecorder();
+  const complete: AgentModel["complete"] = (messages) => {
+    recorder.record(messages);
       if (includesContent(messages, COMPLETION_REPORT)) {
         return Promise.resolve(
           providerStep("The parent received the true child completion."),
@@ -103,8 +102,8 @@ function createRestartedSpawnModel(): RestartedSpawnModel {
           toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
         }),
       );
-    },
   };
+  return { complete, requests: recorder.requests };
 }
 
 async function startChildToolSession(model: AgentModel) {
