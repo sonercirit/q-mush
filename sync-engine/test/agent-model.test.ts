@@ -33,11 +33,11 @@ const OPENROUTER_IMAGE_OPTIONS = {
   provider: "openrouter" as const,
 };
 interface RequestCapture {
-  request?: Request;
+  request: Request | undefined;
 }
 
 function createRequestCapture(): RequestCapture {
-  return {};
+  return { request: undefined };
 }
 async function capturedBody(capture: RequestCapture): Promise<unknown> {
   return capture.request?.json();
