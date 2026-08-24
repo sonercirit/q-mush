@@ -8,7 +8,8 @@ import {
 } from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
 import {
-  ProviderQuotaStore,
+  createProviderQuotaStore,
+  type ProviderQuotaStore,
   type ResetReservation,
 } from "../provider-quota-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
@@ -101,7 +102,7 @@ function setup() {
   ];
   return {
     database,
-    store: new ProviderQuotaStore(database, () => ids.shift() ?? SETTING_ID),
+    store: createProviderQuotaStore(database, () => ids.shift() ?? SETTING_ID),
   };
 }
 

@@ -9,7 +9,7 @@ import {
   type ProviderCredentialDetails,
   type ProviderId,
 } from "../shared/provider-credential-store.ts";
-import { ProviderQuotaStore } from "../shared/provider-quota-store.ts";
+import { createProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
   createConnectedAccountOAuth,
@@ -153,7 +153,7 @@ export function createProviderIntegration(options: {
   const quotaStore =
     options.configuration === undefined
       ? undefined
-      : new ProviderQuotaStore(runtime.database, runtime.generateId);
+      : createProviderQuotaStore(runtime.database, runtime.generateId);
   const sessionStore =
     options.configuration === undefined
       ? undefined
