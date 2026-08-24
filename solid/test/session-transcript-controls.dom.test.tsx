@@ -2,7 +2,7 @@ import { afterEach, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { disposeTestViews, queryTestElement } from "./dom-test-helpers.ts";
-import { MemoryStorage } from "./memory-storage.ts";
+import { createMemoryStorage } from "./memory-storage.ts";
 import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import {
   applyTranscriptDelta,
@@ -14,7 +14,7 @@ import {
 } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
-const filterStorage = new MemoryStorage();
+const filterStorage = createMemoryStorage();
 const FOLLOW_UP_DRAFT = "Keep focus and selection";
 const MIXED_ASSISTANT_TEXT = "Assistant text with a tool";
 const MIXED_TOOL_TEXT = "Tool call · read";

@@ -5,7 +5,7 @@ import {
   writeSessionTranscriptFilters,
   type SessionTranscriptFilterStorage,
 } from "../session-transcript-filters.ts";
-import { MemoryStorage } from "./memory-storage.ts";
+import { createMemoryStorage } from "./memory-storage.ts";
 
 test("transcript filters show every category by default", () => {
   expect(readSessionTranscriptFilters(undefined)).toEqual(
@@ -24,7 +24,7 @@ test("transcript filters show every category by default", () => {
 });
 
 test("transcript filters round trip through browser storage", () => {
-  const storage = new MemoryStorage();
+  const storage = createMemoryStorage();
   const filters = {
     ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
     systemPrompt: false,
@@ -51,7 +51,7 @@ test.each([
     agentInstructions: undefined,
   }),
 ])("invalid stored transcript filters fall back safely: %s", (stored) => {
-  const storage = new MemoryStorage();
+  const storage = createMemoryStorage();
   storage.setItem("q-mush.session-transcript-filters.v1", stored);
 
   expect(readSessionTranscriptFilters(storage)).toEqual(

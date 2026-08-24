@@ -18,7 +18,7 @@ import {
   requestUrl,
   withRestoredFetch,
 } from "./controller-test-helpers.ts";
-import { MemoryStorage } from "./memory-storage.ts";
+import { createMemoryStorage } from "./memory-storage.ts";
 import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -451,7 +451,7 @@ test("replaces a streaming transcript with a compacted snapshot", async () => {
 });
 
 test("loads persisted transcript filters into the controller and keeps them on reset", () => {
-  const storage = new MemoryStorage();
+  const storage = createMemoryStorage();
   writeSessionTranscriptFilters(storage, {
     ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
     toolDefinitions: false,
