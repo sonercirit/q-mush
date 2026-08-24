@@ -41,7 +41,7 @@ import {
 } from "./openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "./openrouter.ts";
 import { renderPages } from "./pages.ts";
-import { createPromptIntegration } from "./prompts.ts";
+import { createDrizzlePromptIntegration } from "./prompts.ts";
 import {
   createRealtimeIntegration,
   isRealtimePath,
@@ -128,7 +128,7 @@ const openRouter = createOpenRouterIntegrationFromEnvironment(
   providerDependencies,
 );
 const runners = createRunnerIntegration(googleAuth, { database });
-const prompts = createPromptIntegration(googleAuth, { database });
+const prompts = createDrizzlePromptIntegration(googleAuth, { database });
 const toolSettings = createToolSettingsIntegration(googleAuth, {
   database,
   realtime: realtimeHub,

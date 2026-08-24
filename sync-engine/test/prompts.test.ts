@@ -5,7 +5,7 @@ import { prompts } from "../../shared/database/schema.ts";
 import { PROMPT_BODY_MAXIMUM_BYTES } from "../../shared/prompt-model.ts";
 import { promptPath, PROMPTS_PATH } from "../../shared/routes.ts";
 import {
-  createPromptIntegration,
+  createDrizzlePromptIntegration,
   type PromptIntegration,
 } from "../../sync-engine/prompts.ts";
 import {
@@ -38,7 +38,7 @@ function createSetup(maximumCount?: number) {
     })
     .run();
   const ids = [PROMPT_ID, NEXT_PROMPT_ID, DUPLICATE_PROMPT_ID];
-  const integration = createPromptIntegration(auth, {
+  const integration = createDrizzlePromptIntegration(auth, {
     database,
     ...(maximumCount === undefined ? {} : { maximumCount }),
     now: () => TEST_NOW,

@@ -36,7 +36,7 @@ import { createGenericIntegrationFromEnvironment } from "../../sync-engine/gener
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import { renderPages } from "../../sync-engine/pages.ts";
-import { createPromptIntegration } from "../../sync-engine/prompts.ts";
+import { createDrizzlePromptIntegration } from "../../sync-engine/prompts.ts";
 import type { RunnerExecutableProvider } from "../../sync-engine/runner-executable.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { createRequestHandler } from "../../sync-engine/server.ts";
@@ -139,7 +139,10 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
     googleAuth,
     openAi,
     openRouter,
-    prompts: createPromptIntegration(googleAuth, integrationDependencies),
+    prompts: createDrizzlePromptIntegration(
+      googleAuth,
+      integrationDependencies,
+    ),
     runnerExecutables,
     runners,
     sessions,

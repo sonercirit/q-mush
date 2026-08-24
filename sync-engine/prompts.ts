@@ -9,10 +9,7 @@ import {
   type PromptInput,
 } from "../shared/prompt-model.ts";
 import type { GoogleAuth } from "./auth.ts";
-import {
-  createAuthenticatedCollectionIntegration,
-  type AuthenticatedCollectionIntegration,
-} from "./authenticated-collection-integration.ts";
+import { createAuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
 import type { CollectionItemIntegration } from "./collection-item-integration.ts";
 import {
   createApiError,
@@ -20,11 +17,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
-import {
-  createPromptStore,
-  isPromptStoreErrorKind,
-  type PromptStore,
-} from "./prompt-store.ts";
+import { createPromptStore, isPromptStoreErrorKind } from "./prompt-store.ts";
 
 interface PromptDependencies {
   readonly database?: AppDatabase;
@@ -33,7 +26,7 @@ interface PromptDependencies {
   readonly randomId?: IdGenerator;
 }
 
-export type PromptIntegration = CollectionItemIntegration;
+export interface PromptIntegration extends CollectionItemIntegration {}
 
 const PROMPT_REQUEST_MAXIMUM_BYTES =
   PROMPT_BODY_MAXIMUM_BYTES + PROMPT_NAME_MAXIMUM_LENGTH * 6 + 1_024;
@@ -126,113 +119,92 @@ function readPromptInput(value: unknown): PromptInput | undefined {
   return normalizePromptInput({ body, name });
 }
 
-class DrizzlePromptIntegration implements PromptIntegration {
-  readonly #authenticated: AuthenticatedCollectionIntegration;
-  readonly #now: () => number;
-  readonly #store: PromptStore;
+export function createDrizzlePromptIntegration(
+  auth: GoogleAuth,
+  dependencies: PromptDependencies = {},
+): PromptIntegration {
+  const authenticated = createAuthenticatedCollectionIntegration(auth);
+  const database = dependencies.database ?? createDatabase(":memory:");
+  const now = dependencies.now ?? Date.now;
+  const store = createPromptStore(
+    database,
+    dependencies.randomId ?? createUuidV7,
+    dependencies.maximumCount,
+  );
 
-  constructor(auth: GoogleAuth, dependencies: PromptDependencies) {
-    this.#authenticated = createAuthenticatedCollectionIntegration(auth);
-    const database = dependencies.database ?? createDatabase(":memory:");
-    this.#now = dependencies.now ?? Date.now;
-    this.#store = createPromptStore(
-      database,
-      dependencies.randomId ?? createUuidV7,
-      dependencies.maximumCount,
-    );
-  }
+  const promptResponse = (prompt: Prompt | undefined): Response =>
+    prompt === undefined
+      ? createApiError("not_found", 404)
+      : createJsonResponse(prompt);
 
-  collection(request: Request): Promise<Response> | Response {
-    const methods = {
-      GET: (userId: string) =>
-        createJsonResponse({ prompts: this.#store.list(userId) }),
-      POST: (userId: string) => this.#write(request, userId),
-    };
-    return this.#authenticated.collectionRoute(request, methods);
-  }
-
-  item(request: Request, promptId: string): Promise<Response> | Response {
-    return this.#authenticated.route(request, (userId, method) => {
-      const handlers: Record<
-        "DELETE" | "GET" | "PUT",
-        () => Promise<Response> | Response
-      > = {
-        DELETE: () => {
-          const revision = preconditionResponse(request);
-          if (revision instanceof Response) return revision;
-          try {
-            return this.#store.remove(userId, promptId, this.#now(), revision)
-              ? createNoContentResponse()
-              : createApiError("not_found", 404);
-          } catch (error) {
-            return isPromptStoreErrorKind(error, "prompt_changed")
-              ? createApiError("prompt_changed", 412)
-              : createApiError("storage_unavailable", 500);
-          }
-        },
-        GET: () => this.#promptResponse(this.#store.get(userId, promptId)),
-        PUT: () => {
-          const revision = preconditionResponse(request);
-          return revision instanceof Response
-            ? revision
-            : this.#write(request, userId, promptId, revision);
-        },
-      };
-      if (method === "DELETE") return handlers.DELETE();
-      if (method === "GET") return handlers.GET();
-      if (method === "PUT") return handlers.PUT();
-      return createMethodNotAllowedResponse("GET, PUT, DELETE");
-    });
-  }
-
-  async #write(
+  const write = async (
     request: Request,
     userId: string,
     promptId?: string,
     revision = 1,
-  ): Promise<Response> {
+  ): Promise<Response> => {
     const parsed = await readPromptRequest(request);
-    if (parsed.tooLarge) {
-      return createApiError("request_too_large", 413);
-    }
+    if (parsed.tooLarge) return createApiError("request_too_large", 413);
     const input = readPromptInput(parsed.value);
-    if (input === undefined) {
-      return createApiError("invalid_request", 400);
-    }
+    if (input === undefined) return createApiError("invalid_request", 400);
     try {
       if (promptId === undefined) {
-        return createJsonResponse(
-          this.#store.create(userId, input, this.#now()),
-          201,
-        );
+        return createJsonResponse(store.create(userId, input, now()), 201);
       }
-      return this.#promptResponse(
-        this.#store.update(userId, promptId, input, this.#now(), revision),
+      return promptResponse(
+        store.update(userId, promptId, input, now(), revision),
       );
     } catch (error) {
-      if (isPromptStoreErrorKind(error, "duplicate_prompt_name")) {
+      if (isPromptStoreErrorKind(error, "duplicate_prompt_name"))
         return createApiError("duplicate_name", 409);
-      }
-      if (isPromptStoreErrorKind(error, "prompt_changed")) {
+      if (isPromptStoreErrorKind(error, "prompt_changed"))
         return createApiError("prompt_changed", 412);
-      }
-      if (isPromptStoreErrorKind(error, "prompt_limit")) {
+      if (isPromptStoreErrorKind(error, "prompt_limit"))
         return createApiError("prompt_limit_reached", 409);
-      }
       return createApiError("storage_unavailable", 500);
     }
-  }
+  };
 
-  #promptResponse(prompt: Prompt | undefined): Response {
-    return prompt === undefined
-      ? createApiError("not_found", 404)
-      : createJsonResponse(prompt);
-  }
-}
-
-export function createPromptIntegration(
-  auth: GoogleAuth,
-  dependencies: PromptDependencies = {},
-): PromptIntegration {
-  return new DrizzlePromptIntegration(auth, dependencies);
+  return {
+    collection: (request) => {
+      const methods = {
+        GET: (userId: string) =>
+          createJsonResponse({ prompts: store.list(userId) }),
+        POST: (userId: string) => write(request, userId),
+      };
+      return authenticated.collectionRoute(request, methods);
+    },
+    item: (request, promptId) =>
+      authenticated.route(request, (userId, method) => {
+        const handlers: Record<
+          "DELETE" | "GET" | "PUT",
+          () => Promise<Response> | Response
+        > = {
+          DELETE: () => {
+            const revision = preconditionResponse(request);
+            if (revision instanceof Response) return revision;
+            try {
+              return store.remove(userId, promptId, now(), revision)
+                ? createNoContentResponse()
+                : createApiError("not_found", 404);
+            } catch (error) {
+              return isPromptStoreErrorKind(error, "prompt_changed")
+                ? createApiError("prompt_changed", 412)
+                : createApiError("storage_unavailable", 500);
+            }
+          },
+          GET: () => promptResponse(store.get(userId, promptId)),
+          PUT: () => {
+            const revision = preconditionResponse(request);
+            return revision instanceof Response
+              ? revision
+              : write(request, userId, promptId, revision);
+          },
+        };
+        if (method === "DELETE") return handlers.DELETE();
+        if (method === "GET") return handlers.GET();
+        if (method === "PUT") return handlers.PUT();
+        return createMethodNotAllowedResponse("GET, PUT, DELETE");
+      }),
+  };
 }
