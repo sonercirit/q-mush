@@ -43,7 +43,7 @@ type RealtimeCommandErrorAcknowledgement = Readonly<{
 type RealtimeCommandAcknowledgement =
   RealtimeCommandErrorAcknowledgement | RealtimeCommandSuccess;
 
-export interface SerializedRealtimeAcknowledgement {
+interface SerializedRealtimeAcknowledgement {
   readonly serialized: string;
   readonly value: RealtimeCommandAcknowledgement;
 }
