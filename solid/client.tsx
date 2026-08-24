@@ -30,7 +30,10 @@ import {
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
 import { createProviderController } from "./provider-controller.ts";
-import { RealtimeConnection } from "./realtime-client.ts";
+import {
+  createRealtimeConnection,
+  type RealtimeConnection,
+} from "./realtime-client.ts";
 import type { RealtimeClientEvent } from "./realtime-stream-buffer.ts";
 import {
   createRenderDebugView,
@@ -304,7 +307,7 @@ function App(): JSX.Element {
   const prompts = createPromptController();
   const runners = createRunnerController();
   const toolSettings = createToolSettingsController();
-  const realtime: RealtimeConnection = new RealtimeConnection(
+  const realtime: RealtimeConnection = createRealtimeConnection(
     (event) => {
       const handlers: {
         [Type in RealtimeClientEvent["type"]]: (

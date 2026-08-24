@@ -39,6 +39,8 @@ interface BrowserWebSocket extends EventTarget {
 type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
 type FrameCallback = (callback: () => void) => number;
 type RealtimeListener = (event: RealtimeClientEvent) => void;
+type SessionRealtimeOperation =
+  (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS];
 type DeferredStateEvent = Extract<
   RealtimeServerEvent,
   {
@@ -56,7 +58,7 @@ type DeferredStateEvent = Extract<
 const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
 const STREAM_UPDATES_PER_FRAME = 4;
 const STREAM_PREP_BUDGET_MS = 8;
-function stateEventKey<Type extends DeferredStateEvent["type"]>(
+function deferredStateEventKey<Type extends DeferredStateEvent["type"]>(
   event: Extract<DeferredStateEvent, { readonly type: Type }>,
   expectedType: Type,
   keys: {
@@ -82,119 +84,121 @@ function realtimeUrl(location: RealtimeLocation, workspaceId: string): string {
   url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }
-export class RealtimeConnection {
-  readonly #createSocket: BrowserWebSocketFactory;
-  readonly #listener: RealtimeListener;
-  readonly #location: RealtimeLocation;
-  readonly #now: () => number;
-  readonly #requestFrame: FrameCallback;
-  readonly #setTimeout: (callback: () => void, delay: number) => number;
-  readonly #selected: () => string | undefined;
-  readonly #clearTimeout: (id: number) => void;
-  #instanceId: string | undefined;
-  #hasConnected = false;
-  #lastInstanceId: string | undefined;
-  readonly #reconnects = new Set<() => void>();
-  #commandBytes = 0;
-  #pendingCommands = new Map<string, PendingCommand>();
-  #queuedCommands: QueuedCommand[] = [];
-  #reconnectAttempt = 0;
-  #reconnectTimer: number | undefined;
-  #stateEventGeneration = 0;
-  #stateEventFrame: number | undefined;
-  readonly #stateEvents = new Map<string, DeferredStateEvent>();
-  readonly #stateBarriers = new Map<string, RealtimeStreamBarrier>();
-  readonly #stateWaiters: ((available: boolean) => void)[] = [];
-  #generation = 0;
-  readonly #buffer: RealtimeStreamBuffer;
-  #streamFrame: number | undefined;
-  #socket: BrowserWebSocket | undefined;
-  readonly #toolSync: ToolSyncTracker;
-  #stopped = true;
-  #workspaceId = GLOBAL_WORKSPACE_ID;
-  constructor(
-    listener: RealtimeListener,
-    options: {
-      readonly clearTimeout?: (id: number) => void;
-      readonly createSocket?: BrowserWebSocketFactory;
-      readonly location?: RealtimeLocation;
-      readonly now?: () => number;
-      readonly requestFrame?: FrameCallback;
-      readonly selectedSession?: () => string | undefined;
-      readonly streamBuffer?: RealtimeStreamBuffer;
-      readonly setTimeout?: (callback: () => void, delay: number) => number;
-      readonly toolSync?: ToolSyncTracker;
-    } = {},
-  ) {
-    this.#buffer = options.streamBuffer ?? createRealtimeStreamBuffer();
-    this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
-    this.#listener = listener;
-    this.#location = options.location ?? window.location;
-    this.#now = options.now ?? (() => performance.now());
-    this.#requestFrame =
-      options.requestFrame ??
-      ((callback) => window.requestAnimationFrame(callback));
-    this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
-    this.#setTimeout = options.setTimeout ?? window.setTimeout;
-    this.#selected = options.selectedSession ?? noSelectedSession;
-    this.#toolSync = options.toolSync ?? createToolSyncTracker();
-  }
-  onReconnect(listener: () => void): () => void {
-    const reconnects = this.#reconnects;
-    reconnects.add(listener);
+export interface RealtimeConnection {
+  command(
+    operation: SessionRealtimeOperation,
+    payload: Readonly<Record<string, unknown>>,
+    idempotencyKey?: string,
+  ): Promise<unknown>;
+  readonly onReconnect: (listener: () => void) => () => void;
+  readonly start: (workspaceId?: string) => void;
+  readonly stop: () => void;
+  readonly syncTools: (sessionId: string) => void;
+  readonly yieldToStateApplication: () => Promise<boolean>;
+}
+
+interface RealtimeConnectionOptions {
+  readonly clearTimeout?: (id: number) => void;
+  readonly createSocket?: BrowserWebSocketFactory;
+  readonly location?: RealtimeLocation;
+  readonly now?: () => number;
+  readonly requestFrame?: FrameCallback;
+  readonly selectedSession?: () => string | undefined;
+  readonly streamBuffer?: RealtimeStreamBuffer;
+  readonly setTimeout?: (callback: () => void, delay: number) => number;
+  readonly toolSync?: ToolSyncTracker;
+}
+
+export function createRealtimeConnection(
+  listener: RealtimeListener,
+  options: RealtimeConnectionOptions = {},
+): RealtimeConnection {
+  const buffer = options.streamBuffer ?? createRealtimeStreamBuffer();
+  const createSocket = options.createSocket ?? ((url) => new WebSocket(url));
+  const location = options.location ?? window.location;
+  const now = options.now ?? (() => performance.now());
+  const requestFrame =
+    options.requestFrame ??
+    ((callback) => window.requestAnimationFrame(callback));
+  const clearTimeout = options.clearTimeout ?? window.clearTimeout;
+  const setTimeout = options.setTimeout ?? window.setTimeout;
+  const selected = options.selectedSession ?? noSelectedSession;
+  const toolSync = options.toolSync ?? createToolSyncTracker();
+  let instanceId: string | undefined;
+  let hasConnected = false;
+  let lastInstanceId: string | undefined;
+  const reconnects = new Set<() => void>();
+  let commandBytes = 0;
+  const pendingCommands = new Map<string, PendingCommand>();
+  let queuedCommands: QueuedCommand[] = [];
+  let reconnectAttempt = 0;
+  let reconnectTimer: number | undefined;
+  let stateEventGeneration = 0;
+  let stateEventFrame: number | undefined;
+  const stateEvents = new Map<string, DeferredStateEvent>();
+  const stateBarriers = new Map<string, RealtimeStreamBarrier>();
+  const stateWaiters: ((available: boolean) => void)[] = [];
+  let generation = 0;
+  let streamFrame: number | undefined;
+  let socket: BrowserWebSocket | undefined;
+  let stopped = true;
+  let workspaceId = GLOBAL_WORKSPACE_ID;
+  function onReconnect(listener: () => void): () => void {
+    const registeredReconnects = reconnects;
+    registeredReconnects.add(listener);
     return () => {
-      reconnects.delete(listener);
+      registeredReconnects.delete(listener);
     };
   }
-  yieldToStateApplication(): Promise<boolean> {
+  function yieldToStateApplication(): Promise<boolean> {
     return new Promise((resolve) => {
-      this.#stateWaiters.push(resolve);
-      this.#scheduleStateEvent();
+      stateWaiters.push(resolve);
+      scheduleStateEvent();
     });
   }
-  #sendToolSync(request: ToolSyncRequest): boolean {
+  function sendToolSync(request: ToolSyncRequest): boolean {
     try {
-      this.#socket?.send(JSON.stringify({ ...request, type: "sync_tools" }));
+      socket?.send(JSON.stringify({ ...request, type: "sync_tools" }));
       return true;
     } catch {
-      this.#socket?.close();
+      socket?.close();
       return false;
     }
   }
-  syncTools(sessionId: string): void {
-    this.#syncTools(this.#buffer.activeToolStreams(sessionId));
+  function syncTools(sessionId: string): void {
+    syncToolRequests(buffer.activeToolStreams(sessionId));
   }
-  start(workspaceId = this.#workspaceId): void {
-    if (!this.#stopped) {
+  function start(nextWorkspaceId = workspaceId): void {
+    if (!stopped) {
       return;
     }
-    this.#workspaceId = workspaceId;
-    this.#stopped = false;
-    this.#connect();
+    workspaceId = nextWorkspaceId;
+    stopped = false;
+    connect();
   }
-  stop(): void {
-    this.#stopped = true;
-    this.#hasConnected = false;
-    this.#lastInstanceId = undefined;
-    this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
-    this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
-    this.#commandBytes = 0;
-    this.#instanceId = undefined;
-    if (this.#reconnectTimer !== undefined) {
-      this.#clearTimeout(this.#reconnectTimer);
-      this.#reconnectTimer = undefined;
+  function stop(): void {
+    stopped = true;
+    hasConnected = false;
+    lastInstanceId = undefined;
+    rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
+    rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
+    commandBytes = 0;
+    instanceId = undefined;
+    if (reconnectTimer !== undefined) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = undefined;
     }
-    const socket = this.#socket;
-    this.#socket = undefined;
-    this.#discardStateEvents();
-    this.#generation += 1;
-    this.#streamFrame = undefined;
-    this.#buffer.clear();
-    this.#toolSync.clear();
-    socket?.close();
+    const activeSocket = socket;
+    socket = undefined;
+    discardStateEvents();
+    generation += 1;
+    streamFrame = undefined;
+    buffer.clear();
+    toolSync.clear();
+    activeSocket?.close();
   }
-  command(
-    operation: (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS],
+  function command(
+    operation: SessionRealtimeOperation,
     payload: Readonly<Record<string, unknown>>,
     idempotencyKey: string = crypto.randomUUID(),
   ): Promise<unknown> {
@@ -215,11 +219,11 @@ export class RealtimeConnection {
     if (bytes >= USER_REALTIME_MAX_PAYLOAD_LENGTH) {
       return Promise.reject(new Error("command_too_large"));
     }
-    const socket = this.#socket;
+    const activeSocket = socket;
     if (
-      this.#queuedCommands.length + this.#pendingCommands.size >=
+      queuedCommands.length + pendingCommands.size >=
         MAXIMUM_PENDING_COMMANDS ||
-      bytes > MAXIMUM_PENDING_COMMAND_BYTES - this.#commandBytes
+      bytes > MAXIMUM_PENDING_COMMAND_BYTES - commandBytes
     ) {
       return Promise.reject(new Error("command_capacity_exceeded"));
     }
@@ -231,97 +235,95 @@ export class RealtimeConnection {
         resolve,
         sentInstanceId: undefined,
       };
-      this.#commandBytes += bytes;
+      commandBytes += bytes;
       if (
-        socket?.readyState !== WebSocket.OPEN ||
-        this.#instanceId === undefined
+        activeSocket?.readyState !== WebSocket.OPEN ||
+        instanceId === undefined
       ) {
-        this.#queuedCommands.push({ commandId, pending });
+        queuedCommands.push({ commandId, pending });
         return;
       }
-      pending.sentInstanceId = this.#instanceId;
-      this.#pendingCommands.set(commandId, pending);
+      pending.sentInstanceId = instanceId;
+      pendingCommands.set(commandId, pending);
       try {
-        socket.send(envelope);
+        activeSocket.send(envelope);
       } catch {
-        this.#pendingCommands.delete(commandId);
-        this.#commandBytes -= pending.bytes;
+        pendingCommands.delete(commandId);
+        commandBytes -= pending.bytes;
         reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
-        socket.close();
+        activeSocket.close();
       }
     });
   }
-  #clearDisconnectedStreams(): void {
-    this.#generation += 1;
-    this.#streamFrame = undefined;
-    this.#buffer.clearPending();
+  function clearDisconnectedStreams(): void {
+    generation += 1;
+    streamFrame = undefined;
+    buffer.clearPending();
   }
-  #connect(): void {
-    if (this.#stopped) {
+  function connect(): void {
+    if (stopped) {
       return;
     }
-    let socket: BrowserWebSocket;
+    let connectedSocket: BrowserWebSocket;
     try {
-      socket = this.#createSocket(
-        realtimeUrl(this.#location, this.#workspaceId),
-      );
+      connectedSocket = createSocket(realtimeUrl(location, workspaceId));
     } catch {
-      this.#scheduleReconnect();
+      scheduleReconnect();
       return;
     }
-    this.#socket = socket;
-    socket.addEventListener("open", () => {
+    socket = connectedSocket;
+    connectedSocket.addEventListener("open", () => {
       if (
-        this.#socket !== socket ||
-        this.#stopped ||
-        socket.readyState !== WebSocket.OPEN
+        socket !== connectedSocket ||
+        stopped ||
+        connectedSocket.readyState !== WebSocket.OPEN
       ) {
-        socket.close();
+        connectedSocket.close();
         return;
       }
-      this.#reconnectAttempt = 0;
+      reconnectAttempt = 0;
     });
-    socket.addEventListener("message", (event) => {
-      if (this.#socket !== socket || this.#stopped) {
+    connectedSocket.addEventListener("message", (event) => {
+      if (socket !== connectedSocket || stopped) {
         return;
       }
       if (!(event instanceof MessageEvent) || typeof event.data !== "string") {
-        socket.close();
+        connectedSocket.close();
         return;
       }
       try {
         const decoded = readRealtimeServerEvent(event.data);
-        if (this.#instanceId === undefined && decoded.type !== "ready") {
+        if (instanceId === undefined && decoded.type !== "ready") {
           throw new Error("The realtime server was not ready");
         }
-        if (this.#instanceId !== undefined && decoded.type === "ready") {
+        if (instanceId !== undefined && decoded.type === "ready") {
           throw new Error("The realtime server sent a duplicate handshake");
         }
-        this.#receive(decoded);
+        receive(decoded);
       } catch {
-        socket.close();
+        connectedSocket.close();
       }
     });
-    socket.addEventListener("close", () => {
-      if (this.#socket === socket) {
-        this.#socket = undefined;
-        this.#instanceId = undefined;
-        this.#discardStateEvents();
-        this.#clearDisconnectedStreams();
-        this.#rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
-        if (!this.#hasConnected && this.#queuedCommands.length > 0) {
-          this.#rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
+    connectedSocket.addEventListener("close", () => {
+      if (socket === connectedSocket) {
+        socket = undefined;
+        instanceId = undefined;
+        discardStateEvents();
+        clearDisconnectedStreams();
+        rejectPendingCommands(UNKNOWN_OUTCOME_ERROR);
+        if (!hasConnected && queuedCommands.length > 0) {
+          rejectQueuedCommands(UNKNOWN_OUTCOME_ERROR);
         }
-        this.#scheduleReconnect();
+        scheduleReconnect();
       }
     });
-    socket.addEventListener("error", () => {
-      if (this.#socket === socket && !this.#stopped) {
-        socket.close();
+    connectedSocket.addEventListener("error", () => {
+      if (socket === connectedSocket && !stopped) {
+        connectedSocket.close();
       }
     });
   }
-  #stateEventKey(event: DeferredStateEvent): string {
+  function stateEventKey(event: DeferredStateEvent): string {
     const keys: {
       [Type in DeferredStateEvent["type"]]: (
         matched: Extract<DeferredStateEvent, { readonly type: Type }>,
@@ -339,22 +341,22 @@ export class RealtimeConnection {
       tool_stream_snapshot: (matched) =>
         `${matched.type}:${matched.sessionId}:${matched.streamId}`,
     };
-    return stateEventKey(event, event.type, keys);
+    return deferredStateEventKey(event, event.type, keys);
   }
-  #discardStateEvents(): void {
-    this.#stateEventGeneration += 1;
-    this.#stateEventFrame = undefined;
-    this.#stateEvents.clear();
+  function discardStateEvents(): void {
+    stateEventGeneration += 1;
+    stateEventFrame = undefined;
+    stateEvents.clear();
     // Callers must immediately clear the stream buffer to discard these barriers.
-    this.#stateBarriers.clear();
-    for (const resolve of this.#stateWaiters.splice(0)) {
+    stateBarriers.clear();
+    for (const resolve of stateWaiters.splice(0)) {
       resolve(false);
     }
   }
-  #queueStateEvent(event: DeferredStateEvent): void {
-    const key = this.#stateEventKey(event);
-    this.#stateEvents.delete(key);
-    this.#stateEvents.set(key, event);
+  function queueStateEvent(event: DeferredStateEvent): void {
+    const key = stateEventKey(event);
+    stateEvents.delete(key);
+    stateEvents.set(key, event);
     const sessionId =
       event.type === "session"
         ? event.session.id
@@ -362,70 +364,70 @@ export class RealtimeConnection {
           ? event.sessionId
           : undefined;
     if (sessionId !== undefined) {
-      const previousBarrier = this.#stateBarriers.get(key);
+      const previousBarrier = stateBarriers.get(key);
       if (previousBarrier !== undefined) {
-        this.#buffer.releaseBarrier(previousBarrier);
+        buffer.releaseBarrier(previousBarrier);
       }
-      this.#stateBarriers.set(key, this.#buffer.markBarrier(sessionId));
-      this.#invalidateStreamFrame();
+      stateBarriers.set(key, buffer.markBarrier(sessionId));
+      invalidateStreamFrame();
     }
-    this.#scheduleStateEvent();
+    scheduleStateEvent();
   }
-  #scheduleStateEvent(): void {
+  function scheduleStateEvent(): void {
     if (
-      this.#stateEventFrame !== undefined ||
-      (this.#stateEvents.size === 0 && this.#stateWaiters.length === 0)
+      stateEventFrame !== undefined ||
+      (stateEvents.size === 0 && stateWaiters.length === 0)
     ) {
       return;
     }
-    const generation = this.#stateEventGeneration;
-    this.#stateEventFrame = this.#requestFrame(() => {
-      this.#stateEventFrame = undefined;
-      if (generation !== this.#stateEventGeneration || this.#stopped) {
+    const generation = stateEventGeneration;
+    stateEventFrame = requestFrame(() => {
+      stateEventFrame = undefined;
+      if (generation !== stateEventGeneration || stopped) {
         return;
       }
-      const frameStartedAt = this.#now();
+      const frameStartedAt = now();
       const withinBudget = (): boolean =>
-        this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS;
+        now() - frameStartedAt < STREAM_PREP_BUDGET_MS;
       while (withinBudget()) {
-        const next = this.#stateEvents.entries().next();
+        const next = stateEvents.entries().next();
         if (next.done) {
-          this.#stateWaiters.shift()?.(true);
+          stateWaiters.shift()?.(true);
           break;
         }
-        if (!this.#applyDeferredStateEntry(next.value, withinBudget)) break;
+        if (!applyDeferredStateEntry(next.value, withinBudget)) break;
       }
-      this.#scheduleStateEvent();
-      this.#scheduleFrame();
+      scheduleStateEvent();
+      scheduleFrame();
     });
   }
-  #applyDeferredStateEntry(
+  function applyDeferredStateEntry(
     [key, queued]: readonly [string, DeferredStateEvent],
     withinBudget: () => boolean,
   ): boolean {
-    const barrier = this.#stateBarriers.get(key);
+    const barrier = stateBarriers.get(key);
     if (barrier !== undefined) {
-      const batch = this.#buffer.takeBarrier(
+      const batch = buffer.takeBarrier(
         barrier,
         STREAM_UPDATES_PER_FRAME,
         withinBudget,
       );
-      this.#deliverStreamBatch(batch);
-      if (batch !== undefined || this.#buffer.barrierPending(barrier)) {
+      deliverStreamBatch(batch);
+      if (batch !== undefined || buffer.barrierPending(barrier)) {
         return false;
       }
     }
-    this.#stateEvents.delete(key);
-    this.#stateBarriers.delete(key);
-    if (barrier !== undefined) this.#buffer.releaseBarrier(barrier);
-    this.#deliverDeferredStateEvent(queued);
+    stateEvents.delete(key);
+    stateBarriers.delete(key);
+    if (barrier !== undefined) buffer.releaseBarrier(barrier);
+    deliverDeferredStateEvent(queued);
     return true;
   }
-  #deliverDeferredStateEvent(event: DeferredStateEvent): void {
+  function deliverDeferredStateEvent(event: DeferredStateEvent): void {
     if (event.type === "tool_stream_snapshot") {
-      const snapshot = this.#buffer.applyToolSnapshot(event);
-      this.#toolSync.resolve(event);
-      this.#deliver(snapshot);
+      const snapshot = buffer.applyToolSnapshot(event);
+      toolSync.resolve(event);
+      deliver(snapshot);
       return;
     }
     if (event.type === "session") {
@@ -433,103 +435,99 @@ export class RealtimeConnection {
         !sessionIsActive(event.session.status) &&
         event.session.status !== "paused"
       ) {
-        this.#buffer.clearToolSession(event.session.id);
-        this.#toolSync.resolveSession(event.session.id);
+        buffer.clearToolSession(event.session.id);
+        toolSync.resolveSession(event.session.id);
       } else {
-        this.syncTools(event.session.id);
+        syncTools(event.session.id);
       }
     }
-    this.#deliver(event);
+    deliver(event);
   }
-  #deliver(event: RealtimeClientEvent): void {
-    this.#listener(event);
+  function deliver(event: RealtimeClientEvent): void {
+    listener(event);
   }
-  #deliverStreamBatch(batch: RealtimeStreamBatch | undefined): void {
-    if (batch !== undefined) this.#deliver(batch);
+  function deliverStreamBatch(batch: RealtimeStreamBatch | undefined): void {
+    if (batch !== undefined) deliver(batch);
   }
-  #flushStreamFrame(): void {
-    this.#streamFrame = undefined;
-    if (!this.#stopped) {
-      const frameStartedAt = this.#now();
-      this.#deliverStreamBatch(
-        this.#buffer.takeNext(
+  function flushStreamFrame(): void {
+    streamFrame = undefined;
+    if (!stopped) {
+      const frameStartedAt = now();
+      deliverStreamBatch(
+        buffer.takeNext(
           STREAM_UPDATES_PER_FRAME,
-          this.#selected(),
-          () => this.#now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
+          selected(),
+          () => now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
         ),
       );
-      this.#scheduleFrame();
+      scheduleFrame();
     }
   }
-  #invalidateStreamFrame(): void {
-    this.#generation += 1;
-    this.#streamFrame = undefined;
+  function invalidateStreamFrame(): void {
+    generation += 1;
+    streamFrame = undefined;
   }
-  #scheduleFrame(): void {
-    if (
-      this.#streamFrame !== undefined ||
-      !this.#buffer.pending ||
-      this.#stateEvents.size > 0
-    ) {
+  function scheduleFrame(): void {
+    if (streamFrame !== undefined || !buffer.pending || stateEvents.size > 0) {
       return;
     }
-    const generation = this.#generation;
-    this.#streamFrame = this.#requestFrame(() => {
-      if (generation === this.#generation) {
-        this.#flushStreamFrame();
+    const scheduledGeneration = generation;
+    streamFrame = requestFrame(() => {
+      if (scheduledGeneration === generation) {
+        flushStreamFrame();
       }
     });
   }
-  #queueStreamDelta(
+  function queueStreamDelta(
     event: Extract<
       RealtimeServerEvent,
       { readonly type: "session_delta" | "tool_stream" }
     >,
   ): void {
-    this.#buffer.queue(event);
-    const requests = this.#buffer.takeToolResyncRequests();
-    this.#syncTools(requests);
-    this.#scheduleFrame();
+    buffer.queue(event);
+    const requests = buffer.takeToolResyncRequests();
+    syncToolRequests(requests);
+    scheduleFrame();
   }
-  #syncTools(requests: readonly ToolSyncRequest[]): void {
-    const unresolved = this.#toolSync.unresolved(requests);
+  function syncToolRequests(requests: readonly ToolSyncRequest[]): void {
+    const unresolved = toolSync.unresolved(requests);
     for (const [index, request] of unresolved.entries()) {
-      if (!this.#sendToolSync(request)) {
+      if (!sendToolSync(request)) {
         for (const remaining of unresolved.slice(index)) {
-          this.#toolSync.remember(remaining);
+          toolSync.remember(remaining);
         }
         return;
       }
       // A sent request stays pending until its matching snapshot arrives.
-      this.#toolSync.remember(request);
+      toolSync.remember(request);
     }
   }
-  #rejectPendingCommands(code: string): void {
-    for (const pending of this.#pendingCommands.values()) {
+  function rejectPendingCommands(code: string): void {
+    for (const pending of pendingCommands.values()) {
       pending.reject(commandFailure(code));
-      this.#commandBytes -= pending.bytes;
+      commandBytes -= pending.bytes;
     }
-    this.#pendingCommands.clear();
+    pendingCommands.clear();
   }
-  #rejectQueuedCommands(code: string): void {
-    for (const queued of this.#queuedCommands) {
+  function rejectQueuedCommands(code: string): void {
+    for (const queued of queuedCommands) {
       queued.pending.reject(commandFailure(code));
-      this.#commandBytes -= queued.pending.bytes;
+      commandBytes -= queued.pending.bytes;
     }
-    this.#queuedCommands = [];
+    queuedCommands = [];
   }
-  #settleCommand(
+  function settleCommand(
     event: Extract<
       RealtimeServerEvent,
       { readonly type: "command_error" | "command_success" }
     >,
   ): void {
-    const pending = this.#pendingCommands.get(event.commandId);
+    const pending = pendingCommands.get(event.commandId);
     if (pending === undefined) {
       return;
     }
-    this.#pendingCommands.delete(event.commandId);
-    this.#commandBytes -= pending.bytes;
+    pendingCommands.delete(event.commandId);
+    commandBytes -= pending.bytes;
     if (event.type === "command_success") {
       pending.resolve(event.result);
     } else {
@@ -537,32 +535,32 @@ export class RealtimeConnection {
       pending.reject(commandFailure(code, event.detail));
     }
   }
-  #receive(event: RealtimeServerEvent): void {
+  function receive(event: RealtimeServerEvent): void {
     if (event.type === "ready") {
-      const reconnected = this.#hasConnected;
-      const previousInstanceId = this.#lastInstanceId;
-      this.#hasConnected = true;
-      this.#instanceId = event.instanceId;
-      this.#lastInstanceId = event.instanceId;
-      const socket = this.#socket;
-      if (socket?.readyState === WebSocket.OPEN) {
-        const queued = this.#queuedCommands;
-        this.#queuedCommands = [];
+      const reconnected = hasConnected;
+      const previousInstanceId = lastInstanceId;
+      hasConnected = true;
+      instanceId = event.instanceId;
+      lastInstanceId = event.instanceId;
+      const readySocket = socket;
+      if (readySocket?.readyState === WebSocket.OPEN) {
+        const queued = queuedCommands;
+        queuedCommands = [];
         for (const { commandId, pending } of queued) {
           pending.sentInstanceId = event.instanceId;
-          this.#pendingCommands.set(commandId, pending);
+          pendingCommands.set(commandId, pending);
         }
-        const remembered = this.#toolSync.pending();
-        this.#toolSync.clear();
-        this.#syncTools([
+        const remembered = toolSync.pending();
+        toolSync.clear();
+        syncToolRequests([
           ...remembered,
-          ...this.#buffer.activeToolStreams(),
-          ...this.#buffer.takeToolResyncRequests(),
+          ...buffer.activeToolStreams(),
+          ...buffer.takeToolResyncRequests(),
         ]);
       }
-      const pendingCommandIds = [...this.#pendingCommands.keys()];
+      const pendingCommandIds = [...pendingCommands.keys()];
       for (const commandId of pendingCommandIds) {
-        const pending = this.#pendingCommands.get(commandId);
+        const pending = pendingCommands.get(commandId);
         if (pending === undefined) {
           continue;
         }
@@ -571,12 +569,12 @@ export class RealtimeConnection {
           pending.sentInstanceId !== event.instanceId &&
           previousInstanceId !== event.instanceId
         ) {
-          this.#pendingCommands.delete(commandId);
-          this.#commandBytes -= pending.bytes;
+          pendingCommands.delete(commandId);
+          commandBytes -= pending.bytes;
           pending.reject(commandFailure(UNKNOWN_OUTCOME_ERROR));
           continue;
         }
-        const activeSocket = this.#socket;
+        const activeSocket = socket;
         if (activeSocket?.readyState === WebSocket.OPEN) {
           pending.sentInstanceId = event.instanceId;
           try {
@@ -587,16 +585,16 @@ export class RealtimeConnection {
         }
       }
       if (reconnected) {
-        for (const listener of this.#reconnects) {
+        for (const listener of reconnects) {
           listener();
         }
       }
-      this.#deliver(event);
+      deliver(event);
       return;
     }
     if (event.type === "command_success" || event.type === "command_error") {
-      this.#settleCommand(event);
-      this.#deliver(event);
+      settleCommand(event);
+      deliver(event);
       return;
     }
     if (
@@ -604,16 +602,16 @@ export class RealtimeConnection {
       event.type === "tool_settings" ||
       event.type === "development_restart_progress"
     ) {
-      this.#deliver(event);
+      deliver(event);
       return;
     }
     if (event.type === "session_delta" || event.type === "tool_stream") {
-      this.#queueStreamEvent(event);
+      queueStreamEvent(event);
       return;
     }
-    this.#queueStateEvent(event);
+    queueStateEvent(event);
   }
-  #queueStreamEvent(
+  function queueStreamEvent(
     event: Extract<
       RealtimeServerEvent,
       { type: "session_delta" | "tool_stream" }
@@ -625,22 +623,30 @@ export class RealtimeConnection {
       event.state !== "preparing" &&
       event.state !== "running"
     ) {
-      this.#toolSync.resolve(event);
+      toolSync.resolve(event);
     }
-    this.#queueStreamDelta(event);
+    queueStreamDelta(event);
   }
-  #scheduleReconnect(): void {
-    if (this.#stopped || this.#reconnectTimer !== undefined) {
+  function scheduleReconnect(): void {
+    if (stopped || reconnectTimer !== undefined) {
       return;
     }
     const delay =
       RECONNECT_DELAYS[
-        Math.min(this.#reconnectAttempt, RECONNECT_DELAYS.length - 1)
+        Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)
       ] ?? 5_000;
-    this.#reconnectAttempt += 1;
-    this.#reconnectTimer = this.#setTimeout(() => {
-      this.#reconnectTimer = undefined;
-      this.#connect();
+    reconnectAttempt += 1;
+    reconnectTimer = setTimeout(() => {
+      reconnectTimer = undefined;
+      connect();
     }, delay);
   }
+  return {
+    command,
+    onReconnect,
+    start,
+    stop,
+    syncTools,
+    yieldToStateApplication,
+  };
 }

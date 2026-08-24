@@ -1,4 +1,7 @@
-import { RealtimeConnection } from "../../solid/realtime-client.ts";
+import {
+  createRealtimeConnection,
+  type RealtimeConnection,
+} from "../../solid/realtime-client.ts";
 import type {
   RealtimeClientEvent,
   RealtimeStreamBuffer,
@@ -33,7 +36,7 @@ export function realtimeTestSetup(
   const requestFrames: (() => void)[] = [];
   const sockets: RealtimeTestSocket[] = [];
   const timers: (() => void)[] = [];
-  const connection = new RealtimeConnection(
+  const connection = createRealtimeConnection(
     options.listener ?? (() => undefined),
     {
       clearTimeout: () => undefined,
