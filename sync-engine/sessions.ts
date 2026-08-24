@@ -8,7 +8,7 @@ import {
   discoverAgentModels,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
-import { ChatCompletionsAgentModel } from "./agent-model.ts";
+import { createChatCompletionsAgentModel } from "./agent-model.ts";
 import { createAttachmentFallbackIntegration } from "./attachment-fallback-integration.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
@@ -153,7 +153,7 @@ class DrizzleSessionIntegration
       dependencies.discoverOpenRouterProviders ?? discoverOpenRouterProviders;
     this.#modelFactory =
       dependencies.modelFactory ??
-      ((options) => new ChatCompletionsAgentModel(options));
+      ((options) => createChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
     this.#runtimes = new SessionRuntimes(this.#now);
     this.#providers = providers;

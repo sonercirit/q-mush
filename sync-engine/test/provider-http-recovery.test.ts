@@ -6,7 +6,10 @@ import {
 } from "../../shared/agent-loop.ts";
 import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
@@ -117,7 +120,7 @@ function openRouterModel(
   deltas?: ProviderTextDelta[],
   onRequestState?: (state: "active" | "admission") => void,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: testApiKeyCredential("sk-or-secret", {
       id: "test-credential",
     }),
@@ -172,7 +175,7 @@ describe("provider HTTP step recovery", () => {
     const headers = new Promise<void>((resolve) => {
       releaseHeaders = resolve;
     });
-    const model = new ChatCompletionsAgentModel({
+    const model = createChatCompletionsAgentModel({
       credential: { accountId: null, secret: "sk-openai", source: "api_key" },
       fetch: async () => {
         await headers;
@@ -300,7 +303,7 @@ describe("provider HTTP step recovery", () => {
     provider: ProviderResponses,
     refreshes: string[],
   ): ChatCompletionsAgentModel {
-    return new ChatCompletionsAgentModel({
+    return createChatCompletionsAgentModel({
       credential: {
         accountId: "account",
         secret: createOpenAiOAuthSecret(),

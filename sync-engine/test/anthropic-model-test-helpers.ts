@@ -4,10 +4,13 @@ import type {
   AnthropicReplayObject,
 } from "../../shared/anthropic-replay.ts";
 import { isRecord } from "../../shared/auth-model.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 
-type AnthropicModelOptions = ConstructorParameters<
-  typeof ChatCompletionsAgentModel
+type AnthropicModelOptions = Parameters<
+  typeof createChatCompletionsAgentModel
 >[0];
 
 const ANTHROPIC_TEST_BASE_URL = "https://anthropic.example.test/v1";
@@ -229,7 +232,7 @@ export function anthropicHarness(
 ): AnthropicHarness {
   const requests: Request[] = [];
   const remaining = [...responses];
-  const model = new ChatCompletionsAgentModel({
+  const model = createChatCompletionsAgentModel({
     credential: options.credential ?? ANTHROPIC_TEST_CREDENTIAL,
     credentialFingerprint:
       options.credentialFingerprint ?? ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,

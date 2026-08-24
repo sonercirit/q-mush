@@ -1,4 +1,7 @@
-import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
   testOpenAiOAuthCredential,
@@ -9,7 +12,7 @@ export const DONE_CODEX_OUTPUT = {
   type: "message",
 };
 
-type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+type ModelOptions = Parameters<typeof createChatCompletionsAgentModel>[0];
 
 export function codexModelOptions(
   options: Omit<

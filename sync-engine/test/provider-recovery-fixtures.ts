@@ -6,7 +6,10 @@ import {
 } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import type { ProviderRequestLifecycleOptions } from "../../sync-engine/provider-request-lifecycle.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import {
@@ -117,7 +120,7 @@ export function createFakeProviderSocket(
 }
 
 type WebSocketFactory = NonNullable<
-  ConstructorParameters<typeof ChatCompletionsAgentModel>[0]["webSocket"]
+  Parameters<typeof createChatCompletionsAgentModel>[0]["webSocket"]
 >;
 
 export function expectProviderSocketReleased(socket: FakeProviderSocket): void {
@@ -277,7 +280,7 @@ export function apiKeyModel(
     readonly webSocket: WebSocketFactory;
   },
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: testApiKeyCredential("sk-openai", { id: "test-credential" }),
     credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     fetch: options.fetch ?? neverFetch,
@@ -298,7 +301,7 @@ function oauthModel(
   webSocket: WebSocketFactory,
   states?: ("active" | "admission")[],
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
     credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     fetch,

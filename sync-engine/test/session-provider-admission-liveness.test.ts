@@ -13,7 +13,10 @@ import {
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { AgentModelRequestOptions } from "../../sync-engine/agent-model-options.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createAuthenticatedRequest,
@@ -69,7 +72,7 @@ class StalledReusedSocketModel implements AgentModel {
     onDelta: AgentModelRequestOptions["onDelta"],
     onRequestState: AgentModelRequestOptions["onRequestState"],
   ) {
-    this.#model = new ChatCompletionsAgentModel({
+    this.#model = createChatCompletionsAgentModel({
       credential: {
         accountId: null,
         secret: "provider-secret",

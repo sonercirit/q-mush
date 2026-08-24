@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
-import { ChatCompletionsAgentModel } from "../agent-model.ts";
+import { createChatCompletionsAgentModel } from "../agent-model.ts";
 import { TEST_CREDENTIAL_FINGERPRINT } from "./agent-model-credential-fixtures.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
@@ -11,7 +11,7 @@ import {
 
 test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async () => {
   const sockets = createFakeProviderSockets();
-  const model = new ChatCompletionsAgentModel({
+  const model = createChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
     credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
     dynamicToolCache: true,

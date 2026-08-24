@@ -2,8 +2,9 @@ import { describe, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  ChatCompletionsAgentModel,
+  createChatCompletionsAgentModel,
   type AgentProviderCredential,
+  type ChatCompletionsAgentModel,
 } from "../../sync-engine/agent-model.ts";
 import { createProviderCredentialReauthenticationRequiredError } from "../../sync-engine/provider-error.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
@@ -51,7 +52,7 @@ function model(options: {
   ) => Promise<AgentProviderCredential>;
   readonly sockets: FakeProviderSockets;
 }): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: options.credential ?? codexOAuthCredential(),
     fetch: unexpectedHttpFallback,
     ...optionalDelta(options.onDelta),
@@ -73,7 +74,7 @@ function genericUnauthorizedModel(
     credential: AgentProviderCredential,
   ) => Promise<AgentProviderCredential>,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: {
       ...codexOAuthCredential(),
       baseUrl: "https://example.test/v1",

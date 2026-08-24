@@ -1,20 +1,12 @@
 import { setTimeout } from "node:timers/promises";
 import type {
-  AgentReasoningEffort,
-  OpenRouterProviderRouting,
-} from "../shared/agent-configuration.ts";
-import type {
   AgentConversationMessage,
   AgentModel,
   AgentModelStep,
 } from "../shared/agent-loop.ts";
 import { AGENT_SYSTEM_PROMPT } from "../shared/agent-prompt.ts";
 import { selectedAgentTools } from "../shared/agent-tool-selection.ts";
-import {
-  AGENT_SESSION_TOOL_NAMES,
-  type AgentSessionToolName,
-  type AgentToolDefinition,
-} from "../shared/agent-tools.ts";
+import { AGENT_SESSION_TOOL_NAMES } from "../shared/agent-tools.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import type { ProviderId } from "../shared/provider-credential-store.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../shared/tool-limits.ts";
@@ -27,7 +19,6 @@ import {
 import {
   agentCredentialFingerprint,
   usesAnthropicFormat,
-  type AgentCredentialRefresher,
   type AgentModelRequestOptions,
   type AgentProviderCredential,
 } from "./agent-model-options.ts";
@@ -43,7 +34,7 @@ import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
-  assertAnthropicContinuationReplays,
+  assertAnthropicContinuationReplays as assertContinuationReplays,
 } from "./anthropic-request.ts";
 import { validateAnthropicStepContinuation } from "./anthropic-step-continuation.ts";
 import {
@@ -53,7 +44,7 @@ import {
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { recoverOpenAiOAuthUnauthorized } from "./openai-unauthorized-recovery.ts";
 import { completeProviderHttp } from "./provider-http.ts";
-import { requestBody } from "./provider-request-body.ts";
+import { requestBody as createRequestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
@@ -219,119 +210,104 @@ function completionInput(
   };
 }
 
-export class ChatCompletionsAgentModel implements AgentModel {
-  readonly #adaptiveThinking: boolean | null;
-  #credential: AgentProviderCredential;
-  readonly #credentialFingerprint: string;
-  readonly #dynamicToolCache: boolean;
-  readonly #fetch: AgentModelFetch;
-  readonly #maxOutputTokens: number | null;
-  readonly #model: string;
-  readonly #onDelta: ((delta: ProviderTextDelta) => void) | undefined;
-  readonly #onRequestState: AgentModelRequestOptions["onRequestState"];
-  readonly #onStepStart: () => void;
-  readonly #openRouterProviderRouting: OpenRouterProviderRouting | undefined;
-  readonly #promptCacheKey: string | undefined;
-  readonly #provider: ProviderId;
-  readonly #reasoningEffort: AgentReasoningEffort | undefined;
-  readonly #refreshCredential: AgentCredentialRefresher | undefined;
-  readonly #resolvedModel: string | null | undefined;
-  #resolvedModelPromise: Promise<string | undefined> | undefined;
-  readonly #sleep: ModelRequestSleep | undefined;
-  readonly #systemPrompt: string;
-  readonly #selectedTools: readonly AgentSessionToolName[];
-  readonly #tools: readonly AgentToolDefinition[];
-  readonly #webSocket: ProviderWebSocketFactory;
-  readonly #webSocketSession = createProviderWebSocketSession();
+export interface ChatCompletionsAgentModel extends AgentModel {
+  readonly close: () => void;
+  readonly startStep: () => void;
+}
 
-  constructor(options: ChatCompletionsAgentModelOptions) {
-    this.#adaptiveThinking = options.adaptiveThinking ?? null;
-    this.#credential = options.credential;
-    this.#credentialFingerprint =
-      options.credentialFingerprint ??
-      agentCredentialFingerprint(options.credential);
-    this.#dynamicToolCache = options.dynamicToolCache === true;
-    this.#fetch = options.fetch ?? ((request) => globalThis.fetch(request));
-    this.#maxOutputTokens = options.maxOutputTokens ?? null;
-    this.#model = options.model;
-    this.#onDelta = options.onDelta;
-    this.#onRequestState = options.onRequestState;
-    this.#onStepStart = options.onStepStart ?? (() => undefined);
-    this.#openRouterProviderRouting =
-      options.openRouterProviderRouting ??
-      (options.openRouterProviderTag === undefined
-        ? undefined
-        : { tag: options.openRouterProviderTag, type: "provider" });
-    this.#promptCacheKey = options.promptCacheKey;
-    this.#provider = options.provider;
-    this.#reasoningEffort = options.reasoningEffort ?? undefined;
-    this.#refreshCredential = options.refreshCredential;
-    this.#resolvedModel = options.resolvedModel;
-    this.#sleep = options.sleep;
-    this.#systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
-    this.#selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
-    this.#tools = selectedAgentTools(
-      this.#dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : this.#selectedTools,
-      options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
-    );
-    this.#webSocket = options.webSocket ?? defaultAgentModelWebSocket;
-  }
+export function createChatCompletionsAgentModel(
+  options: ChatCompletionsAgentModelOptions,
+): ChatCompletionsAgentModel {
+  const adaptiveThinking = options.adaptiveThinking ?? null;
+  let credential = options.credential;
+  const credentialFingerprint =
+    options.credentialFingerprint ??
+    agentCredentialFingerprint(options.credential);
+  const dynamicToolCache = options.dynamicToolCache === true;
+  const maxOutputTokens = options.maxOutputTokens ?? null;
+  const fetch = options.fetch ?? globalThis.fetch;
+  const model = options.model;
+  const onDelta = options.onDelta;
+  const onRequestState = options.onRequestState;
+  const onStepStart = options.onStepStart ?? (() => undefined);
+  const openRouterProviderRouting =
+    options.openRouterProviderRouting ??
+    (options.openRouterProviderTag === undefined
+      ? undefined
+      : { tag: options.openRouterProviderTag, type: "provider" });
+  const promptCacheKey = options.promptCacheKey;
+  const provider = options.provider;
+  const reasoningEffort = options.reasoningEffort ?? undefined;
+  const refreshCredential = options.refreshCredential;
+  const resolvedModel = options.resolvedModel;
+  const sleep = options.sleep;
+  const systemPrompt = options.systemPrompt ?? AGENT_SYSTEM_PROMPT;
+  const selectedTools = options.tools ?? AGENT_SESSION_TOOL_NAMES;
+  const tools = selectedAgentTools(
+    dynamicToolCache ? AGENT_SESSION_TOOL_NAMES : selectedTools,
+    options.toolSettings ?? DEFAULT_TOOL_SETTINGS,
+  );
+  const webSocket = options.webSocket ?? defaultAgentModelWebSocket;
+  const webSocketSession = createProviderWebSocketSession();
+  let resolvedModelPromise: Promise<string | undefined> | undefined;
 
-  readonly startStep = (): void => {
-    this.#onStepStart();
+  const startStep = (): void => {
+    onStepStart();
   };
 
-  readonly close = (): void => {
-    this.#webSocketSession.close();
+  const close = (): void => {
+    webSocketSession.close();
   };
 
-  #resetOutput(): void {
-    this.#onDelta?.({ content: "", reset: true, thinking: "" });
+  function resetOutput(): void {
+    onDelta?.({ content: "", reset: true, thinking: "" });
   }
 
-  async complete(...parameters: CompletionArguments): Promise<AgentModelStep> {
+  async function complete(
+    ...parameters: CompletionArguments
+  ): Promise<AgentModelStep> {
     try {
-      return await this.#completeWithCurrentCredential(...parameters);
+      return await completeWithCurrentCredential(...parameters);
     } catch (error) {
       return recoverOpenAiOAuthUnauthorized({
-        complete: () => this.#completeWithCurrentCredential(...parameters),
-        currentCredential: this.#credential,
+        complete: () => completeWithCurrentCredential(...parameters),
+        currentCredential: credential,
         error,
-        provider: this.#provider,
-        refreshCredential: this.#refreshCredential,
-        replaceCredential: (credential) => {
-          this.#credential = credential;
+        provider: provider,
+        refreshCredential: refreshCredential,
+        replaceCredential: (replacement) => {
+          credential = replacement;
         },
         resetOutput: () => {
-          this.#resetOutput();
+          resetOutput();
         },
         resetTransport: () => {
-          this.#webSocketSession.close();
+          webSocketSession.close();
         },
       });
     }
   }
 
-  async #completeWithCurrentCredential(
+  async function completeWithCurrentCredential(
     ...parameters: CompletionArguments
   ): Promise<AgentModelStep> {
-    if (this.#provider !== "openai") {
-      this.#onRequestState?.("active");
-      return this.#completeHttp(...parameters);
+    if (provider !== "openai") {
+      onRequestState?.("active");
+      return completeHttp(...parameters);
     }
 
-    const webSocketTurn = await this.#tryWebSocket(...parameters);
+    const webSocketTurn = await tryWebSocket(...parameters);
     if (webSocketTurn !== undefined) {
       return webSocketTurn;
     }
     if (parameters[1]?.aborted === true) {
       throw new DOMException("The model request was aborted", "AbortError");
     }
-    this.#onRequestState?.("active");
-    return this.#completeHttp(...parameters);
+    onRequestState?.("active");
+    return completeHttp(...parameters);
   }
 
-  #acceptWebSocketInterruption(
+  function acceptWebSocketInterruption(
     error: unknown,
     signal: AbortSignal | undefined,
   ): void {
@@ -339,11 +315,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
       throw error;
     }
     if (error.started) {
-      this.#resetOutput();
+      resetOutput();
     }
   }
 
-  async #tryWebSocket(
+  async function tryWebSocket(
     ...parameters: CompletionArguments
   ): Promise<OptionalStep> {
     const signal = completionSignal(parameters);
@@ -352,9 +328,9 @@ export class ChatCompletionsAgentModel implements AgentModel {
     let transientAttempt = 0;
     for (;;) {
       try {
-        return await this.#completeWebSocket(...parameters);
+        return await completeWebSocket(...parameters);
       } catch (error) {
-        this.#acceptWebSocketInterruption(error, signal);
+        acceptWebSocketInterruption(error, signal);
         const immediate =
           isProviderWebSocketError(error) && error.reconnectImmediately;
         if (immediate && reconnectImmediately) {
@@ -370,7 +346,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
           return undefined;
         }
         transientAttempt += 1;
-        await this.#waitForRetry(
+        await waitForRetry(
           isProviderWebSocketError(error) &&
             error.retryAfterMilliseconds !== undefined
             ? error.retryAfterMilliseconds
@@ -381,143 +357,136 @@ export class ChatCompletionsAgentModel implements AgentModel {
     }
   }
 
-  #waitForRetry(
+  function waitForRetry(
     milliseconds: number,
     signal: AbortSignal | undefined,
   ): Promise<void> {
-    return this.#sleep === undefined
+    return sleep === undefined
       ? setTimeout(milliseconds, undefined, { signal })
-      : this.#sleep(milliseconds, signal);
+      : sleep(milliseconds, signal);
   }
 
-  #requestBody(
+  function requestBody(
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     stream: boolean,
     resolvedModel?: string,
   ): unknown {
-    return requestBody({
-      adaptiveThinking: this.#adaptiveThinking,
-      credential: this.#credential,
-      credentialFingerprint: this.#credentialFingerprint,
-      dynamicToolCache: this.#dynamicToolCache,
-      maxOutputTokens: this.#maxOutputTokens,
+    return createRequestBody({
+      adaptiveThinking: adaptiveThinking,
+      credential: credential,
+      credentialFingerprint: credentialFingerprint,
+      dynamicToolCache: dynamicToolCache,
+      maxOutputTokens: maxOutputTokens,
       messages,
-      model: this.#model,
-      openRouterProviderRouting: this.#openRouterProviderRouting,
-      promptCacheKey: this.#promptCacheKey,
+      model: model,
+      openRouterProviderRouting: openRouterProviderRouting,
+      promptCacheKey: promptCacheKey,
       protocol,
-      provider: this.#provider,
-      reasoningEffort: this.#reasoningEffort,
+      provider: provider,
+      reasoningEffort: reasoningEffort,
       resolvedModel,
-      selectedTools: this.#selectedTools,
+      selectedTools: selectedTools,
       stream,
-      systemPrompt: this.#systemPrompt,
-      tools: this.#tools,
+      systemPrompt: systemPrompt,
+      tools: tools,
     });
   }
 
-  #httpProtocol(): ProviderRequestProtocol {
-    if (usesCodexOAuth(this.#provider, this.#credential)) {
+  function httpProtocol(): ProviderRequestProtocol {
+    if (usesCodexOAuth(provider, credential)) {
       return "responses";
     }
-    return usesAnthropicFormat(this.#provider, this.#credential)
+    return usesAnthropicFormat(provider, credential)
       ? "anthropic"
       : "chat_completions";
   }
 
-  #webSocketOptions(signal: AbortSignal | undefined): {
+  function webSocketOptions(signal: AbortSignal | undefined): {
     onDelta?: (delta: ProviderTextDelta) => void;
     onRequestState: NonNullable<AgentModelRequestOptions["onRequestState"]>;
     signal?: AbortSignal;
   } {
     return {
-      ...(this.#onDelta === undefined ? {} : { onDelta: this.#onDelta }),
-      onRequestState: this.#onRequestState ?? (() => undefined),
+      ...(onDelta === undefined ? {} : { onDelta: onDelta }),
+      onRequestState: onRequestState ?? (() => undefined),
       ...(signal === undefined ? {} : { signal }),
     };
   }
 
-  #completeWebSocket(
+  function completeWebSocket(
     ...parameters: CompletionArguments
   ): Promise<AgentModelStep> {
     const { messages, signal } = completionInput(parameters);
-    const headers = agentProviderRequestHeaders(
-      this.#provider,
-      this.#credential,
-      {
-        accept: "application/websocket-events",
-        ...promptCacheKeyHeader(this.#promptCacheKey),
-      },
-    );
-    const codexOAuth = usesCodexOAuth(this.#provider, this.#credential);
-    const body = this.#requestBody(messages, "responses", false);
+    const headers = agentProviderRequestHeaders(provider, credential, {
+      accept: "application/websocket-events",
+      ...promptCacheKeyHeader(promptCacheKey),
+    });
+    const codexOAuth = usesCodexOAuth(provider, credential);
+    const body = requestBody(messages, "responses", false);
 
     if (!isRecord(body)) {
       throw new Error("The model request body was invalid");
     }
 
-    return this.#webSocketSession.complete({
+    return webSocketSession.complete({
       body,
-      createSocket: this.#webSocket,
+      createSocket: webSocket,
       headers: headersRecord(headers),
-      ...this.#webSocketOptions(signal),
+      ...webSocketOptions(signal),
       url: codexOAuth
         ? OPENAI_CODEX_RESPONSES_WEBSOCKET_URL
         : OPENAI_RESPONSES_WEBSOCKET_URL,
     });
   }
 
-  #anthropicResolvedModel(
+  function anthropicResolvedModel(
     signal: AbortSignal | undefined,
   ): Promise<string | undefined> {
-    if (this.#resolvedModel !== undefined) {
-      return Promise.resolve(this.#resolvedModel ?? undefined);
+    if (resolvedModel !== undefined) {
+      return Promise.resolve(resolvedModel ?? undefined);
     }
-    if (this.#resolvedModelPromise !== undefined) {
-      return this.#resolvedModelPromise;
+    if (resolvedModelPromise !== undefined) {
+      return resolvedModelPromise;
     }
     const resolution = resolveAnthropicModelAttempt({
-      credential: this.#credential,
-      fetch: this.#fetch,
-      model: this.#model,
-      provider: this.#provider,
+      credential: credential,
+      fetch: fetch,
+      model: model,
+      provider: provider,
       ...(signal === undefined ? {} : { signal }),
     });
-    this.#resolvedModelPromise = resolution.then((result) => {
+    resolvedModelPromise = resolution.then((result) => {
       if (result.retryable) {
-        this.#resolvedModelPromise = undefined;
+        resolvedModelPromise = undefined;
       }
       return result.model;
     });
-    return this.#resolvedModelPromise;
+    return resolvedModelPromise;
   }
 
-  #anthropicReplayIdentity(
+  function anthropicReplayIdentity(
     resolvedModel: string | undefined,
   ): ReturnType<typeof anthropicReplayIdentityFrom> {
     const options = {
-      credential: this.#credential,
-      credentialFingerprint: this.#credentialFingerprint,
-      model: this.#model,
-      provider: this.#provider,
+      credential: credential,
+      credentialFingerprint: credentialFingerprint,
+      model: model,
+      provider: provider,
     };
     return resolvedModel === undefined
       ? anthropicReplayIdentityFrom(options)
       : anthropicReplayIdentityFrom({ ...options, resolvedModel });
   }
 
-  #assertAnthropicContinuationReplays(
+  function assertAnthropicContinuationReplays(
     messages: readonly AgentConversationMessage[],
     resolvedModel: string | undefined,
   ): void {
-    assertAnthropicContinuationReplays(
-      messages,
-      this.#anthropicReplayIdentity(resolvedModel),
-    );
+    assertContinuationReplays(messages, anthropicReplayIdentity(resolvedModel));
   }
 
-  async #httpRequest(
+  async function httpRequest(
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     signal: AbortSignal | undefined,
@@ -525,27 +494,27 @@ export class ChatCompletionsAgentModel implements AgentModel {
     onStreamRetry?: () => void,
   ): Promise<AgentModelStep> {
     if (protocol === "anthropic") {
-      this.#assertAnthropicContinuationReplays(messages, resolvedModel);
+      assertAnthropicContinuationReplays(messages, resolvedModel);
     }
     const step = await completeProviderHttp(
       {
-        body: this.#requestBody(messages, protocol, true, resolvedModel),
-        credential: this.#credential,
-        credentialFingerprint: this.#credentialFingerprint,
-        fetch: this.#fetch,
-        headers: agentProviderRequestHeaders(this.#provider, this.#credential, {
+        body: requestBody(messages, protocol, true, resolvedModel),
+        credential: credential,
+        credentialFingerprint: credentialFingerprint,
+        fetch: fetch,
+        headers: agentProviderRequestHeaders(provider, credential, {
           accept: "text/event-stream",
-          ...promptCacheKeyHeader(this.#promptCacheKey),
+          ...promptCacheKeyHeader(promptCacheKey),
           protocol,
         }),
-        model: this.#model,
-        onDelta: this.#onDelta,
+        model: model,
+        onDelta: onDelta,
         ...(onStreamRetry === undefined ? {} : { onStreamRetry }),
         protocol,
-        provider: this.#provider,
+        provider: provider,
         ...(resolvedModel === undefined ? {} : { resolvedModel }),
-        sleep: this.#sleep,
-        url: endpoint(this.#provider, this.#credential),
+        sleep: sleep,
+        url: endpoint(provider, credential),
       },
       signal,
     );
@@ -554,27 +523,27 @@ export class ChatCompletionsAgentModel implements AgentModel {
       resolvedModel === undefined &&
       (step.toolCalls.length > 0 ||
         step.providerContinuation === "anthropic_pause_turn")
-        ? await this.#anthropicResolvedModel(signal)
+        ? await anthropicResolvedModel(signal)
         : resolvedModel;
     return validateAnthropicStepContinuation(
       step,
-      this.#anthropicReplayIdentity(continuationModel),
+      anthropicReplayIdentity(continuationModel),
     );
   }
 
-  async #completeHttp(
+  async function completeHttp(
     ...parameters: CompletionArguments
   ): Promise<AgentModelStep> {
-    const protocol = this.#httpProtocol();
-    const input = completionInput(parameters, this.#model);
+    const protocol = httpProtocol();
+    const input = completionInput(parameters, model);
     const resolvedModel =
       protocol === "anthropic"
-        ? await this.#anthropicResolvedModel(input.signal)
+        ? await anthropicResolvedModel(input.signal)
         : undefined;
     if (protocol === "anthropic") {
-      this.#assertAnthropicContinuationReplays(parameters[0], resolvedModel);
+      assertAnthropicContinuationReplays(parameters[0], resolvedModel);
     }
-    const step = await this.#httpRequest(
+    const step = await httpRequest(
       input.messages,
       protocol,
       input.signal,
@@ -592,11 +561,11 @@ export class ChatCompletionsAgentModel implements AgentModel {
           step,
           async (messages, output) => {
             const restoreOutput = (): void => {
-              this.#onDelta?.(output);
+              onDelta?.(output);
             };
-            this.#onDelta?.(emptyOutputDelta());
+            onDelta?.(emptyOutputDelta());
             restoreOutput();
-            return this.#httpRequest(
+            return httpRequest(
               messages,
               protocol,
               input.signal,
@@ -607,4 +576,5 @@ export class ChatCompletionsAgentModel implements AgentModel {
         )
       : step;
   }
+  return { close, complete, startStep };
 }

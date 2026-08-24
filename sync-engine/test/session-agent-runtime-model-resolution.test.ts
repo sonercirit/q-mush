@@ -3,7 +3,7 @@ import {
   agentCredentialFingerprint,
   type AgentModelRequestOptions,
 } from "../agent-model-options.ts";
-import { ChatCompletionsAgentModel } from "../agent-model.ts";
+import { createChatCompletionsAgentModel } from "../agent-model.ts";
 import { anthropicReplayIdentityFrom } from "../anthropic-replay-identity.ts";
 import {
   compactSessionConversation,
@@ -159,7 +159,7 @@ describe("session Anthropic model resolution", () => {
       anthropicJsonResponse({ blocks: [{ text: "Recovered.", type: "text" }] }),
     ];
     const modelFactory = (options: AgentModelRequestOptions) =>
-      new ChatCompletionsAgentModel({
+      createChatCompletionsAgentModel({
         ...options,
         fetch: (request) => {
           if (request.method === "GET") {

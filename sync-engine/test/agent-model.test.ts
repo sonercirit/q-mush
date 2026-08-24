@@ -3,7 +3,10 @@ import { AGENT_SYSTEM_PROMPT } from "../../shared/agent-prompt.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -17,7 +20,7 @@ import {
   cachedTextMessage,
   chatCompletionsDone,
 } from "./prompt-cache-fixtures.ts";
-type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+type ModelOptions = Parameters<typeof createChatCompletionsAgentModel>[0];
 const IMAGE_MESSAGE = {
   content: "Implement this design",
   images: [TEST_AGENT_IMAGE],
@@ -136,7 +139,7 @@ function respondingModel(
   responseBody: unknown,
   capture: RequestCapture,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     fetch: captureRequest(capture, () => createJsonResponse(responseBody)),
@@ -148,7 +151,7 @@ function codexModel(
     "credential" | "maxOutputTokens" | "provider" | "toolSettings"
   >,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     credential: {
@@ -491,7 +494,7 @@ describe("chat completions agent model", () => {
     expect(JSON.stringify(body)).toContain("previous-call");
   });
   test("shows the provider's error message", async () => {
-    const model = new ChatCompletionsAgentModel({
+    const model = createChatCompletionsAgentModel({
       credential: apiKeyCredential("secret"),
       toolSettings: DEFAULT_TOOL_SETTINGS,
       maxOutputTokens: null,
