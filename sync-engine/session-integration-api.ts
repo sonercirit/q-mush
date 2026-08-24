@@ -371,18 +371,9 @@ export function createSessionIntegrationApi(
       )) satisfies SessionDetailReader["detailForUser"],
 
     item(request: Request, sessionId: string): Response {
-      return forRequestWorkspace(
-        resources.requests,
-        resources.workspaces,
-        request,
-        (user, workspaceId) =>
-          storedSessionResponse(
-            resources.store,
-            user.id,
-            sessionId,
-            workspaceId,
-          ),
-      );
+      const respond = (user: AuthenticatedUser, workspaceId: string) =>
+        storedSessionResponse(resources.store, user.id, sessionId, workspaceId);
+      return api.forWorkspace(request, respond);
     },
 
     listForUser(
