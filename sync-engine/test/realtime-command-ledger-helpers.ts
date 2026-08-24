@@ -1,7 +1,11 @@
 import { expect, vi } from "vitest";
 import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import type { UserRealtimeCommand } from "../../shared/user-realtime-protocol.ts";
-import { RealtimeCommandLedger } from "../../sync-engine/realtime-command-ledger.ts";
+import {
+  createRealtimeCommandLedger,
+  type RealtimeCommandLedger,
+  type RealtimeCommandLedgerOptions,
+} from "../../sync-engine/realtime-command-ledger.ts";
 
 export const USER_ID = "user-1";
 export const WORKSPACE_ID = "workspace-1";
@@ -15,9 +19,7 @@ interface LedgerExecution {
   readonly userId?: string;
 }
 
-export type LedgerOptions = ConstructorParameters<
-  typeof RealtimeCommandLedger
->[0];
+export type LedgerOptions = RealtimeCommandLedgerOptions;
 
 export interface InvalidLedgerExecution extends LedgerExecution {
   readonly options?: LedgerOptions;
@@ -58,13 +60,13 @@ export function execute(
 }
 
 export function constrainedRetentionLedger(): RealtimeCommandLedger {
-  return new RealtimeCommandLedger({ maximumCompletedResultBytes: 5 });
+  return createRealtimeCommandLedger({ maximumCompletedResultBytes: 5 });
 }
 
 export function receiptConstrainedLedger(
   maximumEntries = 2,
 ): RealtimeCommandLedger {
-  return new RealtimeCommandLedger({
+  return createRealtimeCommandLedger({
     maximumEntries,
     maximumEntriesPerUser: 1,
   });
@@ -99,7 +101,7 @@ function pendingExecution(
 }
 
 export function pendingLedger(): RealtimeCommandLedger {
-  return new RealtimeCommandLedger({ maximumPendingEntries: 1 });
+  return createRealtimeCommandLedger({ maximumPendingEntries: 1 });
 }
 
 export function pendingValueWithExecution(
@@ -149,10 +151,8 @@ export async function expectInvalidExecutions(
   executions: readonly InvalidLedgerExecution[],
 ): Promise<void> {
   for (const execution of executions) {
-    await expectExecutions(
-      new RealtimeCommandLedger(),
-      [execution],
-      () => new RealtimeCommandLedger(execution.options),
+    await expectExecutions(createRealtimeCommandLedger(), [execution], () =>
+      createRealtimeCommandLedger(execution.options),
     );
   }
 }

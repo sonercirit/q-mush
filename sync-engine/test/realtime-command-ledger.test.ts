@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import {
   RealtimeCommandFailure,
-  RealtimeCommandLedger,
+  createRealtimeCommandLedger,
 } from "../../sync-engine/realtime-command-ledger.ts";
 import {
   USER_ID,
@@ -35,7 +35,7 @@ import {
 } from "./realtime-command-ledger-helpers.ts";
 
 test("executes once, snapshots the result, and replays the identical envelope", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const value = { status: "created" };
   const action = vi.fn(() => value);
   const selectedCommand = command("command-1");
@@ -50,7 +50,7 @@ test("executes once, snapshots the result, and replays the identical envelope", 
 });
 
 test("replays the literal serialized acknowledgement envelope", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const selectedCommand = command("command-serialized");
   const first = await ledger.execute(
     USER_ID,
@@ -70,7 +70,7 @@ test("replays the literal serialized acknowledgement envelope", async () => {
 });
 
 test("coalesces identical in-flight retries and isolates authenticated users", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const selectedCommand = command("shared-command");
   const { action, executions, pending } = await pendingRetrySetup(
     ledger,
@@ -192,7 +192,7 @@ test("an in-flight replay resolves before its completed body is evicted", async 
 });
 
 test("evicts bodies by deterministic global completion order", async () => {
-  const ledger = new RealtimeCommandLedger({ maximumCompletedResults: 1 });
+  const ledger = createRealtimeCommandLedger({ maximumCompletedResults: 1 });
   const firstPending = deferredValue<string>();
   const [firstCommand, secondCommand] = sequentialCommands();
 
@@ -205,7 +205,7 @@ test("evicts bodies by deterministic global completion order", async () => {
 });
 
 test("completion sequence breaks equal-clock ties", async () => {
-  const ledger = new RealtimeCommandLedger({
+  const ledger = createRealtimeCommandLedger({
     maximumCompletedResults: 1,
     now: () => 7,
   });
@@ -216,7 +216,10 @@ test("completion sequence breaks equal-clock ties", async () => {
 
 test("retention starts at completion rather than admission", async () => {
   let now = 1;
-  const ledger = new RealtimeCommandLedger({ now: () => now, retentionMs: 10 });
+  const ledger = createRealtimeCommandLedger({
+    now: () => now,
+    retentionMs: 10,
+  });
   const pending = deferredValue<string>();
   const selectedCommand = command("command-1");
   const first = execute(ledger, selectedCommand, () => pending.promise);
@@ -297,7 +300,7 @@ test("rejected admission reserves nothing and an exact lost-ack retry can run", 
 });
 
 test("partitions retained body count and byte budgets per user", async () => {
-  const ledger = new RealtimeCommandLedger({
+  const ledger = createRealtimeCommandLedger({
     maximumCompletedResultBytes: 100,
     maximumCompletedResultBytesPerUser: 10,
     maximumCompletedResults: 10,
@@ -318,7 +321,7 @@ test("partitions retained body count and byte budgets per user", async () => {
 });
 
 test("replays an idempotency key under a fresh command ID", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const action = vi.fn(resolved("first"));
   await execute(ledger, command("command-1", "first-key"), action);
 
@@ -338,7 +341,7 @@ test("replays an idempotency key under a fresh command ID", async () => {
 });
 
 test("coalesces an in-flight idempotency key under a fresh command ID", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const { promise, resolve } = Promise.withResolvers<string>();
   const action = vi.fn(() => promise);
   const first = execute(ledger, command("command-1", "first-key"), action);
@@ -356,7 +359,7 @@ test("replays a failed idempotency key under a fresh command ID", async () => {
   const action = vi.fn(() => {
     throw new RealtimeCommandFailure("session_busy");
   });
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
 
   await expectExecution(
     ledger,
@@ -374,7 +377,7 @@ test("replays a failed idempotency key under a fresh command ID", async () => {
 });
 
 test("rejects a changed fingerprint without retaining mutable payload objects", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   const payload: Record<string, string> = { prompt: "original" };
   const selectedCommand = command(
     "command-1",
@@ -396,7 +399,7 @@ test("rejects a changed fingerprint without retaining mutable payload objects", 
 });
 
 test("bounds pending entries, payload bytes, and operations per user", async () => {
-  const ledger = new RealtimeCommandLedger({
+  const ledger = createRealtimeCommandLedger({
     maximumPendingBytesPerUser: 10,
     maximumPendingEntries: 3,
     maximumPendingEntriesPerOperation: { "sessions.send": 1 },
@@ -430,7 +433,9 @@ test("bounds pending entries, payload bytes, and operations per user", async () 
 });
 
 test("turns oversized, unserializable, and unexpected results into safe receipts", async () => {
-  const oversizedLedger = new RealtimeCommandLedger({ maximumResultBytes: 5 });
+  const oversizedLedger = createRealtimeCommandLedger({
+    maximumResultBytes: 5,
+  });
   await expectExecutions(oversizedLedger, [
     {
       acknowledgement: failure("oversized", "command_result_too_large"),
@@ -445,7 +450,7 @@ test("turns oversized, unserializable, and unexpected results into safe receipts
 
   const circular: Record<string, unknown> = {};
   circular["self"] = circular;
-  await expectExecutions(new RealtimeCommandLedger(), [
+  await expectExecutions(createRealtimeCommandLedger(), [
     {
       acknowledgement: failure("circular", "command_failed"),
       action: () => circular,
@@ -462,7 +467,7 @@ test("turns oversized, unserializable, and unexpected results into safe receipts
 });
 
 test("retains valid explicit command failures and sanitizes invalid codes", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   await expectExecutions(ledger, [
     {
       acknowledgement: failure("command-1", "session_busy"),
@@ -482,7 +487,7 @@ test("retains valid explicit command failures and sanitizes invalid codes", asyn
 });
 
 test("preserves explicit command error detail for the browser", async () => {
-  const ledger = new RealtimeCommandLedger();
+  const ledger = createRealtimeCommandLedger();
   await expectExecution(
     ledger,
     command("invalid-cap"),
@@ -542,6 +547,6 @@ test("rejects invalid accounting, clocks, identities, and constructor limits", a
     { retentionMs: 0 },
   ];
   for (const options of invalidOptions) {
-    expect(() => new RealtimeCommandLedger(options)).toThrow(RangeError);
+    expect(() => createRealtimeCommandLedger(options)).toThrow(RangeError);
   }
 });
