@@ -1,5 +1,5 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type {
   SessionRealtimeActionResult,
@@ -35,7 +35,7 @@ function detail(
   workspaceId: string,
 ): AgentSessionDetail {
   const value = dependencies.store.get(userId, sessionId, workspaceId);
-  if (value === undefined) throw new RealtimeCommandError("not_found");
+  if (value === undefined) throw createRealtimeCommandError("not_found");
   return value;
 }
 

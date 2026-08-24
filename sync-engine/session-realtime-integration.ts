@@ -12,7 +12,11 @@ import type {
   SessionToolUpdatePreview,
   SessionToolUpdatePreviewInput,
 } from "../shared/session-tool-update.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import {
+  createRealtimeCommandError,
+  isRealtimeCommandError,
+  type RealtimeCommandError,
+} from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
@@ -38,7 +42,7 @@ import { type CancelPendingInputResult } from "./session-pending-inputs.ts";
 import type { SessionProviderUpdateDependencies } from "./session-provider-update.ts";
 import {
   answerSessionQuestionsCommand,
-  QuestionActionFailure,
+  isQuestionActionFailure,
   type SessionQuestionActionDependencies,
 } from "./session-question-actions.ts";
 import {
@@ -73,8 +77,8 @@ import type { SessionReassignmentInput } from "./session-reassignment.ts";
 import type { SessionStore } from "./session-store.ts";
 import {
   applySessionToolUpdate,
+  isSessionToolUpdateError,
   previewSessionToolUpdate,
-  SessionToolUpdateError,
   type SessionToolUpdateDependencies,
 } from "./session-tool-update.ts";
 
@@ -118,7 +122,7 @@ function cancellationError(
     invalid_state: "invalid_session_state",
     not_found: "not_found",
   } as const;
-  return new RealtimeCommandError(code[status]);
+  return createRealtimeCommandError(code[status]);
 }
 
 export class RealtimeSessionCommands implements SessionRealtimeCommands {
@@ -146,14 +150,14 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         selection,
       );
       if (credential === undefined) {
-        throw new RealtimeCommandError("credential_unavailable");
+        throw createRealtimeCommandError("credential_unavailable");
       }
       return credential;
     } catch (error) {
-      if (error instanceof RealtimeCommandError) {
+      if (isRealtimeCommandError(error)) {
         throw error;
       }
-      throw new RealtimeCommandError("credential_refresh_failed");
+      throw createRealtimeCommandError("credential_refresh_failed");
     }
   }
 
@@ -168,8 +172,8 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         payload,
       );
     } catch (error) {
-      if (error instanceof QuestionActionFailure) {
-        throw new RealtimeCommandError(error.code);
+      if (isQuestionActionFailure(error)) {
+        throw createRealtimeCommandError(error.code);
       }
       throw error;
     }
@@ -279,7 +283,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       parent?.generation !== input.parentGeneration ||
       parent.runnerRequired
     ) {
-      throw new RealtimeCommandError("parent_stale");
+      throw createRealtimeCommandError("parent_stale");
     }
     return this.#createSession(
       user,
@@ -294,7 +298,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     workspaceId: string,
   ): Promise<AgentSessionDetail> => {
     if (input.workspaceId !== workspaceId) {
-      throw new RealtimeCommandError("not_found");
+      throw createRealtimeCommandError("not_found");
     }
     const source = this.#detail(user.id, input.sourceSessionId, workspaceId);
     return forkSessionForUser({
@@ -336,7 +340,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       workspaceId,
     );
     if (owned === undefined) {
-      throw new RealtimeCommandError("not_found");
+      throw createRealtimeCommandError("not_found");
     }
     const attachments = input.attachments ?? input.images;
     const result = this.#dependencies.store.enqueuePendingInput(
@@ -357,11 +361,11 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
       case "duplicate":
         return this.#detail(user.id, input.sessionId, workspaceId);
       case "conflict":
-        throw new RealtimeCommandError("pending_input_id_conflict");
+        throw createRealtimeCommandError("pending_input_id_conflict");
       case "invalid_state":
-        throw new RealtimeCommandError("invalid_session_state");
+        throw createRealtimeCommandError("invalid_session_state");
       case "not_found":
-        throw new RealtimeCommandError("not_found");
+        throw createRealtimeCommandError("not_found");
     }
   }
 
@@ -422,7 +426,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         input,
       );
       if (result.status !== "reassigned") {
-        throw new RealtimeCommandError(sessionReassignmentError(result));
+        throw createRealtimeCommandError(sessionReassignmentError(result));
       }
       this.#dependencies.notify(user.id, sessionId);
       return result.detail;
@@ -454,7 +458,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
         workspaceId,
       );
       if (detail === undefined) {
-        throw new RealtimeCommandError("not_found");
+        throw createRealtimeCommandError("not_found");
       }
       this.#dependencies.notify(user.id, sessionId);
       return detail;
@@ -570,8 +574,8 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
   }
 
   #toolUpdateError(error: unknown): RealtimeCommandError {
-    return new RealtimeCommandError(
-      error instanceof SessionToolUpdateError ? error.code : "command_failed",
+    return createRealtimeCommandError(
+      isSessionToolUpdateError(error) ? error.code : "command_failed",
     );
   }
 
@@ -631,7 +635,7 @@ export class RealtimeSessionCommands implements SessionRealtimeCommands {
     return requiredSessionDetail(
       this.#dependencies.store.get.bind(this.#dependencies.store),
       [userId, sessionId, workspaceId],
-      () => new RealtimeCommandError("not_found"),
+      () => createRealtimeCommandError("not_found"),
     );
   }
 }

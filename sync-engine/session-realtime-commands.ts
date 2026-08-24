@@ -29,7 +29,7 @@ import {
   SESSION_REALTIME_OPERATIONS,
   type UserRealtimeCommand,
 } from "../shared/user-realtime-protocol.ts";
-import { RealtimeCommandFailure } from "./realtime-command-ledger.ts";
+import { createRealtimeCommandFailure } from "./realtime-command-ledger.ts";
 import { requiredRealtimeInput } from "./realtime-required-input.ts";
 import type {
   AuthenticatedSessionAction,
@@ -186,7 +186,7 @@ function readBooleanSetting(
 ): boolean {
   const setting = payload[key];
   if (typeof setting !== "boolean") {
-    throw new RealtimeCommandFailure("invalid_request");
+    throw createRealtimeCommandFailure("invalid_request");
   }
   return setting;
 }
@@ -199,7 +199,7 @@ function readContextTokenCap(
     cap !== null &&
     (typeof cap !== "number" || !Number.isSafeInteger(cap) || cap <= 0)
   ) {
-    throw new RealtimeCommandFailure("invalid_request");
+    throw createRealtimeCommandFailure("invalid_request");
   }
   return cap;
 }
@@ -215,7 +215,7 @@ function readModelSelection(payload: Readonly<Record<string, unknown>>): {
   const credentialId = readIdentifier(payload["credentialId"]);
   const provider = readProvider(payload["provider"]);
   if (credentialId === undefined || provider === undefined) {
-    throw new RealtimeCommandFailure("invalid_request");
+    throw createRealtimeCommandFailure("invalid_request");
   }
   return { credentialId, provider };
 }
@@ -226,7 +226,7 @@ function workspaceSessionInput<Value extends { readonly workspaceId: string }>(
 ): Value {
   const required = requiredRealtimeInput(input);
   if (required.workspaceId !== workspaceId) {
-    throw new RealtimeCommandFailure("not_found");
+    throw createRealtimeCommandFailure("not_found");
   }
   return required;
 }
@@ -257,7 +257,7 @@ export async function executeSessionRealtimeCommand(
         payload["workspaceId"] !== undefined &&
         payload["workspaceId"] !== workspaceId
       ) {
-        throw new RealtimeCommandFailure("not_found");
+        throw createRealtimeCommandFailure("not_found");
       }
       return sessions.answerQuestionsForUser(user, {
         ...payload,
@@ -317,7 +317,7 @@ export async function executeSessionRealtimeCommand(
         (payload["workspaceId"] !== undefined &&
           payload["workspaceId"] !== workspaceId)
       ) {
-        throw new RealtimeCommandFailure("invalid_request");
+        throw createRealtimeCommandFailure("invalid_request");
       }
       const page = sessions.historyForUser(
         user,
@@ -326,7 +326,7 @@ export async function executeSessionRealtimeCommand(
         workspaceId,
       );
       if (page === undefined) {
-        throw new RealtimeCommandFailure("not_found");
+        throw createRealtimeCommandFailure("not_found");
       }
       return page;
     }
@@ -348,7 +348,7 @@ export async function executeSessionRealtimeCommand(
         workspaceId,
       );
       if (detail?.workspaceId !== workspaceId) {
-        throw new RealtimeCommandFailure("not_found");
+        throw createRealtimeCommandFailure("not_found");
       }
       return detail;
     }
@@ -414,6 +414,6 @@ export async function executeSessionRealtimeCommand(
       return sessions.updateToolsForUser(user, input);
     }
     default:
-      throw new RealtimeCommandFailure("unsupported_operation");
+      throw createRealtimeCommandFailure("unsupported_operation");
   }
 }

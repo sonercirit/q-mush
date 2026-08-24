@@ -3,7 +3,7 @@ import {
   sessionProviderSelectionMatches,
   type SessionProviderUpdateInput,
 } from "../shared/session-provider-update.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import {
   readSessionCredential,
   type SessionCredentialReaders,
@@ -51,10 +51,10 @@ async function targetMetadata(
     if (restartSignal.aborted) {
       throwIfServerRestarting(restartSignal);
     }
-    throw new RealtimeCommandError("credential_refresh_failed");
+    throw createRealtimeCommandError("credential_refresh_failed");
   }
   if (credential === undefined) {
-    throw new RealtimeCommandError("credential_unavailable");
+    throw createRealtimeCommandError("credential_unavailable");
   }
   return withRestartErrorTranslation(capturedRestartSignal, async (signal) =>
     discoverRequiredSessionMetadata({
@@ -79,16 +79,16 @@ export async function applySessionProviderUpdate(
     input.workspaceId,
   );
   if (existing === undefined) {
-    throw new RealtimeCommandError("not_found");
+    throw createRealtimeCommandError("not_found");
   }
   if (sessionProviderSelectionMatches(existing, input)) {
     return existing;
   }
   if (existing.generation !== input.expectedGeneration) {
-    throw new RealtimeCommandError("stale_generation");
+    throw createRealtimeCommandError("stale_generation");
   }
   if (!input.confirmedCacheDrop) {
-    throw new RealtimeCommandError("cache_warning_required");
+    throw createRealtimeCommandError("cache_warning_required");
   }
 
   const { read: capturedRestartSignal, signal: restartSignal } =
@@ -110,14 +110,14 @@ export async function applySessionProviderUpdate(
   });
   const detail = result.detail;
   if (result.status === "invalid_context_token_cap") {
-    throw new RealtimeCommandError(
+    throw createRealtimeCommandError(
       "invalid_context_token_cap",
       result.error ??
         "Lower or clear the context token cap before changing models.",
     );
   }
   if (result.status !== "updated" || detail === undefined) {
-    throw new RealtimeCommandError(
+    throw createRealtimeCommandError(
       result.status === "not_found" ? "not_found" : "stale_generation",
     );
   }

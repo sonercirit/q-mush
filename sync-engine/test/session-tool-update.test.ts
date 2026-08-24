@@ -5,8 +5,8 @@ import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   applySessionToolUpdate,
+  isSessionToolUpdateError,
   previewSessionToolUpdate,
-  SessionToolUpdateError,
 } from "../session-tool-update.ts";
 import {
   addTestProviderCredential,
@@ -172,7 +172,7 @@ describe("session tool update", () => {
         TEST_USER_ID,
         updateRequest(setupValue, []),
       ),
-    ).rejects.toBeInstanceOf(SessionToolUpdateError);
+    ).rejects.toSatisfy(isSessionToolUpdateError);
     expectOriginalTools(setupValue);
   });
 });

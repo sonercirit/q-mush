@@ -6,7 +6,7 @@ import {
   type SessionForkInput,
 } from "../shared/session-fork.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
@@ -58,7 +58,7 @@ async function selectedForkConfiguration(
     { ...selection, workspaceId: input.workspaceId },
   );
   if (credentials.length === 0) {
-    throw new RealtimeCommandError("credential_unavailable");
+    throw createRealtimeCommandError("credential_unavailable");
   }
   for (const credential of credentials) {
     try {
@@ -110,7 +110,7 @@ async function selectedForkConfiguration(
       }
     }
   }
-  throw new RealtimeCommandError("credential_unavailable");
+  throw createRealtimeCommandError("credential_unavailable");
 }
 
 export async function forkSessionForUser(options: {
@@ -140,7 +140,7 @@ export async function forkSessionForUser(options: {
     selected?.configuration,
   );
   if (result.status !== "forked") {
-    throw new RealtimeCommandError(result.status);
+    throw createRealtimeCommandError(result.status);
   }
   options.dependencies.notify(options.user.id, result.detail.id);
   return compactChangedSessionFork({

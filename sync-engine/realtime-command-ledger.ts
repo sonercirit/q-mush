@@ -12,7 +12,7 @@ import {
   scopedCommandIdentity,
 } from "./realtime-command-identity.ts";
 
-export { RealtimeCommandError as RealtimeCommandFailure } from "../shared/user-realtime-protocol.ts";
+export { createRealtimeCommandError as createRealtimeCommandFailure } from "../shared/user-realtime-protocol.ts";
 
 const MAXIMUM_COMMAND_RESULT_LENGTH = 128 * 1024 * 1024;
 const DEFAULT_MAXIMUM_COMPLETED_RESULT_BYTES = 16 * 1024 * 1024;

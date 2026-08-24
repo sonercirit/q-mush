@@ -3,8 +3,8 @@ import { createUuidV7 } from "../shared/ids.ts";
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import {
+  createRealtimeCommandError,
   readUserRealtimeCommand,
-  RealtimeCommandError,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
   UserRealtimeProtocolError,
 } from "../shared/user-realtime-protocol.ts";
@@ -434,7 +434,7 @@ export function createRealtimeIntegration(
               user.id,
             );
             if (current === null) {
-              throw new RealtimeCommandError("authentication_expired");
+              throw createRealtimeCommandError("authentication_expired");
             }
             return executeSessionRealtimeCommand(
               options.sessions.realtimeCommands,

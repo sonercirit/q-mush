@@ -35,16 +35,47 @@ export const SESSION_REALTIME_OPERATIONS = {
   updateTools: "sessions.update_tools",
 } as const;
 
-export class RealtimeCommandError extends Error {
+export type RealtimeCommandError = Error & {
   readonly code: string;
   readonly detail: string | undefined;
+  readonly realtimeCommandError: true;
+};
 
-  constructor(code: string, detail?: string) {
-    super(detail ?? code);
-    this.name = "RealtimeCommandError";
-    this.code = code;
-    this.detail = detail;
-  }
+export function createTaggedRealtimeCommandError<Tag extends string>(
+  code: string,
+  detail: string | undefined,
+  kind: Tag,
+  name: string,
+): RealtimeCommandError & { readonly kind: Tag } {
+  return Object.assign(new Error(detail ?? code), {
+    code,
+    detail,
+    kind,
+    name,
+    realtimeCommandError: true as const,
+  });
+}
+
+export function createRealtimeCommandError(
+  code: string,
+  detail?: string,
+): RealtimeCommandError {
+  return createTaggedRealtimeCommandError(
+    code,
+    detail,
+    "realtime_command_error",
+    "RealtimeCommandError",
+  );
+}
+
+export function isRealtimeCommandError(
+  error: unknown,
+): error is RealtimeCommandError {
+  return (
+    error instanceof Error &&
+    "realtimeCommandError" in error &&
+    error.realtimeCommandError === true
+  );
 }
 
 export type UserRealtimeCommand = Readonly<{

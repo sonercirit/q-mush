@@ -1,12 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import {
-  RealtimeCommandFailure,
+  createRealtimeCommandFailure,
   RealtimeCommandLedger,
 } from "../../sync-engine/realtime-command-ledger.ts";
 import {
-  USER_ID,
-  WORKSPACE_ID,
   command,
   constrainedRetentionLedger,
   deferredValue,
@@ -30,6 +28,8 @@ import {
   sequentialCommands,
   success,
   unexpected,
+  USER_ID,
+  WORKSPACE_ID,
   type InvalidLedgerExecution,
   type LedgerOptions,
 } from "./realtime-command-ledger-helpers.ts";
@@ -354,7 +354,7 @@ test("coalesces an in-flight idempotency key under a fresh command ID", async ()
 
 test("replays a failed idempotency key under a fresh command ID", async () => {
   const action = vi.fn(() => {
-    throw new RealtimeCommandFailure("session_busy");
+    throw createRealtimeCommandFailure("session_busy");
   });
   const ledger = new RealtimeCommandLedger();
 
@@ -467,14 +467,14 @@ test("retains valid explicit command failures and sanitizes invalid codes", asyn
     {
       acknowledgement: failure("command-1", "session_busy"),
       action: () => {
-        throw new RealtimeCommandFailure("session_busy");
+        throw createRealtimeCommandFailure("session_busy");
       },
       command: command("command-1"),
     },
     {
       acknowledgement: failure("command-2", "command_failed"),
       action: () => {
-        throw new RealtimeCommandFailure("contains private spaces");
+        throw createRealtimeCommandFailure("contains private spaces");
       },
       command: command("command-2", "second-key"),
     },
@@ -487,7 +487,7 @@ test("preserves explicit command error detail for the browser", async () => {
     ledger,
     command("invalid-cap"),
     () => {
-      throw new RealtimeCommandFailure(
+      throw createRealtimeCommandFailure(
         "invalid_context_token_cap",
         "Context token cap cannot exceed the model limit of 64,000 tokens.",
       );

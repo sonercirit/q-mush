@@ -5,18 +5,34 @@ import {
   type AskQuestionAnswers,
 } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createTaggedRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AskQuestionsStore } from "./ask-questions-store.ts";
 import type {
   RecoverableQuestionIdentity,
   SessionLifecycleDependencies,
 } from "./session-lifecycle-types.ts";
 
-export class QuestionActionFailure extends RealtimeCommandError {
-  constructor(code: string) {
-    super(code);
-    this.name = "QuestionActionFailure";
-  }
+export type QuestionActionFailure = ReturnType<
+  typeof createQuestionActionFailure
+>;
+
+function createQuestionActionFailure(code: string) {
+  return createTaggedRealtimeCommandError(
+    code,
+    undefined,
+    "question_action_failure",
+    "QuestionActionFailure",
+  );
+}
+
+export function isQuestionActionFailure(
+  error: unknown,
+): error is QuestionActionFailure {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "question_action_failure"
+  );
 }
 
 export type AnsweredQuestionLaunch = RecoverableQuestionIdentity;
@@ -43,11 +59,11 @@ export interface SessionQuestionActionDependencies extends SessionLifecycleDepen
 function answerFailure(status: "conflict" | "not_found" | "stale"): never {
   switch (status) {
     case "conflict":
-      throw new QuestionActionFailure("question_answer_conflict");
+      throw createQuestionActionFailure("question_answer_conflict");
     case "not_found":
-      throw new QuestionActionFailure("not_found");
+      throw createQuestionActionFailure("not_found");
     case "stale":
-      throw new QuestionActionFailure("question_request_stale");
+      throw createQuestionActionFailure("question_request_stale");
   }
 }
 
@@ -63,7 +79,7 @@ function validAnswers(
       payload.workspaceId,
     ) === false
   ) {
-    throw new QuestionActionFailure("not_found");
+    throw createQuestionActionFailure("not_found");
   }
   const input = dependencies.questions.input(
     userId,
@@ -75,7 +91,7 @@ function validAnswers(
       ? undefined
       : readAskQuestionAnswers({ answers: payload.answers }, input.questions);
   if (answers === undefined) {
-    throw new QuestionActionFailure(
+    throw createQuestionActionFailure(
       input === undefined ? "not_found" : "invalid_request",
     );
   }
@@ -97,7 +113,7 @@ export async function answerSessionQuestionsCommand(
 }> {
   const payload = readAnswerQuestionsRealtimePayload(value);
   if (payload === undefined) {
-    throw new QuestionActionFailure("invalid_request");
+    throw createQuestionActionFailure("invalid_request");
   }
   const answers = validAnswers(dependencies, user.id, payload);
   const answered = dependencies.questions.answer(
