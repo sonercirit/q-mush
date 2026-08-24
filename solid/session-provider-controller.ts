@@ -41,7 +41,10 @@ export function createSessionProviderController(
     credentialId: string,
     model: string,
   ): Promise<void> {
-    const query = new URLSearchParams({ credentialId, model, workspaceId });
+    const query = new URLSearchParams();
+    query.set("credentialId", credentialId);
+    query.set("model", model);
+    query.set("workspaceId", workspaceId);
     try {
       const catalog = readOpenRouterProviderCatalog(
         await requestJson(
