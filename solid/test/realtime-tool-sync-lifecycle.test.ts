@@ -39,7 +39,9 @@ test("reconnect deduplicates remembered, active, and resync tool streams", () =>
   );
   const toolSync = createToolSyncTracker();
   const pendingSpy = vi.spyOn(toolSync, "pending");
-  const stream = streamingRealtimeFixture("deduplicated-reconnect", undefined, { toolSync });
+  const stream = streamingRealtimeFixture("deduplicated-reconnect", undefined, {
+    toolSync,
+  });
   const callId = "deduplicated-call";
   // Flushing the initial delta commits an active tool state.
   stream.receive(preparingToolDelta(0, STREAM_ID, callId));
@@ -112,7 +114,9 @@ test("does not resend unresolved session synchronization", () => {
 
 test("retains current and remaining requests after a send failure", () => {
   const toolSync = createToolSyncTracker();
-  const stream = streamingRealtimeFixture("failed-sync-instance", undefined, { toolSync });
+  const stream = streamingRealtimeFixture("failed-sync-instance", undefined, {
+    toolSync,
+  });
   const failedStreams = ["failed-a", "failed-b"];
   for (const [index, streamId] of failedStreams.entries()) {
     stream.receive(preparingToolDelta(index, streamId, `call-${streamId}`));

@@ -1,5 +1,5 @@
-import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
+import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";

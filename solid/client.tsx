@@ -33,11 +33,11 @@ import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
 import type { RealtimeClientEvent } from "./realtime-stream-buffer.ts";
 import {
+  createRenderDebugView,
   renderDebugBoundary,
   RenderDebugLegend,
   RenderDebugProvider,
   RenderDebugToggle,
-  createRenderDebugView,
   type RenderDebugView,
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";

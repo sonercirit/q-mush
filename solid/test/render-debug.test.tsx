@@ -1,11 +1,11 @@
 import { type JSX } from "solid-js";
 import { expect, test } from "vitest";
 import {
+  createRenderDebugView,
   renderDebugBoundary,
   RenderDebugLegend,
   RenderDebugProvider,
   RenderDebugToggle,
-  createRenderDebugView,
 } from "../../solid/render-debug.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 

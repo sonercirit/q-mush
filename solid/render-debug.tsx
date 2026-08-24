@@ -54,7 +54,9 @@ export function createRenderDebugView(): RenderDebugView {
     return { count, heat: renderHeat(count) };
   };
   return {
-    get enabled() { return enabled(); },
+    get enabled() {
+      return enabled();
+    },
     enabledView: enabled,
     revisionView: revision,
     measurement,
@@ -67,7 +69,9 @@ export function createRenderDebugView(): RenderDebugView {
       counts.clear();
       setRevision((value) => value + 1);
     },
-    toggle() { setEnabled((value) => !value); },
+    toggle() {
+      setEnabled((value) => !value);
+    },
   };
 }
 
