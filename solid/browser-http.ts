@@ -16,7 +16,9 @@ export function createHttpResponseError(
   );
 }
 
-export function isHttpResponseError(error: unknown): error is HttpResponseError {
+export function isHttpResponseError(
+  error: unknown,
+): error is HttpResponseError {
   return (
     error instanceof Error &&
     "kind" in error &&

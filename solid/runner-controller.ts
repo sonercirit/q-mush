@@ -215,8 +215,7 @@ export class RunnerController {
       }
     } catch (error) {
       if (this.#isCurrent(revision)) {
-        const unavailable =
-          isHttpResponseError(error) && error.status === 503;
+        const unavailable = isHttpResponseError(error) && error.status === 503;
         this.#patch({
           creating: false,
           error: unavailable

@@ -322,7 +322,9 @@ const transcriptMessageRenderers: TranscriptMessageRenderer = {
   compaction_request: (props) => (
     <CompactionRequestTranscriptMessage message={props.message} />
   ),
-  error: (props) => <NoteTranscriptMessage kind="error" message={props.message} />,
+  error: (props) => (
+    <NoteTranscriptMessage kind="error" message={props.message} />
+  ),
   thinking: (props) => (
     <NoteTranscriptMessage kind="thinking" message={props.message} />
   ),
@@ -360,7 +362,10 @@ function renderTypedTranscriptMessage<Role extends TranscriptMessageRole>(
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
-  return renderTypedTranscriptMessage(props, untrack(() => props.message));
+  return renderTypedTranscriptMessage(
+    props,
+    untrack(() => props.message),
+  );
 }
 
 function TranscriptMessage(

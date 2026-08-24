@@ -148,10 +148,9 @@ export class ProviderController {
   async load(): Promise<void> {
     await this.#state.load({
       failure: (error) => ({
-        error:
-          isHttpResponseError(error)
-            ? this.#loadError(error.status)
-            : this.#loadError(0),
+        error: isHttpResponseError(error)
+          ? this.#loadError(error.status)
+          : this.#loadError(0),
       }),
       pending: { credentials: undefined, error: undefined },
       request: () =>

@@ -53,15 +53,14 @@ function modelDiscoveryFailure(
   error: unknown,
 ): SessionModelDiscoveryFailure {
   const providerName = provider === "openrouter" ? "OpenRouter" : "Provider";
-  const code =
-    isHttpResponseError(error)
+  const code = isHttpResponseError(error)
+    ? error.code
+    : typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        typeof error.code === "string"
       ? error.code
-      : typeof error === "object" &&
-          error !== null &&
-          "code" in error &&
-          typeof error.code === "string"
-        ? error.code
-        : undefined;
+      : undefined;
   if (code === "credential_unavailable") {
     return {
       error: `That ${providerName} credential is not available in this workspace.`,
@@ -70,10 +69,7 @@ function modelDiscoveryFailure(
   if (code === "workspace_unavailable") {
     return { error: "That workspace is unavailable for model discovery." };
   }
-  if (
-    isHttpResponseError(error) &&
-    error.code === "provider_unavailable"
-  ) {
+  if (isHttpResponseError(error) && error.code === "provider_unavailable") {
     return {
       error: error.detail ?? `${providerName} model discovery is unavailable.`,
     };

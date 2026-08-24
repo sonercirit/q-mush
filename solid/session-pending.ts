@@ -59,7 +59,8 @@ export function createPendingCommandCapacity(
         !Number.isSafeInteger(bytes) ||
         bytes < 0 ||
         bytes > maximumBytes - reservedBytes
-      ) return undefined;
+      )
+        return undefined;
       users.set(userId, (users.get(userId) ?? 0) + bytes);
       reservedBytes += bytes;
       let released = false;
