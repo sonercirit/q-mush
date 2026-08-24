@@ -5,6 +5,7 @@ import { sha256Base64Url } from "../shared/sha256.ts";
 import { requireRecord } from "../shared/validation.ts";
 import {
   createCookie,
+  createMethodNotAllowedResponse,
   createRedirect,
   readCookie,
   valuesMatch,
@@ -21,6 +22,24 @@ type ProviderFetch = (
 export interface OAuthEndpoints {
   begin(request: Request): Response;
   complete(request: Request): Promise<Response>;
+}
+
+export function serveGetRequest<T>(
+  request: Request,
+  serve: () => T,
+): Response | T {
+  return request.method === "GET"
+    ? serve()
+    : createMethodNotAllowedResponse("GET");
+}
+
+export function readReadyOAuthCallback(
+  request: Request,
+  names: FlowCookies,
+  onNotReady: (status: "denied" | "failed" | "invalid_state") => Response,
+): Extract<OAuthCallbackResult, { readonly status: "ready" }> | Response {
+  const callback = readOAuthCallback(request, names);
+  return callback.status === "ready" ? callback : onNotReady(callback.status);
 }
 
 export interface OAuthDependencies {
@@ -173,7 +192,7 @@ export async function readJsonRecord(
   return requireRecord(await response.json(), errorMessage);
 }
 
-export function readOAuthCallback(
+function readOAuthCallback(
   request: Request,
   names: FlowCookies,
 ): OAuthCallbackResult {

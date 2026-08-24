@@ -15,19 +15,18 @@ type CollectionRoute = (
 
 export interface AuthenticatedCollectionIntegration {
   readonly collectionRoute: CollectionRoute;
-  readonly route: (
-    request: Request,
-    serve: (userId: string, method: string) => Promise<Response> | Response,
-  ) => Promise<Response> | Response;
+  readonly route: CollectionRouteDispatcher;
 }
+
+type CollectionRouteDispatcher = (
+  request: Request,
+  serve: (userId: string, method: string) => Promise<Response> | Response,
+) => Promise<Response> | Response;
 
 export function createAuthenticatedCollectionIntegration(
   auth: GoogleAuth,
 ): AuthenticatedCollectionIntegration {
-  const route = (
-    request: Request,
-    serve: (userId: string, method: string) => Promise<Response> | Response,
-  ): Promise<Response> | Response => {
+  const route: CollectionRouteDispatcher = (request, serve) => {
     const method = request.method;
     return withAuthenticatedUser(auth, request, ({ id }) => serve(id, method));
   };

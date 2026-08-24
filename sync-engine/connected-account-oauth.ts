@@ -5,7 +5,6 @@ import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
   createApiError,
   createCookie,
-  createMethodNotAllowedResponse,
   createRedirect,
   readCookie,
   valuesMatch,
@@ -13,12 +12,14 @@ import {
 import {
   clearPkceCookies,
   createFlowCookie,
-  readOAuthCallback,
+  readReadyOAuthCallback,
   redirectToApp,
   resolveRedirectUri,
+  serveGetRequest,
   startPkceFlowForRedirect,
   usesSecureCookies,
   type FlowCookies,
+  type OAuthEndpoints,
   type OAuthRuntime,
 } from "./oauth.ts";
 import type { ProviderCredentialEndpoints } from "./provider-credentials.ts";
@@ -55,25 +56,17 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly workspaceCookie: string;
 }
 
-export interface ConnectedAccountOAuth {
-  begin(request: Request): Response;
-  complete(request: Request): Promise<Response>;
-}
+export type ConnectedAccountOAuth = OAuthEndpoints;
 
 export function createConnectedAccountOAuth(
   configuration: ConnectedAccountOAuthConfiguration,
   credentials: ProviderCredentialEndpoints,
   runtime: OAuthRuntime,
 ): ConnectedAccountOAuth {
-  const begin = (request: Request): Response => {
-    if (["GET"].includes(request.method)) {
-      return credentials.authorize(request, (user) =>
-        beginAuthorized(request, user),
-      );
-    }
-
-    return createMethodNotAllowedResponse("GET");
-  };
+  const begin: OAuthEndpoints["begin"] = (request) =>
+    serveGetRequest(request, () =>
+      credentials.authorize(request, (user) => beginAuthorized(request, user)),
+    );
 
   const validWorkspaceScope = (
     workspaceId: string | undefined,
@@ -145,15 +138,14 @@ export function createConnectedAccountOAuth(
     ]);
   };
 
-  const complete = async (request: Request): Promise<Response> => {
-    if (!["GET"].includes(request.method)) {
-      return createMethodNotAllowedResponse("GET");
-    }
-
-    return await credentials.authorize(request, (user) =>
-      completeAuthorized(request, user),
+  const complete: OAuthEndpoints["complete"] = async (request) =>
+    await serveGetRequest(
+      request,
+      async () =>
+        await credentials.authorize(request, (user) =>
+          completeAuthorized(request, user),
+        ),
     );
-  };
 
   const completeAuthorized = async (
     request: Request,
@@ -171,10 +163,13 @@ export function createConnectedAccountOAuth(
         createCookie(name, "", 0, configuration.flowCookies.path, secure),
       ),
     ];
-    const callback = readOAuthCallback(request, configuration.flowCookies);
-
-    if (callback.status !== "ready") {
-      return appRedirect(request, callback.status, clearedCookies);
+    const callback = readReadyOAuthCallback(
+      request,
+      configuration.flowCookies,
+      (status) => appRedirect(request, status, clearedCookies),
+    );
+    if (callback instanceof Response) {
+      return callback;
     }
 
     const invalidState = (): Response =>

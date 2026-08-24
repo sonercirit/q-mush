@@ -23,10 +23,11 @@ import {
   normalizeOptionalValue,
   postFormJson,
   readJsonRecord,
-  readOAuthCallback,
   readProviderString,
+  readReadyOAuthCallback,
   redirectToApp,
   resolveRedirectUri,
+  serveGetRequest,
   startPkceFlowForRedirect,
   usesSecureCookies,
   validateRedirectUri,
@@ -155,81 +156,81 @@ function createGoogleAuthentication(
   };
 
   const begin = (request: Request): Response => {
-    if (request.method !== "GET") {
-      return createMethodNotAllowedResponse("GET");
-    }
+    return serveGetRequest(request, () => {
+      if (normalizedConfiguration === undefined) {
+        return createUnavailableResponse();
+      }
 
-    if (normalizedConfiguration === undefined) {
-      return createUnavailableResponse();
-    }
+      const callbackRedirectUri = redirectUri(request);
+      const flow = startPkceFlowForRedirect(
+        runtime,
+        GOOGLE_FLOW_COOKIES,
+        callbackRedirectUri,
+      );
+      const authorizationUrl = new URL(GOOGLE_AUTHORIZATION_URL);
+      authorizationUrl.search = new URLSearchParams({
+        client_id: normalizedConfiguration.clientId,
+        code_challenge: flow.challenge,
+        code_challenge_method: "S256",
+        redirect_uri: callbackRedirectUri,
+        response_type: "code",
+        scope: "openid email profile",
+        state: flow.state,
+      }).toString();
 
-    const callbackRedirectUri = redirectUri(request);
-    const flow = startPkceFlowForRedirect(
-      runtime,
-      GOOGLE_FLOW_COOKIES,
-      callbackRedirectUri,
-    );
-    const authorizationUrl = new URL(GOOGLE_AUTHORIZATION_URL);
-    authorizationUrl.search = new URLSearchParams({
-      client_id: normalizedConfiguration.clientId,
-      code_challenge: flow.challenge,
-      code_challenge_method: "S256",
-      redirect_uri: callbackRedirectUri,
-      response_type: "code",
-      scope: "openid email profile",
-      state: flow.state,
-    }).toString();
-
-    const flowCookies = flow.cookies;
-    return createRedirect(authorizationUrl, flowCookies);
+      const flowCookies = flow.cookies;
+      return createRedirect(authorizationUrl, flowCookies);
+    });
   };
 
   const complete = async (request: Request): Promise<Response> => {
-    if (request.method !== "GET") {
-      return createMethodNotAllowedResponse("GET");
-    }
+    return await serveGetRequest(request, async () => {
+      const secure = usesSecureCookiesForRequest(request);
+      const clearedFlowCookies = clearPkceCookies(GOOGLE_FLOW_COOKIES, secure);
 
-    const secure = usesSecureCookiesForRequest(request);
-    const clearedFlowCookies = clearPkceCookies(GOOGLE_FLOW_COOKIES, secure);
+      if (normalizedConfiguration === undefined) {
+        return createUnavailableResponse(clearedFlowCookies);
+      }
 
-    if (normalizedConfiguration === undefined) {
-      return createUnavailableResponse(clearedFlowCookies);
-    }
-
-    const callback = readOAuthCallback(request, GOOGLE_FLOW_COOKIES);
-    if (callback.status !== "ready") {
-      return appRedirect(request, callback.status, clearedFlowCookies);
-    }
-
-    try {
-      const user = await authenticateWithGoogle(
-        callback.code,
-        callback.verifier,
-        redirectUri(request),
-        normalizedConfiguration,
+      const callback = readReadyOAuthCallback(
+        request,
+        GOOGLE_FLOW_COOKIES,
+        (status) => appRedirect(request, status, clearedFlowCookies),
       );
-      const sessionToken = generateOAuthToken(runtime.randomToken);
-      const now = expireSessions();
-      store.createSession(
-        sessionToken,
-        user,
-        now + SESSION_LIFETIME_SECONDS * 1000,
-        now,
-      );
+      if (callback instanceof Response) {
+        return callback;
+      }
 
-      return appRedirect(request, undefined, [
-        ...clearedFlowCookies,
-        createCookie(
-          SESSION_COOKIE,
+      try {
+        const user = await authenticateWithGoogle(
+          callback.code,
+          callback.verifier,
+          redirectUri(request),
+          normalizedConfiguration,
+        );
+        const sessionToken = generateOAuthToken(runtime.randomToken);
+        const now = expireSessions();
+        store.createSession(
           sessionToken,
-          SESSION_LIFETIME_SECONDS,
-          "/",
-          secure,
-        ),
-      ]);
-    } catch {
-      return appRedirect(request, "failed", clearedFlowCookies);
-    }
+          user,
+          now + SESSION_LIFETIME_SECONDS * 1000,
+          now,
+        );
+
+        return appRedirect(request, undefined, [
+          ...clearedFlowCookies,
+          createCookie(
+            SESSION_COOKIE,
+            sessionToken,
+            SESSION_LIFETIME_SECONDS,
+            "/",
+            secure,
+          ),
+        ]);
+      } catch {
+        return appRedirect(request, "failed", clearedFlowCookies);
+      }
+    });
   };
 
   const logout = (request: Request): Response => {
