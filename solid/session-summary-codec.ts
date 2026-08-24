@@ -17,18 +17,6 @@ import {
   readFiniteNumber,
 } from "../shared/validation.ts";
 
-const STATUS_READERS: Readonly<
-  Record<AgentSessionStatus, () => AgentSessionStatus>
-> = {
-  completed: () => "completed",
-  failed: () => "failed",
-  idle: () => "idle",
-  paused: () => "paused",
-  queued: () => "queued",
-  running: () => "running",
-  stopped: () => "stopped",
-};
-
 function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
   return (
     value === "completed" ||
@@ -42,7 +30,7 @@ function isAgentSessionStatus(value: unknown): value is AgentSessionStatus {
 }
 
 function readStatus(value: unknown): AgentSessionStatus | undefined {
-  return isAgentSessionStatus(value) ? STATUS_READERS[value]() : undefined;
+  return isAgentSessionStatus(value) ? value : undefined;
 }
 
 function exactObjectKeys(value: object, expected: readonly string[]): boolean {

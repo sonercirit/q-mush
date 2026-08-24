@@ -9,6 +9,7 @@ import {
   type AnthropicReplayObject,
 } from "../shared/anthropic-replay.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 
 interface MutableThinkingBlock {
   readonly fields: AnthropicReplayObject;
@@ -485,7 +486,7 @@ const replayDeltaHandlers: Record<ReplayDeltaType, ReplayDeltaHandler> = {
 };
 
 function isReplayDeltaType(value: unknown): value is ReplayDeltaType {
-  return typeof value === "string" && value in replayDeltaHandlers;
+  return isDispatchKey(replayDeltaHandlers, value);
 }
 
 function updatedReplayBlock(

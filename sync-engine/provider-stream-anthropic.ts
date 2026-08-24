@@ -4,6 +4,7 @@ import type {
   AgentTokenUsage,
 } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import {
@@ -84,13 +85,6 @@ type AnthropicEventKind =
   | "message_stop";
 type AnthropicDeltaKind = "input_json_delta" | "text_delta" | "thinking_delta";
 type AnthropicBlockKind = "text" | "thinking" | "tool_use";
-
-function isDispatchKey<Kind extends string>(
-  handlers: Readonly<Record<Kind, unknown>>,
-  value: unknown,
-): value is Kind {
-  return typeof value === "string" && Object.hasOwn(handlers, value);
-}
 
 export function createAnthropicStreamAccumulator(
   model: string,

@@ -17,6 +17,10 @@ function invalidEvent(payload: Readonly<Record<string, unknown>>): void {
   expect(() => roundTrip(payload)).toThrow("invalid");
 }
 
+test("rejects prototype property names as realtime event types", () => {
+  invalidEvent({ type: "toString" });
+});
+
 test("reads storage-health warnings", () => {
   const expected = {
     health: {

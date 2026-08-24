@@ -1,6 +1,7 @@
 import { Show, type Accessor, type JSX } from "solid-js";
 import { isRecord, readNullableString } from "../shared/auth-model.ts";
 import type { PendingViewState } from "../shared/connection-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import type { RunnerStatus, RunnerSummary } from "../shared/runner-model.ts";
 import type { WorkspaceList } from "../shared/workspace-model.ts";
 import { Collection } from "./collection.tsx";
@@ -133,14 +134,14 @@ export function readCreatedRunner(value: unknown): CreatedRunnerSetup {
   };
 }
 
-const PLATFORM_LABELS: Readonly<Record<string, string>> = {
+const PLATFORM_LABELS = {
   darwin: "macOS",
   linux: "Linux",
   win32: "Windows",
 };
 
 function platformLabel(value: string): string {
-  return PLATFORM_LABELS[value] ?? value;
+  return isDispatchKey(PLATFORM_LABELS, value) ? PLATFORM_LABELS[value] : value;
 }
 
 function runnerDetails(runner: RunnerSummary): string {

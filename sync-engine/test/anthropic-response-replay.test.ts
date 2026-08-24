@@ -5,6 +5,7 @@ import {
   type AnthropicReplayBlock,
   type AnthropicReplayObject,
 } from "../../shared/anthropic-replay.ts";
+import { createAnthropicReplayCapture } from "../../sync-engine/provider-stream-anthropic-replay.ts";
 import { recordedMessageValues } from "../../sync-engine/session-store-values.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
@@ -236,6 +237,16 @@ function replayTool(caller?: AnthropicReplayObject): AnthropicReplayObject {
     type: "tool_use",
   };
 }
+
+test("rejects prototype property names as replay delta types", () => {
+  const capture = createAnthropicReplayCapture("test");
+  capture.readModel(KNOWN_ANTHROPIC_MODEL);
+  capture.start(0, { text: "", type: "text" });
+  capture.delta(0, { text: "poison", type: "toString" });
+  capture.stop(0);
+
+  expect(capture.finish()).toBeUndefined();
+});
 
 describe("Anthropic response replay", () => {
   test("streams tool calls and thinking from Messages events", async () => {

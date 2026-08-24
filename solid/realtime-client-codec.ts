@@ -3,6 +3,7 @@ import {
   readDevelopmentRestartProgress,
   type DevelopmentRestartProgress,
 } from "../shared/development-shutdown.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 import {
   parseJsonRecord,
@@ -113,7 +114,7 @@ type RealtimeWireEventType =
 function isRealtimeWireEventType(
   value: unknown,
 ): value is RealtimeWireEventType {
-  return typeof value === "string" && value in realtimeEventReaders;
+  return isDispatchKey(realtimeEventReaders, value);
 }
 
 type RealtimeEventReader = (

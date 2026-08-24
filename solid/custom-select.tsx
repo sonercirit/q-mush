@@ -1,4 +1,5 @@
 import { createEffect, createMemo, createSignal, For, on, Show, untrack, type JSX } from "solid-js";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import { normalizeSearchText } from "../shared/search.ts";
 
 export interface CustomSelectOption {
@@ -253,7 +254,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
       setActiveIndex(0);
     },
   } satisfies Record<string, () => void>;
-  const isNavigationKey = (key: string): key is keyof typeof navigationHandlers => key in navigationHandlers;
+  const isNavigationKey = (key: string): key is keyof typeof navigationHandlers => isDispatchKey(navigationHandlers, key);
   const handleNavigationKey = (event: KeyboardEvent): boolean => {
     if (!isNavigationKey(event.key)) return false;
     navigationHandlers[event.key]();
@@ -288,7 +289,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
         handleEscape(event);
       },
     } satisfies Record<string, () => void>;
-    const isListAction = (key: string): key is keyof typeof keyHandlers => key in keyHandlers;
+    const isListAction = (key: string): key is keyof typeof keyHandlers => isDispatchKey(keyHandlers, key);
     const handler = isListAction(event.key) ? keyHandlers[event.key] : undefined;
     if (handler !== undefined) {
       handler();
@@ -307,7 +308,7 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
       End: (): InitialOption => "last",
       Home: (): InitialOption => "first",
     } satisfies Record<string, () => InitialOption>;
-    const isOpenPositionKey = (key: string): key is keyof typeof openPositions => key in openPositions;
+    const isOpenPositionKey = (key: string): key is keyof typeof openPositions => isDispatchKey(openPositions, key);
     const positionForKey = isOpenPositionKey(event.key) ? openPositions[event.key] : undefined;
     if (positionForKey === undefined) {
       if (event.key === "Enter" || event.key === " ") {
