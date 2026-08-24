@@ -271,52 +271,36 @@ function mutationIsReconciled(
   if (launchMutation(mutation.operation)) {
     return generationAdvanced;
   }
-  switch (mutation.operation) {
-    case SESSION_REALTIME_OPERATIONS.followUp:
-    case SESSION_REALTIME_OPERATIONS.steer:
-      return detail.pendingInputs.some(
-        ({ clientRequestId }) =>
-          clientRequestId === mutation.payload["clientRequestId"],
-      );
-    case SESSION_REALTIME_OPERATIONS.reassign:
-      return (
-        generationAdvanced &&
-        detail.runnerId === mutation.payload["runnerId"] &&
-        detail.workingDirectory === mutation.payload["workingDirectory"] &&
-        !detail.runnerRequired
-      );
-    case SESSION_REALTIME_OPERATIONS.send: {
+  const handlers: Record<SessionMutationOperation, () => boolean> = {
+    [SESSION_REALTIME_OPERATIONS.compact]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.continue]: () => generationAdvanced,
+    [SESSION_REALTIME_OPERATIONS.followUp]: () => detail.pendingInputs.some(
+      ({ clientRequestId }) => clientRequestId === mutation.payload["clientRequestId"]),
+    [SESSION_REALTIME_OPERATIONS.reassign]: () => generationAdvanced &&
+      detail.runnerId === mutation.payload["runnerId"] &&
+      detail.workingDirectory === mutation.payload["workingDirectory"] && !detail.runnerRequired,
+    [SESSION_REALTIME_OPERATIONS.send]: () => {
       const prompt = mutation.payload["prompt"];
       const images = mutation.payload["images"] ?? [];
       const previousMessageIds = new Set(baseline.messages.map(({ id }) => id));
-      return (
-        generationAdvanced &&
-        typeof prompt === "string" &&
-        Array.isArray(images) &&
-        detail.messages.some(
-          (message) =>
-            !previousMessageIds.has(message.id) &&
-            message.role === "user" &&
-            message.content === prompt &&
-            serializedValuesMatch(message.images, images),
-        )
-      );
-    }
-    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
-      return (
-        detail.userContextTokenCap === mutation.payload["userContextTokenCap"]
-      );
-    case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
-      return detail.autoCompact === mutation.payload["autoCompact"];
-    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
-      return detail.idleCompact === mutation.payload["idleCompact"];
-    case SESSION_REALTIME_OPERATIONS.stop:
-      return detail.status === "stopped";
-    case SESSION_REALTIME_OPERATIONS.updateProvider:
-      return false;
-    default:
-      return false;
-  }
+      return generationAdvanced && typeof prompt === "string" && Array.isArray(images) &&
+        detail.messages.some((message) => !previousMessageIds.has(message.id) &&
+          message.role === "user" && message.content === prompt &&
+          serializedValuesMatch(message.images, images));
+    },
+    [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
+      detail.autoCompact === mutation.payload["autoCompact"],
+    [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: () =>
+      detail.userContextTokenCap === mutation.payload["userContextTokenCap"],
+    [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
+      detail.idleCompact === mutation.payload["idleCompact"],
+    [SESSION_REALTIME_OPERATIONS.steer]: () => detail.pendingInputs.some(
+      ({ clientRequestId }) => clientRequestId === mutation.payload["clientRequestId"]),
+    [SESSION_REALTIME_OPERATIONS.stop]: () => detail.status === "stopped",
+    [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
+  };
+  return handlers[mutation.operation]();
 }
 
 export function acknowledgeSessionMutation(
