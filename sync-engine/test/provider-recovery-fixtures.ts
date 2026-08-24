@@ -1,6 +1,9 @@
 import { expect, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
-import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+import {
+  closeEventWithCode,
+  RecordingTestSocket,
+} from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
@@ -52,7 +55,7 @@ export function createFakeProviderSocket(
   headers: Readonly<Record<string, string>> = {},
 ): FakeProviderSocket {
   const socket = new RecordingTestSocket({
-    closeEvent: () => new CloseEvent("close", { code: 1000 }),
+    closeEvent: closeEventWithCode(1000),
     readyState: WebSocket.CONNECTING,
   });
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();

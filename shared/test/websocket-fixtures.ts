@@ -3,6 +3,19 @@ export interface RecordingTestSocketOptions {
   readonly readyState?: number;
 }
 
+export function closeEventWithCode(code: number): () => CloseEvent {
+  return () => new CloseEvent("close", { code });
+}
+
+export function recordingSleep(
+  delays: number[],
+): (milliseconds: number) => Promise<void> {
+  return (milliseconds) => {
+    delays.push(milliseconds);
+    return Promise.resolve();
+  };
+}
+
 export class RecordingTestSocket extends EventTarget {
   readonly #closeEvent: () => Event;
   readyState: number;

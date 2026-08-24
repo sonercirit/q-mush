@@ -4,6 +4,7 @@ import {
   type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
+import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
@@ -107,10 +108,7 @@ function createProviderResponses(
       }
       return response;
     },
-    sleep: (milliseconds) => {
-      delays.push(milliseconds);
-      return Promise.resolve();
-    },
+    sleep: recordingSleep(delays),
   };
 }
 

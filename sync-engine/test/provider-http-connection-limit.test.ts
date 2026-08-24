@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
@@ -42,10 +43,7 @@ describe("provider HTTP connection-limit classification", () => {
       model: "openai/gpt-4.1-mini",
       provider: "openrouter",
       toolSettings: DEFAULT_TOOL_SETTINGS,
-      sleep: (milliseconds) => {
-        delays.push(milliseconds);
-        return Promise.resolve();
-      },
+      sleep: recordingSleep(delays),
     };
     const model = new ChatCompletionsAgentModel(modelOptions);
     const failure = await captureRejection(model.complete(USER_MESSAGE));

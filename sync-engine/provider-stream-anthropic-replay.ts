@@ -154,8 +154,14 @@ function initialServerToolBlock(
   };
 }
 
+type ReplayRecord = Readonly<Record<string, unknown>>;
+type IndexedReplayBlock = readonly [
+  index: number | undefined,
+  block: ReplayRecord,
+];
+
 function initialReplayBlock(
-  block: Readonly<Record<string, unknown>>,
+  block: ReplayRecord,
 ): MutableReplayBlock | undefined {
   const type = readAnthropicReplayBlockType(block["type"]);
   if (type === undefined) return undefined;
@@ -282,10 +288,7 @@ function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
 }
 
 export interface AnthropicReplayCapture {
-  readonly complete: (
-    index: number,
-    block: Readonly<Record<string, unknown>>,
-  ) => void;
+  readonly complete: (...[index, block]: IndexedReplayBlock) => void;
   readonly delta: (
     index: number | undefined,
     delta: Readonly<Record<string, unknown>>,
@@ -294,10 +297,7 @@ export interface AnthropicReplayCapture {
   readonly invalidate: () => void;
   readonly readContainer: (value: unknown) => void;
   readonly readModel: (value: unknown) => void;
-  readonly start: (
-    index: number | undefined,
-    block: Readonly<Record<string, unknown>>,
-  ) => void;
+  readonly start: (...[index, block]: IndexedReplayBlock) => void;
   readonly stop: (index: number | undefined) => void;
 }
 
@@ -354,10 +354,7 @@ export function createAnthropicReplayCapture(
     const entry = index === undefined ? undefined : entries.get(index);
     store(index, entry === undefined ? undefined : mutation(entry));
   };
-  const start = (
-    index: number | undefined,
-    block: Readonly<Record<string, unknown>>,
-  ): void => {
+  const start = (...[index, block]: IndexedReplayBlock): void => {
     const replayBlock = initialReplayBlock(block);
     const duplicate = index !== undefined && entries.has(index);
     store(
@@ -381,10 +378,7 @@ export function createAnthropicReplayCapture(
       entry.stopped ? undefined : { ...entry, stopped: true },
     );
   };
-  const complete = (
-    index: number,
-    block: Readonly<Record<string, unknown>>,
-  ): void => {
+  const complete = (...[index, block]: IndexedReplayBlock): void => {
     start(index, block);
     stop(index);
   };
@@ -496,7 +490,7 @@ function isReplayDeltaType(value: unknown): value is ReplayDeltaType {
 
 function updatedReplayBlock(
   block: MutableReplayBlock,
-  delta: Readonly<Record<string, unknown>>,
+  delta: ReplayRecord,
 ): MutableReplayBlock | undefined {
   const type = delta["type"];
   return isReplayDeltaType(type)
