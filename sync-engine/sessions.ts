@@ -31,7 +31,6 @@ import {
   SessionIntegrationApi,
   type SessionIntegrationApiResources,
 } from "./session-integration-api.ts";
-import type { SessionIntegrationFactory } from "./session-integration-factory.ts";
 import type { SessionIntegration } from "./session-integration.ts";
 import {
   recoverInterruptedSessions,
@@ -480,9 +479,16 @@ function createDrizzleSessionIntegration(
   });
 }
 
-export const createSessionIntegration: SessionIntegrationFactory = (
-  auth,
-  runners,
-  providers,
-  dependencies,
-) => createDrizzleSessionIntegration(auth, runners, providers, dependencies);
+export function createSessionIntegration(
+  auth: GoogleAuth,
+  runners: RunnerIntegration,
+  providers: SessionCredentialReaders,
+  dependencies: SessionDependencies,
+): DrizzleSessionIntegration {
+  return createDrizzleSessionIntegration(
+    auth,
+    runners,
+    providers,
+    dependencies,
+  );
+}
