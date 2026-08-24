@@ -15,8 +15,9 @@ import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 import {
+  createFakeProviderSockets,
   failWebSocketAttempts,
-  FakeProviderSockets,
+  type FakeProviderSockets,
   recordDelay,
 } from "./provider-recovery-fixtures.ts";
 
@@ -163,7 +164,7 @@ function resetDeltas(
 
 describe("provider HTTP step recovery", () => {
   test("transfers stalled-admission ownership to a healthy HTTP fallback", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const states: ("active" | "admission")[] = [];
     const controller = new AbortController();
     let releaseHeaders: (() => void) | undefined;
@@ -348,7 +349,7 @@ describe("provider HTTP step recovery", () => {
   } {
     const provider = createProviderResponses([...responses]);
     const refreshes: string[] = [];
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const model = oauthHttpRecoveryModel(provider, refreshes);
     const pending = model.complete(USER_MESSAGE);
     return { pending, provider, refreshes, sockets };

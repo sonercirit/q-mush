@@ -2,11 +2,11 @@ import { expect } from "vitest";
 import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
+  createFakeProviderSockets,
   apiKeyModel,
   complete,
   COMPLETED_EVENT,
   completeProviderSocket,
-  FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 
@@ -47,7 +47,7 @@ export function completeWithSignal(
 }
 export function instrumentedProviderRequest() {
   const controller = createInstrumentedAbortController();
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const model = apiKeyModel({ webSocket: sockets.create });
   const pending = completeWithSignal(model, controller.signal);
   const socket = requireProviderSocket(sockets, 0);
@@ -55,7 +55,7 @@ export function instrumentedProviderRequest() {
   return { controller, pending, socket };
 }
 export function lifecycleModel(states: ("active" | "admission")[]) {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   return {
     model: apiKeyModel({
       onRequestState: (state) => states.push(state),

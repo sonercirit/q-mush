@@ -1,10 +1,11 @@
 import { expect, test } from "vitest";
 import {
+  createFakeProviderSockets,
   acknowledgeProviderSocket,
   apiKeyModel,
   complete,
   completeProviderSocket,
-  FakeProviderSockets,
+  type FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
@@ -12,7 +13,7 @@ import { expectDoneStep } from "./provider-step-fixtures.ts";
 async function reusedModel(
   onDelta?: Parameters<typeof apiKeyModel>[0]["onDelta"],
 ) {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const model = apiKeyModel({
     ...(onDelta === undefined ? {} : { onDelta }),
     webSocket: sockets.create,
