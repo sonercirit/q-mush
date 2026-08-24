@@ -3,7 +3,8 @@ import type { ToolSettings } from "../../shared/tool-limits.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { ToolSettingsPanel } from "../tool-settings-client.tsx";
 import {
-  ToolSettingsController,
+  createToolSettingsController,
+  type ToolSettingsController,
   type ToolSettingsViewState,
 } from "../tool-settings-controller.ts";
 import {
@@ -25,7 +26,7 @@ function loadedState(settings: ToolSettings): ToolSettingsViewState {
 }
 
 function settingsController(settings: ToolSettings): ToolSettingsController {
-  return new ToolSettingsController(createReactiveState(loadedState(settings)));
+  return createToolSettingsController(createReactiveState(loadedState(settings)));
 }
 
 function testSettings(
@@ -36,7 +37,7 @@ function testSettings(
 }
 
 async function loadedController(): Promise<ToolSettingsController> {
-  const controller = new ToolSettingsController();
+  const controller = createToolSettingsController();
   await controller.load();
   return controller;
 }
@@ -77,7 +78,7 @@ test("realtime invalidates pending load and save responses", async () => {
   installFetch((_input, init = {}) =>
     init.method === "PUT" ? save.promise : load.promise,
   );
-  const controller = new ToolSettingsController();
+  const controller = createToolSettingsController();
   const loading = controller.load();
   const realtimeAfterLoad = testSettings(6, 6_000);
   controller.apply(realtimeAfterLoad);

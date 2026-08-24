@@ -29,37 +29,37 @@ function parseSettings(value: unknown): ToolSettings {
   return settings;
 }
 
-export class ToolSettingsController {
-  readonly #state: ControllerState<ToolSettingsViewState>;
+export interface ToolSettingsController {
+  readonly settings: ToolSettings | undefined;
+  readonly view: Accessor<ToolSettingsViewState>;
+  apply(settings: ToolSettings): void;
+  load(): Promise<void>;
+  reset(): void;
+  save(settings: ToolSettings): Promise<void>;
+}
 
-  constructor(
-    view: ReactiveState<ToolSettingsViewState> = createReactiveState(
-      initialState(),
-    ),
-  ) {
-    this.#state = new ControllerState(view);
-  }
-
-  get settings(): ToolSettings | undefined {
-    return this.#state.value.settings;
-  }
-
-  get view(): Accessor<ToolSettingsViewState> {
-    return this.#state.accessor;
-  }
-
-  apply(settings: ToolSettings): void {
-    this.#state.reset({
-      ...this.#state.value,
+export function createToolSettingsController(
+  view: ReactiveState<ToolSettingsViewState> = createReactiveState(initialState()),
+): ToolSettingsController {
+  const state = new ControllerState(view);
+  return {
+    get settings() {
+      return state.value.settings;
+    },
+    get view() {
+      return state.accessor;
+    },
+    apply(settings) {
+      state.reset({
+      ...state.value,
       error: undefined,
       loading: false,
       settings,
-    });
-  }
-
-  load(): Promise<void> {
-    return this.#state
-      .load({
+      });
+    },
+    load() {
+      return state
+        .load({
         failure: () => ({
           error: "We could not load your tool limits.",
           loading: false,
@@ -72,17 +72,15 @@ export class ToolSettingsController {
           loading: false,
           settings: parseSettings(value),
         }),
-      })
-      .then(() => undefined);
-  }
-
-  reset(): void {
-    this.#state.reset(initialState());
-  }
-
-  save(settings: ToolSettings): Promise<void> {
-    return this.#state.mutate(
-      {
+        })
+        .then(() => undefined);
+    },
+    reset() {
+      state.reset(initialState());
+    },
+    save(settings) {
+      return state.mutate(
+        {
         failure: () => ({
           error: "We could not save your tool limits.",
           saving: false,
@@ -91,8 +89,9 @@ export class ToolSettingsController {
         input: TOOL_SETTINGS_PATH,
         request: requestJson,
         success: { error: undefined, saving: false, settings },
-      },
-      { error: undefined, saving: true },
-    );
-  }
+        },
+        { error: undefined, saving: true },
+      );
+    },
+  };
 }

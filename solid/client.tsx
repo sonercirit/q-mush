@@ -46,7 +46,7 @@ import { SessionController } from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
-import { ToolSettingsController } from "./tool-settings-controller.ts";
+import { createToolSettingsController } from "./tool-settings-controller.ts";
 import { createWorkspaceController } from "./workspace-controller.ts";
 import { Workspace } from "./workspace-view.tsx";
 
@@ -303,7 +303,7 @@ function App(): JSX.Element {
   const openRouter = new ProviderController(OPENROUTER_PANEL);
   const prompts = new PromptController();
   const runners = new RunnerController();
-  const toolSettings = new ToolSettingsController();
+  const toolSettings = createToolSettingsController();
   const realtime: RealtimeConnection = new RealtimeConnection(
     (event) => {
       const handlers: {
