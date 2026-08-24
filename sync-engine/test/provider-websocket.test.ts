@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
-import { ProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
+import { createProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
   acknowledgeProviderSocket,
@@ -225,7 +225,7 @@ test.each([
 
 test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
   const sockets = new FakeProviderSockets();
-  const session = new ProviderWebSocketSession();
+  const session = createProviderWebSocketSession();
   const completeSession = () =>
     session.complete({
       body: {},

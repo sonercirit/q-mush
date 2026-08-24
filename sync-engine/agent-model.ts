@@ -57,8 +57,8 @@ import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
-  ProviderWebSocketError,
-  ProviderWebSocketSession,
+  createProviderWebSocketSession,
+  isProviderWebSocketError,
   type ProviderWebSocketFactory,
 } from "./provider-websocket.ts";
 
@@ -242,7 +242,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
   readonly #selectedTools: readonly AgentSessionToolName[];
   readonly #tools: readonly AgentToolDefinition[];
   readonly #webSocket: ProviderWebSocketFactory;
-  readonly #webSocketSession = new ProviderWebSocketSession();
+  readonly #webSocketSession = createProviderWebSocketSession();
 
   constructor(options: ChatCompletionsAgentModelOptions) {
     this.#adaptiveThinking = options.adaptiveThinking ?? null;
@@ -335,10 +335,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
     error: unknown,
     signal: AbortSignal | undefined,
   ): void {
-    if (
-      signal?.aborted === true ||
-      !(error instanceof ProviderWebSocketError)
-    ) {
+    if (signal?.aborted === true || !isProviderWebSocketError(error)) {
       throw error;
     }
     if (error.started) {
@@ -359,7 +356,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
       } catch (error) {
         this.#acceptWebSocketInterruption(error, signal);
         const immediate =
-          error instanceof ProviderWebSocketError && error.reconnectImmediately;
+          isProviderWebSocketError(error) && error.reconnectImmediately;
         if (immediate && reconnectImmediately) {
           // The documented expiry requires a fresh socket. Grant one immediate
           // replacement per model step, independent of ordinary retry capacity;
@@ -374,7 +371,7 @@ export class ChatCompletionsAgentModel implements AgentModel {
         }
         transientAttempt += 1;
         await this.#waitForRetry(
-          error instanceof ProviderWebSocketError &&
+          isProviderWebSocketError(error) &&
             error.retryAfterMilliseconds !== undefined
             ? error.retryAfterMilliseconds
             : delay,
