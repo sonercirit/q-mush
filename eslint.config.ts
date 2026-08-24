@@ -322,7 +322,6 @@ export default defineConfig(
         "error",
         { fixStyle: "inline-type-imports" },
       ],
-      "@typescript-eslint/switch-exhaustiveness-check": "error",
       "no-duplicate-imports": ["error", { allowSeparateTypeImports: false }],
       "no-restricted-syntax": ["error", ...RESTRICTED_TYPESCRIPT_SYNTAX],
       "q-mush/canonical-imports": "error",

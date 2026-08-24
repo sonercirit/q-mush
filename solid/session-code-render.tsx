@@ -1,3 +1,4 @@
+import { isDispatchKey } from "../shared/dispatch.ts";
 import { type JSX } from "solid-js";
 import {
   findJsonTextSegment,
@@ -172,7 +173,7 @@ const JSON_PRIMITIVE_KINDS: Readonly<
 };
 
 function isJsonPrimitiveType(value: string): value is JsonPrimitiveType {
-  return value in JSON_PRIMITIVE_KINDS;
+  return isDispatchKey(JSON_PRIMITIVE_KINDS, value);
 }
 
 function jsonPrimitiveKind(value: JsonPrimitive): SyntaxTokenKind {
