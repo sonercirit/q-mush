@@ -1,4 +1,4 @@
-export type RunnerProcessCommit = () => void;
+type RunnerProcessCommit = () => void;
 
 export interface RunnerCommandSurvivalOptions {
   readonly log?: (message: string) => void;
