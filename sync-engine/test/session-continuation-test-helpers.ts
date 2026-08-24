@@ -1,7 +1,10 @@
 import { expect } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedStep,
+} from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {
   hasSessionStatus,
@@ -61,7 +64,7 @@ export function compactionStep(
 }
 
 export function continuationSetup(
-  steps: ConstructorParameters<typeof ScriptedAgentModel>[0],
+  steps: ScriptedStep[],
   options: {
     readonly blockRequest?: number;
     readonly label: string;
@@ -71,7 +74,7 @@ export function continuationSetup(
   const blocked = Promise.withResolvers<undefined>();
   const entered = Promise.withResolvers<undefined>();
   const notified = Promise.withResolvers<undefined>();
-  const model = new ScriptedAgentModel(steps, {
+  const model = createScriptedAgentModel(steps, {
     onComplete: async (requestCount) => {
       if (requestCount === options.notifyRequest) {
         notified.resolve(undefined);

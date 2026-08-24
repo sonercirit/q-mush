@@ -18,7 +18,7 @@ import {
 import { TEST_COMPACTION_REQUEST_MESSAGE } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { promiseGate } from "./session-race-test-helpers.ts";
 
 const CREDENTIAL: ProviderCredentialAccess = {
@@ -49,7 +49,7 @@ function recordingFactory(
 ): AgentModelFactory {
   return (options) => {
     selections.push(options);
-    return new ScriptedAgentModel([]);
+    return createScriptedAgentModel([]);
   };
 }
 
@@ -278,7 +278,7 @@ describe("session agent models", () => {
     let onDelta: ((delta: ProviderTextDelta) => void) | undefined;
     const factory: AgentModelFactory = (options) => {
       onDelta = options.onDelta;
-      return new ScriptedAgentModel([]);
+      return createScriptedAgentModel([]);
     };
     createSessionAgentModels(
       sessionModelOptions(factory, {

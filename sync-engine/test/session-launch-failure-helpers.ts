@@ -6,7 +6,10 @@ import {
   type DatabaseWriteResilience,
 } from "../../sync-engine/database-write-resilience.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
-import { SessionFinisher } from "../../sync-engine/session-finisher.ts";
+import {
+  createSessionFinisher,
+  type SessionFinisher,
+} from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
@@ -47,7 +50,7 @@ export function launchFailureSetup(
     commandId: () => "recovered-launch-agent-file",
   });
   const pending = new Map<string, Parameters<SessionFinisher["finish"]>>();
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify,
     now: () => now + 2,

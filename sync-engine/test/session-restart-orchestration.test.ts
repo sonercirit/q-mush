@@ -12,7 +12,10 @@ import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
-import { SessionFinisher } from "../../sync-engine/session-finisher.ts";
+import {
+  createSessionFinisher,
+  type SessionFinisher,
+} from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
 import { recoverSessionRestartHandoffs } from "../../sync-engine/session-restart-recovery.ts";
 import type {
@@ -95,7 +98,7 @@ function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const actionsFinished = vi.spyOn(actions, "finished");
   const store = storeSetup.store;
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify,
     now: () => TEST_NOW + 5,
@@ -178,7 +181,7 @@ function manualCompactionSetup(
       return Promise.resolve(modelTurn("Durable manual restart summary."));
     },
   }));
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify: () => undefined,
     now: () => TEST_NOW + 5,

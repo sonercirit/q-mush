@@ -47,7 +47,10 @@ import {
   createSessionFailureReconciler,
   type SessionFailureReconciler,
 } from "./session-failure-reconciler.ts";
-import { SessionFinisher } from "./session-finisher.ts";
+import {
+  createSessionFinisher,
+  type SessionFinisher,
+} from "./session-finisher.ts";
 import { compactIdleSessions } from "./session-idle-compaction.ts";
 import {
   SessionIntegrationApi,
@@ -255,7 +258,7 @@ class DrizzleSessionIntegration
       ...this.#context(),
       ...this.#credentialRuntime(),
     });
-    this.#finisher = new SessionFinisher({
+    this.#finisher = createSessionFinisher({
       actions: this.#actions,
       cleanup: (detail) => {
         void this.#cleanup.cleanup(detail);

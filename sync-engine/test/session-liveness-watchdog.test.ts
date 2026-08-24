@@ -13,7 +13,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { DeferredAgentModel } from "./deferred-agent-model.ts";
+import { createDeferredAgentModel } from "./deferred-agent-model.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import { toolCall } from "./session-agent-tool-setup.ts";
 import {
@@ -273,7 +273,7 @@ test("stops the default global scan interval", () => {
 test("stops an injected scan interval once across repeated shutdowns", async () => {
   const cleared: unknown[] = [];
   const setup = connectedSessionSetup(
-    new DeferredAgentModel(),
+    createDeferredAgentModel(),
     "api_key",
     undefined,
     {
@@ -487,7 +487,7 @@ test("a watchdog-failed child reports failure to its parent exactly once", () =>
   closeSetup(setup);
 });
 async function deferredLivenessSession() {
-  const model = new DeferredAgentModel();
+  const model = createDeferredAgentModel();
   return { model, ...(await createUnsafeLivenessSession(model)) };
 }
 test("compacts an opted-in idle session after a liveness scan", async () => {

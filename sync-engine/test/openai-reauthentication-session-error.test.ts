@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "vitest";
 import { ProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
-import { SessionFinisher } from "../session-finisher.ts";
+import { createSessionFinisher } from "../session-finisher.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { closeTrackedDatabases } from "./database-test-helpers.ts";
 import {
@@ -19,7 +19,7 @@ describe("OpenAI re-login session failure", () => {
     const setup = createStore();
     databases.push(setup.database);
     const detail = createTestSession(setup.store);
-    const finisher = new SessionFinisher({
+    const finisher = createSessionFinisher({
       actions: { finished: () => undefined, stopChildren: () => undefined },
       notify: () => undefined,
       now: () => 1_700_000_000_000,

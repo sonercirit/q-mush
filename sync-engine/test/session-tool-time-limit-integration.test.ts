@@ -8,13 +8,13 @@ import {
 import { createActiveSessionTools } from "../active-session-tools.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
-import { SessionFinisher } from "../session-finisher.ts";
+import { createSessionFinisher } from "../session-finisher.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completedRunToolOutputs,
   completingTestBroker,
@@ -143,7 +143,7 @@ function persistedDeadlineRun(
     now: () => TEST_NOW + 4,
     store: setup.store,
   };
-  const finisher = new SessionFinisher(finisherOptions);
+  const finisher = createSessionFinisher(finisherOptions);
   return runPersistedSession({
     controller,
     credential: runtimeTestCredential(
@@ -179,7 +179,7 @@ function persistedDeadlineRun(
           >[0],
         ) => {
           factorySelections.push(options);
-          return Object.assign(new ScriptedAgentModel([]), {});
+          return Object.assign(createScriptedAgentModel([]), {});
         },
         notify: () => undefined,
         realtime: undefined,
@@ -275,7 +275,7 @@ describe("global tool time limit integration", () => {
         id: "hung-call",
         name: "read",
       };
-      const model = new ScriptedAgentModel([
+      const model = createScriptedAgentModel([
         { content: "Read the file.", toolCalls: [hungReadCall] },
         { content: "Finished after the timeout.", toolCalls: [] },
       ]);
@@ -358,7 +358,7 @@ describe("global tool time limit integration", () => {
     withLimitSetup(async (setup) => {
       const { detail } = setup;
       const factorySelections: unknown[] = [];
-      const model = new ScriptedAgentModel([
+      const model = createScriptedAgentModel([
         {
           content: "Explain the attachment.",
           toolCalls: [

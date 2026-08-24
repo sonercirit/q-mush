@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   compacted,
   recordingCompactor,
@@ -80,7 +80,7 @@ describe("truncated answer compaction", () => {
           compacted("The answer was partial and must be continued."),
         ),
         maxContextTokens,
-        model: new ScriptedAgentModel([
+        model: createScriptedAgentModel([
           {
             content: TRUNCATED_ANSWER,
             contextTokens,
@@ -113,7 +113,7 @@ describe("truncated answer compaction", () => {
     await runTestLoop({
       createCompactor: compactor,
       maxContextTokens: null,
-      model: new ScriptedAgentModel([
+      model: createScriptedAgentModel([
         {
           content: "A partial tool step.",
           toolCalls: [TOOL_CALL],

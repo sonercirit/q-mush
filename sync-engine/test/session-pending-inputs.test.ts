@@ -8,7 +8,7 @@ import {
   type UserRealtimeCommand,
 } from "../../shared/user-realtime-protocol.ts";
 import { RealtimeCommandLedger } from "../realtime-command-ledger.ts";
-import { SessionFinisher } from "../session-finisher.ts";
+import { createSessionFinisher } from "../session-finisher.ts";
 import {
   cancelPendingInput,
   enqueuePendingInput,
@@ -538,7 +538,7 @@ describe("durable pending session inputs", () => {
     enqueueInput(setup, "post-runtime-follow-up", "Run after settlement");
     const runtimes = new SessionRuntimes();
     const launchStates: boolean[] = [];
-    const finisher = new SessionFinisher({
+    const finisher = createSessionFinisher({
       actions: { finished: vi.fn(), stopChildren: vi.fn() },
       launchQueued: () => {
         launchStates.push(runtimes.active(setup.detail.id));

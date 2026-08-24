@@ -2,7 +2,7 @@ import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { RUNNERS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   REPLACEMENT_RUNNER_ID,
@@ -53,7 +53,7 @@ function addReplacementRunner(
 
 function completingSessionSetup() {
   return connectedSessionSetup(
-    new ScriptedAgentModel([
+    createScriptedAgentModel([
       { content: "Initial work complete.", toolCalls: [] },
     ]),
   );
@@ -149,7 +149,7 @@ describe("runner reassignment", () => {
   });
 
   test("cancels active runner work and fences late results on removal", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Running a command.",
         toolCalls: [
