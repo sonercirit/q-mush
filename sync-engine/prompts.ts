@@ -10,7 +10,6 @@ import {
 } from "../shared/prompt-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { createAuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
-import type { CollectionItemIntegration } from "./collection-item-integration.ts";
 import {
   createApiError,
   createJsonResponse,
@@ -26,7 +25,10 @@ interface PromptDependencies {
   readonly randomId?: IdGenerator;
 }
 
-export interface PromptIntegration extends CollectionItemIntegration {}
+export interface PromptIntegration {
+  collection(request: Request): Promise<Response> | Response;
+  item(request: Request, id: string): Promise<Response> | Response;
+}
 
 const PROMPT_REQUEST_MAXIMUM_BYTES =
   PROMPT_BODY_MAXIMUM_BYTES + PROMPT_NAME_MAXIMUM_LENGTH * 6 + 1_024;

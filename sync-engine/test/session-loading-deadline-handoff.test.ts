@@ -53,11 +53,9 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
           {
             actions: orchestrationActions(setup.database, setup.store),
             activeTools: createActiveSessionTools(),
-            braveSearch: new (class {
-              execute(): Promise<string> {
-                return Promise.resolve("unused loading search result");
-              }
-            })(),
+            braveSearch: {
+              execute: () => Promise.resolve("unused loading search result"),
+            },
             broker,
             modelFactory: () => {
               throw new Error("unreached model factory");
