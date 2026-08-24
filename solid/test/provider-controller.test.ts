@@ -40,15 +40,14 @@ function recordedProvider(
 } {
   const requests: RecordedRequests = [];
   installRecordedFetch(requests, (init) => {
-    switch (init?.method) {
-      case "POST":
-        return Response.json(credential, { status: 201 });
-      case "PUT":
-        return new Response(null, { status: 204 });
-      case undefined:
-      default:
-        return Response.json({ credentials: [] });
-    }
+    const responses = {
+      POST: (): Response => Response.json(credential, { status: 201 }),
+      PUT: (): Response => new Response(null, { status: 204 }),
+    } satisfies Record<string, () => Response>;
+    const method = init?.method;
+    if (method === "POST") return responses.POST();
+    if (method === "PUT") return responses.PUT();
+    return Response.json({ credentials: [] });
   });
   return { controller: new ProviderController(configuration), requests };
 }

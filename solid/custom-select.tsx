@@ -285,23 +285,27 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
       choose(option.value);
     }
   };
+  const navigationHandlers = {
+    ArrowDown: (): void => {
+      moveActive(1);
+    },
+    ArrowUp: (): void => {
+      moveActive(-1);
+    },
+    End: (): void => {
+      setActiveIndex(filteredOptions().length - 1);
+    },
+    Home: (): void => {
+      setActiveIndex(0);
+    },
+  } satisfies Record<string, () => void>;
+  const isNavigationKey = (
+    key: string,
+  ): key is keyof typeof navigationHandlers => key in navigationHandlers;
   const handleNavigationKey = (event: KeyboardEvent): boolean => {
-    switch (event.key) {
-      case "ArrowDown":
-        moveActive(1);
-        return true;
-      case "ArrowUp":
-        moveActive(-1);
-        return true;
-      case "End":
-        setActiveIndex(filteredOptions().length - 1);
-        return true;
-      case "Home":
-        setActiveIndex(0);
-        return true;
-      default:
-        return false;
-    }
+    if (!isNavigationKey(event.key)) return false;
+    navigationHandlers[event.key]();
+    return true;
   };
   const preventHandledNavigation = (event: KeyboardEvent): boolean => {
     const handled = handleNavigationKey(event);
@@ -319,59 +323,64 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
     if (preventHandledNavigation(event)) {
       return;
     }
-    switch (event.key) {
-      case "Enter":
-      case " ":
+    const keyHandlers = {
+      " ": (): void => {
         event.preventDefault();
         chooseActive();
-        break;
-      case "Escape":
+      },
+      Enter: (): void => {
+        event.preventDefault();
+        chooseActive();
+      },
+      Escape: (): void => {
         handleEscape(event);
-        break;
-      default:
-        if (
-          searchable() &&
-          event.key.length === 1 &&
-          !event.altKey &&
-          !event.ctrlKey &&
-          !event.metaKey
-        ) {
-          event.preventDefault();
-          updateSearch(`${query()}${event.key}`);
-          focusSoon(searchInput);
-        }
+      },
+    } satisfies Record<string, () => void>;
+    const isListAction = (key: string): key is keyof typeof keyHandlers =>
+      key in keyHandlers;
+    const handler = isListAction(event.key)
+      ? keyHandlers[event.key]
+      : undefined;
+    if (handler !== undefined) {
+      handler();
+      return;
+    }
+    if (
+      searchable() &&
+      event.key.length === 1 &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
+      event.preventDefault();
+      updateSearch(`${query()}${event.key}`);
+      focusSoon(searchInput);
     }
   };
   const handleTriggerKey = (event: KeyboardEvent): void => {
-    let position: InitialOption | undefined;
-    switch (event.key) {
-      case "ArrowDown":
-        position = "selected";
-        break;
-      case "ArrowUp":
-        position = props.selectedValue.length === 0 ? "last" : "selected";
-        break;
-      case "End":
-        position = "last";
-        break;
-      case "Home":
-        position = "first";
-        break;
-      case "Enter":
-      case " ":
-        if (event.detail === 0) {
-          toggleFromTrigger(event);
-        }
-        return;
-      case "Escape":
-        if (props.open) {
-          event.preventDefault();
-          props.onToggle();
-        }
-        return;
-      default:
-        return;
+    const openPositions = {
+      ArrowDown: (): InitialOption => "selected",
+      ArrowUp: (): InitialOption =>
+        props.selectedValue.length === 0 ? "last" : "selected",
+      End: (): InitialOption => "last",
+      Home: (): InitialOption => "first",
+    } satisfies Record<string, () => InitialOption>;
+    const isOpenPositionKey = (
+      key: string,
+    ): key is keyof typeof openPositions => key in openPositions;
+    const positionForKey = isOpenPositionKey(event.key)
+      ? openPositions[event.key]
+      : undefined;
+    if (positionForKey === undefined) {
+      if (event.key === "Enter" || event.key === " ") {
+        if (event.detail === 0) toggleFromTrigger(event);
+      } else if (event.key === "Escape" && props.open) {
+        event.preventDefault();
+        props.onToggle();
+      }
+      return;
     }
+    const position = positionForKey();
     event.preventDefault();
     if (props.open) {
       setActiveIndex(requestedIndex(position));

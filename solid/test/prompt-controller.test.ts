@@ -62,24 +62,29 @@ test("loads, creates, edits, deletes, and sends revisions", async () => {
     if (init.method === "PUT" || init.method === "DELETE") {
       revisions.push(new Headers(init.headers).get("if-match"));
     }
-    switch (init.method) {
-      case undefined:
-        return Promise.resolve(collection([TEST_PROMPT]));
-      case "POST":
-        return Promise.resolve(Response.json(SECOND, { status: 201 }));
-      case "PUT":
-        return Promise.resolve(
+    const responses = {
+      DELETE: (): Promise<Response> =>
+        Promise.resolve(new Response(null, { status: 204 })),
+      POST: (): Promise<Response> =>
+        Promise.resolve(Response.json(SECOND, { status: 201 })),
+      PUT: (): Promise<Response> =>
+        Promise.resolve(
           Response.json({
             ...TEST_PROMPT,
             body: "Updated body",
             revision: 2,
           }),
-        );
-      case "DELETE":
-        return Promise.resolve(new Response(null, { status: 204 }));
-      default:
-        return Promise.resolve(collection([TEST_PROMPT]));
-    }
+        ),
+    } satisfies Record<string, () => Promise<Response>>;
+    const method = init.method;
+    const isMutationMethod = (
+      value: string | undefined,
+    ): value is keyof typeof responses =>
+      value !== undefined && value in responses;
+    return (
+      (isMutationMethod(method) ? responses[method]() : undefined) ??
+      Promise.resolve(collection([TEST_PROMPT]))
+    );
   });
   const controller = await loadedController();
   controller.setCreateField("name", SECOND.name);
