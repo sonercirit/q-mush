@@ -125,6 +125,16 @@ function settingValues(
   };
 }
 
+export type ProviderQuotaResetCompleter = (
+  userId: string,
+  credentialId: string,
+  requestId: string,
+  result: ProviderQuotaResetOutcome,
+  now: number,
+  replayRequestId?: string,
+  leaseAcquiredAt?: number,
+) => void;
+
 export interface ProviderQuotaStore {
   readonly read: (userId: string, credentialId: string) => ProviderQuotaSetting;
   readonly setThreshold: (
@@ -139,15 +149,7 @@ export interface ProviderQuotaStore {
     requestId: string,
     now: number,
   ) => ResetReservation;
-  readonly completeReset: (
-    userId: string,
-    credentialId: string,
-    requestId: string,
-    result: ProviderQuotaResetOutcome,
-    now: number,
-    replayRequestId?: string,
-    leaseAcquiredAt?: number,
-  ) => void;
+  readonly completeReset: ProviderQuotaResetCompleter;
   readonly releaseReset: (
     userId: string,
     credentialId: string,
@@ -280,15 +282,15 @@ export function createProviderQuotaStore(
     }
   }
 
-  function completeReset(
-    userId: string,
-    credentialId: string,
-    requestId: string,
-    result: ProviderQuotaResetOutcome,
-    now: number,
+  const completeReset: ProviderQuotaResetCompleter = (
+    userId,
+    credentialId,
+    requestId,
+    result,
+    now,
     replayRequestId = requestId,
     leaseAcquiredAt = now,
-  ): void {
+  ) => {
     const timestamp = new Date(now);
     storeDatabase.transaction((transaction) => {
       const completed = mutateLeasedReceipt(
@@ -319,7 +321,7 @@ export function createProviderQuotaStore(
           .run();
       }
     });
-  }
+  };
 
   function releaseReset(
     userId: string,
