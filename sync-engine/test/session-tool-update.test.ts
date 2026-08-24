@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test, vi } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore } from "../session-store.ts";
 import {
   applySessionToolUpdate,
   isSessionToolUpdateError,
@@ -23,7 +23,7 @@ function setup() {
   const database = createAuthenticatedTestDatabase();
   addSessionTestRunner(database, "tool-update-machine", "runner-1");
   addTestProviderCredential(database, "credential-1");
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,
@@ -144,7 +144,7 @@ describe("session tool update", () => {
       ),
     ).rejects.toMatchObject({ code: "stale_generation" });
     expect(
-      new SessionStore(
+      createSessionStore(
         setupValue.database,
         undefined,
         () => DEFAULT_TOOL_SETTINGS,

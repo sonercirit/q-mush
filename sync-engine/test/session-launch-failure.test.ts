@@ -7,7 +7,7 @@ import {
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
 import { EngineHealth } from "../engine-health.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -44,7 +44,7 @@ function markerlessStartupSession(database: AppDatabase): void {
     "018bcfe5-6800-7000-8000-000000000065",
   ];
   let idIndex = 0;
-  const startupStore = new SessionStore(
+  const startupStore = createSessionStore(
     database,
     () => {
       const id = ids.at(idIndex);

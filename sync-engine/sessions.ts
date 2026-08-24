@@ -90,7 +90,7 @@ import {
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
-import { SessionStore } from "./session-store.ts";
+import { createSessionStore, type SessionStore } from "./session-store.ts";
 import {
   compactSessionForUser,
   createSessionForUser,
@@ -203,7 +203,7 @@ class DrizzleSessionIntegration
     };
     this.#toolSettings =
       dependencies.toolSettings ?? createToolSettingsStore(database);
-    this.#store = new SessionStore(
+    this.#store = createSessionStore(
       database,
       dependencies.randomId ?? createUuidV7,
       (userId) => this.#toolSettings.read(userId),

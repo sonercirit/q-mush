@@ -9,7 +9,7 @@ import {
   sessionModelRuntime,
   type SessionModelRuntimeResources,
 } from "../session-model-runtime.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore, type SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -68,7 +68,7 @@ function configuredStore(read: () => ToolSettings): SettingsStoreSetup {
   const setup = createStore();
   return {
     ...setup,
-    store: new SessionStore(
+    store: createSessionStore(
       setup.database,
       setup.generateId,
       read,

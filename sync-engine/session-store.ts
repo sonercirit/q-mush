@@ -35,7 +35,6 @@ import {
 } from "./session-lineage-repair.ts";
 import {
   createManualCompactionStore,
-  type ManualCompactionStore,
 } from "./session-manual-compaction-store.ts";
 import {
   cancelPendingInput,
@@ -93,14 +92,8 @@ import {
   type ReassignSessionResult,
 } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
-import {
-  createSessionStoreRestarts,
-  type SessionStoreRestarts,
-} from "./session-store-restarts.ts";
-import {
-  createSessionStoreRuntime,
-  type SessionStoreRuntime,
-} from "./session-store-runtime.ts";
+import { createSessionStoreRestarts } from "./session-store-restarts.ts";
+import { createSessionStoreRuntime } from "./session-store-runtime.ts";
 import {
   setSessionCompactionFlag,
   setSessionContextTokenCap,
@@ -123,91 +116,70 @@ import {
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
 import { activeSessionToolSettings } from "./session-turn-store.ts";
-export class SessionStore {
-  readonly #runtime: SessionStoreRuntime;
-  readonly #restarts: SessionStoreRestarts;
-  readonly #manualCompactions: ManualCompactionStore;
-  readonly #questions: AskQuestionsStore;
-  readonly #reportParent: SessionStoreWriteResources["reportParent"];
-  readonly #resources: readonly [AppDatabase, IdGenerator];
-  readonly #runtimes: Pick<SessionRuntimes, "pending">;
-  readonly #toolSettings: (userId: string) => ToolSettings;
-  constructor(
-    database: AppDatabase,
-    generateId: IdGenerator = createUuidV7,
-    toolSettings: (userId: string) => ToolSettings,
-    runtimes: Pick<SessionRuntimes, "pending">,
-    reportParent?: SessionStoreWriteResources["reportParent"],
-  ) {
-    this.#resources = [database, generateId];
-    this.#runtime = createSessionStoreRuntime(() => this.#writeResources());
-    this.#restarts = createSessionStoreRestarts({
-      appendUnknownToolResults: (transaction, sessionId, now) => {
-        this.appendUnknownRestartToolResults(transaction, sessionId, now);
-      },
-      database,
-      generateId,
-      read: (userId, sessionId) => this.get(userId, sessionId),
-    });
-    this.#reportParent = reportParent;
-    this.#toolSettings = toolSettings;
-    this.#manualCompactions = createManualCompactionStore(database, generateId);
-    this.#questions = createAskQuestionsStore({
-      generateId,
-      persistence: createAskQuestionsPersistence(database),
-      systemActorId: SYSTEM_ID,
-      toolSettings: (_userId, sessionId, executionGeneration) =>
-        activeSessionToolSettings(database, sessionId, executionGeneration),
-    });
-    this.#runtimes = runtimes;
-  }
-  repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult {
-    return repairSpawnedSessionLineage(this.#database, now);
-  }
-  recoverSpawnedSessionReservations(now: number): number {
-    return recoverSpawnedSessionReservations({
-      content: "Session failed: the server restarted during child preparation",
-      database: this.#database,
-      generateId: this.#resources[1],
-      now,
-    });
-  }
-  get #database(): AppDatabase {
-    return this.#resources[0];
-  }
-  #writeResources(workspaceId?: string) {
-    const database = this.#database;
-    const generateId = this.#resources[1];
+export function createSessionStore(
+  database: AppDatabase,
+  generateId: IdGenerator = createUuidV7,
+  readToolSettings: (userId: string) => ToolSettings,
+  runtimes: Pick<SessionRuntimes, "pending">,
+  reportParent?: SessionStoreWriteResources["reportParent"],
+) {
+  const writeResourcesInternal = (workspaceId?: string) => {
     const read = (userId: string, sessionId: string) =>
-      this.get(userId, sessionId, workspaceId);
+      store.get(userId, sessionId, workspaceId);
     return {
       database,
       generateId,
       read,
-      toolSettings: this.#toolSettings,
-      ...(this.#reportParent === undefined
-        ? {}
-        : { reportParent: this.#reportParent }),
+      toolSettings: readToolSettings,
+      ...(reportParent === undefined ? {} : { reportParent }),
     };
-  }
+  };
+  const runtime = createSessionStoreRuntime(writeResourcesInternal);
+  const restarts = createSessionStoreRestarts({
+    appendUnknownToolResults: (transaction, sessionId, now) => {
+      store.appendUnknownRestartToolResults(transaction, sessionId, now);
+    },
+    database,
+    generateId,
+    read: (userId, sessionId) => store.get(userId, sessionId),
+  });
+  const manualCompactions = createManualCompactionStore(database, generateId);
+  const questionsStore = createAskQuestionsStore({
+    generateId,
+    persistence: createAskQuestionsPersistence(database),
+    systemActorId: SYSTEM_ID,
+    toolSettings: (_userId, sessionId, executionGeneration) =>
+      activeSessionToolSettings(database, sessionId, executionGeneration),
+  });
+  const generateSessionId = (now: number) => generateId(now);
+  const spawnIdentity = (userId: string, sessionId: string, generation: number) => ({ generation, sessionId, userId });
+  const reservationOptions = (userId: string, sessionId: string, generation: number) => ({ database, identity: spawnIdentity(userId, sessionId, generation) });
+  const readPendingQuestions = (userId: string, sessionId: string) => questionsStore.pending(userId, sessionId);
+  const settingContext = () => ({ database, read: (userId: string, sessionId: string, workspaceId?: string) => store.get(userId, sessionId, workspaceId) });
+  const currentGeneration = (sessionId: string): number => {
+    const current = readStoredSessionGeneration({ condition: activeSessionCondition({ id: sessionId }), database });
+    if (current === undefined) throw new DOMException("The agent session was stopped", "AbortError");
+    return current;
+  };
+  const currentStore = (): CurrentSessionStore => createCurrentSessionStore(store, currentGeneration);
+  const store = {
+  repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult {
+    return repairSpawnedSessionLineage(database, now);
+  },
+  recoverSpawnedSessionReservations(now: number): number {
+    return recoverSpawnedSessionReservations({
+      content: "Session failed: the server restarted during child preparation",
+      database: database,
+      generateId: generateId,
+      now,
+    });
+  },
   writeResources(workspaceId?: string) {
-    return this.#writeResources(workspaceId);
-  }
-  #generateId(now: number): string {
-    return this.#resources[1](now);
-  }
+    return writeResourcesInternal(workspaceId);
+  },
   create(input: CreateAgentSession, now: number): CreateSessionResult {
-    return createStoredSession(this.#writeResources(), input, now);
-  }
-  #spawnIdentity(userId: string, sessionId: string, generation: number) {
-    return { generation, sessionId, userId };
-  }
-  #reservationOptions(userId: string, sessionId: string, generation: number) {
-    return {
-      database: this.#database,
-      identity: this.#spawnIdentity(userId, sessionId, generation),
-    };
-  }
+    return createStoredSession(writeResourcesInternal(), input, now);
+  },
   prepareSpawnedSession(
     identity: { readonly generation: number; readonly sessionId: string },
     userId: string,
@@ -215,19 +187,19 @@ export class SessionStore {
     metadata: SpawnedSessionMetadata,
     now: number,
   ) {
-    const reservation = this.#spawnIdentity(
+    const reservation = spawnIdentity(
       userId,
       identity.sessionId,
       identity.generation,
     );
     return prepareSpawnedSessionReservation({
       authority,
-      database: this.#database,
+      database: database,
       identity: reservation,
       metadata,
       now,
     });
-  }
+  },
   claimSpawnedSession(
     userId: string,
     identity: { readonly generation: number; readonly sessionId: string },
@@ -235,15 +207,15 @@ export class SessionStore {
   ): boolean {
     const options = {
       authority,
-      database: this.#database,
-      identity: this.#spawnIdentity(
+      database: database,
+      identity: spawnIdentity(
         userId,
         identity.sessionId,
         identity.generation,
       ),
     };
     return claimSpawnedSessionReservation(options);
-  }
+  },
   discardSpawnedSessionPreparation(
     userId: string,
     sessionId: string,
@@ -251,10 +223,10 @@ export class SessionStore {
     now: number,
   ): boolean {
     return discardSpawnedSessionReservation({
-      ...this.#reservationOptions(userId, sessionId, generation),
+      ...reservationOptions(userId, sessionId, generation),
       now,
     });
-  }
+  },
   failSpawnedSessionPreparation(
     userId: string,
     sessionId: string,
@@ -265,36 +237,33 @@ export class SessionStore {
     return failSpawnedSessionReservation({
       allowClaimed: true,
       content,
-      ...this.#reservationOptions(userId, sessionId, generation),
-      generateId: this.#resources[1],
+      ...reservationOptions(userId, sessionId, generation),
+      generateId: generateId,
       now,
     });
-  }
+  },
   fork(...parameters: SessionStoreForkParameters): SessionStoreForkResult {
     return forkStoredSessionFromSource(
-      this.#writeResources(parameters[3]),
+      writeResourcesInternal(parameters[3]),
       ...parameters,
     );
-  }
+  },
   questions(): AskQuestionsStore {
-    return this.#questions;
-  }
+    return questionsStore;
+  },
   toolSettings(sessionId: string, executionGeneration: number): ToolSettings {
     return activeSessionToolSettings(
-      this.#database,
+      database,
       sessionId,
       executionGeneration,
     );
-  }
-  #readPendingQuestions(userId: string, sessionId: string) {
-    return this.#questions.pending(userId, sessionId);
-  }
+  },
   pendingQuestions(
     userId: string,
     sessionId: string,
   ): PendingAskQuestions | null {
-    return this.#readPendingQuestions(userId, sessionId);
-  }
+    return readPendingQuestions(userId, sessionId);
+  },
   executionIsCurrent(
     userId: string,
     sessionId: string,
@@ -302,7 +271,7 @@ export class SessionStore {
     tool?: AgentSessionToolName,
   ): boolean {
     return sessionExecutionIsCurrent(
-      this.#database,
+      database,
       {
         generation,
         sessionId,
@@ -310,40 +279,40 @@ export class SessionStore {
       },
       userId,
     );
-  }
+  },
   get(
     userId: string,
     sessionId: string,
     workspaceId?: string,
   ): AgentSessionDetail | undefined {
     return readStoredSessionDetail(
-      this.#database,
-      this.#readPendingQuestions.bind(this),
+      database,
+      readPendingQuestions.bind(this),
       userId,
       sessionId,
       workspaceId,
-      this.#runtimes.pending.bind(this.#runtimes),
+      runtimes.pending.bind(runtimes),
     );
-  }
+  },
   list(userId: string, workspaceId?: string): readonly AgentSessionSummary[] {
     return listStoredSessions(
-      this.#database,
-      this.#readPendingQuestions.bind(this),
+      database,
+      readPendingQuestions.bind(this),
       userId,
       workspaceId,
-      this.#runtimes.pending.bind(this.#runtimes),
+      runtimes.pending.bind(runtimes),
     );
-  }
+  },
   history(
     userId: string,
     sessionId: string,
     cursor: string | null,
   ): SessionHistoryPage | undefined {
-    return readStoredSessionHistory(this.#database, userId, {
+    return readStoredSessionHistory(database, userId, {
       cursor,
       sessionId,
     });
-  }
+  },
   conversation(
     sessionId: string,
     replayIdentity?: AnthropicReplayIdentity,
@@ -351,17 +320,17 @@ export class SessionStore {
   ): readonly AgentConversationMessage[] {
     return conversationFromInternalMessages(
       withInterruptedInternalToolResults(
-        readInternalSessionMessages(this.#database, sessionId),
+        readInternalSessionMessages(database, sessionId),
         interrupted,
       ),
       replayIdentity,
     );
-  }
+  },
   conversationTruncation(sessionId: string): AgentStepTruncation | undefined {
     return storedConversationTruncation(
-      readStoredSessionMessages(this.#database, sessionId),
+      readStoredSessionMessages(database, sessionId),
     );
-  }
+  },
   reassign(
     userId: string,
     sessionId: string,
@@ -370,39 +339,32 @@ export class SessionStore {
     now: number,
   ): ReassignSessionResult {
     return reassignStoredSession({
-      resources: this.#writeResources(),
+      resources: writeResourcesInternal(),
       now,
-      read: (ownerId, id) => this.get(ownerId, id),
+      read: (ownerId, id) => store.get(ownerId, id),
       runnerId,
       sessionId,
       userId,
       workingDirectory,
     });
-  }
-  #settingContext() {
-    return {
-      database: this.#database,
-      read: (userId: string, sessionId: string, workspaceId?: string) =>
-        this.get(userId, sessionId, workspaceId),
-    };
-  }
+  },
   setContextTokenCap(...parameters: SessionContextTokenCapParameters) {
-    return setSessionContextTokenCap(this.#settingContext(), ...parameters);
-  }
+    return setSessionContextTokenCap(settingContext(), ...parameters);
+  },
   setAutoCompact(...parameters: SessionCompactionFlagParameters) {
     return setSessionCompactionFlag(
-      this.#settingContext(),
+      settingContext(),
       "autoCompact",
       ...parameters,
     );
-  }
+  },
   setIdleCompact(...parameters: SessionCompactionFlagParameters) {
     return setSessionCompactionFlag(
-      this.#settingContext(),
+      settingContext(),
       "idleCompact",
       ...parameters,
     );
-  }
+  },
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
     sessionId: string,
@@ -410,24 +372,24 @@ export class SessionStore {
   ): void {
     appendUnknownRestartToolResults({
       database,
-      generateId: this.#resources[1],
+      generateId: generateId,
       now,
       sessionId,
     });
-  }
+  },
   appendInterruptedRunnerTool(sessionId: string, now: number): void {
     appendInterruptedRunnerToolResult({
-      database: this.#database,
-      generateId: this.#resources[1],
+      database: database,
+      generateId: generateId,
       now,
       sessionId,
     });
-  }
+  },
   cancelPendingInput(
     options: Omit<Parameters<typeof cancelPendingInput>[0], "database">,
   ) {
-    return cancelPendingInput({ ...options, database: this.#database });
-  }
+    return cancelPendingInput({ ...options, database: database });
+  },
   enqueuePendingInput(
     userId: string,
     sessionId: string,
@@ -435,34 +397,34 @@ export class SessionStore {
     now: number,
   ): EnqueuePendingInputResult {
     return enqueuePendingInput({
-      database: this.#database,
-      generateId: this.#resources[1],
+      database: database,
+      generateId: generateId,
       input,
       now,
       sessionId,
       userId,
     });
-  }
+  },
   takeSteeringInputs(
     sessionId: string,
     now: number,
   ): readonly Extract<AgentConversationMessage, { readonly role: "user" }>[] {
-    return takeSteeringInputs({ database: this.#database, now, sessionId });
-  }
+    return takeSteeringInputs({ database: database, now, sessionId });
+  },
   manualCompactionPending(sessionId: string, generation: number): boolean {
-    return this.#manualCompactions.pending(sessionId, generation);
-  }
+    return manualCompactions.pending(sessionId, generation);
+  },
   scheduleManualCompaction(sessionId: string, generation: number, now: number) {
-    return this.#manualCompactions.schedule(sessionId, generation, now);
-  }
+    return manualCompactions.schedule(sessionId, generation, now);
+  },
   settleNormalBoundary(sessionId: string, now: number, generation: number) {
     return settleNormalSessionBoundary({
-      database: this.#database,
+      database: database,
       generation,
       now,
       sessionId,
     });
-  }
+  },
   appendUserMessage(
     userId: string,
     sessionId: string,
@@ -472,16 +434,30 @@ export class SessionStore {
     return appendSessionUserMessage({
       content,
       now,
-      resources: { database: this.#database, generateId: this.#resources[1] },
+      resources: { database: database, generateId: generateId },
       sessionId,
       userId,
     });
-  }
+  },
   appendSpawnedSessionReport(
-    ...parameters: Parameters<SessionStore["spawnedSessionCallbackDisposition"]>
+    userId: string,
+    childId: string,
+    childGeneration: number,
+    parentId: string,
+    parentGeneration: number,
+    content: string,
+    now: number,
   ): boolean {
-    return this.spawnedSessionCallbackDisposition(...parameters) !== undefined;
-  }
+    return store.spawnedSessionCallbackDisposition(
+      userId,
+      childId,
+      childGeneration,
+      parentId,
+      parentGeneration,
+      content,
+      now,
+    ) !== undefined;
+  },
   spawnedSessionCallbackDisposition(
     userId: string,
     childId: string,
@@ -495,40 +471,40 @@ export class SessionStore {
       childGeneration,
       childId,
       content,
-      database: this.#database,
-      generateId: this.#resources[1],
+      database: database,
+      generateId: generateId,
       now,
       parentGeneration,
       parentId,
       userId,
     });
-  }
+  },
   activeSpawnedSessionChildren(userId: string, sessionId: string) {
-    return activeSpawnedSessionChildren(this.#database, userId, sessionId);
-  }
+    return activeSpawnedSessionChildren(database, userId, sessionId);
+  },
   spawnedSessionChildren(userId: string, sessionId: string): readonly string[] {
-    return spawnedSessionChildren(this.#database, userId, sessionId);
-  }
+    return spawnedSessionChildren(database, userId, sessionId);
+  },
   spawnedSessionLink(userId: string, sessionId: string) {
-    return spawnedSessionLink(this.#database, userId, sessionId);
-  }
+    return spawnedSessionLink(database, userId, sessionId);
+  },
   pendingSpawnedSessions(limit?: number): readonly PendingSpawnedSession[] {
-    return pendingSpawnedSessions(this.#database, this.get.bind(this), limit);
-  }
+    return pendingSpawnedSessions(database, (userId: string, sessionId: string) => store.get(userId, sessionId), limit);
+  },
   queuedSessionOwnerIds(): readonly string[] {
-    return queuedSessionOwnerIds(this.#database);
-  }
+    return queuedSessionOwnerIds(database);
+  },
   queuedSessions(userId: string): readonly AgentSessionDetail[] {
     const awaitingAnsweredLaunch = new Set(
-      this.#questions
+      questionsStore
         .recoverable()
         .filter((request) => request.userId === userId)
         .map((request) => request.sessionId),
     );
-    return queuedSessionDetails(this.#database, userId, (ownerId, sessionId) =>
-      this.get(ownerId, sessionId),
+    return queuedSessionDetails(database, userId, (ownerId, sessionId) =>
+      store.get(ownerId, sessionId),
     ).filter(({ id }) => !awaitingAnsweredLaunch.has(id));
-  }
+  },
   transitionRuntime(
     sessionId: string,
     status: "failed" | "idle" | "running",
@@ -538,64 +514,42 @@ export class SessionStore {
     return transitionSessionRuntime({
       generation,
       now,
-      resources: { database: this.#database },
+      resources: { database: database },
       sessionId,
       status,
     });
-  }
+  },
   /**
    * Administrative/test helper that intentionally targets the current generation.
    * Runtime code must use the generation-required methods above.
    */
-  #currentGeneration(sessionId: string): number {
-    const current = readStoredSessionGeneration({
-      condition: activeSessionCondition({ id: sessionId }),
-      database: this.#database,
-    });
-    if (current === undefined) {
-      throw new DOMException("The agent session was stopped", "AbortError");
-    }
-    return current;
-  }
-  #current(): CurrentSessionStore {
-    return createCurrentSessionStore(this, (sessionId) =>
-      this.#currentGeneration(sessionId),
-    );
-  }
-  appendCurrentAgentMessage: CurrentSessionStore["appendAgentMessage"] = (
-    ...a
-  ) => {
-    this.#current().appendAgentMessage(...a);
-  };
-  appendCurrentErrorMessage: CurrentSessionStore["appendErrorMessage"] = (
-    ...a
-  ) => {
-    this.#current().appendErrorMessage(...a);
-  };
-  compactCurrentConversation: CurrentSessionStore["compactConversation"] = (
-    ...a
-  ) => {
-    this.#current().compactConversation(...a);
-  };
-  setCurrentAgentFile: CurrentSessionStore["setAgentFile"] = (...a) => {
-    this.#current().setAgentFile(...a);
-  };
-  updateCurrentUsage: CurrentSessionStore["updateUsage"] = (...a) => {
-    this.#current().updateUsage(...a);
-  };
-  transitionCurrent: CurrentSessionStore["transition"] = (...a) =>
-    this.#current().transition(...a);
+  appendCurrentAgentMessage: (...parameters: Parameters<CurrentSessionStore["appendAgentMessage"]>) => {
+    currentStore().appendAgentMessage(...parameters);
+  },
+  appendCurrentErrorMessage: (...parameters: Parameters<CurrentSessionStore["appendErrorMessage"]>) => {
+    currentStore().appendErrorMessage(...parameters);
+  },
+  compactCurrentConversation: (...parameters: Parameters<CurrentSessionStore["compactConversation"]>) => {
+    currentStore().compactConversation(...parameters);
+  },
+  setCurrentAgentFile: (...parameters: Parameters<CurrentSessionStore["setAgentFile"]>) => {
+    currentStore().setAgentFile(...parameters);
+  },
+  updateCurrentUsage: (...parameters: Parameters<CurrentSessionStore["updateUsage"]>) => {
+    currentStore().updateUsage(...parameters);
+  },
+  transitionCurrent: (...parameters: Parameters<CurrentSessionStore["transition"]>) => currentStore().transition(...parameters),
   stop(userId: string, sessionId: string, now: number): boolean {
-    if (this.#questions.pending(userId, sessionId) !== null) {
-      return this.#questions.stop(userId, sessionId, now);
+    if (questionsStore.pending(userId, sessionId) !== null) {
+      return questionsStore.stop(userId, sessionId, now);
     }
     return stopStoredSession({
       now,
-      resources: { database: this.#database },
+      resources: { database: database },
       sessionId,
       userId,
     });
-  }
+  },
   queue(
     userId: string,
     sessionId: string,
@@ -612,130 +566,44 @@ export class SessionStore {
       now,
       ...(prompt === undefined ? {} : { prompt }),
       resources: {
-        database: this.#database,
-        generateId: this.#resources[1],
-        read: (ownerId, id) => this.get(ownerId, id, workspaceId),
-        toolSettings: this.#toolSettings,
+        database: database,
+        generateId: generateId,
+        read: (ownerId, id) => store.get(ownerId, id, workspaceId),
+        toolSettings: readToolSettings,
       },
       sessionId,
       userId,
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
-  }
-  appendRuntimeAgentMessages(
-    ...parameters: Parameters<SessionStoreRuntime["appendRuntimeAgentMessages"]>
-  ) {
-    this.#runtime.appendRuntimeAgentMessages(...parameters);
-  }
-  appendRuntimeErrorMessage(
-    ...parameters: Parameters<SessionStoreRuntime["appendRuntimeErrorMessage"]>
-  ) {
-    this.#runtime.appendRuntimeErrorMessage(...parameters);
-  }
-  commitRuntimeTerminal(
-    ...parameters: Parameters<SessionStoreRuntime["commitRuntimeTerminal"]>
-  ) {
-    this.#runtime.commitRuntimeTerminal(...parameters);
-  }
-  compactRuntimeConversation(
-    ...parameters: Parameters<SessionStoreRuntime["compactRuntimeConversation"]>
-  ) {
-    this.#runtime.compactRuntimeConversation(...parameters);
-  }
-  compactRuntimeTerminal(
-    ...parameters: Parameters<SessionStoreRuntime["compactRuntimeTerminal"]>
-  ) {
-    this.#runtime.compactRuntimeTerminal(...parameters);
-  }
-  markRuntimeStepStart(
-    ...parameters: Parameters<SessionStoreRuntime["markRuntimeStepStart"]>
-  ) {
-    this.#runtime.markRuntimeStepStart(...parameters);
-  }
-  setRuntimeAgentFile(
-    ...parameters: Parameters<SessionStoreRuntime["setRuntimeAgentFile"]>
-  ) {
-    this.#runtime.setRuntimeAgentFile(...parameters);
-  }
-  setRuntimeModelMetadata(
-    ...parameters: Parameters<SessionStoreRuntime["setRuntimeModelMetadata"]>
-  ) {
-    this.#runtime.setRuntimeModelMetadata(...parameters);
-  }
-  settleRuntimeFailure(
-    ...parameters: Parameters<SessionStoreRuntime["settleRuntimeFailure"]>
-  ) {
-    return this.#runtime.settleRuntimeFailure(...parameters);
-  }
-  updateRuntimeUsage(
-    ...parameters: Parameters<SessionStoreRuntime["updateRuntimeUsage"]>
-  ) {
-    this.#runtime.updateRuntimeUsage(...parameters);
-  }
-  claimRestartHandoff(
-    ...parameters: Parameters<SessionStoreRestarts["claimRestartHandoff"]>
-  ) {
-    return this.#restarts.claimRestartHandoff(...parameters);
-  }
-  failInvalidRestartHandoff(
-    ...parameters: Parameters<SessionStoreRestarts["failInvalidRestartHandoff"]>
-  ) {
-    return this.#restarts.failInvalidRestartHandoff(...parameters);
-  }
-  failRestartHandoff(
-    ...parameters: Parameters<SessionStoreRestarts["failRestartHandoff"]>
-  ) {
-    return this.#restarts.failRestartHandoff(...parameters);
-  }
-  invalidRestartHandoffs(
-    ...parameters: Parameters<SessionStoreRestarts["invalidRestartHandoffs"]>
-  ) {
-    return this.#restarts.invalidRestartHandoffs(...parameters);
-  }
-  pauseQueuedForRestart(
-    ...parameters: Parameters<SessionStoreRestarts["pauseQueuedForRestart"]>
-  ) {
-    return this.#restarts.pauseQueuedForRestart(...parameters);
-  }
-  pauseRunningForRestart(
-    ...parameters: Parameters<SessionStoreRestarts["pauseRunningForRestart"]>
-  ) {
-    return this.#restarts.pauseRunningForRestart(...parameters);
-  }
-  pendingRestartHandoffs(
-    ...parameters: Parameters<SessionStoreRestarts["pendingRestartHandoffs"]>
-  ) {
-    return this.#restarts.pendingRestartHandoffs(...parameters);
-  }
-  restoreRestartHandoff(
-    ...parameters: Parameters<SessionStoreRestarts["restoreRestartHandoff"]>
-  ) {
-    return this.#restarts.restoreRestartHandoff(...parameters);
-  }
-  settleRestartHandoff(
-    ...parameters: Parameters<SessionStoreRestarts["settleRestartHandoff"]>
-  ) {
-    return this.#restarts.settleRestartHandoff(...parameters);
-  }
+  },
+  ...runtime,
+  ...restarts,
   failInterrupted(
     now: number,
     active: (id: string, generation: number) => boolean = () => false,
   ) {
-    const interrupted = interruptedStoredSessions(this.#database, now);
+    const interrupted = interruptedStoredSessions(database, now);
     for (const session of interrupted) {
       if (active(session.id, session.executionGeneration)) {
         continue;
       }
-      if (this.#restarts.restoreInterruptedRestart(session, now)) {
+      if (restarts.restoreInterruptedRestart(session, now)) {
         continue;
       }
       failInterruptedStoredSession(
-        this.#database,
+        database,
         session,
-        this.#generateId(now),
+        generateSessionId(now),
         now,
       );
     }
-    return this.pendingSpawnedSessions();
-  }
+    return store.pendingSpawnedSessions();
+  },
+  };
+  return store;
+}
+
+
+export interface SessionStore extends ReturnType<typeof createSessionStore> {
+  readonly __sessionStore?: never;
 }

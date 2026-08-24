@@ -8,7 +8,7 @@ import {
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { applySessionProviderUpdate } from "../session-provider-update.ts";
 import { createSessionRestartAbort } from "../session-restart-abort.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore, type SessionStore } from "../session-store.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -56,7 +56,7 @@ function setup(userContextTokenCap?: number) {
   addTestProviderCredential(database, "openai-source");
   addTestProviderCredential(database, "openrouter-target", "openrouter");
   const readSettings = () => DEFAULT_TOOL_SETTINGS;
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     undefined,
     readSettings,

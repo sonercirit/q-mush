@@ -1,7 +1,8 @@
+import type { AppDatabase } from "../../shared/database.ts";
 import { expect, vi } from "vitest";
 import type { SessionAgentActionsDependencies } from "../session-agent-actions-dependencies.ts";
 import { createSessionAgentActions } from "../session-agent-actions.ts";
-import { type SessionStore } from "../session-store.ts";
+import type { SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -99,7 +100,7 @@ export function continueChild(setup: ReturnType<typeof spawnedChildSetup>) {
 
 export function terminalEventActions(
   store: SessionStore,
-  database: ConstructorParameters<typeof SessionStore>[0],
+  database: AppDatabase,
   cleanupSession = vi.fn(),
   overrides: Partial<SessionAgentActionsDependencies> = {},
 ) {

@@ -12,7 +12,7 @@ import {
 } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createSessionStore, type SessionStore } from "../../sync-engine/session-store.ts";
 import { insertWorkspace } from "../../sync-engine/workspace-write.ts";
 import {
   addTestProviderCredential,
@@ -129,7 +129,7 @@ export function authoritySetup(options: {
     CHILD_SESSION_ID,
     "child-authority-message",
   ];
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     () => ids.shift() ?? "unexpected-parent-authority-id",
     () => DEFAULT_TOOL_SETTINGS,
