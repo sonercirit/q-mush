@@ -5,7 +5,7 @@ import {
   type RunnerDirectoryListing,
 } from "../shared/runner-directory-model.ts";
 import { isHttpResponseError, requestJson } from "./browser-http.ts";
-import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
+import { createReactiveState } from "./reactive-state.ts";
 
 export interface DirectoryPickerState {
   readonly error: string | undefined;
@@ -35,81 +35,92 @@ function browsingError(error: unknown): string {
     : "We could not open that directory on the runner.";
 }
 
-export class DirectoryPickerController {
-  #abort: AbortController | undefined;
-  #request = 0;
-  readonly #view: ReactiveState<DirectoryPickerState>;
+export interface DirectoryPickerController {
+  readonly state: DirectoryPickerState;
+  readonly view: Accessor<DirectoryPickerState>;
+    browse(path: string): Promise<void>;
+    choose(): string | undefined;
+    close(): void;
+    open(runnerId: string, path: string, workspaceId?: string): Promise<void>;
+    reset(): void;
+    retry(): Promise<void>;
+}
 
-  constructor(view = createReactiveState(initialDirectoryPickerState())) {
-    this.#view = view;
-  }
+export function createDirectoryPickerController(
+  view = createReactiveState(initialDirectoryPickerState()),
+): DirectoryPickerController {
+  let abort: AbortController | undefined;
+  let request = 0;
+  const controller: DirectoryPickerController = {
 
-  get state(): DirectoryPickerState {
-    return this.#view.state();
-  }
+    get state() {
+      return view.state();
+    },
 
-  get view(): Accessor<DirectoryPickerState> {
-    return this.#view.state;
-  }
+    get view() {
+      return view.state;
+    },
 
-  browse(path: string): Promise<void> {
+    browse(path: string): Promise<void> {
     const runnerId = this.state.runnerId;
     return runnerId === undefined
       ? Promise.resolve()
-      : this.#load(runnerId, path, false);
-  }
+      : load(runnerId, path, false);
+    },
 
-  choose(): string | undefined {
+    choose(): string | undefined {
     const path = this.state.listing?.path;
 
     if (path !== undefined) {
-      this.close();
+      controller.close();
     }
 
-    return path;
-  }
+      return path;
+    },
 
-  close(): void {
-    this.#reset();
-  }
+    close(): void {
+      resetState();
+    },
 
-  open(runnerId: string, path: string, workspaceId?: string): Promise<void> {
-    return this.#load(runnerId, path, true, workspaceId);
-  }
+    open(runnerId: string, path: string, workspaceId?: string): Promise<void> {
+      return load(runnerId, path, true, workspaceId);
+    },
 
-  reset(): void {
-    this.#reset();
-  }
+    reset(): void {
+      resetState();
+    },
 
-  retry(): Promise<void> {
+    retry(): Promise<void> {
     const path = this.state.requestedPath;
-    return path === undefined ? Promise.resolve() : this.browse(path);
+      return path === undefined ? Promise.resolve() : controller.browse(path);
+    },
+
+  };
+
+  function resetState(): void {
+    cancel();
+    view.setState(initialDirectoryPickerState());
   }
 
-  #reset(): void {
-    this.#cancel();
-    this.#view.setState(initialDirectoryPickerState());
+  function cancel(): void {
+    request += 1;
+    abort?.abort();
+    abort = undefined;
   }
 
-  #cancel(): void {
-    this.#request += 1;
-    this.#abort?.abort();
-    this.#abort = undefined;
-  }
-
-  async #load(
+  async function load(
     runnerId: string,
     path: string,
     clearListing: boolean,
-    workspaceId = this.state.workspaceId,
+    workspaceId = controller.state.workspaceId,
   ): Promise<void> {
-    this.#cancel();
-    const request = this.#request;
-    const controller = new AbortController();
-    this.#abort = controller;
-    this.#view.setState({
+    cancel();
+    const requestId = request;
+    const abortController = new AbortController();
+    abort = abortController;
+    view.setState({
       error: undefined,
-      listing: clearListing ? undefined : this.state.listing,
+      listing: clearListing ? undefined : controller.state.listing,
       loading: true,
       open: true,
       requestedPath: path,
@@ -123,27 +134,29 @@ export class DirectoryPickerController {
           body: JSON.stringify({ path }),
           headers: { "content-type": "application/json" },
           method: "POST",
-          signal: controller.signal,
+          signal: abortController.signal,
         }),
       );
 
-      if (request !== this.#request) {
+      if (requestId !== request) {
         return;
       }
 
-      this.#view.setState({ ...this.state, listing, loading: false });
+      view.setState({ ...controller.state, listing, loading: false });
     } catch (error) {
-      if (request === this.#request) {
-        this.#view.setState({
-          ...this.state,
+      if (requestId === request) {
+        view.setState({
+          ...controller.state,
           error: browsingError(error),
           loading: false,
         });
       }
     } finally {
-      if (request === this.#request) {
-        this.#abort = undefined;
+      if (requestId === request) {
+        abort = undefined;
       }
     }
   }
+
+  return controller;
 }

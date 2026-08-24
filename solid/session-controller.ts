@@ -6,7 +6,7 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { DirectoryPickerController } from "./directory-picker-controller.ts";
+import { createDirectoryPickerController, type DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
@@ -92,7 +92,7 @@ export class SessionController {
   readonly #reactiveView: ReactiveState<SessionViewState>;
   constructor(
     reactiveView = createReactiveState(initialSessionViewState()),
-    directoryPicker = new DirectoryPickerController(),
+    directoryPicker = createDirectoryPickerController(),
     transcriptFilterStorage:
       | SessionTranscriptFilterStorage
       | null
