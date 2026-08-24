@@ -16,13 +16,13 @@ import {
 } from "./provider-quota.ts";
 import { createStoreResources } from "./store-resources.ts";
 
-export interface ProviderQuotaSetting {
+interface ProviderQuotaSetting {
   readonly autoResetThresholdPercent: number;
 }
 
 const PROVIDER_QUOTA_RESET_LEASE_MILLISECONDS = 60_000;
 
-export type ResetReservation =
+type ResetReservation =
   | {
       readonly leaseAcquiredAt: number;
       readonly providerRequestId: string;
@@ -125,7 +125,7 @@ function settingValues(
   };
 }
 
-export type ProviderQuotaResetCompleter = (
+type ProviderQuotaResetCompleter = (
   userId: string,
   credentialId: string,
   requestId: string,
