@@ -84,7 +84,7 @@ export function createFakeProviderSocket(
     closeCount: number;
     closeReason: string | undefined;
   } = { closeCode: undefined, closeCount: 0, closeReason: undefined };
-  return Object.assign(socket, state, {
+  const result: FakeProviderSocket = Object.assign(socket, state, {
     addEventListener(
       type: string,
       callback: EventListenerOrEventListenerObject | null,
@@ -94,9 +94,9 @@ export function createFakeProviderSocket(
       if (callback !== null) changeListener("add", type, callback);
     },
     close(code?: number, reason?: string): void {
-      state.closeCode = code;
-      state.closeCount += 1;
-      state.closeReason = reason;
+      result.closeCode = code;
+      result.closeCount += 1;
+      result.closeReason = reason;
       close();
     },
     fail(): void {
@@ -117,6 +117,7 @@ export function createFakeProviderSocket(
       if (callback !== null) changeListener("remove", type, callback);
     },
   });
+  return result;
 }
 
 type WebSocketFactory = NonNullable<
