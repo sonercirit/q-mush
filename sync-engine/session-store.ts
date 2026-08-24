@@ -172,12 +172,13 @@ export function createSessionStore(
   ) => ({ database, identity: spawnIdentity(userId, sessionId, generation) });
   const readPendingQuestions = (userId: string, sessionId: string) =>
     questionsStore.pending(userId, sessionId);
+  const readSession = (
+    userId: string,
+    sessionId: string,
+    workspaceId?: string,
+  ) => store.get(userId, sessionId, workspaceId);
   const settingContext = () =>
-    createSessionSettingContext(
-      database,
-      (userId: string, sessionId: string, workspaceId?: string) =>
-        store.get(userId, sessionId, workspaceId),
-    );
+    createSessionSettingContext(database, readSession);
   const currentGeneration = (sessionId: string): number => {
     const current = readStoredSessionGeneration({
       condition: activeSessionCondition({ id: sessionId }),

@@ -204,8 +204,10 @@ function createDrizzleSessionIntegration(
       ),
     notify: notify,
     now: now,
-    ownsSession: (userId: string, sessionId: string, workspaceId?: string) =>
-      store.get(userId, sessionId, workspaceId) !== undefined,
+    ownsSession: (userId: string, sessionId: string, workspaceId?: string) => {
+      const session = store.get(userId, sessionId, workspaceId);
+      return session !== undefined;
+    },
     questions: store.questions(),
   };
   const launcher = createSessionLauncher({
@@ -218,9 +220,7 @@ function createDrizzleSessionIntegration(
     braveSearch: braveSearch,
     broker: broker,
     discoverModels: models,
-    finish: (detail, userId, error, recovered) => {
-      finisher.finish(detail, userId, error, recovered);
-    },
+    finish: finisher.finish.bind(finisher),
     modelFactory: modelFactory,
     activeTools: activeTools,
     readCredential: readCredential,
