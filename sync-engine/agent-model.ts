@@ -34,7 +34,7 @@ import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import {
   ANTHROPIC_CONTEXT_WINDOW_BETA,
   ANTHROPIC_VERSION,
-  assertAnthropicContinuationReplays as assertContinuationReplays,
+  assertAnthropicContinuationReplays,
 } from "./anthropic-request.ts";
 import { validateAnthropicStepContinuation } from "./anthropic-step-continuation.ts";
 import {
@@ -44,7 +44,7 @@ import {
 import { readOpenAiOAuthCredential } from "./openai-credential.ts";
 import { recoverOpenAiOAuthUnauthorized } from "./openai-unauthorized-recovery.ts";
 import { completeProviderHttp } from "./provider-http.ts";
-import { requestBody as createRequestBody } from "./provider-request-body.ts";
+import { requestBody } from "./provider-request-body.ts";
 import type { ProviderRequestProtocol } from "./provider-request.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 import {
@@ -366,13 +366,13 @@ export function createChatCompletionsAgentModel(
       : sleep(milliseconds, signal);
   }
 
-  function requestBody(
+  function createModelRequestBody(
     messages: readonly AgentConversationMessage[],
     protocol: ProviderRequestProtocol,
     stream: boolean,
     resolvedModel?: string,
   ): unknown {
-    return createRequestBody({
+    return requestBody({
       adaptiveThinking: adaptiveThinking,
       credential: credential,
       credentialFingerprint: credentialFingerprint,
@@ -423,7 +423,7 @@ export function createChatCompletionsAgentModel(
       ...promptCacheKeyHeader(promptCacheKey),
     });
     const codexOAuth = usesCodexOAuth(provider, credential);
-    const body = requestBody(messages, "responses", false);
+    const body = createModelRequestBody(messages, "responses", false);
 
     if (!isRecord(body)) {
       throw new Error("The model request body was invalid");
@@ -479,11 +479,14 @@ export function createChatCompletionsAgentModel(
       : anthropicReplayIdentityFrom({ ...options, resolvedModel });
   }
 
-  function assertAnthropicContinuationReplays(
+  function validateAnthropicContinuationReplays(
     messages: readonly AgentConversationMessage[],
     resolvedModel: string | undefined,
   ): void {
-    assertContinuationReplays(messages, anthropicReplayIdentity(resolvedModel));
+    assertAnthropicContinuationReplays(
+      messages,
+      anthropicReplayIdentity(resolvedModel),
+    );
   }
 
   async function httpRequest(
@@ -494,11 +497,11 @@ export function createChatCompletionsAgentModel(
     onStreamRetry?: () => void,
   ): Promise<AgentModelStep> {
     if (protocol === "anthropic") {
-      assertAnthropicContinuationReplays(messages, resolvedModel);
+      validateAnthropicContinuationReplays(messages, resolvedModel);
     }
     const step = await completeProviderHttp(
       {
-        body: requestBody(messages, protocol, true, resolvedModel),
+        body: createModelRequestBody(messages, protocol, true, resolvedModel),
         credential: credential,
         credentialFingerprint: credentialFingerprint,
         fetch: fetch,
@@ -541,7 +544,7 @@ export function createChatCompletionsAgentModel(
         ? await anthropicResolvedModel(input.signal)
         : undefined;
     if (protocol === "anthropic") {
-      assertAnthropicContinuationReplays(parameters[0], resolvedModel);
+      validateAnthropicContinuationReplays(parameters[0], resolvedModel);
     }
     const step = await httpRequest(
       input.messages,

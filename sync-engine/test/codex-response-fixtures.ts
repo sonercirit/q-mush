@@ -1,6 +1,6 @@
-import {
+import type {
+  ChatCompletionsAgentModel,
   createChatCompletionsAgentModel,
-  type ChatCompletionsAgentModel,
 } from "../../sync-engine/agent-model.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
