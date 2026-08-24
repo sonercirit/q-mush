@@ -264,7 +264,7 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   expect(staleProcess.client.readyState).toBe(WebSocket.CLOSED);
   expect(staleProcess.client.received).toContain(runnerSupersededMessage());
   await expect(staleProcess.stopped()).resolves.toMatchObject({
-    name: "RunnerSupersededError",
+    kind: "runner_superseded",
   });
   await expect(commandRejection).resolves.toEqual(
     createRunnerDisconnectedError(
