@@ -3,7 +3,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
+import { isProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -291,8 +291,8 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
       const setup = setupRefresh(Response.json({ error: code }, { status }));
 
       const failure = forceRefresh(setup);
-      await expect(failure).rejects.toBeInstanceOf(
-        ProviderCredentialReauthenticationRequiredError,
+      await expect(failure).rejects.toSatisfy(
+        isProviderCredentialReauthenticationRequiredError,
       );
       expectReauthenticationState(setup.store, true);
       const summaries = await setup.integration.credentials(

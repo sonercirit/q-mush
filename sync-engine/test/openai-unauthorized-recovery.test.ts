@@ -5,7 +5,7 @@ import {
   ChatCompletionsAgentModel,
   type AgentProviderCredential,
 } from "../../sync-engine/agent-model.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "../../sync-engine/provider-error.ts";
+import { createProviderCredentialReauthenticationRequiredError } from "../../sync-engine/provider-error.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
@@ -238,7 +238,7 @@ describe("OpenAI OAuth unauthorized recovery", () => {
     const sockets = new FakeProviderSockets();
     const refreshCredential = vi.fn(() =>
       Promise.reject(
-        new ProviderCredentialReauthenticationRequiredError("OpenAI", 401),
+        createProviderCredentialReauthenticationRequiredError("OpenAI", 401),
       ),
     );
     const pending = model({ refreshCredential, sockets }).complete(

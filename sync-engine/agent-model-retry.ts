@@ -1,5 +1,5 @@
 import { setTimeout } from "node:timers/promises";
-import { ProviderCredentialRejectionError } from "./provider-error.ts";
+import { createProviderCredentialRejectionError } from "./provider-error.ts";
 
 const MODEL_REQUEST_RETRY_DELAYS_MILLISECONDS = [1_000, 2_000, 4_000] as const;
 const MODEL_REQUEST_MAX_RETRY_DELAY_MILLISECONDS =
@@ -120,7 +120,7 @@ export async function fetchModelRequestAttempt(
   }
 
   if (response.status === 401 || response.status === 403) {
-    throw new ProviderCredentialRejectionError(
+    throw createProviderCredentialRejectionError(
       `The model credential was rejected with status ${String(response.status)}`,
       response.status,
     );
@@ -160,7 +160,7 @@ export async function runModelRequestWithRetries<T>(
           error.rateLimited &&
           error.response?.status === RATE_LIMITED_MODEL_REQUEST_STATUS
         ) {
-          throw new ProviderCredentialRejectionError(
+          throw createProviderCredentialRejectionError(
             "The model credential was rate limited",
             RATE_LIMITED_MODEL_REQUEST_STATUS,
           );

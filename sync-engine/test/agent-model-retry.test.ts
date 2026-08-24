@@ -6,7 +6,7 @@ import {
   type ModelRequestSleep,
 } from "../../sync-engine/agent-model-retry.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
+import { isProviderCredentialRejection } from "../../sync-engine/provider-error.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 function unwrapResponse(error: unknown): Response {
@@ -174,7 +174,7 @@ describe("agent model request retries", () => {
         REQUEST.signal,
         () => Promise.resolve(),
       ),
-    ).rejects.toBeInstanceOf(ProviderCredentialRejectionError);
+    ).rejects.toSatisfy(isProviderCredentialRejection);
     expect(attempts).toBe(13);
   });
 

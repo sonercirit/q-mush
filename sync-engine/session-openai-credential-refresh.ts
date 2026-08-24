@@ -1,7 +1,8 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
 import type { AgentCredentialRefresher } from "./agent-model-options.ts";
 import {
-  ProviderCredentialReauthenticationRequiredError,
+  createProviderCredentialReauthenticationRequiredError,
+  isProviderCredentialReauthenticationRequiredError,
   isProviderCredentialRejection,
 } from "./provider-error.ts";
 import type { SessionCredentialRead } from "./session-credential-access.ts";
@@ -36,11 +37,11 @@ export function createOpenAiSessionCredentialRefresher(
       }
       return refreshed;
     } catch (error) {
-      if (error instanceof ProviderCredentialReauthenticationRequiredError) {
+      if (isProviderCredentialReauthenticationRequiredError(error)) {
         throw error;
       }
       if (isProviderCredentialRejection(error)) {
-        throw new ProviderCredentialReauthenticationRequiredError("OpenAI");
+        throw createProviderCredentialReauthenticationRequiredError("OpenAI");
       }
       throw error;
     }

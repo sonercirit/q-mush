@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "vitest";
-import { ProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
+import { createProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
 import { SessionFinisher } from "../session-finisher.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { closeTrackedDatabases } from "./database-test-helpers.ts";
@@ -26,7 +26,7 @@ describe("OpenAI re-login session failure", () => {
       store: setup.store,
     });
     const secret = "oauth-refresh-token-that-must-not-leak";
-    const error = new ProviderCredentialReauthenticationRequiredError(
+    const error = createProviderCredentialReauthenticationRequiredError(
       "OpenAI",
       401,
     );

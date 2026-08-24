@@ -1,5 +1,8 @@
 import { isRecord } from "../shared/auth-model.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "./provider-error.ts";
+import {
+  createProviderCredentialReauthenticationRequiredError,
+  type ProviderCredentialReauthenticationRequiredError,
+} from "./provider-error.ts";
 
 const TERMINAL_OPENAI_REFRESH_CODES = new Set([
   "invalid_client",
@@ -13,7 +16,7 @@ export async function openAiRefreshReauthenticationError(
   response: Response,
 ): Promise<ProviderCredentialReauthenticationRequiredError | undefined> {
   if (response.status === 401 || response.status === 403) {
-    return new ProviderCredentialReauthenticationRequiredError(
+    return createProviderCredentialReauthenticationRequiredError(
       "OpenAI",
       response.status,
     );
@@ -30,6 +33,6 @@ export async function openAiRefreshReauthenticationError(
   const terminalCode = typeof code === "string" ? code : nestedCode;
   return typeof terminalCode === "string" &&
     TERMINAL_OPENAI_REFRESH_CODES.has(terminalCode)
-    ? new ProviderCredentialReauthenticationRequiredError("OpenAI", 400)
+    ? createProviderCredentialReauthenticationRequiredError("OpenAI", 400)
     : undefined;
 }

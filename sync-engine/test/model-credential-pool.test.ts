@@ -10,8 +10,9 @@ import {
   type ModelCredentialPoolDependencies,
 } from "../model-credential-pool.ts";
 import {
-  ProviderCredentialReauthenticationRequiredError,
-  ProviderCredentialRejectionError,
+  createProviderCredentialReauthenticationRequiredError,
+  createProviderCredentialRejectionError,
+  type ProviderCredentialReauthenticationRequiredError,
 } from "../provider-error.ts";
 import {
   addTestProviderCredential,
@@ -160,7 +161,7 @@ describe("model credential pool", () => {
     const pool = modelPool(database, (_userId, selection) => {
       if (selection.credentialId === FIRST_CREDENTIAL_ID) {
         return Promise.reject(
-          new ProviderCredentialRejectionError("rejected", 402),
+          createProviderCredentialRejectionError("rejected", 402),
         );
       }
       const credential = createTestProviderCredential(selection.credentialId);
@@ -229,7 +230,7 @@ describe("model credential pool", () => {
     expect(
       rejectFirstCredential(
         setup.pool,
-        new ProviderCredentialReauthenticationRequiredError("OpenAI"),
+        createProviderCredentialReauthenticationRequiredError("OpenAI"),
       ),
     ).toBe(true);
     expect(await remainingCredentialIds(setup.pool)).toEqual([

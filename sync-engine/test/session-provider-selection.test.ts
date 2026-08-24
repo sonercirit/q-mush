@@ -4,7 +4,7 @@ import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../../shared/routes.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { AgentModelDiscoveryError } from "../../sync-engine/agent-model-discovery-fetch.ts";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
+import { createProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import type { SessionCredentialMetadataUpdate } from "../../sync-engine/session-credential-reassignment-store.ts";
 import {
   openRouterProvidersForUser,
@@ -344,7 +344,7 @@ describe("OpenRouter session provider validation", () => {
 
   test("propagates tagged-provider credential rejections when requested", async () => {
     for (const status of [402, 429] as const) {
-      const rejection = new ProviderCredentialRejectionError(
+      const rejection = createProviderCredentialRejectionError(
         "rejected",
         status,
       );
@@ -355,7 +355,7 @@ describe("OpenRouter session provider validation", () => {
       await expect(sessionMetadata(rejectedOptions)).rejects.toBe(rejection);
     }
 
-    const rejection = new ProviderCredentialRejectionError("rejected", 429);
+    const rejection = createProviderCredentialRejectionError("rejected", 429);
     const handledOptions = metadataOptions({
       discoverProviders: () => Promise.reject(rejection),
     });

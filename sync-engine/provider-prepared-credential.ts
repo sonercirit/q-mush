@@ -4,7 +4,7 @@ import type {
 } from "../shared/provider-credential-store.ts";
 import type { OAuthRuntime } from "./oauth.ts";
 import type { ProviderCredentialRead } from "./provider-credential-reader.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "./provider-error.ts";
+import { isProviderCredentialReauthenticationRequiredError } from "./provider-error.ts";
 import type {
   StoredCredentialReadArguments,
   StoredProviderCredentialAccess,
@@ -47,7 +47,7 @@ async function prepareAndPersistCredential(
     const current = options.credentials.readCredential(userId, credentialId);
     if (current?.secret !== credential.secret) return true;
     if (
-      error instanceof ProviderCredentialReauthenticationRequiredError &&
+      isProviderCredentialReauthenticationRequiredError(error) &&
       options.store?.markRequiresReauthentication(
         userId,
         credentialId,

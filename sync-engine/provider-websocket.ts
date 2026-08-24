@@ -1,7 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
-  ProviderStreamError,
+  isProviderStreamError,
   readProviderStreamError,
 } from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
@@ -209,7 +209,7 @@ export class ProviderWebSocketSession {
       };
       const failUnknown = (error: unknown): void => {
         if (
-          error instanceof ProviderStreamError &&
+          isProviderStreamError(error) &&
           (error.transient || error.reconnectWebSocket)
         ) {
           fail(

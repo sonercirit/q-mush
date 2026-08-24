@@ -12,7 +12,10 @@ import {
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
-import { ProviderStreamError } from "./provider-error.ts";
+import {
+  isProviderStreamError,
+  type ProviderStreamError,
+} from "./provider-error.ts";
 import {
   readProviderEventStream,
   type AnthropicEventStreamOptions,
@@ -99,13 +102,12 @@ function streamFailure(
   error: unknown,
   response: Response,
 ): RetryableModelRequestError | ProviderStreamError {
-  if (error instanceof ProviderStreamError && !error.transient) {
+  if (isProviderStreamError(error) && !error.transient) {
     return error;
   }
-  const retryAfterMilliseconds =
-    error instanceof ProviderStreamError
-      ? error.retryAfterMilliseconds
-      : modelResponseRetryAfterMilliseconds(response);
+  const retryAfterMilliseconds = isProviderStreamError(error)
+    ? error.retryAfterMilliseconds
+    : modelResponseRetryAfterMilliseconds(response);
   return RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
