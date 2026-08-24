@@ -39,7 +39,10 @@ import {
   sessionIsActive,
 } from "./session-controller-guards.ts";
 import { showNewestSessionHistory } from "./session-controller-history.ts";
-import { SessionLoadController } from "./session-controller-load.ts";
+import {
+  createSessionLoadController,
+  type SessionLoadController,
+} from "./session-controller-load.ts";
 import type { SessionToolUpdateResult } from "./session-controller-options.ts";
 import {
   createSessionPendingInputController,
@@ -119,7 +122,7 @@ export class SessionController {
       ),
     });
     this.#live = createSessionRealtimeState(this.#view);
-    this.#loader = new SessionLoadController(this.#view, this.#live, transport);
+    this.#loader = createSessionLoadController(this.#view, this.#live, transport);
     this.#reconciliation = new SessionReconciliationController(
       this.#view,
       this.#loader,
