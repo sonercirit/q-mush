@@ -70,7 +70,7 @@ import {
   runUnlessSessionMutation,
   sessionMutationPending,
 } from "./session-pending.ts";
-import { SessionProviderController } from "./session-provider-controller.ts";
+import { createSessionProviderController, type SessionProviderController } from "./session-provider-controller.ts";
 import { initialSessionViewState } from "./session-state.ts";
 import type {
   SessionTranscriptFilterName,
@@ -115,7 +115,7 @@ export class SessionController {
       this.#loader,
     );
     this.#models = createSessionModelController(this.#view, transport);
-    this.#providers = new SessionProviderController(this.#view);
+    this.#providers = createSessionProviderController(this.#view);
     this.#pendingInputs = new SessionPendingInputController({
       loader: this.#loader,
       realtime: this.#live,
