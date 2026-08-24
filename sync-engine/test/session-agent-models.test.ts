@@ -9,7 +9,10 @@ import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
 } from "../../sync-engine/provider-stream.ts";
-import { createRealtimeHub, type RealtimeHub } from "../../sync-engine/realtime-hub.ts";
+import {
+  createRealtimeHub,
+  type RealtimeHub,
+} from "../../sync-engine/realtime-hub.ts";
 import {
   createFallbackModel,
   createSessionAgentModels,

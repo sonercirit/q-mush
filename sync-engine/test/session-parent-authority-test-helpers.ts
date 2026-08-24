@@ -4,7 +4,10 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { createModelCredentialPool, type ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "../../sync-engine/model-credential-pool.ts";
 import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import {
   createSessionAgentActions,
@@ -48,9 +51,12 @@ function createRejectingModelCredentialPool(
 ): ModelCredentialPool {
   const pool = createModelCredentialPool({
     database,
-    readCredential: () => Promise.reject(new Error("candidate boom")),
+    readCredential: () => Promise.resolve(undefined),
   });
-  return pool;
+  return {
+    ...pool,
+    candidates: () => Promise.reject(new Error("candidate boom")),
+  };
 }
 
 export const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";

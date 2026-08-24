@@ -41,7 +41,7 @@ export type RealtimeCommandError = Error & {
   readonly realtimeCommandError: true;
 };
 
-export function createTaggedRealtimeCommandError<Tag extends string>(
+function createTaggedRealtimeCommandError<Tag extends string>(
   code: string,
   detail: string | undefined,
   kind: Tag,

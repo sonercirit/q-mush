@@ -12,7 +12,11 @@ import type {
   SessionToolUpdatePreview,
   SessionToolUpdatePreviewInput,
 } from "../shared/session-tool-update.ts";
-import { createRealtimeCommandError, isRealtimeCommandError, type RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import {
+  createRealtimeCommandError,
+  isRealtimeCommandError,
+  type RealtimeCommandError,
+} from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";

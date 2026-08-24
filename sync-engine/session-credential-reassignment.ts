@@ -93,10 +93,7 @@ function reassignmentSelection(
 }
 
 export interface SessionCredentialReassignmentEndpoints {
-  readonly reassign: (
-    request: Request,
-    credentialId: string,
-  ) => Promise<Response>;
+  reassign(request: Request, credentialId: string): Promise<Response>;
 }
 
 export function createSessionCredentialReassignmentEndpoints(

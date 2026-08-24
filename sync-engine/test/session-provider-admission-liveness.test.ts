@@ -24,8 +24,8 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { createDeferredAgentModel } from "./deferred-agent-model.ts";
 import {
-  expectProviderSocketReleased,
   createFakeProviderSockets,
+  expectProviderSocketReleased,
   type FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";

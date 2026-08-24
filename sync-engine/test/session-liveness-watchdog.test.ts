@@ -2,8 +2,8 @@ import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions, runners } from "../../shared/database/schema.ts";
 import {
-  type RunnerCommandBroker,
   createRunnerCommandBroker,
+  type RunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
