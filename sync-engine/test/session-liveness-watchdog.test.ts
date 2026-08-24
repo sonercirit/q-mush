@@ -6,7 +6,10 @@ import type { SessionRuntimePendingComponent } from "../../shared/session-model.
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { createSessionLivenessWatchdogState } from "../../sync-engine/session-liveness-watchdog.ts";
-import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import { notifySessionSteeringInput } from "../../sync-engine/session-steering-wakeup.ts";
 import {

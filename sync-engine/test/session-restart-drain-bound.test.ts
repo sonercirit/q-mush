@@ -4,8 +4,8 @@ import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
 import {
   createSessionRuntimes,
-  type SessionRuntimes,
   type RestartRequest,
+  type SessionRuntimes,
 } from "../../sync-engine/session-runtime.ts";
 import {
   createSessionRestartTestClock,

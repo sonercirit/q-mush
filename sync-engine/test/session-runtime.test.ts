@@ -2,9 +2,9 @@ import { describe, expect, test } from "vitest";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import {
   createSessionRuntimes,
-  type SessionRuntimes,
   type RestartRequest,
   type RestartScope,
+  type SessionRuntimes,
 } from "../../sync-engine/session-runtime.ts";
 
 interface DeferredRuntime {

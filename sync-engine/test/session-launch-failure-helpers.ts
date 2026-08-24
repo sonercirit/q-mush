@@ -11,7 +11,10 @@ import {
   type SessionFinisher,
 } from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
-import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import type { CompactionStoreSetup } from "./session-compaction-test-helpers.ts";

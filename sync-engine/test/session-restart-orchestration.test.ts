@@ -22,7 +22,10 @@ import type {
   RestartHandoffIdentity,
   RestartHandoffSettlement,
 } from "../../sync-engine/session-restart-store.ts";
-import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,

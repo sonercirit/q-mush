@@ -12,7 +12,10 @@ import { startManualSessionCompaction } from "../../sync-engine/session-compacti
 import { createValidatedSession } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { queueSessionForUser } from "../../sync-engine/session-queue.ts";
-import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import {
   createTestProviderCredential,
   TEST_AUTHENTICATED_USER,

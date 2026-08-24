@@ -11,10 +11,10 @@ import type {
   SessionNotification,
 } from "./session-creation.ts";
 import type {
-  RestartHandoffStore,
   InvalidRestartSession,
   PendingRestartSession,
   RestartHandoffIdentity,
+  RestartHandoffStore,
 } from "./session-restart-store.ts";
 import {
   sessionRunnerIsAvailable,

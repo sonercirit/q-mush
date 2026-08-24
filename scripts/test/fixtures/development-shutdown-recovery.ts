@@ -172,7 +172,12 @@ if (mode === "start" || mode === "start-no-ack") {
   interrupted.failInvalid(now);
   interrupted.restore(now);
   const settings = () => DEFAULT_TOOL_SETTINGS;
-  const store = createSessionStore(database, undefined, settings, emptyRuntimes);
+  const store = createSessionStore(
+    database,
+    undefined,
+    settings,
+    emptyRuntimes,
+  );
   store.failInterrupted(now + 1);
   const detail = store.get(state.userId, state.sessionId);
   if (detail === undefined) {

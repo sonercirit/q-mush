@@ -4,7 +4,10 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { runners, users } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { createSessionStore, type SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,

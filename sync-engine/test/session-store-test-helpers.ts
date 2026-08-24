@@ -1,6 +1,9 @@
 import type { AppDatabase } from "../../shared/database.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { createSessionStore, type SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,

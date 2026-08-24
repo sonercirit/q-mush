@@ -1,5 +1,5 @@
-import type { AppDatabase } from "../../shared/database.ts";
 import { expect, vi } from "vitest";
+import type { AppDatabase } from "../../shared/database.ts";
 import type { SessionAgentActionsDependencies } from "../session-agent-actions-dependencies.ts";
 import { createSessionAgentActions } from "../session-agent-actions.ts";
 import type { SessionStore } from "../session-store.ts";

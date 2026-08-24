@@ -15,7 +15,10 @@ import {
   type RunnerDirectoryRequest,
   type SessionRequestHelpers,
 } from "../../sync-engine/session-request-helpers.ts";
-import { createSessionStore, type SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedTestContext,
   createAuthenticatedTestDatabase,
@@ -51,15 +54,24 @@ function testSession(): AgentSessionDetail {
   };
 }
 
-function createCurrentSessionStore(): Pick<SessionStore, "executionIsCurrent" | "get"> {
+function createCurrentSessionStore(): Pick<
+  SessionStore,
+  "executionIsCurrent" | "get"
+> {
   return {
     get: (userId, sessionId) => {
       const session = testSession();
-      return userId === TEST_USER_ID && sessionId === session.id ? session : undefined;
+      return userId === TEST_USER_ID && sessionId === session.id
+        ? session
+        : undefined;
     },
     executionIsCurrent: (userId, sessionId, generation) => {
       const session = testSession();
-      return userId === TEST_USER_ID && sessionId === session.id && generation === session.generation;
+      return (
+        userId === TEST_USER_ID &&
+        sessionId === session.id &&
+        generation === session.generation
+      );
     },
   };
 }
@@ -241,7 +253,12 @@ test("agent directory browsing passes parent identity, authorization, and signal
   );
   const database = createAuthenticatedTestDatabase();
   const store = {
-    ...createSessionStore(database, undefined, () => DEFAULT_TOOL_SETTINGS, emptyRuntimes),
+    ...createSessionStore(
+      database,
+      undefined,
+      () => DEFAULT_TOOL_SETTINGS,
+      emptyRuntimes,
+    ),
     ...createCurrentSessionStore(),
   };
   const session = testSession();
