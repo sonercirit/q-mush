@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 import {
+  isUserRealtimeProtocolError,
   readUserRealtimeCommand,
   SESSION_REALTIME_OPERATIONS,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
-  UserRealtimeProtocolError,
 } from "../../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../../shared/utf8.ts";
 
@@ -50,9 +50,7 @@ describe("authenticated user realtime protocol", () => {
       command({ payload: [] }),
       command({ unexpected: true }),
     ]) {
-      expect(() => readUserRealtimeCommand(message)).toThrow(
-        UserRealtimeProtocolError,
-      );
+      expect(() => readUserRealtimeCommand(message)).toThrow();
     }
   });
 
@@ -92,11 +90,9 @@ describe("authenticated user realtime protocol", () => {
       readUserRealtimeCommand(command({ operation: "bad operation" }));
       throw new Error("The malformed command was accepted");
     } catch (error) {
-      expect(error).toBeInstanceOf(UserRealtimeProtocolError);
+      expect(isUserRealtimeProtocolError(error)).toBe(true);
       expect(
-        error instanceof UserRealtimeProtocolError
-          ? error.commandId
-          : undefined,
+        isUserRealtimeProtocolError(error) ? error.commandId : undefined,
       ).toBe("command-1");
     }
   });

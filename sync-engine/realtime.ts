@@ -3,10 +3,10 @@ import { createUuidV7 } from "../shared/ids.ts";
 import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import {
+  isUserRealtimeProtocolError,
   readUserRealtimeCommand,
   RealtimeCommandError,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
-  UserRealtimeProtocolError,
 } from "../shared/user-realtime-protocol.ts";
 import type { EngineHealth } from "./engine-health.ts";
 import {
@@ -408,7 +408,7 @@ export function createRealtimeIntegration(
           command = readUserRealtimeCommand(message);
         } catch (error) {
           if (
-            error instanceof UserRealtimeProtocolError &&
+            isUserRealtimeProtocolError(error) &&
             handleToolStreamSync({
               commandError: error,
               hub: options.hub,
@@ -422,7 +422,7 @@ export function createRealtimeIntegration(
             return;
           }
           if (
-            error instanceof UserRealtimeProtocolError &&
+            isUserRealtimeProtocolError(error) &&
             error.commandId !== undefined
           ) {
             sendCommandError(socket, error.commandId, "invalid_command");
