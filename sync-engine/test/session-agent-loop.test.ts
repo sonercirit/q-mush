@@ -4,7 +4,7 @@ import type {
   CompactedConversation,
 } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   abortedSignal,
   compacted,
@@ -29,7 +29,7 @@ import {
 import { promiseGate } from "./session-race-test-helpers.ts";
 
 function recoveredModel(content = "Must wait for explicit recovery.") {
-  return new ScriptedAgentModel([{ content, toolCalls: [] }]);
+  return createScriptedAgentModel([{ content, toolCalls: [] }]);
 }
 
 function recordedToolTurn(toolCalls: readonly unknown[]) {
@@ -46,7 +46,7 @@ function expectNoCompaction(
 
 describe("compacting agent session loop", () => {
   test("automatically compacts at 95% before the next model request", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Reading the project.",
         contextTokens: 95_000,
@@ -119,7 +119,7 @@ describe("compacting agent session loop", () => {
   });
 
   test("compacts and continues a final step that reaches 95%", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       highStep("Done before compaction."),
       highStep("Done after compaction.", 96_000),
     ]);
@@ -169,7 +169,7 @@ describe("compacting agent session loop", () => {
     // The provider already filled the model's window; summarizing the same
     // transcript would meet the same wall, so the soft stop must settle as
     // a completed (noticed) answer rather than convert into a failure.
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         ...highStep("Truncated terminal answer.", 99_000),
         truncation: "model_context_window_exceeded" as const,
@@ -203,7 +203,7 @@ describe("compacting agent session loop", () => {
   });
 
   test("ignores stale high usage after the compacted handoff", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       highStep("Before compaction."),
       highStep("After compaction.", 96_000),
     ]);
@@ -224,7 +224,7 @@ describe("compacting agent session loop", () => {
 
   test("allows later compaction after post-handoff tool progress", async () => {
     const firstToolCall = { ...TOOL_CALL, id: "call-2" };
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       highStep("First phase done."),
       {
         content: "Progress after the handoff.",
@@ -272,7 +272,7 @@ describe("compacting agent session loop", () => {
       },
       toolMessage(TOOL_CALL.id, "Durable tool result"),
     ];
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Recovered after compaction.", toolCalls: [] },
     ]);
     const compactedConversations: unknown[] = [];
@@ -336,7 +336,7 @@ describe("compacting agent session loop", () => {
   });
 
   test("does not pre-compact recovered context below the threshold", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Recovered normally.", toolCalls: [] },
     ]);
     let compactorRequests = 0;
@@ -361,7 +361,7 @@ describe("compacting agent session loop", () => {
       runTestLoop({
         createCompactor: () => compactor,
         handoffRequested: () => true,
-        model: new ScriptedAgentModel([]),
+        model: createScriptedAgentModel([]),
         signal: abortedSignal(),
       }),
     );
@@ -369,7 +369,7 @@ describe("compacting agent session loop", () => {
 
   test("hands off a tool step before pending compaction or another model request", async () => {
     const toolCalls = [TOOL_CALL, { ...TOOL_CALL, id: "call-2" }];
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Finish these tools.",
         contextTokens: 95_000,
@@ -412,7 +412,7 @@ describe("compacting agent session loop", () => {
 
   test("completes when restart becomes pending during durable terminal persistence", async () => {
     const persistence = promiseGate();
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       highStep("Persisted terminal response."),
       highStep("Must not run after restart."),
     ]);
@@ -444,7 +444,7 @@ describe("compacting agent session loop", () => {
   test("completes when restart becomes pending during terminal compaction", async () => {
     const compactor = promiseGate<CompactedConversation>();
     const compactionPersistence = promiseGate();
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       highStep("Durable terminal response."),
       highStep("Must not run after restart."),
     ]);
@@ -585,7 +585,7 @@ describe("compacting agent session loop", () => {
         compact: () => Promise.reject(new Error("No compaction expected")),
       }),
       maxContextTokens: null,
-      model: new ScriptedAgentModel([
+      model: createScriptedAgentModel([
         {
           content: "Persist this provider step.",
           contextTokens: 10,
@@ -613,7 +613,7 @@ describe("compacting agent session loop", () => {
   });
 
   test("does not compact a full context when automatic compaction is off", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Inspecting despite high usage.",
         contextTokens: 99_000,

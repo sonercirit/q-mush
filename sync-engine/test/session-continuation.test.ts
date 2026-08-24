@@ -3,7 +3,7 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   closeContinuationSetup,
   compactionStep,
@@ -195,7 +195,7 @@ describe("session continuation", () => {
       content: "Configured limits complete.",
       toolCalls: [],
     };
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Reading.",
         toolCalls: [
@@ -236,7 +236,7 @@ describe("session continuation", () => {
   });
 
   test("spawns a session, executes tools on its runner, and accepts follow-ups", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Reading the file.",
         contextTokens: 12_345,

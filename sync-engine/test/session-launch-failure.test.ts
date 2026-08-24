@@ -13,7 +13,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   closeCompactionStore,
   pauseRestartStore,
@@ -190,7 +190,7 @@ test.each([
 );
 
 test("startup queued-session recovery launches a marker-less row", async () => {
-  const model = new ScriptedAgentModel([
+  const model = createScriptedAgentModel([
     providerStep("Recovered after restart."),
   ]);
   const initial = connectedSessionSetup(model);

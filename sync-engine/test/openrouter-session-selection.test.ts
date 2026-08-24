@@ -25,7 +25,7 @@ import {
   openRouterSessionMetadataSelection,
   TEST_OPENROUTER_PROVIDER_CATALOG,
 } from "./openrouter-provider-catalog-fixture.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,
@@ -218,7 +218,7 @@ function selectedSessionRow(setup: ReturnType<typeof connectedSessionSetup>) {
 
 describe("OpenRouter provider selection integration", () => {
   test("discovers in scope and persists an explicitly selected provider", async () => {
-    const model = new ScriptedAgentModel([{ content: "Done.", toolCalls: [] }]);
+    const model = createScriptedAgentModel([{ content: "Done.", toolCalls: [] }]);
     const setup = sessionSetupWithOpenRouter(model, () =>
       Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG),
     );
@@ -241,7 +241,7 @@ describe("OpenRouter provider selection integration", () => {
   test("rejects discovery for a credential outside the workspace scope", async () => {
     let discoveryCalls = 0;
     const setup = connectedSessionSetup(
-      new ScriptedAgentModel([]),
+      createScriptedAgentModel([]),
       "api_key",
       undefined,
       {
@@ -270,7 +270,7 @@ describe("OpenRouter provider selection integration", () => {
 
   test("preserves selection through follow-ups, continuation, and manual compaction", async () => {
     const setup = sessionSetupWithOpenRouter(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         { content: "Initial complete.", toolCalls: [] },
         { content: "Follow-up complete.", toolCalls: [] },
         { content: "Continue complete.", toolCalls: [] },
@@ -294,7 +294,7 @@ describe("OpenRouter provider selection integration", () => {
 
   test("keeps selection on automatic compaction and continuation", async () => {
     const setup = connectedSessionSetup(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         {
           content: "Work before compaction.",
           contextTokens: 95_000,
@@ -330,7 +330,7 @@ describe("OpenRouter provider selection integration", () => {
 
   test("does not gate automatic routing on endpoint discovery", async () => {
     const setup = sessionSetupWithOpenRouter(
-      new ScriptedAgentModel([{ content: "Done.", toolCalls: [] }]),
+      createScriptedAgentModel([{ content: "Done.", toolCalls: [] }]),
       () => Promise.reject(new Error("offline")),
     );
 
@@ -343,7 +343,7 @@ describe("OpenRouter provider selection integration", () => {
 
   test("revalidates a selected provider before credential reassignment", async () => {
     const discovered: string[] = [];
-    const model = new ScriptedAgentModel([]);
+    const model = createScriptedAgentModel([]);
     const setup = connectedSessionSetup(model);
     addReassignmentCredential(setup, SOURCE_CREDENTIAL_ID);
     addReassignmentCredential(setup, TARGET_CREDENTIAL_ID);

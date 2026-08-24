@@ -9,8 +9,9 @@ import { ProviderCredentialReauthenticationRequiredError } from "../../sync-engi
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
+  createFakeProviderSockets,
   COMPLETED_EVENT,
-  FakeProviderSockets,
+  type FakeProviderSockets,
   OPENAI_AUTHENTICATION_ERROR_EVENT,
   openAndRejectProviderSocket,
   requireProviderSocket,
@@ -105,7 +106,7 @@ function refreshSetup(
   >;
   readonly sockets: FakeProviderSockets;
 } {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const refreshCredential = vi.fn(successfulRefresh);
   const pending = model({ credential, refreshCredential, sockets }).complete(
     USER_MESSAGE,
@@ -178,7 +179,7 @@ describe("OpenAI OAuth unauthorized recovery", () => {
 
   test("clears partial output before retrying with the refreshed token", async () => {
     const deltas: ProviderTextDelta[] = [];
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const pending = model({
       onDelta: (delta) => deltas.push(delta),
       refreshCredential: successfulRefresh,
@@ -235,7 +236,7 @@ describe("OpenAI OAuth unauthorized recovery", () => {
   });
 
   test("surfaces a terminal refresh rejection as an explicit re-login error", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const refreshCredential = vi.fn(() =>
       Promise.reject(
         new ProviderCredentialReauthenticationRequiredError("OpenAI", 401),

@@ -19,7 +19,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completingTestBroker,
   IDLE_RUNTIME_SIGNALS,
@@ -114,7 +114,7 @@ describe("session Anthropic model resolution", () => {
         },
         TEST_NOW + 2,
       );
-      const model = new ScriptedAgentModel([
+      const model = createScriptedAgentModel([
         { content: "Reloaded completion", toolCalls: [] },
       ]);
       const runtime = {
