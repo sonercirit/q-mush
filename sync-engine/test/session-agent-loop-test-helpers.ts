@@ -8,7 +8,10 @@ import type {
   CompactedConversation,
 } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
-import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+} from "./scripted-agent-model.ts";
 import type { PromiseGate } from "./session-race-test-helpers.ts";
 
 export const STEP_TOKEN_USAGE = {

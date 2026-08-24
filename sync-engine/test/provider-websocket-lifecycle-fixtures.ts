@@ -2,11 +2,11 @@ import { expect } from "vitest";
 import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
-  createFakeProviderSockets,
   apiKeyModel,
   complete,
   COMPLETED_EVENT,
   completeProviderSocket,
+  createFakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 

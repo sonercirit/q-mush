@@ -9,12 +9,12 @@ import { ProviderCredentialReauthenticationRequiredError } from "../../sync-engi
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
-  createFakeProviderSockets,
   COMPLETED_EVENT,
-  type FakeProviderSockets,
+  createFakeProviderSockets,
   OPENAI_AUTHENTICATION_ERROR_EVENT,
   openAndRejectProviderSocket,
   requireProviderSocket,
+  type FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 

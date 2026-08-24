@@ -11,7 +11,10 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { TEST_COMPACTION_HANDOFF_INSTRUCTION } from "./compaction-test-fixtures.ts";
-import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+} from "./scripted-agent-model.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,

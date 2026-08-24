@@ -22,10 +22,18 @@ export function createRecordingTestSocket(
   const closeEvent = options.closeEvent ?? (() => new Event("close"));
 
   const state = {
-    get readyState(): number { return readyState; },
-    set readyState(value: number) { readyState = value; },
-    get throwOnSend(): boolean { return throwOnSend; },
-    set throwOnSend(value: boolean) { throwOnSend = value; },
+    get readyState(): number {
+      return readyState;
+    },
+    set readyState(value: number) {
+      readyState = value;
+    },
+    get throwOnSend(): boolean {
+      return throwOnSend;
+    },
+    set throwOnSend(value: boolean) {
+      throwOnSend = value;
+    },
   };
   const result = Object.assign(socket, state, {
     close(): void {
@@ -45,8 +53,18 @@ export function createRecordingTestSocket(
   });
   Object.defineProperties(result, Object.getOwnPropertyDescriptors(state));
   Object.defineProperties(result, {
-    readyState: { get: () => readyState, set: (value: number) => { readyState = value; } },
-    throwOnSend: { get: () => throwOnSend, set: (value: boolean) => { throwOnSend = value; } },
+    readyState: {
+      get: () => readyState,
+      set: (value: number) => {
+        readyState = value;
+      },
+    },
+    throwOnSend: {
+      get: () => throwOnSend,
+      set: (value: boolean) => {
+        throwOnSend = value;
+      },
+    },
   });
   return result;
 }

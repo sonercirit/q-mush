@@ -40,7 +40,11 @@ export function createDeferredAgentModel(): DeferredAgentModel {
       return result.promise;
     },
     requests,
-    resolve(step): void { result.resolve(step); },
-    resolveContent(content): void { result.resolve(terminalAgentStep(content)); },
+    resolve(step): void {
+      result.resolve(step);
+    },
+    resolveContent(content): void {
+      result.resolve(terminalAgentStep(content));
+    },
   };
 }

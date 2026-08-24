@@ -1,6 +1,9 @@
 import { expect, vi } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
-import { createRecordingTestSocket, type RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+import {
+  createRecordingTestSocket,
+  type RecordingTestSocket,
+} from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ModelRequestSleep } from "../../sync-engine/agent-model-retry.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
@@ -77,12 +80,24 @@ export function createFakeProviderSocket(
   };
 
   const state = {
-    get closeCode(): number | undefined { return closeCode; },
-    set closeCode(value: number | undefined) { closeCode = value; },
-    get closeCount(): number { return closeCount; },
-    set closeCount(value: number) { closeCount = value; },
-    get closeReason(): string | undefined { return closeReason; },
-    set closeReason(value: string | undefined) { closeReason = value; },
+    get closeCode(): number | undefined {
+      return closeCode;
+    },
+    set closeCode(value: number | undefined) {
+      closeCode = value;
+    },
+    get closeCount(): number {
+      return closeCount;
+    },
+    set closeCount(value: number) {
+      closeCount = value;
+    },
+    get closeReason(): string | undefined {
+      return closeReason;
+    },
+    set closeReason(value: string | undefined) {
+      closeReason = value;
+    },
   };
   const result = Object.assign(socket, state, {
     addEventListener(
@@ -121,9 +136,24 @@ export function createFakeProviderSocket(
   });
   Object.defineProperties(result, Object.getOwnPropertyDescriptors(state));
   Object.defineProperties(result, {
-    closeCode: { get: () => closeCode, set: (value: number | undefined) => { closeCode = value; } },
-    closeCount: { get: () => closeCount, set: (value: number) => { closeCount = value; } },
-    closeReason: { get: () => closeReason, set: (value: string | undefined) => { closeReason = value; } },
+    closeCode: {
+      get: () => closeCode,
+      set: (value: number | undefined) => {
+        closeCode = value;
+      },
+    },
+    closeCount: {
+      get: () => closeCount,
+      set: (value: number) => {
+        closeCount = value;
+      },
+    },
+    closeReason: {
+      get: () => closeReason,
+      set: (value: string | undefined) => {
+        closeReason = value;
+      },
+    },
   });
   return result;
 }

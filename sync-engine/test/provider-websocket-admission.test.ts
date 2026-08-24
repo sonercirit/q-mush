@@ -1,10 +1,10 @@
 import { expect, test } from "vitest";
 import {
-  createFakeProviderSockets,
   acknowledgeProviderSocket,
   apiKeyModel,
   complete,
   completeProviderSocket,
+  createFakeProviderSockets,
   replaceProviderSocket,
   requireProviderSocket,
   retryingSocket,

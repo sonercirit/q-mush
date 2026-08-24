@@ -7,7 +7,10 @@ import {
   type RunnerStartupConnection,
   type RunnerStartupRestart,
 } from "../../runner/runner-update.ts";
-import { createRecordingTestSocket, type RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+import {
+  createRecordingTestSocket,
+  type RecordingTestSocket,
+} from "../../shared/test/websocket-fixtures.ts";
 
 interface RegistrationSetup {
   readonly connection: RunnerStartupConnection;

@@ -8,8 +8,8 @@ import {
   codexOAuthCredential,
 } from "./prompt-cache-fixtures.ts";
 import {
-  createFakeProviderSockets,
   completedEventResponse,
+  createFakeProviderSockets,
   failWebSocketAttempts,
 } from "./provider-recovery-fixtures.ts";
 

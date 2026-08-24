@@ -17,8 +17,8 @@ import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 import {
   createFakeProviderSockets,
   failWebSocketAttempts,
-  type FakeProviderSockets,
   recordDelay,
+  type FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 
 const FIRST_REQUEST_ID = "d128368f-4052-4f00-9233-61153d3f5953";

@@ -3,7 +3,10 @@ import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
-import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+} from "./scripted-agent-model.ts";
 import {
   closeContinuationSetup,
   compactionStep,

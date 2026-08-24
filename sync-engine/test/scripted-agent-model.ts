@@ -55,12 +55,19 @@ export function createScriptedAgentModel(
       const { requestCount } = recordAgentModelRequest(requests, messages);
       await options.onComplete?.(requestCount);
       const step = pendingSteps.shift();
-      if (step === undefined) throw new Error("The scripted model ran out of steps");
+      if (step === undefined)
+        throw new Error("The scripted model ran out of steps");
       return step;
     },
     requests,
-    startStep(): void { stepStarts += 1; },
-    get stepStarts(): number { return stepStarts; },
-    set stepStarts(value: number) { stepStarts = value; },
+    startStep(): void {
+      stepStarts += 1;
+    },
+    get stepStarts(): number {
+      return stepStarts;
+    },
+    set stepStarts(value: number) {
+      stepStarts = value;
+    },
   };
 }

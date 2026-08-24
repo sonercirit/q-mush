@@ -3,13 +3,13 @@ import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { ProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
-  createFakeProviderSocket,
-  createFakeProviderSockets,
   acknowledgeProviderSocket,
   apiKeyModel,
   chatCompletedResponse,
   complete,
   COMPLETED_EVENT,
+  createFakeProviderSocket,
+  createFakeProviderSockets,
   expectBoundedHttpFallback,
   expectProviderSocketReleased,
   expireProviderSocket,

@@ -25,7 +25,10 @@ import {
   openRouterSessionMetadataSelection,
   TEST_OPENROUTER_PROVIDER_CATALOG,
 } from "./openrouter-provider-catalog-fixture.ts";
-import { createScriptedAgentModel, type ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+} from "./scripted-agent-model.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,
@@ -218,7 +221,9 @@ function selectedSessionRow(setup: ReturnType<typeof connectedSessionSetup>) {
 
 describe("OpenRouter provider selection integration", () => {
   test("discovers in scope and persists an explicitly selected provider", async () => {
-    const model = createScriptedAgentModel([{ content: "Done.", toolCalls: [] }]);
+    const model = createScriptedAgentModel([
+      { content: "Done.", toolCalls: [] },
+    ]);
     const setup = sessionSetupWithOpenRouter(model, () =>
       Promise.resolve(TEST_OPENROUTER_PROVIDER_CATALOG),
     );
