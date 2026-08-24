@@ -5,7 +5,7 @@ import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
-import { SessionLivenessWatchdog } from "../../sync-engine/session-liveness-watchdog.ts";
+import { createSessionLivenessWatchdogState } from "../../sync-engine/session-liveness-watchdog.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import { notifySessionSteeringInput } from "../../sync-engine/session-steering-wakeup.ts";
@@ -58,13 +58,13 @@ export function closeSetup(
 export function watchdogSetup(
   setup: Pick<ReturnType<typeof createStore>, "database" | "store">,
   options: {
-    readonly actions?: ConstructorParameters<
-      typeof SessionLivenessWatchdog
+    readonly actions?: Parameters<
+      typeof createSessionLivenessWatchdogState
     >[0]["actions"];
     readonly allowUnsafeTestTiming?: boolean;
     readonly broker?: RunnerCommandBroker;
-    readonly cleanup?: ConstructorParameters<
-      typeof SessionLivenessWatchdog
+    readonly cleanup?: Parameters<
+      typeof createSessionLivenessWatchdogState
     >[0]["cleanup"];
     readonly graceMs?: number;
     readonly runtimes?: SessionRuntimes;
@@ -79,7 +79,7 @@ export function watchdogSetup(
     database: setup.database,
     generateId: () => "watchdog-handoff-message",
   });
-  const watchdog = new SessionLivenessWatchdog({
+  const watchdog = createSessionLivenessWatchdogState({
     actions: options.actions ?? { finished, reportAll, stopChildren },
     allowUnsafeTestTiming: options.allowUnsafeTestTiming ?? true,
     broker: options.broker ?? new RunnerCommandBroker(),
