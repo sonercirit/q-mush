@@ -207,6 +207,8 @@ export function createSessionRequestHelpers(
         browseSignal,
       );
     } catch (error) {
+      // Browser disconnects and the route deadline cancel the broker command.
+      // The HTTP boundary must still settle with its normal browse error.
       if (!browseSignal.aborted) throw error;
       result = { status: "directory_unavailable" };
     }

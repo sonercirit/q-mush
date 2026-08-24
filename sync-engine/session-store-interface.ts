@@ -221,7 +221,11 @@ interface SessionStoreLineage {
     now: number,
     generation: number,
   ): boolean;
-  /** * Administrative/test helper that intentionally targets the current generation. * Runtime code must use the generation-required methods above. */ appendCurrentAgentMessage: (
+  /**
+   * Administrative/test helper that intentionally targets the current generation.
+   * Runtime code must use the generation-required methods above.
+   */
+  appendCurrentAgentMessage: (
     sessionId: string,
     message: AgentRecordedMessage,
     now: number,

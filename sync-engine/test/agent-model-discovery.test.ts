@@ -405,11 +405,23 @@ describe("agent model discovery", () => {
   });
 });
 
-test("inherited model metadata keys are not treated as present", () => {
-  const metadata: Record<string, unknown> = { id: "inherited-metadata" };
-  Object.setPrototypeOf(metadata, { toString: 16_384 });
+test("inherited direct and nested model metadata keys are not treated as present", () => {
+  const nested: Record<string, unknown> = {};
+  Object.setPrototypeOf(nested, { toString: 16_384 });
+  const nestedMetadata: Record<string, unknown> = {
+    capabilities: nested,
+    id: "inherited-nested-metadata",
+  };
+  const directMetadata: Record<string, unknown> = {
+    id: "inherited-direct-metadata",
+  };
+  Object.setPrototypeOf(directMetadata, { toString: 16_384 });
 
+  const candidateKeys = ["toString"];
   expect(
-    modelOption(metadata, "id", "name", [], ["toString"])?.contextWindow,
+    modelOption(nestedMetadata, "id", "name", [], candidateKeys)?.contextWindow,
+  ).toBeNull();
+  expect(
+    modelOption(directMetadata, "id", "name", [], candidateKeys)?.contextWindow,
   ).toBeNull();
 });

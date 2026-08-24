@@ -62,6 +62,8 @@ function providerAttachmentInput(
   );
 }
 
+// A cached message switches its text to content parts so an Anthropic-style
+// cache_control marker can ride on the final part.
 function chatContent(
   content: string | null,
   parts: readonly unknown[] | undefined,
