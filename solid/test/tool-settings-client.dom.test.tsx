@@ -26,7 +26,9 @@ function loadedState(settings: ToolSettings): ToolSettingsViewState {
 }
 
 function settingsController(settings: ToolSettings): ToolSettingsController {
-  return createToolSettingsController(createReactiveState(loadedState(settings)));
+  return createToolSettingsController(
+    createReactiveState(loadedState(settings)),
+  );
 }
 
 function testSettings(

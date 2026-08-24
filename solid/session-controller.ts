@@ -57,7 +57,10 @@ import {
 } from "./session-controller-transcript.ts";
 import { selectedDraftOption } from "./session-form.ts";
 import { loadSessionHistoryPage } from "./session-history-controller.ts";
-import { createSessionModelController, type SessionModelController } from "./session-model-controller.ts";
+import {
+  createSessionModelController,
+  type SessionModelController,
+} from "./session-model-controller.ts";
 import {
   continueSessionMutation,
   sendSessionMutation,

@@ -39,7 +39,9 @@ export interface ToolSettingsController {
 }
 
 export function createToolSettingsController(
-  view: ReactiveState<ToolSettingsViewState> = createReactiveState(initialState()),
+  view: ReactiveState<ToolSettingsViewState> = createReactiveState(
+    initialState(),
+  ),
 ): ToolSettingsController {
   const state = new ControllerState(view);
   return {
@@ -51,27 +53,27 @@ export function createToolSettingsController(
     },
     apply(settings) {
       state.reset({
-      ...state.value,
-      error: undefined,
-      loading: false,
-      settings,
+        ...state.value,
+        error: undefined,
+        loading: false,
+        settings,
       });
     },
     load() {
       return state
         .load({
-        failure: () => ({
-          error: "We could not load your tool limits.",
-          loading: false,
-          settings: undefined,
-        }),
-        pending: { error: undefined, loading: true },
-        request: () => requestJson(TOOL_SETTINGS_PATH),
-        success: (value) => ({
-          error: undefined,
-          loading: false,
-          settings: parseSettings(value),
-        }),
+          failure: () => ({
+            error: "We could not load your tool limits.",
+            loading: false,
+            settings: undefined,
+          }),
+          pending: { error: undefined, loading: true },
+          request: () => requestJson(TOOL_SETTINGS_PATH),
+          success: (value) => ({
+            error: undefined,
+            loading: false,
+            settings: parseSettings(value),
+          }),
         })
         .then(() => undefined);
     },
@@ -81,14 +83,14 @@ export function createToolSettingsController(
     save(settings) {
       return state.mutate(
         {
-        failure: () => ({
-          error: "We could not save your tool limits.",
-          saving: false,
-        }),
-        init: jsonRequestInit(settings, "PUT"),
-        input: TOOL_SETTINGS_PATH,
-        request: requestJson,
-        success: { error: undefined, saving: false, settings },
+          failure: () => ({
+            error: "We could not save your tool limits.",
+            saving: false,
+          }),
+          init: jsonRequestInit(settings, "PUT"),
+          input: TOOL_SETTINGS_PATH,
+          request: requestJson,
+          success: { error: undefined, saving: false, settings },
         },
         { error: undefined, saving: true },
       );
