@@ -546,20 +546,14 @@ export function appendMarkdownBlocks(
   }
 }
 
+const HEADING_CLASSES: Readonly<Record<number, string>> = {
+  1: "text-lg font-semibold text-white",
+  2: "text-base font-semibold text-white",
+  3: "text-sm font-semibold text-white",
+};
+
 function headingClasses(level: number): string {
-  switch (level) {
-    case 1:
-      return "text-lg font-semibold text-white";
-    case 2:
-      return "text-base font-semibold text-white";
-    case 3:
-      return "text-sm font-semibold text-white";
-    case 4:
-    case 5:
-    case 6:
-    default:
-      return "text-sm font-medium text-slate-100";
-  }
+  return HEADING_CLASSES[level] ?? "text-sm font-medium text-slate-100";
 }
 
 function renderMarkdownList(block: MarkdownListBlock): JSX.Element {

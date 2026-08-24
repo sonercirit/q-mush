@@ -37,32 +37,28 @@ export function modelCredentialValue(
   );
 }
 
+function isProviderId(value: string | undefined): value is ProviderId {
+  return value === "generic" || value === "openai" || value === "openrouter";
+}
+
 export function parseModelCredentialValue(
   value: string,
 ): ModelCredentialIdentity | undefined {
   const [provider, ...identityParts] = value.split(MODEL_CREDENTIAL_DELIMITER);
   const credentialId = identityParts.join(":");
-  if (credentialId.length === 0) return undefined;
-  switch (provider) {
-    case "generic":
-    case "openai":
-    case "openrouter":
-      return { credentialId, provider };
-    case undefined:
-    default:
-      return undefined;
-  }
+  return credentialId.length > 0 && isProviderId(provider)
+    ? { credentialId, provider }
+    : undefined;
 }
 
+const MODEL_PROVIDER_LABELS: Readonly<Record<ProviderId, string>> = {
+  generic: "Generic LLM",
+  openai: "OpenAI",
+  openrouter: "OpenRouter",
+};
+
 export function modelProviderLabel(provider: ProviderId): string {
-  switch (provider) {
-    case "generic":
-      return "Generic LLM";
-    case "openai":
-      return "OpenAI";
-    case "openrouter":
-      return "OpenRouter";
-  }
+  return MODEL_PROVIDER_LABELS[provider];
 }
 
 export function modelCredentialOptions(

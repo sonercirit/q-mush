@@ -132,17 +132,14 @@ export function readCreatedRunner(value: unknown): CreatedRunnerSetup {
   };
 }
 
+const PLATFORM_LABELS: Readonly<Record<string, string>> = {
+  darwin: "macOS",
+  linux: "Linux",
+  win32: "Windows",
+};
+
 function platformLabel(value: string): string {
-  switch (value) {
-    case "darwin":
-      return "macOS";
-    case "linux":
-      return "Linux";
-    case "win32":
-      return "Windows";
-    default:
-      return value;
-  }
+  return PLATFORM_LABELS[value] ?? value;
 }
 
 function runnerDetails(runner: RunnerSummary): string {
