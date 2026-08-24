@@ -3,11 +3,11 @@ import {
   type CredentialCipher,
 } from "../shared/credential-cipher.ts";
 import {
+  createProviderCredentialStore,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderId,
-  createProviderCredentialStore,
 } from "../shared/provider-credential-store.ts";
 import { createProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";

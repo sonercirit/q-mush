@@ -539,12 +539,7 @@ describe("session agent introspection tools", () => {
       })
       .run();
 
-    const page = listModelCredentials(
-      database,
-      TEST_USER_ID,
-      10,
-      10,
-    );
+    const page = listModelCredentials(database, TEST_USER_ID, 10, 10);
     for (let index = 21; index < 100; index += 1) {
       const credentialId = `credential-${String(index).padStart(2, "0")}`;
       addTestProviderCredential(database, credentialId, "openrouter", {

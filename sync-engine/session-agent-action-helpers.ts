@@ -1,8 +1,8 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
-  type ProviderCredentialAccess,
   listActiveModelCredentials,
+  type ProviderCredentialAccess,
 } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,

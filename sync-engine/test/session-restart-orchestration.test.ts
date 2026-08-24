@@ -6,7 +6,10 @@ import type {
 } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";

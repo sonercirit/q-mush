@@ -2,9 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
-import {
-  createProviderCredentialStore,
-} from "../../shared/provider-credential-store.ts";
+import { createProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import {

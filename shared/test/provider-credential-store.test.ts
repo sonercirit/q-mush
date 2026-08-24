@@ -8,10 +8,10 @@ import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
-  isDuplicateProviderCredentialError,
-  type ProviderCredentialStore,
-  type ProviderCredentialAccess,
   createProviderCredentialStore,
+  isDuplicateProviderCredentialError,
+  type ProviderCredentialAccess,
+  type ProviderCredentialStore,
 } from "../../shared/provider-credential-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 

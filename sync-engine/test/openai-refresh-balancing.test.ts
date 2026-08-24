@@ -2,9 +2,7 @@ import { Buffer } from "node:buffer";
 import { describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
-import {
-  createProviderCredentialStore,
-} from "../../shared/provider-credential-store.ts";
+import { createProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import {

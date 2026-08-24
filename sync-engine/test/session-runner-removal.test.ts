@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { captureBrokerRejection } from "../../shared/test/promise-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";

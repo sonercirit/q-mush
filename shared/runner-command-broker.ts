@@ -1,9 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { countRestartProgressTools } from "./restart-progress-tools.ts";
 import type { RestartProgressTool } from "./restart-progress.ts";
-import {
-  createRunnerCommandDelivery,
-} from "./runner-command-delivery.ts";
+import { createRunnerCommandDelivery } from "./runner-command-delivery.ts";
 import {
   abortRunnerCommand,
   ignoreRunnerCommandCleanupError,
@@ -50,35 +48,76 @@ interface RejectedCommand {
 }
 
 export interface RunnerCommandBroker {
-  dispatch(input: DispatchRunnerToolCommand, signal?: AbortSignal, stream?: RunnerCommandStream): Promise<RunnerCommandResult>;
+  dispatch(
+    input: DispatchRunnerToolCommand,
+    signal?: AbortSignal,
+    stream?: RunnerCommandStream,
+  ): Promise<RunnerCommandResult>;
   take(runnerId: string): RunnerToolCommand | undefined;
-  deliverCancellationTombstones(runnerId: string, deliver: (commandId: string) => boolean): boolean;
+  deliverCancellationTombstones(
+    runnerId: string,
+    deliver: (commandId: string) => boolean,
+  ): boolean;
   acknowledgeCancellation(runnerId: string, commandId: string): boolean;
   registerRunnerProcess(runnerId: string, processNonce?: string): boolean;
   commitRunnerProcess(runnerId: string, processNonce?: string): void;
-  deliverRunnerCommands(runnerId: string, processNonce: string | undefined, deliver: (command: RunnerToolCommand) => boolean, deliverCancellation: (commandId: string) => boolean, connectionGeneration?: number): boolean;
-  deliverQueued(runnerId: string, deliver: (command: RunnerToolCommand) => boolean, connectionGeneration?: number, excludedCommandIds?: ReadonlySet<string>): void;
+  deliverRunnerCommands(
+    runnerId: string,
+    processNonce: string | undefined,
+    deliver: (command: RunnerToolCommand) => boolean,
+    deliverCancellation: (commandId: string) => boolean,
+    connectionGeneration?: number,
+  ): boolean;
+  deliverQueued(
+    runnerId: string,
+    deliver: (command: RunnerToolCommand) => boolean,
+    connectionGeneration?: number,
+    excludedCommandIds?: ReadonlySet<string>,
+  ): void;
   isActive(runnerId: string, commandId: string): boolean;
   pendingToolProgress(sessionId: string): readonly RestartProgressTool[];
-  sessionCommandPhase(sessionId: string): "in_flight" | "queued" | "runner_disconnected" | undefined;
-  stream(runnerId: string, commandId: string, delta: RunnerCommandOutputDelta): boolean;
-  complete(runnerId: string, commandId: string, result: RunnerCommandResult): boolean;
+  sessionCommandPhase(
+    sessionId: string,
+  ): "in_flight" | "queued" | "runner_disconnected" | undefined;
+  stream(
+    runnerId: string,
+    commandId: string,
+    delta: RunnerCommandOutputDelta,
+  ): boolean;
+  complete(
+    runnerId: string,
+    commandId: string,
+    result: RunnerCommandResult,
+  ): boolean;
   runnerConnectionGeneration(runnerId: string): number;
-  replaceRunnerConnection(runnerId: string, replacedGeneration?: number): number;
+  replaceRunnerConnection(
+    runnerId: string,
+    replacedGeneration?: number,
+  ): number;
   disconnectRunner(runnerId: string, retry?: boolean): void;
   runnerRemoved(runnerId: string): readonly RejectedCommand[];
-  cancelSessionGeneration(sessionId: string, generation: number): readonly RunnerToolCommand[];
+  cancelSessionGeneration(
+    sessionId: string,
+    generation: number,
+  ): readonly RunnerToolCommand[];
   cancelSessionCommands(sessionId: string): readonly RunnerToolCommand[];
 }
 
-export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = {}): RunnerCommandBroker {
+export function createRunnerCommandBroker(
+  options: RunnerCommandBrokerOptions = {},
+): RunnerCommandBroker {
   const cancelCommand = options.cancel;
   const generateCommandId = options.commandId ?? randomUUID;
   const deliverCommand = options.deliver;
   const pendingCommands = new Map<string, PendingRunnerCommand>();
-  const processRegistrations = new Map<string, Readonly<{ commit: () => void; processNonce: string | undefined }>>();
+  const processRegistrations = new Map<
+    string,
+    Readonly<{ commit: () => void; processNonce: string | undefined }>
+  >();
   const runnerConnectionGenerations = new Map<string, number>();
-  const delivery = createRunnerCommandDelivery((commandId) => pendingCommands.get(commandId));
+  const delivery = createRunnerCommandDelivery((commandId) =>
+    pendingCommands.get(commandId),
+  );
   const survival = createRunnerCommandSurvivalState(options);
   function dispatch(
     input: DispatchRunnerToolCommand,
@@ -272,7 +311,10 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
     return survival.deliverCancellations(runnerId, deliver);
   }
 
-  function acknowledgeCancellation(runnerId: string, commandId: string): boolean {
+  function acknowledgeCancellation(
+    runnerId: string,
+    commandId: string,
+  ): boolean {
     return survival.acknowledgeCancellation(runnerId, commandId);
   }
 
@@ -285,7 +327,10 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
     );
   }
 
-  function runnerProcessMatches(runnerId: string, processNonce?: string): boolean {
+  function runnerProcessMatches(
+    runnerId: string,
+    processNonce?: string,
+  ): boolean {
     if (processNonce === undefined) return false;
     return survival.processMatches(runnerId, processNonce);
   }
@@ -310,7 +355,10 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
     };
   }
 
-  function registerRunnerProcess(runnerId: string, processNonce?: string): boolean {
+  function registerRunnerProcess(
+    runnerId: string,
+    processNonce?: string,
+  ): boolean {
     const sameProcess = runnerProcessMatches(runnerId, processNonce);
     stageRunnerProcess(
       runnerId,
@@ -425,12 +473,12 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
   }
 
   function sessionPending(sessionId: string): PendingRunnerCommand[] {
-    return matchingPending(
-      ({ command }) => command.sessionId === sessionId,
-    );
+    return matchingPending(({ command }) => command.sessionId === sessionId);
   }
 
-  function pendingToolProgress(sessionId: string): readonly RestartProgressTool[] {
+  function pendingToolProgress(
+    sessionId: string,
+  ): readonly RestartProgressTool[] {
     return countRestartProgressTools(
       sessionPending(sessionId).map(({ command }) => command.tool),
     );
@@ -588,7 +636,9 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
     );
   }
 
-  function cancelSessionCommands(sessionId: string): readonly RunnerToolCommand[] {
+  function cancelSessionCommands(
+    sessionId: string,
+  ): readonly RunnerToolCommand[] {
     return cancelMatching(
       (pending) => pending.command.sessionId === sessionId,
       "The agent session was stopped",
@@ -602,7 +652,11 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
     );
   }
 
-  function reject(commandId: string, error: Error, publishCancellation = true): void {
+  function reject(
+    commandId: string,
+    error: Error,
+    publishCancellation = true,
+  ): void {
     const pending = pendingCommands.get(commandId);
     if (pending === undefined) {
       return;
@@ -626,12 +680,27 @@ export function createRunnerCommandBroker(options: RunnerCommandBrokerOptions = 
   }
 
   function settle(commandId: string, pending: PendingRunnerCommand): void {
-    settlePendingRunnerCommand(
-      pendingCommands,
-      delivery,
-      commandId,
-      pending,
-    );
+    settlePendingRunnerCommand(pendingCommands, delivery, commandId, pending);
   }
-  return { dispatch, take, deliverCancellationTombstones, acknowledgeCancellation, registerRunnerProcess, commitRunnerProcess, deliverRunnerCommands, deliverQueued, isActive, pendingToolProgress, sessionCommandPhase, stream, complete, runnerConnectionGeneration, replaceRunnerConnection, disconnectRunner, runnerRemoved, cancelSessionGeneration, cancelSessionCommands };
+  return {
+    dispatch,
+    take,
+    deliverCancellationTombstones,
+    acknowledgeCancellation,
+    registerRunnerProcess,
+    commitRunnerProcess,
+    deliverRunnerCommands,
+    deliverQueued,
+    isActive,
+    pendingToolProgress,
+    sessionCommandPhase,
+    stream,
+    complete,
+    runnerConnectionGeneration,
+    replaceRunnerConnection,
+    disconnectRunner,
+    runnerRemoved,
+    cancelSessionGeneration,
+    cancelSessionCommands,
+  };
 }

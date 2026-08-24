@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
-import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import {
   createAuthenticatedRequest,

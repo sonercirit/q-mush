@@ -1,9 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
 import {
+  createRunnerCommandBroker,
   type RunnerCommandBroker,
   type RunnerCommandResult,
   type RunnerToolCommand,
-  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";

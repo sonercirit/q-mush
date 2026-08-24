@@ -1,5 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {

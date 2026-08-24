@@ -4,7 +4,7 @@ import {
   type AgentModel,
   type AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import {

@@ -7,9 +7,9 @@ import {
 } from "../runner/runner-update.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
+  createRunnerCommandBroker,
   type RunnerCommandBroker,
   type RunnerToolCommand,
-  createRunnerCommandBroker,
 } from "../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import {

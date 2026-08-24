@@ -1,6 +1,9 @@
 import { expect, test, vi } from "vitest";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import {
   RUNNER_DIRECTORY_COMMAND,
   type RunnerDirectoryListing,

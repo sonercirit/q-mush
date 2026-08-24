@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  type RunnerCommandBroker,
+  createRunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import {
   DEFAULT_TOOL_SETTINGS,

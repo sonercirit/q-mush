@@ -1,5 +1,8 @@
 import { expect, vi } from "vitest";
-import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import {
   installDatabaseWriteResilience,

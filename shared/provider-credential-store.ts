@@ -142,28 +142,94 @@ function legacyCredentialSummary(
   };
 }
 
-
-export function listActiveModelCredentials(database: AppDatabase, userId: string, provider: ProviderId, workspaceId?: string): readonly ProviderCredentialSummary[] {
+export function listActiveModelCredentials(
+  database: AppDatabase,
+  userId: string,
+  provider: ProviderId,
+  workspaceId?: string,
+): readonly ProviderCredentialSummary[] {
   return queryActiveModelCredentials(database, userId, provider, workspaceId);
 }
-export function hasActiveModelCredential(database: AppDatabase, userId: string, provider: ProviderId, credentialId: string, workspaceId?: string): boolean {
-  return modelCredentialIsActive(database, userId, provider, credentialId, workspaceId);
+export function hasActiveModelCredential(
+  database: AppDatabase,
+  userId: string,
+  provider: ProviderId,
+  credentialId: string,
+  workspaceId?: string,
+): boolean {
+  return modelCredentialIsActive(
+    database,
+    userId,
+    provider,
+    credentialId,
+    workspaceId,
+  );
 }
-export function listModelCredentials(database: AppDatabase, userId: string, offset: number, limit: number, search?: string, workspaceId?: string): ProviderCredentialPage {
-  const options: ModelCredentialQueryOptions = { pageSize: limit, skip: offset, ...(search === undefined ? {} : { search }), ...(workspaceId === undefined ? {} : { workspaceId }) };
+export function listModelCredentials(
+  database: AppDatabase,
+  userId: string,
+  offset: number,
+  limit: number,
+  search?: string,
+  workspaceId?: string,
+): ProviderCredentialPage {
+  const options: ModelCredentialQueryOptions = {
+    pageSize: limit,
+    skip: offset,
+    ...(search === undefined ? {} : { search }),
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+  };
   return queryModelCredentials(database, userId, options);
 }
 
 export interface ProviderCredentialStore {
-  validateScopes(userId: string, workspaceIds: readonly string[]): readonly string[];
-  add(userId: string, credential: string, details: ProviderCredentialDetails, source: ProviderCredentialSource, now: number, workspaceIds?: readonly string[]): ProviderCredentialSummary;
-  list(userId: string, workspaceId?: string): readonly ProviderCredentialSummary[];
-  read(userId: string, credentialId: string, workspaceId?: string): ProviderCredentialAccess | undefined;
-  readSecret(userId: string, credentialId: string, workspaceId?: string): string | undefined;
-  setScopes(userId: string, credentialId: string, workspaceIds: readonly string[], now: number): boolean;
+  validateScopes(
+    userId: string,
+    workspaceIds: readonly string[],
+  ): readonly string[];
+  add(
+    userId: string,
+    credential: string,
+    details: ProviderCredentialDetails,
+    source: ProviderCredentialSource,
+    now: number,
+    workspaceIds?: readonly string[],
+  ): ProviderCredentialSummary;
+  list(
+    userId: string,
+    workspaceId?: string,
+  ): readonly ProviderCredentialSummary[];
+  read(
+    userId: string,
+    credentialId: string,
+    workspaceId?: string,
+  ): ProviderCredentialAccess | undefined;
+  readSecret(
+    userId: string,
+    credentialId: string,
+    workspaceId?: string,
+  ): string | undefined;
+  setScopes(
+    userId: string,
+    credentialId: string,
+    workspaceIds: readonly string[],
+    now: number,
+  ): boolean;
   setDefault(userId: string, credentialId: string, now: number): boolean;
-  markRequiresReauthentication(userId: string, credentialId: string, now: number): boolean;
-  updateSecret(userId: string, credentialId: string, secret: string, now: number, requireReauthentication?: boolean, accountId?: string, label?: string): boolean;
+  markRequiresReauthentication(
+    userId: string,
+    credentialId: string,
+    now: number,
+  ): boolean;
+  updateSecret(
+    userId: string,
+    credentialId: string,
+    secret: string,
+    now: number,
+    requireReauthentication?: boolean,
+    accountId?: string,
+    label?: string,
+  ): boolean;
   remove(userId: string, credentialId: string, now: number): boolean;
 }
 
@@ -292,7 +358,10 @@ export function createProviderCredentialStore(
       workspaceIds: workspaceIdsForCredential(userId, credential.id),
     }));
   }
-  function workspaceIdsForCredential(userId: string, credentialId: string): readonly string[] {
+  function workspaceIdsForCredential(
+    userId: string,
+    credentialId: string,
+  ): readonly string[] {
     return readConnectionScopes(
       database,
       scopeConfiguration,
@@ -407,7 +476,11 @@ export function createProviderCredentialStore(
       return true;
     });
   }
-  function setDefault(userId: string, credentialId: string, now: number): boolean {
+  function setDefault(
+    userId: string,
+    credentialId: string,
+    now: number,
+  ): boolean {
     let changed = false;
     database.transaction((transaction) => {
       const activeId = matchingCredentialId(
@@ -519,5 +592,16 @@ export function createProviderCredentialStore(
     });
     return true;
   }
-  return { validateScopes, add, list, read, readSecret, setScopes, setDefault, markRequiresReauthentication, updateSecret, remove };
+  return {
+    validateScopes,
+    add,
+    list,
+    read,
+    readSecret,
+    setScopes,
+    setDefault,
+    markRequiresReauthentication,
+    updateSecret,
+    remove,
+  };
 }

@@ -488,7 +488,7 @@ describe("OpenAI credentials", () => {
       }),
     );
 
-    database.$client.exec(`CREATE TRIGGER reject_unexpected_endpoint_reconnect
+    database.$client.run(`CREATE TRIGGER reject_unexpected_endpoint_reconnect
       BEFORE UPDATE OF encrypted_credential ON provider_credentials
       BEGIN SELECT RAISE(ABORT, 'unexpected endpoint reconnect'); END`);
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
@@ -519,7 +519,7 @@ describe("OpenAI credentials", () => {
       "openai-state-eight",
     );
     await expectWrongAccount(integration, missingStoredIdentity);
-    database.$client.exec("DROP TRIGGER reject_unexpected_endpoint_reconnect");
+    database.$client.run("DROP TRIGGER reject_unexpected_endpoint_reconnect");
     database.$client.close();
   });
 
@@ -527,7 +527,7 @@ describe("OpenAI credentials", () => {
     const setup = await setupConnectedCredential();
     const { database, integration, store } = setup;
     const unchangedSecret = markForReconnect(store);
-    database.$client.exec(`CREATE TRIGGER change_account_during_reconnect
+    database.$client.run(`CREATE TRIGGER change_account_during_reconnect
       BEFORE UPDATE OF encrypted_credential ON provider_credentials
       BEGIN UPDATE provider_credentials SET provider_account_id = 'chatgpt-workspace-two'
       WHERE id = '${FIRST_OAUTH_ID}'; END`);

@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import {
   DEFAULT_TOOL_SETTINGS,

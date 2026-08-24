@@ -1,7 +1,7 @@
 import { expect } from "vitest";
 import {
-  type RunnerCommandBroker,
   type DispatchRunnerToolCommand,
+  type RunnerCommandBroker,
   type RunnerCommandResult,
   type RunnerToolCommand,
   createRunnerCommandBroker,
