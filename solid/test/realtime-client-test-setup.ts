@@ -1,6 +1,6 @@
 import { RealtimeConnection } from "../../solid/realtime-client.ts";
 import type { RealtimeClientEvent } from "../../solid/realtime-stream-buffer.ts";
-import { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
+import { createRealtimeTestSocket, type RealtimeTestSocket } from "./realtime-client-fixtures.ts";
 
 const LOCATION = {
   href: "https://qmush.example/app",
@@ -32,7 +32,7 @@ export function realtimeTestSetup(
     {
       clearTimeout: () => undefined,
       createSocket: (url) => {
-        const socket = new RealtimeTestSocket(url);
+        const socket = createRealtimeTestSocket(url);
         sockets.push(socket);
         return socket;
       },

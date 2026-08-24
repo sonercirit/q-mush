@@ -1,47 +1,56 @@
-export class RealtimeTestSocket extends EventTarget {
-  #closed = false;
-  #opened = false;
+export interface RealtimeTestSocket extends EventTarget {
   throwAfter: number | undefined;
-  readonly sent: string[] = [];
+  readonly sent: string[];
   readonly url: string | undefined;
+  readonly readyState: number;
+  readonly close: () => void;
+  readonly open: (instanceId?: string) => void;
+  readonly receive: (value: unknown) => void;
+  readonly send: (message: string) => void;
+}
 
-  constructor(url?: string) {
-    super();
-    this.url = url;
-  }
-
-  get readyState(): number {
-    if (this.#closed) {
-      return WebSocket.CLOSED;
-    }
-    return this.#opened ? WebSocket.OPEN : WebSocket.CONNECTING;
-  }
-
-  close(): void {
-    if (this.#closed) {
-      return;
-    }
-    this.#closed = true;
-    this.dispatchEvent(new Event("close"));
-  }
-
-  open(instanceId?: string): void {
-    this.#opened = true;
-    this.dispatchEvent(new Event("open"));
-    if (instanceId !== undefined) {
-      this.receive({ instanceId, type: "ready" });
-    }
-  }
-
-  receive(value: unknown): void {
-    const data = typeof value === "string" ? value : JSON.stringify(value);
-    this.dispatchEvent(new MessageEvent("message", { data }));
-  }
-
-  send(message: string): void {
-    const shouldFail =
-      this.throwAfter !== undefined && this.sent.length >= this.throwAfter;
-    if (shouldFail) throw new Error("realtime fixture send failure");
-    this.sent.push(message);
-  }
+export function createRealtimeTestSocket(url?: string): RealtimeTestSocket {
+  let closed = false;
+  let opened = false;
+  const events = new EventTarget();
+  const socket: RealtimeTestSocket = {
+    addEventListener: (...arguments_) => {
+      events.addEventListener(...arguments_);
+    },
+    close: () => {
+      if (closed) return;
+      closed = true;
+      socket.dispatchEvent(new Event("close"));
+    },
+    dispatchEvent: (event) => events.dispatchEvent(event),
+    open: (instanceId) => {
+      opened = true;
+      socket.dispatchEvent(new Event("open"));
+      if (instanceId !== undefined) {
+        socket.receive({ instanceId, type: "ready" });
+      }
+    },
+    receive: (value) => {
+      const data = typeof value === "string" ? value : JSON.stringify(value);
+      socket.dispatchEvent(new MessageEvent("message", { data }));
+    },
+    removeEventListener: (...arguments_) => {
+      events.removeEventListener(...arguments_);
+    },
+    send: (message) => {
+      const shouldFail =
+        socket.throwAfter !== undefined &&
+        socket.sent.length >= socket.throwAfter;
+      if (shouldFail) throw new Error("realtime fixture send failure");
+      socket.sent.push(message);
+    },
+    sent: [],
+    throwAfter: undefined,
+    url,
+    get readyState() {
+      if (closed) return WebSocket.CLOSED;
+      return opened ? WebSocket.OPEN : WebSocket.CONNECTING;
+    },
+  };
+  return socket;
 }
