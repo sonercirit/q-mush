@@ -25,30 +25,47 @@ interface CandidateOptions {
   readonly userId: string;
 }
 
-export class ModelCredentialPool {
-  readonly #balancer: CredentialPoolBalancer;
-  readonly #dependencies: ModelCredentialPoolDependencies;
+export interface ModelCredentialPool {
+  readonly candidates: (
+    userId: string,
+    selection: ModelCredentialSelection,
+    signal?: AbortSignal,
+  ) => Promise<readonly ProviderCredentialAccess[]>;
+  readonly reject: (
+    userId: string,
+    selection: ModelCredentialSelection,
+    credentialId: string,
+    error: unknown,
+  ) => boolean;
+  readonly representative: (
+    userId: string,
+    selection: ModelCredentialSelection,
+    signal?: AbortSignal,
+  ) => Promise<readonly ProviderCredentialAccess[]>;
+}
 
-  constructor(
-    dependencies: ModelCredentialPoolDependencies,
-    balancer = new CredentialPoolBalancer(),
-  ) {
-    this.#balancer = balancer;
-    this.#dependencies = dependencies;
-  }
+export function createModelCredentialPool(
+  dependencies: ModelCredentialPoolDependencies,
+  balancer = new CredentialPoolBalancer(),
+): ModelCredentialPool {
+  const poolKey = (
+    userId: string,
+    selection: ModelCredentialSelection,
+  ): string =>
+    [userId, selection.workspaceId ?? "", selection.provider].join(":");
 
-  async #readCandidates(
+  const readCandidates = async (
     userId: string,
     selection: ModelCredentialSelection,
     summaries: readonly { readonly id: string }[],
     pool?: string,
     signal?: AbortSignal,
-  ): Promise<readonly ProviderCredentialAccess[]> {
+  ): Promise<readonly ProviderCredentialAccess[]> => {
     const credentials: ProviderCredentialAccess[] = [];
     for (const summary of summaries) {
       throwIfSignalAborted(signal, "Credential discovery was canceled");
       try {
-        const credential = await this.#dependencies.readCredential(userId, {
+        const credential = await dependencies.readCredential(userId, {
           ...selection,
           credentialId: summary.id,
         });
@@ -57,29 +74,20 @@ export class ModelCredentialPool {
       } catch (error) {
         throwIfSignalAborted(signal, "Credential discovery was canceled");
         if (pool !== undefined && isCredentialRejectionError(error)) {
-          this.#balancer.coolDown(pool, summary.id);
+          balancer.coolDown(pool, summary.id);
         }
       }
     }
     return credentials;
-  }
+  };
 
-  #activeSummaries(userId: string, selection: ModelCredentialSelection) {
-    return ProviderCredentialStore.listActiveModelCredentials(
-      this.#dependencies.database,
-      userId,
-      selection.provider,
-      selection.workspaceId,
-    );
-  }
-
-  async #candidates(
+  const candidates = async (
     options: CandidateOptions,
     balance: boolean,
-  ): Promise<readonly ProviderCredentialAccess[]> {
+  ): Promise<readonly ProviderCredentialAccess[]> => {
     const { selection, signal, userId } = options;
     if (!isBalancedCredentialId(selection.provider, selection.credentialId)) {
-      return this.#readCandidates(
+      return readCandidates(
         userId,
         selection,
         [{ id: selection.credentialId }],
@@ -87,77 +95,51 @@ export class ModelCredentialPool {
         signal,
       );
     }
-    const pool = balance ? this.#poolKey(userId, selection) : undefined;
-    const summaries = this.#activeSummaries(userId, selection);
-    return this.#readCandidates(
+    const pool = balance ? poolKey(userId, selection) : undefined;
+    const summaries = ProviderCredentialStore.listActiveModelCredentials(
+      dependencies.database,
+      userId,
+      selection.provider,
+      selection.workspaceId,
+    );
+    return readCandidates(
       userId,
       selection,
-      pool === undefined ? summaries : this.#balancer.ordered(pool, summaries),
+      pool === undefined ? summaries : balancer.ordered(pool, summaries),
       pool,
       signal,
     );
-  }
+  };
 
-  #candidateOptions(
-    userId: string,
-    selection: ModelCredentialSelection,
-    signal?: AbortSignal,
-  ): CandidateOptions {
-    return {
-      selection,
-      ...(signal === undefined ? {} : { signal }),
-      userId,
-    };
-  }
-
-  async #selectCandidates(
+  const selectCandidates = (
     userId: string,
     selection: ModelCredentialSelection,
     signal: AbortSignal | undefined,
     balance: boolean,
-  ): Promise<readonly ProviderCredentialAccess[]> {
-    return this.#candidates(
-      this.#candidateOptions(userId, selection, signal),
+  ): Promise<readonly ProviderCredentialAccess[]> =>
+    candidates(
+      {
+        selection,
+        ...(signal === undefined ? {} : { signal }),
+        userId,
+      },
       balance,
     );
-  }
 
-  representative(
-    userId: string,
-    selection: ModelCredentialSelection,
-    signal?: AbortSignal,
-  ): Promise<readonly ProviderCredentialAccess[]> {
-    return this.#selectCandidates(userId, selection, signal, false);
-  }
-
-  candidates(
-    ...parameters: readonly [
-      userId: string,
-      selection: ModelCredentialSelection,
-      signal?: AbortSignal,
-    ]
-  ): Promise<readonly ProviderCredentialAccess[]> {
-    const [userId, selection, signal] = parameters;
-    return this.#selectCandidates(userId, selection, signal, true);
-  }
-
-  reject(
-    userId: string,
-    selection: ModelCredentialSelection,
-    credentialId: string,
-    error: unknown,
-  ): boolean {
-    if (
-      !isBalancedCredentialId(selection.provider, selection.credentialId) ||
-      !isCredentialRejectionError(error)
-    ) {
-      return false;
-    }
-    this.#balancer.coolDown(this.#poolKey(userId, selection), credentialId);
-    return true;
-  }
-
-  #poolKey(userId: string, selection: ModelCredentialSelection): string {
-    return [userId, selection.workspaceId ?? "", selection.provider].join(":");
-  }
+  return {
+    candidates: (userId, selection, signal) =>
+      selectCandidates(userId, selection, signal, true),
+    reject: (userId, selection, credentialId, error) => {
+      if (
+        !isBalancedCredentialId(selection.provider, selection.credentialId) ||
+        !isCredentialRejectionError(error)
+      ) {
+        return false;
+      }
+      balancer.coolDown(poolKey(userId, selection), credentialId);
+      return true;
+    },
+    representative: (userId, selection, signal) =>
+      selectCandidates(userId, selection, signal, false),
+  };
 }

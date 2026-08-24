@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import { createModelCredentialPool } from "../model-credential-pool.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import {
   createAuthenticatedTestContext,
@@ -99,7 +99,7 @@ function refreshPool(
       now: () => TEST_NOW,
     },
   );
-  const pool = new ModelCredentialPool({
+  const pool = createModelCredentialPool({
     database,
     readCredential: (userId, selection) =>
       integration.readCredential(

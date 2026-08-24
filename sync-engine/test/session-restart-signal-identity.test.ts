@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import { createModelCredentialPool } from "../model-credential-pool.ts";
 import { sessionAgentOptions } from "../session-agent-options-action.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
 import { createSessionWithCredentialPool } from "../session-realtime-create.ts";
@@ -110,7 +110,7 @@ test("recovery replacement cannot create a child", async () => {
     database: poolSetup.database,
     readCredential: () => Promise.resolve(credential),
   };
-  const pool = new ModelCredentialPool(
+  const pool = createModelCredentialPool(
     poolDependencies,
     new CredentialPoolBalancer(),
   );
@@ -168,7 +168,7 @@ test("restart-aborted credential candidates return server restarting", async () 
   const restart = new SessionRestartAbort();
   const credential = createTestProviderCredential("rejecting-candidate");
   const poolSetup = agentActionsSetup("none", false);
-  const pool = new ModelCredentialPool(
+  const pool = createModelCredentialPool(
     {
       database: poolSetup.database,
       readCredential: () => {
@@ -298,7 +298,7 @@ test("recovery replacement cannot create a realtime session", async () => {
     discoverModels,
     discoverOpenRouterProviders: () => Promise.resolve({ providers: [] }),
     launch: () => false,
-    modelCredentialPool: new ModelCredentialPool(
+    modelCredentialPool: createModelCredentialPool(
       {
         database,
         readCredential: () => Promise.resolve(credential),

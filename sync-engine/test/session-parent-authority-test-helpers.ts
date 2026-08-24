@@ -4,7 +4,10 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "../../sync-engine/model-credential-pool.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
@@ -34,10 +37,16 @@ import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-class RejectingModelCredentialPool extends ModelCredentialPool {
-  override candidates(): Promise<never> {
-    return Promise.reject(new Error("candidate boom"));
-  }
+function rejectingModelCredentialPool(
+  database: AppDatabase,
+): ModelCredentialPool {
+  return {
+    ...createModelCredentialPool({
+      database,
+      readCredential: () => Promise.resolve(undefined),
+    }),
+    candidates: () => Promise.reject(new Error("candidate boom")),
+  };
 }
 
 export const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
@@ -202,10 +211,7 @@ export function authoritySetup(options: {
     launchSession: launch,
     ...(options.rejectCandidates === true
       ? {
-          modelCredentialPool: new RejectingModelCredentialPool({
-            database,
-            readCredential: () => Promise.resolve(undefined),
-          }),
+          modelCredentialPool: rejectingModelCredentialPool(database),
         }
       : {}),
     notify,

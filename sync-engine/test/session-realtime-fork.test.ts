@@ -5,7 +5,10 @@ import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { SessionForkInput } from "../../shared/session-fork.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
 import { SessionRestartAbort } from "../session-restart-abort.ts";
 import {
@@ -39,7 +42,7 @@ function forkSetup(discoverModels: Parameters<typeof forkDependencies>[0]) {
     return createTestProviderCredential(id);
   });
   const storeFork = vi.fn(() => FORKED_RESULT);
-  const modelCredentialPool = new ModelCredentialPool(
+  const modelCredentialPool = createModelCredentialPool(
     {
       database,
       readCredential: (_userId, selection) =>

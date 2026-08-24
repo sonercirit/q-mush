@@ -12,7 +12,10 @@ import { ChatCompletionsAgentModel } from "./agent-model.ts";
 import { createAttachmentFallbackIntegration } from "./attachment-fallback-integration.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
-import { ModelCredentialPool } from "./model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "./model-credential-pool.ts";
 import {
   discoverOpenRouterProviders,
   type OpenRouterProviderDiscoverer,
@@ -157,7 +160,7 @@ class DrizzleSessionIntegration
     const credentials = new SessionCredentialAccess(providers);
     this.#readCredential = credentials.read;
     this.#withCredential = credentials.with;
-    this.#credentialPool = new ModelCredentialPool({
+    this.#credentialPool = createModelCredentialPool({
       database,
       readCredential: this.#readCredential,
     });

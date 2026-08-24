@@ -4,7 +4,11 @@ import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts
 import { providerCredentials } from "../../shared/database/schema.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+  type ModelCredentialPoolDependencies,
+} from "../model-credential-pool.ts";
 import {
   ProviderCredentialReauthenticationRequiredError,
   ProviderCredentialRejectionError,
@@ -39,12 +43,10 @@ function testDatabase() {
 
 function modelPool(
   database: ReturnType<typeof createAuthenticatedTestDatabase>,
-  readCredential: ConstructorParameters<
-    typeof ModelCredentialPool
-  >[0]["readCredential"],
+  readCredential: ModelCredentialPoolDependencies["readCredential"],
   balancer?: CredentialPoolBalancer,
 ): ModelCredentialPool {
-  return new ModelCredentialPool({ database, readCredential }, balancer);
+  return createModelCredentialPool({ database, readCredential }, balancer);
 }
 
 function createSetup() {
