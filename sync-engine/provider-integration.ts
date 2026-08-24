@@ -25,7 +25,7 @@ import {
 } from "./oauth.ts";
 import type { ProviderCredentialReader } from "./provider-credential-reader.ts";
 import {
-  ProviderCredentialEndpoints,
+  createProviderCredentialEndpoints,
   type ProviderCredentialInputDetails,
 } from "./provider-credentials.ts";
 import {
@@ -142,7 +142,7 @@ export function createProviderIntegration(options: {
           options.provider,
           runtime.generateId,
         );
-  const credentials = new ProviderCredentialEndpoints({
+  const credentials = createProviderCredentialEndpoints({
     ...options.credentialOptions,
     auth: options.auth,
     now: runtime.now,

@@ -13,7 +13,10 @@ import {
   type JsonRecord,
   type OAuthDependencies,
 } from "./oauth.ts";
-import { ProviderCredentialEndpoints } from "./provider-credentials.ts";
+import {
+  createProviderCredentialEndpoints,
+  type ProviderCredentialEndpoints,
+} from "./provider-credentials.ts";
 
 const BRAVE_SEARCH_API_URL = "https://api.search.brave.com/res/v1/web/search";
 const QUERY_MAXIMUM_LENGTH = 500;
@@ -174,7 +177,7 @@ class BraveSearchSkillIntegration implements BraveSearchSkill {
             "brave_search",
             dependencies.randomId ?? createUuidV7,
           );
-    this.#credentials = new ProviderCredentialEndpoints({
+    this.#credentials = createProviderCredentialEndpoints({
       auth,
       labelRequired: true,
       now: dependencies.now ?? Date.now,
