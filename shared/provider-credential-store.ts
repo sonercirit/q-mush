@@ -71,12 +71,23 @@ function isCredentialFingerprintCollision(error: unknown): boolean {
   );
 }
 
-export class DuplicateProviderCredentialError extends Error {
-  constructor() {
-    super("This provider credential is already stored");
-    this.name = "DuplicateProviderCredentialError";
-  }
+const DUPLICATE_PROVIDER_CREDENTIAL_ERROR =
+  "DuplicateProviderCredentialError" as const;
+
+export interface DuplicateProviderCredentialError extends Error {
+  readonly name: typeof DUPLICATE_PROVIDER_CREDENTIAL_ERROR;
 }
+
+export const createDuplicateProviderCredentialError =
+  (): DuplicateProviderCredentialError =>
+    Object.assign(new Error("This provider credential is already stored"), {
+      name: DUPLICATE_PROVIDER_CREDENTIAL_ERROR,
+    });
+
+export const isDuplicateProviderCredentialError = (
+  value: unknown,
+): value is DuplicateProviderCredentialError =>
+  value instanceof Error && value.name === DUPLICATE_PROVIDER_CREDENTIAL_ERROR;
 
 function ownedDefaultCondition(
   userId: string,
@@ -185,7 +196,7 @@ export class ProviderCredentialStore {
       .where(fingerprintCondition(this.#provider, userId, fingerprint))
       .get();
     if (existing !== undefined && !existing.isDeleted) {
-      throw new DuplicateProviderCredentialError();
+      throw createDuplicateProviderCredentialError();
     }
     const id = existing?.id ?? this.#generateId(now);
     const normalizedScopes = this.validateScopes(userId, workspaceIds);
@@ -489,7 +500,7 @@ export class ProviderCredentialStore {
       });
     } catch (error) {
       if (isCredentialFingerprintCollision(error)) {
-        throw new DuplicateProviderCredentialError();
+        throw createDuplicateProviderCredentialError();
       }
       throw error;
     }

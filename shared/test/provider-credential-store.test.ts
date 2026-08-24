@@ -8,7 +8,7 @@ import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
-  DuplicateProviderCredentialError,
+  isDuplicateProviderCredentialError,
   ProviderCredentialStore,
   type ProviderCredentialAccess,
 } from "../../shared/provider-credential-store.ts";
@@ -177,9 +177,12 @@ function expectRotationCollision(
   secret: string,
   now: number,
 ): void {
-  expect(() =>
-    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, now),
-  ).toThrow(DuplicateProviderCredentialError);
+  try {
+    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, now);
+    throw new Error("The colliding credential rotation was accepted");
+  } catch (error) {
+    expect(isDuplicateProviderCredentialError(error)).toBe(true);
+  }
   expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe("first-secret");
 }
 
