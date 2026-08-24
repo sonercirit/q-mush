@@ -1,6 +1,6 @@
 import { isRecord } from "../shared/auth-model.ts";
 import { createCredentialCipher } from "../shared/credential-cipher.ts";
-import { CredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
+import { createCredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { ProviderCredentialStore } from "../shared/provider-credential-store.ts";
@@ -153,7 +153,7 @@ function createBraveSearchSkill(
   encodedCredentialKey: string | undefined,
 ): BraveSearchSkill {
   const fetch = dependencies.fetch ?? globalThis.fetch;
-  const balancer = new CredentialPoolBalancer({
+  const balancer = createCredentialPoolBalancer({
     ...(dependencies.now === undefined ? {} : { now: dependencies.now }),
   });
   const store =

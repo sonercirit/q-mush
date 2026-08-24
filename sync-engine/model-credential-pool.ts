@@ -1,4 +1,7 @@
-import { CredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
+import {
+  createCredentialPoolBalancer,
+  type CredentialPoolBalancer,
+} from "../shared/credential-pool-balancer.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
@@ -31,7 +34,7 @@ export class ModelCredentialPool {
 
   constructor(
     dependencies: ModelCredentialPoolDependencies,
-    balancer = new CredentialPoolBalancer(),
+    balancer = createCredentialPoolBalancer(),
   ) {
     this.#balancer = balancer;
     this.#dependencies = dependencies;
