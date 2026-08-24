@@ -10,30 +10,34 @@ import {
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 
-export class InstrumentedAbortController extends AbortController {
-  abortListenerCount = 0;
-  constructor() {
-    super();
-    const signal = this.signal;
-    const add = signal.addEventListener.bind(signal);
-    const remove = signal.removeEventListener.bind(signal);
-    signal.addEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount += 1;
-      add(type, listener, options);
-    };
-    signal.removeEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount -= 1;
-      remove(type, listener, options);
-    };
-  }
+export interface InstrumentedAbortController extends AbortController {
+  abortListenerCount: number;
+}
+
+export function createInstrumentedAbortController(): InstrumentedAbortController {
+  const controller = Object.assign(new AbortController(), {
+    abortListenerCount: 0,
+  });
+  const signal = controller.signal;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  signal.addEventListener = (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: AddEventListenerOptions | boolean,
+  ) => {
+    if (type === "abort") controller.abortListenerCount += 1;
+    add(type, listener, options);
+  };
+  signal.removeEventListener = (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: EventListenerOptions | boolean,
+  ) => {
+    if (type === "abort") controller.abortListenerCount -= 1;
+    remove(type, listener, options);
+  };
+  return controller;
 }
 export function completeWithSignal(
   model: ChatCompletionsAgentModel,
@@ -42,7 +46,7 @@ export function completeWithSignal(
   return model.complete([{ content: "Hello", role: "user" }], signal);
 }
 export function instrumentedProviderRequest() {
-  const controller = new InstrumentedAbortController();
+  const controller = createInstrumentedAbortController();
   const sockets = new FakeProviderSockets();
   const model = apiKeyModel({ webSocket: sockets.create });
   const pending = completeWithSignal(model, controller.signal);

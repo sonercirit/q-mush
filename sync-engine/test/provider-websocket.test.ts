@@ -27,7 +27,7 @@ import {
   expectAbortWithoutHttp,
   expectRequestPending,
   expectRequestStates,
-  InstrumentedAbortController,
+  createInstrumentedAbortController,
   instrumentedProviderRequest,
   lifecycleModel,
   responseEvent,
@@ -114,7 +114,7 @@ test("removes abort listener after abort", async () => {
 });
 
 test("cleans up when send throws", async () => {
-  const controller = new InstrumentedAbortController();
+  const controller = createInstrumentedAbortController();
   const socket = new FakeProviderSocket();
   socket.throwOnSend = true;
   const model = apiKeyModel({ webSocket: () => socket });
