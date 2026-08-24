@@ -18,6 +18,11 @@ interface ScriptedModelOptions {
   readonly onComplete?: (requestCount: number) => Promise<void> | void;
 }
 
+export interface ScriptedAgentModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  stepStarts: number;
+}
+
 export function recordAgentModelRequest<T>(
   requests: T[][],
   messages: readonly T[],
@@ -32,42 +37,32 @@ interface AgentModelRequest<T> {
   readonly requestCount: number;
 }
 
-export interface ScriptedAgentModel extends AgentModel {
-  readonly requests: AgentConversationMessage[][];
-  stepStarts: number;
-}
-
 export function createScriptedAgentModel(
-  steps: ScriptedStep[],
+  scriptedSteps: ScriptedStep[],
   options: ScriptedModelOptions = {},
 ): ScriptedAgentModel {
   const requests: AgentConversationMessage[][] = [];
-  const pendingSteps: AgentModelStep[] = steps.map((step) => ({
+  const steps = scriptedSteps.map((step) => ({
     ...step,
     contextTokens: step.contextTokens === undefined ? null : step.contextTokens,
     costUsd: step.costUsd ?? null,
     thinking: step.thinking ?? "",
     tokenUsage: step.tokenUsage ?? null,
   }));
-  let stepStarts = 0;
-  return {
-    async complete(messages): Promise<AgentModelStep> {
+  const model: ScriptedAgentModel = {
+    requests,
+    stepStarts: 0,
+    startStep: () => {
+      model.stepStarts += 1;
+    },
+    async complete(messages) {
       const { requestCount } = recordAgentModelRequest(requests, messages);
       await options.onComplete?.(requestCount);
-      const step = pendingSteps.shift();
+      const step = steps.shift();
       if (step === undefined)
         throw new Error("The scripted model ran out of steps");
       return step;
     },
-    requests,
-    startStep(): void {
-      stepStarts += 1;
-    },
-    get stepStarts(): number {
-      return stepStarts;
-    },
-    set stepStarts(value: number) {
-      stepStarts = value;
-    },
   };
+  return model;
 }

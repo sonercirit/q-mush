@@ -8,10 +8,10 @@ import { createRecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 
 function createFailingSocket(): RealtimeSocket {
   return {
-    close() {
+    close(): void {
       // Already closed.
     },
-    send() {
+    send(): number {
       throw new Error("socket closed");
     },
   };

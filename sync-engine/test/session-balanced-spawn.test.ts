@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
+import type { AgentModel } from "../../shared/agent-loop.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
@@ -31,40 +31,47 @@ function balancedCredentials() {
   return { openai: [primary, secondary] };
 }
 
-class BalancedSpawnModel implements AgentModel {
-  #step = 0;
+interface BalancedSpawnModel {
+  readonly complete: AgentModel["complete"];
+}
 
-  complete(): Promise<AgentModelStep> {
-    this.#step += 1;
-    return Promise.resolve(
-      this.#step === 1
-        ? providerStep("Delegating balanced work.", {
-            toolCalls: [
-              spawnCall(
-                "Use the balanced model pool",
-                undefined,
-                [],
-                balancedCredentialId("openai"),
-              ),
-            ],
-          })
-        : providerStep("Done."),
-    );
-  }
+function createBalancedSpawnModel(): BalancedSpawnModel {
+  let step = 0;
+  return {
+    complete: () => {
+      step += 1;
+      return Promise.resolve(
+        step === 1
+          ? providerStep("Delegating balanced work.", {
+              toolCalls: [
+                spawnCall(
+                  "Use the balanced model pool",
+                  undefined,
+                  [],
+                  balancedCredentialId("openai"),
+                ),
+              ],
+            })
+          : providerStep("Done."),
+      );
+    },
+  };
 }
 
 describe("balanced session agent spawn", () => {
   test("spawns a balanced child through the real launch path", async () => {
     const selectedCredentials: string[] = [];
-    const model = new BalancedSpawnModel();
+    const model = createBalancedSpawnModel();
     const setup = await startToolSession(
       model,
       {
         credentials: balancedCredentials(),
         modelFactory: ({ credential }) => ({
-          complete: () => {
-            selectedCredentials.push(testCredentialId(credential));
-            return model.complete();
+          complete: (messages, signal) => {
+            const selectedCredential = testCredentialId(credential);
+            selectedCredentials.push(selectedCredential);
+            const completion = model.complete(messages, signal);
+            return completion;
           },
         }),
       },
@@ -96,7 +103,7 @@ describe("balanced session agent spawn", () => {
 
   test("persists one failed linked child when every balanced credential rejects", async () => {
     const setup = await startToolSession(
-      new BalancedSpawnModel(),
+      createBalancedSpawnModel(),
       { credentials: balancedCredentials() },
       () => {
         throw AgentModelDiscoveryError("rejected", 429);

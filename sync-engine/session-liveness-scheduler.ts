@@ -7,7 +7,8 @@ import type { SessionNotification } from "./session-creation.ts";
 import type { SessionDependencies } from "./session-dependencies.ts";
 import {
   DEFAULT_SESSION_LIVENESS_GRACE_MS,
-  SessionLivenessWatchdog,
+  createSessionLivenessWatchdogState,
+  type SessionLivenessWatchdog,
 } from "./session-liveness-watchdog.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
@@ -43,7 +44,7 @@ export function createSessionLivenessWatchdog(
   options: SessionLivenessSchedulerOptions,
 ): SessionLiveness {
   const { dependencies } = options;
-  const watchdog = new SessionLivenessWatchdog({
+  const watchdog = createSessionLivenessWatchdogState({
     actions: options.actions,
     broker: options.broker,
     cleanup: options.cleanup,

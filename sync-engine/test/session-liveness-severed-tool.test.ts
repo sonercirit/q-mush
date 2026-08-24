@@ -27,7 +27,7 @@ import {
   reconnectDurableSessionRunner,
 } from "./session-restart-runner-continuity-helpers.ts";
 import {
-  MultiSessionRestartModel,
+  createMultiSessionRestartModel,
   nextCommandId,
 } from "./session-restart-step-resume-helpers.ts";
 
@@ -182,7 +182,7 @@ test("a five-second runner blip redelivers the severed tool and completes automa
 test("a planned-restart reconnect becomes healthy on the production operational path", async () => {
   const clock = testLivenessClock(GRACE_MS, 10_000);
   const setup = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     {

@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
-import { SessionRuntimes } from "../session-runtime.ts";
+import { createSessionRuntimes } from "../session-runtime.ts";
 
 test("tool changes abort only the runtime with the fenced generation", async () => {
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   let oldAborted = false;
   let settleOld = (): void => undefined;
   expect(

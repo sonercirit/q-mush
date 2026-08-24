@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 
 describe("active session tools", () => {
   test("can omit runner-backed invocations already counted by the broker", () => {
-    const active = new ActiveSessionTools();
+    const active = createActiveSessionTools();
     active.begin("session-1", "parallel:0", "read", {
       runnerCommand: true,
     });
@@ -19,7 +19,7 @@ describe("active session tools", () => {
   });
 
   test("counts distinct same-name and nested invocations", () => {
-    const active = new ActiveSessionTools();
+    const active = createActiveSessionTools();
     const finishFirst = active.begin("session-1", "parallel", "read");
     const finishSecond = active.begin("session-1", "parallel", "read");
     const finishSearch = active.begin("session-1", "parallel", "brave_search");

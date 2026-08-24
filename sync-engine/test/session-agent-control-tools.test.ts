@@ -50,50 +50,55 @@ function scheduledCompactionStep(
   });
 }
 
-class SelfCompactingModel implements AgentModel {
-  #step = 0;
-
-  complete(
-    input: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    this.#step += 1;
-    const response = isCompactionRequest(input)
-      ? providerStep("Self-compaction handoff")
-      : this.#step === 1
-        ? scheduledCompactionStep("I will compact at this step boundary.")
-        : providerStep("Continued after self-compaction.");
-    return Promise.resolve(response);
-  }
+function createSelfCompactingModel(): AgentModel {
+  let step = 0;
+  return {
+    complete(input) {
+      step += 1;
+      const response = isCompactionRequest(input)
+        ? providerStep("Self-compaction handoff")
+        : step === 1
+          ? scheduledCompactionStep("I will compact at this step boundary.")
+          : providerStep("Continued after self-compaction.");
+      return Promise.resolve(response);
+    },
+  };
 }
 
-class RestartScheduledCompactionModel implements AgentModel {
-  readonly compacting = Promise.withResolvers<undefined>();
-  #scheduled = false;
+interface RestartScheduledCompactionModel extends AgentModel {
+  readonly compacting: PromiseWithResolvers<undefined>;
+}
 
-  complete(
-    input: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    if (isCompactionRequest(input)) {
-      this.compacting.resolve();
-      return successfulCompactionStep("Restart-safe compacted handoff.");
-    }
-    if (!this.#scheduled) {
-      this.#scheduled = true;
+function createRestartScheduledCompactionModel(): RestartScheduledCompactionModel {
+  const compacting = Promise.withResolvers<undefined>();
+  let scheduled = false;
+  return {
+    compacting,
+    complete(input) {
+      if (isCompactionRequest(input)) {
+        compacting.resolve();
+        return successfulCompactionStep("Restart-safe compacted handoff.");
+      }
+      if (!scheduled) {
+        scheduled = true;
+        return Promise.resolve(
+          providerStep("Schedule before restart.", {
+            toolCalls: [
+              toolCall("compact_session", { sessionId: SESSION_ID }),
+              toolCall(
+                "bash",
+                { command: "printf restart-gap", timeout: 30 },
+                "call-restart-gap",
+              ),
+            ],
+          }),
+        );
+      }
       return Promise.resolve(
-        providerStep("Schedule before restart.", {
-          toolCalls: [
-            toolCall("compact_session", { sessionId: SESSION_ID }),
-            toolCall(
-              "bash",
-              { command: "printf restart-gap", timeout: 30 },
-              "call-restart-gap",
-            ),
-          ],
-        }),
+        providerStep("Continued after restart compaction."),
       );
-    }
-    return Promise.resolve(providerStep("Continued after restart compaction."));
-  }
+    },
+  };
 }
 
 function failedCompactionStep(): Promise<AgentModelStep> {
@@ -104,108 +109,121 @@ function successfulCompactionStep(content: string): Promise<AgentModelStep> {
   return Promise.resolve(providerStep(content));
 }
 
-class FailedThenRetriedCompactionModel implements AgentModel {
-  compactionRequests = 0;
-  #agentSteps = 0;
-
-  complete(
-    input: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    if (!isCompactionRequest(input)) {
-      return this.#agentStep();
-    }
-    this.compactionRequests += 1;
-    if (this.compactionRequests === 1) {
-      return failedCompactionStep();
-    }
-    if (this.compactionRequests === 2) {
-      return successfulCompactionStep("Generation-one handoff.");
-    }
-    throw new Error("Unexpected repeated compaction");
-  }
-
-  #agentStep(): Promise<AgentModelStep> {
-    this.#agentSteps += 1;
-    return Promise.resolve(
-      this.#agentSteps === 3
-        ? providerStep("Continued exactly once.")
-        : scheduledCompactionStep(
-            `Schedule generation ${String(this.#agentSteps - 1)}.`,
-            `call-compact-generation-${String(this.#agentSteps - 1)}`,
-          ),
-    );
-  }
+interface FailedThenRetriedCompactionModel extends AgentModel {
+  readonly compactionRequests: number;
 }
 
-class SteeringDispatchModel implements AgentModel {
-  readonly releaseTarget = Promise.withResolvers<undefined>();
-  readonly targetWaiting = Promise.withResolvers<undefined>();
-  readonly targetRequests: AgentConversationMessage[][] = [];
-  #parentStep = 0;
-  #targetStarted = false;
-
-  async complete(messages: readonly AgentConversationMessage[]) {
-    const steeringText = JSON.stringify(messages);
-    if (steeringText.includes("Running steering target.")) {
-      this.targetRequests.push([...messages]);
-      if (steeringText.includes("Change direction at the boundary.")) {
-        return providerStep("Steering consumed.");
+function createFailedThenRetriedCompactionModel(): FailedThenRetriedCompactionModel {
+  let compactionRequests = 0;
+  let agentSteps = 0;
+  return {
+    get compactionRequests() {
+      return compactionRequests;
+    },
+    complete(input) {
+      if (!isCompactionRequest(input)) {
+        agentSteps += 1;
+        return Promise.resolve(
+          agentSteps === 3
+            ? providerStep("Continued exactly once.")
+            : scheduledCompactionStep(
+                `Schedule generation ${String(agentSteps - 1)}.`,
+                `call-compact-generation-${String(agentSteps - 1)}`,
+              ),
+        );
       }
-      if (this.#targetStarted) {
-        throw new Error("The steering target repeated its initial request");
+      compactionRequests += 1;
+      if (compactionRequests === 1) return failedCompactionStep();
+      if (compactionRequests === 2) {
+        return successfulCompactionStep("Generation-one handoff.");
       }
-      this.#targetStarted = true;
-      this.targetWaiting.resolve();
-      await this.releaseTarget.promise;
-      return providerStep("Reached the steering boundary.");
-    }
-    if (steeringText.includes("Dispatch steering from the real tool mount.")) {
-      this.#parentStep += 1;
-      return this.#parentStep === 1
-        ? providerStep("Steer the running target.", {
-            toolCalls: [
-              toolCall("steer_session", {
-                message: "Change direction at the boundary.",
-                sessionId: SESSION_ID,
-              }),
-            ],
-          })
-        : providerStep("Steering dispatch complete.");
-    }
-    throw new Error("Unexpected steering model request");
-  }
+      throw new Error("Unexpected repeated compaction");
+    },
+  };
 }
 
-class CompletedTargetCompactionModel implements AgentModel {
-  #parentStep = 0;
+interface SteeringDispatchModel extends AgentModel {
+  readonly releaseTarget: PromiseWithResolvers<undefined>;
+  readonly targetWaiting: PromiseWithResolvers<undefined>;
+  readonly targetRequests: AgentConversationMessage[][];
+}
 
-  complete(messages: readonly AgentConversationMessage[]) {
-    const compactingText = JSON.stringify(messages);
-    if (isCompactionRequest(messages)) {
-      return Promise.resolve(providerStep("Completed target handoff."));
-    }
-    if (compactingText.includes("Completed target handoff.")) {
-      return Promise.resolve(providerStep("Completed target continued."));
-    }
-    if (compactingText.includes("Completed compaction target.")) {
-      return Promise.resolve(
-        providerStep("Target completed before compaction."),
-      );
-    }
-    if (compactingText.includes("Compact the completed target.")) {
-      this.#parentStep += 1;
-      return Promise.resolve(
-        this.#parentStep === 1
-          ? providerStep("Compact completed target.", {
+function createSteeringDispatchModel(): SteeringDispatchModel {
+  const releaseTarget = Promise.withResolvers<undefined>();
+  const targetWaiting = Promise.withResolvers<undefined>();
+  const targetRequests: AgentConversationMessage[][] = [];
+  let parentStep = 0;
+  let targetStarted = false;
+  return {
+    releaseTarget,
+    targetWaiting,
+    targetRequests,
+    async complete(messages) {
+      const steeringText = JSON.stringify(messages);
+      if (steeringText.includes("Running steering target.")) {
+        targetRequests.push([...messages]);
+        if (steeringText.includes("Change direction at the boundary.")) {
+          return providerStep("Steering consumed.");
+        }
+        if (targetStarted) {
+          throw new Error("The steering target repeated its initial request");
+        }
+        targetStarted = true;
+        targetWaiting.resolve();
+        await releaseTarget.promise;
+        return providerStep("Reached the steering boundary.");
+      }
+      if (
+        steeringText.includes("Dispatch steering from the real tool mount.")
+      ) {
+        parentStep += 1;
+        return parentStep === 1
+          ? providerStep("Steer the running target.", {
               toolCalls: [
-                toolCall("compact_session", { sessionId: SESSION_ID }),
+                toolCall("steer_session", {
+                  message: "Change direction at the boundary.",
+                  sessionId: SESSION_ID,
+                }),
               ],
             })
-          : providerStep("Completed target compaction dispatched."),
-      );
-    }
-    throw new Error("Unexpected completed-target model request");
-  }
+          : providerStep("Steering dispatch complete.");
+      }
+      throw new Error("Unexpected steering model request");
+    },
+  };
+}
+
+function createCompletedTargetCompactionModel(): AgentModel {
+  let parentStep = 0;
+  return {
+    complete(messages) {
+      const compactingText = JSON.stringify(messages);
+      if (isCompactionRequest(messages)) {
+        return Promise.resolve(providerStep("Completed target handoff."));
+      }
+      if (compactingText.includes("Completed target handoff.")) {
+        return Promise.resolve(providerStep("Completed target continued."));
+      }
+      if (compactingText.includes("Completed compaction target.")) {
+        return Promise.resolve(
+          providerStep("Target completed before compaction."),
+        );
+      }
+      if (compactingText.includes("Compact the completed target.")) {
+        parentStep += 1;
+        return Promise.resolve(
+          parentStep === 1
+            ? providerStep("Compact completed target.", {
+                toolCalls: [
+                  toolCall("compact_session", { sessionId: SESSION_ID }),
+                ],
+              })
+            : providerStep("Completed target compaction dispatched."),
+        );
+      }
+      throw new Error("Unexpected completed-target model request");
+    },
+  };
 }
 
 type ConnectedSetup = ReturnType<typeof connectedSessionSetup>;
@@ -369,7 +387,7 @@ test("rejects invalid compact and steer dispatch arguments", async () => {
 });
 
 test("self-compaction schedules at the tool boundary and continues", async () => {
-  const setup = await startToolSession(new SelfCompactingModel());
+  const setup = await startToolSession(createSelfCompactingModel());
   const detail = await completedParentDetail(setup, "idle");
   const serialized = JSON.stringify(detail);
 
@@ -379,7 +397,7 @@ test("self-compaction schedules at the tool boundary and continues", async () =>
 });
 
 test("scheduled self-compaction survives restart before its boundary", async () => {
-  const model = new RestartScheduledCompactionModel();
+  const model = createRestartScheduledCompactionModel();
   const initial = controlledSetup(model);
   await expectCreatedDefaultSession(initial);
   await completeRunnerCommand(initial, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
@@ -426,7 +444,7 @@ test("scheduled self-compaction survives restart before its boundary", async () 
 });
 
 test("retires a failed scheduled generation before retrying compaction", async () => {
-  const model = new FailedThenRetriedCompactionModel();
+  const model = createFailedThenRetriedCompactionModel();
   const setup = controlledSetup(model);
   await expectCreatedDefaultSession(setup);
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
@@ -452,7 +470,7 @@ test("retires a failed scheduled generation before retrying compaction", async (
 });
 
 test("steer_session dispatch is consumed by a running target at its boundary", async () => {
-  const model = new SteeringDispatchModel();
+  const model = createSteeringDispatchModel();
   const setup = controlledSetup(model);
   await expectCreatedPromptSession(setup, "Running steering target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);
@@ -467,7 +485,7 @@ test("steer_session dispatch is consumed by a running target at its boundary", a
     () => setup.sessions.detailForUser(TEST_USER_ID, parentId),
     (value) => JSON.stringify(value).includes("steering_scheduled"),
   );
-  model.releaseTarget.resolve();
+  model.releaseTarget.resolve(undefined);
   const target = await completeAndWaitForSession(
     setup,
     SESSION_ID,
@@ -483,7 +501,7 @@ test("steer_session dispatch is consumed by a running target at its boundary", a
 });
 
 test("compact_session wakes a completed target, compacts, and continues it", async () => {
-  const model = new CompletedTargetCompactionModel();
+  const model = createCompletedTargetCompactionModel();
   const setup = controlledSetup(model);
   await expectCreatedPromptSession(setup, "Completed compaction target.");
   await completeRunnerCommand(setup, SESSION_ID, RUNNER_AGENT_FILE_COMMAND);

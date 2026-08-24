@@ -8,10 +8,10 @@ import {
   DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitMilliseconds,
 } from "../../shared/tool-limits.ts";
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 import { runSessionAgent } from "../session-agent-runtime.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
-import { SessionFinisher } from "../session-finisher.ts";
+import { createSessionFinisher } from "../session-finisher.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
@@ -146,7 +146,7 @@ function persistedDeadlineRun(
     now: () => TEST_NOW + 4,
     store: setup.store,
   };
-  const finisher = new SessionFinisher(finisherOptions);
+  const finisher = createSessionFinisher(finisherOptions);
   return runPersistedSession({
     controller,
     credential: runtimeTestCredential(
@@ -166,7 +166,7 @@ function persistedDeadlineRun(
       {},
       {
         actions,
-        activeTools: new ActiveSessionTools(),
+        activeTools: createActiveSessionTools(),
         braveSearch: Object.assign(
           {},
           {

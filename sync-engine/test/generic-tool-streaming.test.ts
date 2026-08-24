@@ -3,16 +3,13 @@ import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamDeltaFrame } from "../../shared/tool-stream.ts";
-import {
-  createChatCompletionsAgentModel,
-  type ChatCompletionsAgentModel,
-} from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel, type ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
 import {
-  ToolStreamPublisher,
+  createToolStreamPublisher,
   type ToolStreamTransport,
 } from "../../sync-engine/tool-stream-publisher.ts";
 
@@ -33,9 +30,7 @@ function createRecordingToolStreamTransport(): RecordingToolStreamTransport {
   const frames: ToolStreamDeltaFrame[] = [];
   return {
     frames,
-    publishToolStream: (_userId, frame) => {
-      frames.push(frame);
-    },
+    publishToolStream: (_userId, frame) => frames.push(frame),
   };
 }
 
@@ -121,7 +116,7 @@ function genericSession(response: Response): {
   readonly run: () => ReturnType<ChatCompletionsAgentModel["complete"]>;
 } {
   const transport = createRecordingToolStreamTransport();
-  const toolStream = new ToolStreamPublisher({
+  const toolStream = createToolStreamPublisher({
     sessionId: TEST_SESSION_DETAIL.id,
     streamId: "initial-step",
     transport,

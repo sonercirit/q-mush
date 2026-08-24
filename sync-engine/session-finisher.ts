@@ -35,71 +35,53 @@ interface SessionFinisherOptions {
   readonly store: SessionStore;
 }
 
-export class SessionFinisher {
-  readonly #options: SessionFinisherOptions;
-
-  constructor(options: SessionFinisherOptions) {
-    this.#options = options;
-  }
-
-  #afterNotify(
-    detail: AgentSessionDetail,
-    userId: string,
-    action: "finished" | "launch_queued",
-  ): void {
-    this.#options.notify(userId, detail.id);
-    if (action === "finished") {
-      this.#options.actions.finished(detail, userId);
-    } else {
-      this.#launchAfterSettlement(detail.id, userId);
-    }
-  }
-
-  finish(
+export interface SessionFinisher {
+  readonly finish: (
     detail: AgentSessionDetail,
     userId: string,
     ...result: FinishResult
-  ): ReturnType<FinishSession> {
-    try {
-      this.#finish(detail, userId, result);
-    } catch (settlementError) {
-      const [error, recovered] = result;
-      if (error !== undefined && isDiskFullFailure(settlementError)) {
-        this.#options.reconciliationFailed?.({
-          detail,
-          error,
-          ...(recovered === undefined ? {} : { recovered }),
-          userId,
-        });
-        return;
-      }
-      throw settlementError;
-    }
-  }
+  ) => ReturnType<FinishSession>;
+}
 
-  #finish(
+export function createSessionFinisher(
+  options: SessionFinisherOptions,
+): SessionFinisher {
+  const launchAfterSettlement = (sessionId: string, userId: string): void => {
+    const settled = options.settled?.(sessionId) ?? Promise.resolve();
+    void settled.then(() => options.launchQueued?.(userId));
+  };
+  const afterNotify = (
+    detail: AgentSessionDetail,
+    userId: string,
+    action: "finished" | "launch_queued",
+  ): void => {
+    options.notify(userId, detail.id);
+    if (action === "finished") options.actions.finished(detail, userId);
+    else launchAfterSettlement(detail.id, userId);
+  };
+  const settle = (
     detail: AgentSessionDetail,
     userId: string,
     result: FinishResult,
-  ): void {
+  ): void => {
     const notifyFinished = () => {
-      this.#afterNotify(detail, userId, "finished");
+      afterNotify(detail, userId, "finished");
     };
     const launchQueued = () => {
-      this.#afterNotify(detail, userId, "launch_queued");
+      afterNotify(detail, userId, "launch_queued");
     };
     const [error, recovered] = result;
     if (isAskQuestionsPause(error)) {
       notifyFinished();
       return;
     }
-    this.#options.cleanup?.(detail);
-    const current = this.#options.store.get(userId, detail.id);
+    options.cleanup?.(detail);
+    const current = options.store.get(userId, detail.id);
     if (current?.runnerRequired === true || current?.status === "stopped") {
       notifyFinished();
       return;
     }
-    const now = this.#options.now();
+    const now = options.now();
     const errorMessage =
       error === undefined ? undefined : safeErrorMessage(error);
     if (
@@ -111,12 +93,11 @@ export class SessionFinisher {
       return;
     }
     if (errorMessage === undefined && recovered === undefined) {
-      const next = this.#options.store.settleNormalBoundary(
+      const next = options.store.settleNormalBoundary(
         detail.id,
         now,
         detail.generation,
       );
-
       if (sessionHasStatus(next, "queued")) {
         launchQueued();
         return;
@@ -128,44 +109,54 @@ export class SessionFinisher {
           ? { status: "idle" as const }
           : { error: errorMessage, status: "failed" as const };
       const settled =
-        this.#options.store.settleRestartHandoff(
+        options.store.settleRestartHandoff(
           userId,
           recovered,
           settlement,
           now,
         ) ||
         (settlement.status === "failed" &&
-          this.#options.store.failRestartHandoff(
+          options.store.failRestartHandoff(
             userId,
             recovered,
             settlement.error,
             now,
           ));
-      if (!settled) {
-        return;
-      }
-      if (settlement.status === "failed") {
-        this.#options.actions.stopChildren(detail, userId);
-      }
+      if (!settled) return;
+      if (settlement.status === "failed")
+        options.actions.stopChildren(detail, userId);
       notifyFinished();
       return;
     }
     if (errorMessage !== undefined) {
-      const failed = this.#options.store.settleRuntimeFailure(
+      const failed = options.store.settleRuntimeFailure(
         detail.id,
         errorMessage,
         now,
         detail.generation,
       );
-      if (failed) this.#options.actions.stopChildren(detail, userId);
+      if (failed) options.actions.stopChildren(detail, userId);
       notifyFinished();
       return;
     }
     notifyFinished();
-  }
-
-  #launchAfterSettlement(sessionId: string, userId: string): void {
-    const settled = this.#options.settled?.(sessionId) ?? Promise.resolve();
-    void settled.then(() => this.#options.launchQueued?.(userId));
-  }
+  };
+  const finish: SessionFinisher["finish"] = (detail, userId, ...result) => {
+    try {
+      settle(detail, userId, result);
+    } catch (settlementError) {
+      const [error, recovered] = result;
+      if (error !== undefined && isDiskFullFailure(settlementError)) {
+        options.reconciliationFailed?.({
+          detail,
+          error,
+          ...(recovered === undefined ? {} : { recovered }),
+          userId,
+        });
+        return;
+      }
+      throw settlementError;
+    }
+  };
+  return { finish };
 }

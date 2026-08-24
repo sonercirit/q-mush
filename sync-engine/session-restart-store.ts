@@ -244,18 +244,12 @@ function exactHandoffCondition(
   );
 }
 
-export class RestartHandoffStore {
-  readonly #options: RestartHandoffStoreOptions;
-
-  constructor(options: RestartHandoffStoreOptions) {
-    this.#options = options;
-  }
-
-  parse(value: string | null): RestartHandoff | null {
+export function RestartHandoffStore(options: RestartHandoffStoreOptions) {
+  function parse(value: string | null): RestartHandoff | null {
     return parseRestartHandoff(value);
   }
 
-  #pauseValues(options: PauseRestartHandoff) {
+  function pauseValues(options: PauseRestartHandoff) {
     return {
       interruptedHandoff: null,
       status: "paused" as const,
@@ -263,13 +257,16 @@ export class RestartHandoffStore {
     };
   }
 
-  #pause(options: PauseRestartHandoff, from: "queued" | "running"): boolean {
+  function pause(
+    pauseOptions: PauseRestartHandoff,
+    from: "queued" | "running",
+  ): boolean {
     const condition = restartSessionCondition({
-      generation: options.authority.generation,
-      sessionId: options.authority.sessionId,
+      generation: pauseOptions.authority.generation,
+      sessionId: pauseOptions.authority.sessionId,
       status: from,
     });
-    const result = this.#options.database.transaction((transaction) => {
+    const result = options.database.transaction((transaction) => {
       const timing =
         from === "running"
           ? readActiveSessionTiming(transaction, condition)
@@ -278,39 +275,39 @@ export class RestartHandoffStore {
       const advanced = advanceStoredSessionGeneration({
         condition,
         database: transaction,
-        generateId: this.#options.generateId,
+        generateId: options.generateId,
         mode: "attempt",
-        now: options.now,
-        sessionId: options.authority.sessionId,
+        now: pauseOptions.now,
+        sessionId: pauseOptions.authority.sessionId,
         startTurn: {},
         values: {
-          ...this.#pauseValues(options),
+          ...pauseValues(pauseOptions),
           ...(timing === undefined
             ? {}
-            : sessionTimingUpdate(timing, options.now)),
+            : sessionTimingUpdate(timing, pauseOptions.now)),
         },
       });
       if (advanced === undefined) return false;
       const restartHandoff = handoffValue({
         executionGeneration: advanced.generation,
-        operation: options.operation,
-        requestedBy: options.requestedBy,
-        restartId: options.restartId,
+        operation: pauseOptions.operation,
+        requestedBy: pauseOptions.requestedBy,
+        restartId: pauseOptions.restartId,
       });
       updateStoredSessions(
         transaction,
         restartSessionCondition({
           generation: advanced.generation,
-          sessionId: options.authority.sessionId,
+          sessionId: pauseOptions.authority.sessionId,
           status: "paused",
         }),
         { restartHandoff },
       );
       if (from === "running") {
-        this.#options.interruptUnknownTools?.(
+        options.interruptUnknownTools?.(
           transaction,
-          options.authority.sessionId,
-          options.now,
+          pauseOptions.authority.sessionId,
+          pauseOptions.now,
         );
       }
       return true;
@@ -318,16 +315,16 @@ export class RestartHandoffStore {
     return result;
   }
 
-  pauseQueued(...arguments_: RestartPauseArguments): boolean {
+  function pauseQueued(...arguments_: RestartPauseArguments): boolean {
     const [authority, requestedBy, restartId, operation, now] = arguments_;
-    return this.#pause(
+    return pause(
       { authority, now, operation, requestedBy, restartId },
       "queued",
     );
   }
 
-  pauseRunning(...arguments_: RestartPauseArguments): boolean {
-    return this.#pause(
+  function pauseRunning(...arguments_: RestartPauseArguments): boolean {
+    return pause(
       {
         authority: arguments_[0],
         now: arguments_[4],
@@ -339,8 +336,8 @@ export class RestartHandoffStore {
     );
   }
 
-  #restartRows(runnerId?: string) {
-    return this.#options.database
+  function restartRows(runnerId?: string) {
+    return options.database
       .select({
         executionGeneration: agentSessions.executionGeneration,
         id: agentSessions.id,
@@ -359,8 +356,8 @@ export class RestartHandoffStore {
       .all();
   }
 
-  invalid(runnerId?: string): readonly InvalidRestartSession[] {
-    return this.#restartRows(runnerId).flatMap(
+  function invalid(runnerId?: string): readonly InvalidRestartSession[] {
+    return restartRows(runnerId).flatMap(
       ({ restartHandoff, runnerId: selectedRunnerId, id, userId }) => {
         if (restartHandoff === null) {
           return [];
@@ -382,8 +379,8 @@ export class RestartHandoffStore {
     );
   }
 
-  pending(runnerId?: string): readonly PendingRestartSession[] {
-    return this.#restartRows(runnerId).flatMap(
+  function pending(runnerId?: string): readonly PendingRestartSession[] {
+    return restartRows(runnerId).flatMap(
       ({ executionGeneration, id, restartHandoff, userId }) => {
         let handoff: RestartHandoff | null;
         try {
@@ -391,7 +388,7 @@ export class RestartHandoffStore {
         } catch {
           return [];
         }
-        const current = this.#options.read(userId, id);
+        const current = options.read(userId, id);
         const detail =
           current === undefined
             ? undefined
@@ -404,12 +401,12 @@ export class RestartHandoffStore {
     );
   }
 
-  failInvalid(
+  function failInvalid(
     invalid: InvalidRestartSession,
     error: string,
     now: number,
   ): boolean {
-    return this.#options.database.transaction((transaction) => {
+    return options.database.transaction((transaction) => {
       const condition = and(
         activeSessionCondition({
           id: invalid.sessionId,
@@ -430,7 +427,7 @@ export class RestartHandoffStore {
             {
               condition,
               database: transaction,
-              generateId: this.#options.generateId,
+              generateId: options.generateId,
               generation,
               now,
               sessionId: invalid.sessionId,
@@ -441,19 +438,19 @@ export class RestartHandoffStore {
     });
   }
 
-  failQueued(
+  function failQueued(
     userId: string,
     identity: RestartHandoffIdentity,
     error: string,
     now: number,
   ): boolean {
     return (
-      this.#withExactHandoff(userId, identity, "queued", (transaction, exact) =>
+      withExactHandoff(userId, identity, "queued", (transaction, exact) =>
         settleSessionFailure(
           {
             condition: exactHandoffCondition(exact, "queued", userId),
             database: transaction,
-            generateId: this.#options.generateId,
+            generateId: options.generateId,
             generation: identity.generation,
             now,
             sessionId: identity.sessionId,
@@ -465,7 +462,7 @@ export class RestartHandoffStore {
     );
   }
 
-  #withExactHandoff<T>(
+  function withExactHandoff<T>(
     userId: string | undefined,
     identity: RestartHandoffIdentity,
     status: RestartStatus,
@@ -474,18 +471,18 @@ export class RestartHandoffStore {
       exact: ExactRestartHandoff,
     ) => T | undefined,
   ): T | undefined {
-    return this.#options.database.transaction((transaction) => {
+    return options.database.transaction((transaction) => {
       const exact = readExactHandoff(transaction, userId, identity, status);
       return exact === undefined ? undefined : operation(transaction, exact);
     });
   }
 
-  claim(
+  function claim(
     userId: string,
     identity: RestartHandoffIdentity,
     now: number,
   ): AgentSessionDetail | undefined {
-    const claimed = this.#withExactHandoff(
+    const claimed = withExactHandoff(
       userId,
       identity,
       "paused",
@@ -498,7 +495,7 @@ export class RestartHandoffStore {
         return updated ? exact : undefined;
       },
     );
-    const current = this.#options.read(userId, identity.sessionId);
+    const current = options.read(userId, identity.sessionId);
     return claimed !== undefined && current !== undefined
       ? {
           ...current,
@@ -507,7 +504,10 @@ export class RestartHandoffStore {
       : undefined;
   }
 
-  restoreInterrupted(session: InterruptedStoredSession, now: number): boolean {
+  function restoreInterrupted(
+    session: InterruptedStoredSession,
+    now: number,
+  ): boolean {
     const value = session.restartHandoff;
     const handoff = parseRestartHandoff(value);
     if (
@@ -524,7 +524,7 @@ export class RestartHandoffStore {
       },
       value,
     } satisfies ExactRestartHandoff;
-    const restored = this.#options.database.transaction((transaction) => {
+    const restored = options.database.transaction((transaction) => {
       const updated = updateStoredSessions(
         transaction,
         exactHandoffCondition(exact, session.status),
@@ -535,89 +535,95 @@ export class RestartHandoffStore {
         },
       );
       if (updated) {
-        this.#options.interruptUnknownTools?.(transaction, session.id, now);
+        options.interruptUnknownTools?.(transaction, session.id, now);
       }
       return updated;
     });
     return restored;
   }
 
-  settle(
+  function settle(
     userId: string,
     identity: RestartHandoffIdentity,
     settlement: RestartHandoffSettlement,
     now: number,
   ): boolean {
     return (
-      this.#withExactHandoff(
-        userId,
-        identity,
-        "running",
-        (transaction, exact) => {
-          const condition = exactHandoffCondition(exact, "running", userId);
+      withExactHandoff(userId, identity, "running", (transaction, exact) => {
+        const condition = exactHandoffCondition(exact, "running", userId);
 
-          const timing = readActiveSessionTiming(transaction, condition);
-          const turnId = activeSessionTurnId(transaction, identity.sessionId);
-          if (
-            timing === undefined ||
-            !updateSessionAndEndGenerationTurn({
-              condition,
-              database: transaction,
-              generation: identity.generation,
+        const timing = readActiveSessionTiming(transaction, condition);
+        const turnId = activeSessionTurnId(transaction, identity.sessionId);
+        if (
+          timing === undefined ||
+          !updateSessionAndEndGenerationTurn({
+            condition,
+            database: transaction,
+            generation: identity.generation,
+            now,
+            sessionId: identity.sessionId,
+            values: {
+              ...sessionTimingUpdate(timing, now),
+              interruptedHandoff: null,
+              restartHandoff: null,
+              status:
+                settlement.status === "idle"
+                  ? normalSessionCompletionStatus({
+                      parentCallbackGeneration: storedParentCallbackGeneration(
+                        transaction,
+                        condition,
+                      ),
+                    })
+                  : settlement.status,
+              ...updatedAuditFields(SYSTEM_ID, now),
+            },
+          })
+        ) {
+          return false;
+        }
+        if (settlement.status === "failed") {
+          insertStoredMessage(
+            transaction,
+            { ...errorMessageValues(settlement.error), turnId },
+            {
+              actorId: SYSTEM_ID,
+              id: options.generateId(now),
               now,
               sessionId: identity.sessionId,
-              values: {
-                ...sessionTimingUpdate(timing, now),
-                interruptedHandoff: null,
-                restartHandoff: null,
-                status:
-                  settlement.status === "idle"
-                    ? normalSessionCompletionStatus({
-                        parentCallbackGeneration:
-                          storedParentCallbackGeneration(
-                            transaction,
-                            condition,
-                          ),
-                      })
-                    : settlement.status,
-                ...updatedAuditFields(SYSTEM_ID, now),
-              },
-            })
-          ) {
-            return false;
-          }
-          if (settlement.status === "failed") {
-            insertStoredMessage(
-              transaction,
-              { ...errorMessageValues(settlement.error), turnId },
-              {
-                actorId: SYSTEM_ID,
-                id: this.#options.generateId(now),
-                now,
-                sessionId: identity.sessionId,
-                userId,
-              },
-            );
-          }
-          return true;
-        },
+              userId,
+            },
+          );
+        }
+        return true;
+      }) ?? false
+    );
+  }
+
+  function restore(identity: RestartHandoffIdentity, now: number): boolean {
+    return (
+      withExactHandoff(undefined, identity, "queued", (transaction, exact) =>
+        updateStoredSessions(
+          transaction,
+          exactHandoffCondition(exact, "queued"),
+          { status: "paused", ...updatedAuditFields(SYSTEM_ID, now) },
+        ),
       ) ?? false
     );
   }
 
-  restore(identity: RestartHandoffIdentity, now: number): boolean {
-    return (
-      this.#withExactHandoff(
-        undefined,
-        identity,
-        "queued",
-        (transaction, exact) =>
-          updateStoredSessions(
-            transaction,
-            exactHandoffCondition(exact, "queued"),
-            { status: "paused", ...updatedAuditFields(SYSTEM_ID, now) },
-          ),
-      ) ?? false
-    );
-  }
+  return {
+    claim,
+    failInvalid,
+    failQueued,
+    invalid,
+    parse,
+    pauseQueued,
+    pauseRunning,
+    pending,
+    restore,
+    restoreInterrupted,
+    settle,
+  };
 }
+
+export type RestartHandoffStore = ReturnType<typeof RestartHandoffStore>;

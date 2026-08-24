@@ -6,7 +6,7 @@ import {
   type SessionToolUpdatePreview,
   type SessionToolUpdatePreviewInput,
 } from "../shared/session-tool-update.ts";
-import { createTaggedRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError, isRealtimeCommandError, type RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { SessionGenerationInterruptionDependencies } from "./session-generation-interruption.ts";
 import { sessionToolCachePreview } from "./session-tool-cache-policy.ts";
 import {
@@ -14,26 +14,24 @@ import {
   type SessionToolUpdateStoreOptions,
 } from "./session-tool-update-store.ts";
 
-export type SessionToolUpdateError = ReturnType<
-  typeof createSessionToolUpdateError
->;
+export type SessionToolUpdateError = RealtimeCommandError & {
+  readonly tag: "session_tool_update_error";
+};
 
-function createSessionToolUpdateError(code: string) {
-  return createTaggedRealtimeCommandError(
-    code,
-    undefined,
-    "session_tool_update_error",
-    "SessionToolUpdateError",
-  );
+function createSessionToolUpdateError(code: string): SessionToolUpdateError {
+  return Object.assign(createRealtimeCommandError(code), {
+    name: "SessionToolUpdateError",
+    tag: "session_tool_update_error" as const,
+  });
 }
 
 export function isSessionToolUpdateError(
   error: unknown,
 ): error is SessionToolUpdateError {
   return (
-    error instanceof Error &&
-    "kind" in error &&
-    error.kind === "session_tool_update_error"
+    isRealtimeCommandError(error) &&
+    "tag" in error &&
+    error.tag === "session_tool_update_error"
   );
 }
 

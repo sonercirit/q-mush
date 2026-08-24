@@ -4,7 +4,7 @@ import { createDatabase } from "../../shared/database.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { createRunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createSessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -265,7 +265,7 @@ describe("session store forks", () => {
       "018bcfe5-6800-7000-8000-000000000044",
       "018bcfe5-6800-7000-8000-000000000045",
     ];
-    const store = new SessionStore(
+    const store = createSessionStore(
       database,
       () => {
         const replayId = ids.shift();
@@ -292,7 +292,7 @@ describe("session store forks", () => {
     const reopened = createDatabase(path);
     expect(
       replayConversation(
-        new SessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
+        createSessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
           pending: () => undefined,
         }),
         STORE_SESSION_ID,

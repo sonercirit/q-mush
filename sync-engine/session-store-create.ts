@@ -4,6 +4,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import { agentMessages, agentSessions } from "../shared/database/schema.ts";
 import type {
   AgentSessionDetail,
+  AgentSessionMessage,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
 import { runnerIsAvailable } from "./runner-availability-store.ts";
@@ -322,38 +323,77 @@ export function createStoredSession(
   );
 }
 
+type ForkMessageHandlers = Record<
+  AgentSessionMessage["role"],
+  (message: AgentSessionMessage) => ReturnType<typeof recordedMessageValues>
+>;
+
+function hasMessageRole<Role extends AgentSessionMessage["role"]>(
+  message: AgentSessionMessage,
+  role: Role,
+): message is AgentSessionMessage & { readonly role: Role } {
+  return message.role === role;
+}
+
 function forkMessageValues(internal: InternalSessionMessage) {
   const message = internal.message;
-  const { content, toolCallId, toolCalls, toolName } = message;
-  switch (message.role) {
-    case "compaction_request":
+  const unsupported = () => {
+    throw new Error("A non-conversation message cannot be copied");
+  };
+  const handlers: ForkMessageHandlers = {
+    compaction_request: () => {
       throw new Error("A transient compaction request cannot be copied");
-    case "assistant": {
-      const assistant = { content, role: "assistant" as const, toolCalls };
+    },
+    assistant: (assistantMessage) => {
+      if (!hasMessageRole(assistantMessage, "assistant")) {
+        throw new Error("An assistant message handler received another role");
+      }
+      const assistant = {
+        content: assistantMessage.content,
+        role: "assistant" as const,
+        toolCalls: assistantMessage.toolCalls,
+      };
       return recordedMessageValues(
         internal.providerReplay === undefined
           ? assistant
           : { ...assistant, providerReplay: internal.providerReplay },
-        message.tokenUsage,
+        assistantMessage.tokenUsage,
       );
-    }
-    case "tool":
-      if (toolCallId === null || toolName === null) {
+    },
+    tool: (toolMessage) => {
+      if (!hasMessageRole(toolMessage, "tool")) {
+        throw new Error("A tool message handler received another role");
+      }
+      if (toolMessage.toolCallId === null || toolMessage.toolName === null) {
         throw new Error("A stored tool result has no tool identity");
       }
       return recordedMessageValues({
-        content,
+        content: toolMessage.content,
         role: "tool",
-        toolCallId,
-        toolName,
+        toolCallId: toolMessage.toolCallId,
+        toolName: toolMessage.toolName,
       });
-    case "user":
-      return storedUserMessageValues(content, message.images);
-    case "error":
-    case "system":
-    case "thinking":
-      throw new Error("A non-conversation message cannot be copied");
+    },
+    user: (userMessage) => {
+      if (!hasMessageRole(userMessage, "user")) {
+        throw new Error("A user message handler received another role");
+      }
+      return storedUserMessageValues(userMessage.content, userMessage.images);
+    },
+    error: unsupported,
+    system: unsupported,
+    thinking: unsupported,
+  };
+  const forkableRoles = ["assistant", "tool", "user"] as const;
+  for (const role of forkableRoles) {
+    if (hasMessageRole(message, role)) {
+      return handlers[role](message);
+    }
   }
+  if (hasMessageRole(message, "compaction_request")) {
+    return handlers.compaction_request(message);
+  }
+  return unsupported();
 }
 
 export function forkStoredSession(

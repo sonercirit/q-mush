@@ -3,22 +3,28 @@ import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RUNNER_TERMINAL_CLEANUP_ARGUMENT,
   createRunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerCommandResult,
 } from "../../shared/runner-command-broker.ts";
-import type { DispatchRunnerToolCommand } from "../../shared/runner-command.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
+import { createSessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
 
-function createRecordingCleanupBroker() {
-  const commands: DispatchRunnerToolCommand[] = [];
-  return {
-    ...createRunnerCommandBroker(),
-    commands,
-    dispatch(input: DispatchRunnerToolCommand): Promise<RunnerCommandResult> {
-      commands.push(input);
-      return Promise.resolve({ output: "cleaned", state: "completed" });
-    },
+interface RecordingCleanupBroker {
+  readonly broker: RunnerCommandBroker;
+  readonly commands: Parameters<RunnerCommandBroker["dispatch"]>[0][];
+}
+
+function createRecordingCleanupBroker(): RecordingCleanupBroker {
+  const commands: Parameters<RunnerCommandBroker["dispatch"]>[0][] = [];
+  const broker = createRunnerCommandBroker({
+    commandId: () => "unused-cleanup-command",
+    deliver: () => false,
+  });
+  broker.dispatch = (input): Promise<RunnerCommandResult> => {
+    commands.push(input);
+    return Promise.resolve({ output: "cleaned", state: "completed" });
   };
+  return { broker, commands };
 }
 
 function cleanupDetail(executionEnvironment: "bare_metal" | "container") {
@@ -26,10 +32,10 @@ function cleanupDetail(executionEnvironment: "bare_metal" | "container") {
 }
 
 function cleanupSetup(executionEnvironment: "bare_metal" | "container") {
-  const broker = createRecordingCleanupBroker();
+  const recording = createRecordingCleanupBroker();
   return {
-    broker,
-    cleanup: new SessionExecutionCleanup(broker),
+    broker: recording,
+    cleanup: createSessionExecutionCleanup(recording.broker),
     detail: cleanupDetail(executionEnvironment),
   };
 }

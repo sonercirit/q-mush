@@ -2,8 +2,8 @@ import { expect } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import {
-  type ScriptedStep,
   createScriptedAgentModel,
+  type ScriptedStep,
 } from "./scripted-agent-model.ts";
 import { connectedSessionSetup } from "./session-integration-fixtures.ts";
 import {

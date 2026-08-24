@@ -3,36 +3,39 @@ import type {
   SessionFinisher,
 } from "./session-finisher.ts";
 
-export class SessionFailureReconciler {
-  readonly #pending = new Map<string, SessionFailureReconciliation>();
+export interface SessionFailureReconciler {
+  hasPending(): boolean;
+  pending(failure: SessionFailureReconciliation): void;
+  reconcile(finisher: SessionFinisher): boolean;
+}
 
-  hasPending(): boolean {
-    return this.#pending.size > 0;
-  }
-
-  pending(failure: SessionFailureReconciliation): void {
-    this.#pending.set(failure.detail.id, failure);
-  }
-
-  reconcile(finisher: SessionFinisher): boolean {
-    for (const [sessionId, failure] of [...this.#pending]) {
-      this.#pending.delete(sessionId);
-      try {
-        if (failure.recovered === undefined) {
-          finisher.finish(failure.detail, failure.userId, failure.error);
-        } else {
-          finisher.finish(
-            failure.detail,
-            failure.userId,
-            failure.error,
-            failure.recovered,
-          );
+export function createSessionFailureReconciler(): SessionFailureReconciler {
+  const failures = new Map<string, SessionFailureReconciliation>();
+  return {
+    hasPending: () => failures.size > 0,
+    pending(failure) {
+      failures.set(failure.detail.id, failure);
+    },
+    reconcile(finisher) {
+      for (const [sessionId, failure] of [...failures]) {
+        failures.delete(sessionId);
+        try {
+          if (failure.recovered === undefined) {
+            finisher.finish(failure.detail, failure.userId, failure.error);
+          } else {
+            finisher.finish(
+              failure.detail,
+              failure.userId,
+              failure.error,
+              failure.recovered,
+            );
+          }
+        } catch (error) {
+          failures.set(sessionId, failure);
+          throw error;
         }
-      } catch (error) {
-        this.#pending.set(sessionId, failure);
-        throw error;
       }
-    }
-    return this.#pending.size === 0;
-  }
+      return failures.size === 0;
+    },
+  };
 }

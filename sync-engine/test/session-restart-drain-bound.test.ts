@@ -3,10 +3,14 @@ import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutd
 import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
 import {
-  SessionRuntimes,
+  createSessionRuntimes,
   type RestartRequest,
+  type SessionRuntimes,
 } from "../../sync-engine/session-runtime.ts";
-import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
+import {
+  createSessionRestartTestClock,
+  type SessionRestartTestClock,
+} from "./session-restart-test-clock.ts";
 
 interface PendingRuntime {
   readonly aborted: () => boolean;
@@ -96,8 +100,8 @@ function testRestartControl(
 }
 
 function restartRuntimeFixture(logged: string[] = []) {
-  const clock = new SessionRestartTestClock();
-  const runtimes = new SessionRuntimes(clock.now);
+  const clock = createSessionRestartTestClock();
+  const runtimes = createSessionRuntimes(clock.now);
   return {
     clock,
     control: testRestartControl(clock, runtimes, logged),

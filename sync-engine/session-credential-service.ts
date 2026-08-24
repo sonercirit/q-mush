@@ -8,29 +8,30 @@ import {
 } from "./session-credential-access.ts";
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 
-export class SessionCredentialAccess {
-  readonly #providers: SessionCredentialReaders;
-
-  constructor(providers: SessionCredentialReaders) {
-    this.#providers = providers;
-  }
-
-  readonly readForSession: SessionCredentialRead = (
-    userId,
-    selection,
-    refresh,
-  ) => readSessionCredential(this.#providers, userId, selection, refresh);
-
-  readonly read = async (
+export interface SessionCredentialAccess {
+  readForSession(
+    ...parameters: Parameters<SessionCredentialRead>
+  ): ReturnType<SessionCredentialRead>;
+  read(
     userId: string,
     selection: SessionCredentialSelection,
-  ): Promise<ProviderCredentialAccess | undefined> =>
-    readSessionCredential(this.#providers, userId, selection);
-
-  readonly with = (
+  ): Promise<ProviderCredentialAccess | undefined>;
+  with(
     userId: string,
     selection: SessionCredentialSelection,
     action: SessionCredentialAction,
-  ): Promise<Response> =>
-    withSessionCredential(this.#providers, userId, selection, action);
+  ): Promise<Response>;
+}
+
+export function createSessionCredentialAccess(
+  providers: SessionCredentialReaders,
+): SessionCredentialAccess {
+  return {
+    readForSession: (userId, selection, refresh) =>
+      readSessionCredential(providers, userId, selection, refresh),
+    read: (userId, selection) =>
+      readSessionCredential(providers, userId, selection),
+    with: (userId, selection, action) =>
+      withSessionCredential(providers, userId, selection, action),
+  };
 }

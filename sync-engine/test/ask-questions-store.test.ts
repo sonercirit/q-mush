@@ -2,9 +2,10 @@ import { describe, expect, test } from "vitest";
 import type { AskQuestionAnswers } from "../../shared/ask-questions.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  AskQuestionsStore,
+  createAskQuestionsStore,
   type AskQuestionsPersistence,
   type AskQuestionsPersistenceTransaction,
+  type AskQuestionsStore,
   type QuestionToolResult,
   type StoredQuestionRequest,
   type StoredQuestionSession,
@@ -50,30 +51,38 @@ function replaceMatching<Value>(
   return true;
 }
 
-class MemoryAskQuestionsPersistence implements AskQuestionsPersistence {
+interface MemoryAskQuestionsPersistence extends AskQuestionsPersistence {
   readonly state: MemoryQuestionState;
-  #busy = false;
+}
 
-  constructor(sessions: readonly StoredQuestionSession[] = []) {
-    this.state = { requests: [], sessions: [...sessions], toolResults: [] };
-  }
-
-  transaction<Result>(
-    action: (transaction: AskQuestionsPersistenceTransaction) => Result,
-  ): Result {
-    if (this.#busy) {
-      throw new Error("Nested memory question transactions are unsupported");
-    }
-    this.#busy = true;
-    const draft = cloneState(this.state);
-    try {
-      const result = action(transactionFor(draft));
-      replaceState(this.state, draft);
-      return result;
-    } finally {
-      this.#busy = false;
-    }
-  }
+function createMemoryAskQuestionsPersistence(
+  sessions: readonly StoredQuestionSession[] = [],
+): MemoryAskQuestionsPersistence {
+  const state: MemoryQuestionState = {
+    requests: [],
+    sessions: [...sessions],
+    toolResults: [],
+  };
+  let busy = false;
+  return {
+    state,
+    transaction: <Result>(
+      action: (transaction: AskQuestionsPersistenceTransaction) => Result,
+    ): Result => {
+      if (busy) {
+        throw new Error("Nested memory question transactions are unsupported");
+      }
+      busy = true;
+      const draft = cloneState(state);
+      try {
+        const result = action(transactionFor(draft));
+        replaceState(state, draft);
+        return result;
+      } finally {
+        busy = false;
+      }
+    },
+  };
 }
 
 function activeRequest(
@@ -185,9 +194,9 @@ function runningSession(): StoredQuestionSession {
 }
 
 function setup() {
-  const persistence = new MemoryAskQuestionsPersistence([runningSession()]);
+  const persistence = createMemoryAskQuestionsPersistence([runningSession()]);
   const ids = [REQUEST_ID, MESSAGE_ID];
-  const store = new AskQuestionsStore({
+  const store = createAskQuestionsStore({
     generateId: () => ids.shift() ?? "unexpected-id",
     persistence,
     systemActorId: "SYSTEM",
@@ -238,12 +247,29 @@ function expectRecoverableRequest(
   expect(store.recoverable()).toEqual(expected);
 }
 
+function createQuestion(
+  store: AskQuestionsStore,
+  toolCallId: string,
+  now: number,
+  generation = 3,
+) {
+  return store.create(USER_ID, SESSION_ID, generation, toolCallId, input, now);
+}
+
+function selectedAnswer(value: string): AskQuestionAnswers {
+  return { answers: [{ questionId: "decision", value }] };
+}
+
 function answerQuestion(
   store: AskQuestionsStore,
   now = NOW + 30,
   selectedAnswers = answers,
 ) {
   return store.answer(USER_ID, SESSION_ID, REQUEST_ID, selectedAnswers, now);
+}
+
+function configuredPendingQuestion() {
+  return setupWithQuestion();
 }
 
 function answeredQuestion() {
@@ -255,22 +281,8 @@ function answeredQuestion() {
 describe("ask questions store", () => {
   test("persists one audited pending call and returns it idempotently", () => {
     const { persistence, store } = setup();
-    const created = store.create(
-      USER_ID,
-      SESSION_ID,
-      3,
-      "call-question",
-      input,
-      NOW + 20,
-    );
-    const repeated = store.create(
-      USER_ID,
-      SESSION_ID,
-      3,
-      "call-question",
-      input,
-      NOW + 30,
-    );
+    const created = createQuestion(store, "call-question", NOW + 20);
+    const repeated = createQuestion(store, "call-question", NOW + 30);
 
     expect(repeated).toEqual(created);
     expect(store.pending(USER_ID, SESSION_ID)).toEqual(created);
@@ -297,17 +309,17 @@ describe("ask questions store", () => {
       activeStartedAt: NOW + 21,
     };
 
-    expect(() =>
-      store.create(USER_ID, SESSION_ID, 3, "call-other", input, NOW + 30),
-    ).toThrow("already has pending questions");
+    expect(() => createQuestion(store, "call-other", NOW + 30)).toThrow(
+      "already has pending questions",
+    );
     expect(persistence.state.requests).toHaveLength(1);
   });
 
   test("does not persist a request when the generation is stale", () => {
     const { persistence, store } = setup();
-    expect(() =>
-      store.create(USER_ID, SESSION_ID, 2, "call-question", input, NOW + 20),
-    ).toThrow("not running");
+    expect(() => createQuestion(store, "call-question", NOW + 20, 2)).toThrow(
+      "not running",
+    );
     expect(persistence.state.requests).toEqual([]);
   });
 
@@ -380,20 +392,17 @@ describe("ask questions store", () => {
       "answered",
     ]);
     expect(persistence.state.toolResults).toHaveLength(1);
-    expect(
-      answerQuestion(store, NOW + 50, {
-        answers: [{ questionId: "decision", value: "stop" }],
-      }),
-    ).toEqual({ status: "conflict" });
+    expect(answerQuestion(store, NOW + 50, selectedAnswer("stop"))).toEqual({
+      status: "conflict",
+    });
   });
 
   test("delivers a custom answer in the tool result", () => {
-    const { persistence, store } = setupWithQuestion();
+    const configured = configuredPendingQuestion();
+    const { persistence, store } = configured;
 
     expect(
-      answerQuestion(store, NOW + 30, {
-        answers: [{ questionId: "decision", value: "wait for approval" }],
-      }),
+      answerQuestion(store, NOW + 30, selectedAnswer("wait for approval")),
     ).toMatchObject({ status: "answered" });
     expect(persistence.state.toolResults[0]?.content).toContain(
       '"value": "wait for approval"',
@@ -401,12 +410,11 @@ describe("ask questions store", () => {
   });
 
   test("rejects invalid answers without changing pending state", () => {
-    const { persistence, store } = setupWithQuestion();
+    const pending = configuredPendingQuestion();
+    const { persistence, store } = pending;
 
     expect(() =>
-      answerQuestion(store, NOW + 30, {
-        answers: [{ questionId: "decision", value: "   " }],
-      }),
+      answerQuestion(store, NOW + 30, selectedAnswer("   ")),
     ).toThrow("invalid");
     expect(pendingQuestionStatus(store)).not.toBeNull();
     expect(persistence.state.toolResults).toEqual([]);

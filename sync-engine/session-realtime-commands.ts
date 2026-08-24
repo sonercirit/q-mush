@@ -243,177 +243,286 @@ function workspaceToolUpdateInput<Value extends SessionToolUpdatePreviewInput>(
  * Authentication deliberately remains a transport-boundary responsibility so
  * no connection-time identity can be mistaken for execution-time authority.
  */
+type SessionRealtimeOperation =
+  (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS];
+type SessionRealtimeHandler = (
+  sessions: SessionRealtimeCommands,
+  user: AuthenticatedUser,
+  payload: Readonly<Record<string, unknown>>,
+  workspaceId: string,
+) => unknown;
+
+const sessionRealtimeOperationSet = new Set<string>(
+  Object.values(SESSION_REALTIME_OPERATIONS),
+);
+function isSessionRealtimeOperation(
+  value: string,
+): value is SessionRealtimeOperation {
+  return sessionRealtimeOperationSet.has(value);
+}
+
+function pendingInputHandler(
+  ...parameters: Parameters<SessionRealtimeHandler>
+): AgentSessionDetail {
+  const [sessions, user, payload, workspaceId] = parameters;
+  return sessions.pendingInputForUser(
+    user,
+    requiredRealtimeInput(readSessionPendingInputCommand(payload)),
+    workspaceId,
+  );
+}
+
+const sessionRealtimeHandlers: Record<
+  SessionRealtimeOperation,
+  SessionRealtimeHandler
+> = {
+  [SESSION_REALTIME_OPERATIONS.answerQuestions]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => {
+    if (
+      payload["workspaceId"] !== undefined &&
+      payload["workspaceId"] !== workspaceId
+    )
+      throw createRealtimeCommandFailure("not_found");
+    return sessions.answerQuestionsForUser(user, { ...payload, workspaceId });
+  },
+  [SESSION_REALTIME_OPERATIONS.cancelPendingInput]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.cancelPendingInputForUser(
+      user,
+      readSessionId(payload),
+      readPendingInputId(payload),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.compact]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => sessions.compactForUser(user, readSessionId(payload), workspaceId),
+  [SESSION_REALTIME_OPERATIONS.compactAndContinue]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.compactAndContinueForUser(
+      user,
+      readSessionId(payload),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.continue]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => sessions.continueForUser(user, readSessionId(payload), workspaceId),
+  [SESSION_REALTIME_OPERATIONS.create]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.createForUser(
+      user,
+      requiredRealtimeInput(readCreateSession(payload)),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.spawn]: (sessions, user, payload, workspaceId) =>
+    sessions.spawnForUser(
+      user,
+      requiredRealtimeInput(readUserSpawnSession(payload)),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.followUp]: pendingInputHandler,
+  [SESSION_REALTIME_OPERATIONS.steer]: pendingInputHandler,
+  [SESSION_REALTIME_OPERATIONS.fork]: (sessions, user, payload, workspaceId) =>
+    sessions.forkForUser(
+      user,
+      workspaceSessionInput(readSessionForkInput(payload), workspaceId),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.history]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => {
+    const request = readSessionHistoryRequest(payload);
+    if (
+      request === undefined ||
+      (payload["workspaceId"] !== undefined &&
+        payload["workspaceId"] !== workspaceId)
+    )
+      throw createRealtimeCommandFailure("invalid_request");
+    const page = sessions.historyForUser(
+      user,
+      request.sessionId,
+      request.cursor,
+      workspaceId,
+    );
+    if (page === undefined) throw createRealtimeCommandFailure("not_found");
+    return page;
+  },
+  [SESSION_REALTIME_OPERATIONS.models]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.modelsForUser({
+      ...readModelSelection(payload),
+      user,
+      workspaceId,
+    }),
+  [SESSION_REALTIME_OPERATIONS.previewToolUpdate]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.previewToolUpdateForUser(
+      user,
+      workspaceToolUpdateInput(
+        readSessionToolUpdatePreviewInput(payload),
+        workspaceId,
+      ),
+    ),
+  [SESSION_REALTIME_OPERATIONS.read]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => {
+    const detail = sessions.detailForUser(
+      user.id,
+      readSessionId(payload),
+      workspaceId,
+    );
+    if (detail?.workspaceId !== workspaceId)
+      throw createRealtimeCommandFailure("not_found");
+    return detail;
+  },
+  [SESSION_REALTIME_OPERATIONS.reassign]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) => {
+    const { runnerId, workingDirectory } = readReassignment(payload);
+    return sessions.reassignForUser(
+      user,
+      readSessionId(payload),
+      runnerId,
+      workingDirectory,
+      workspaceId,
+    );
+  },
+  [SESSION_REALTIME_OPERATIONS.send]: (sessions, user, payload, workspaceId) =>
+    sessions.messageForUser(
+      user,
+      readSessionId(payload),
+      requiredRealtimeInput(readPrompt(payload)),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.setAutoCompactionForUser(
+      user,
+      readSessionId(payload),
+      readBooleanSetting(payload, "autoCompact"),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.setIdleCompactionForUser(
+      user,
+      readSessionId(payload),
+      readBooleanSetting(payload, "idleCompact"),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.setContextTokenCapForUser(
+      user,
+      readSessionId(payload),
+      readContextTokenCap(payload),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.stop]: (sessions, user, payload, workspaceId) =>
+    sessions.stopForUser(
+      user,
+      readSessionId(payload),
+      readCascadeStop(payload),
+      workspaceId,
+    ),
+  [SESSION_REALTIME_OPERATIONS.subscribe]: (
+    sessions,
+    user,
+    _payload,
+    workspaceId,
+  ) => ({ sessions: sessions.summariesForUser(user.id, workspaceId) }),
+  [SESSION_REALTIME_OPERATIONS.updateProvider]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.updateProviderForUser(
+      user,
+      workspaceSessionInput(
+        readSessionProviderUpdateInput(payload),
+        workspaceId,
+      ),
+    ),
+  [SESSION_REALTIME_OPERATIONS.updateTools]: (
+    sessions,
+    user,
+    payload,
+    workspaceId,
+  ) =>
+    sessions.updateToolsForUser(
+      user,
+      workspaceToolUpdateInput(
+        readSessionToolUpdateInput(payload),
+        workspaceId,
+      ),
+    ),
+};
+
+/** Dispatches a command after the caller revalidates the WebSocket user. */
 export async function executeSessionRealtimeCommand(
   sessions: SessionRealtimeCommands,
   user: AuthenticatedUser,
   command: UserRealtimeCommand,
   workspaceId: string,
 ): Promise<unknown> {
-  const payload = command.payload;
-
-  switch (command.operation) {
-    case SESSION_REALTIME_OPERATIONS.answerQuestions:
-      if (
-        payload["workspaceId"] !== undefined &&
-        payload["workspaceId"] !== workspaceId
-      ) {
-        throw createRealtimeCommandFailure("not_found");
-      }
-      return sessions.answerQuestionsForUser(user, {
-        ...payload,
-        workspaceId,
-      });
-    case SESSION_REALTIME_OPERATIONS.cancelPendingInput:
-      return sessions.cancelPendingInputForUser(
-        user,
-        readSessionId(payload),
-        readPendingInputId(payload),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.compact:
-      return sessions.compactForUser(user, readSessionId(payload), workspaceId);
-    case SESSION_REALTIME_OPERATIONS.compactAndContinue:
-      return sessions.compactAndContinueForUser(
-        user,
-        readSessionId(payload),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.continue:
-      return sessions.continueForUser(
-        user,
-        readSessionId(payload),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.create:
-      return sessions.createForUser(
-        user,
-        requiredRealtimeInput(readCreateSession(payload)),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.spawn:
-      return sessions.spawnForUser(
-        user,
-        requiredRealtimeInput(readUserSpawnSession(payload)),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.followUp:
-    case SESSION_REALTIME_OPERATIONS.steer:
-      return sessions.pendingInputForUser(
-        user,
-        requiredRealtimeInput(readSessionPendingInputCommand(payload)),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.fork: {
-      const input = workspaceSessionInput(
-        readSessionForkInput(payload),
-        workspaceId,
-      );
-      return sessions.forkForUser(user, input, workspaceId);
-    }
-    case SESSION_REALTIME_OPERATIONS.history: {
-      const request = readSessionHistoryRequest(payload);
-      if (
-        request === undefined ||
-        (payload["workspaceId"] !== undefined &&
-          payload["workspaceId"] !== workspaceId)
-      ) {
-        throw createRealtimeCommandFailure("invalid_request");
-      }
-      const page = sessions.historyForUser(
-        user,
-        request.sessionId,
-        request.cursor,
-        workspaceId,
-      );
-      if (page === undefined) {
-        throw createRealtimeCommandFailure("not_found");
-      }
-      return page;
-    }
-    case SESSION_REALTIME_OPERATIONS.models: {
-      const selection = readModelSelection(payload);
-      return sessions.modelsForUser({ ...selection, user, workspaceId });
-    }
-    case SESSION_REALTIME_OPERATIONS.previewToolUpdate: {
-      const input = workspaceToolUpdateInput(
-        readSessionToolUpdatePreviewInput(payload),
-        workspaceId,
-      );
-      return sessions.previewToolUpdateForUser(user, input);
-    }
-    case SESSION_REALTIME_OPERATIONS.read: {
-      const detail = sessions.detailForUser(
-        user.id,
-        readSessionId(payload),
-        workspaceId,
-      );
-      if (detail?.workspaceId !== workspaceId) {
-        throw createRealtimeCommandFailure("not_found");
-      }
-      return detail;
-    }
-    case SESSION_REALTIME_OPERATIONS.reassign: {
-      const { runnerId, workingDirectory } = readReassignment(payload);
-      return sessions.reassignForUser(
-        user,
-        readSessionId(payload),
-        runnerId,
-        workingDirectory,
-        workspaceId,
-      );
-    }
-    case SESSION_REALTIME_OPERATIONS.send:
-      return sessions.messageForUser(
-        user,
-        readSessionId(payload),
-        requiredRealtimeInput(readPrompt(payload)),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.setAutoCompaction:
-      return sessions.setAutoCompactionForUser(
-        user,
-        readSessionId(payload),
-        readBooleanSetting(payload, "autoCompact"),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.setIdleCompaction:
-      return sessions.setIdleCompactionForUser(
-        user,
-        readSessionId(payload),
-        readBooleanSetting(payload, "idleCompact"),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.setContextTokenCap:
-      return sessions.setContextTokenCapForUser(
-        user,
-        readSessionId(payload),
-        readContextTokenCap(payload),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.stop:
-      return sessions.stopForUser(
-        user,
-        readSessionId(payload),
-        readCascadeStop(payload),
-        workspaceId,
-      );
-    case SESSION_REALTIME_OPERATIONS.subscribe:
-      return { sessions: sessions.summariesForUser(user.id, workspaceId) };
-    case SESSION_REALTIME_OPERATIONS.updateProvider: {
-      const input = workspaceSessionInput(
-        readSessionProviderUpdateInput(payload),
-        workspaceId,
-      );
-      return sessions.updateProviderForUser(user, input);
-    }
-    case SESSION_REALTIME_OPERATIONS.updateTools: {
-      const input = workspaceToolUpdateInput(
-        readSessionToolUpdateInput(payload),
-        workspaceId,
-      );
-      return sessions.updateToolsForUser(user, input);
-    }
-    default:
-      throw createRealtimeCommandFailure("unsupported_operation");
+  if (!isSessionRealtimeOperation(command.operation)) {
+    throw createRealtimeCommandFailure("unsupported_operation");
   }
+  return await sessionRealtimeHandlers[command.operation](
+    sessions,
+    user,
+    command.payload,
+    workspaceId,
+  );
 }

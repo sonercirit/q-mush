@@ -5,14 +5,14 @@ export interface RecordingRealtimeSocket extends RealtimeSocket {
 }
 
 export function createRecordingRealtimeSocket(): RecordingRealtimeSocket {
-  const messages: string[] = [];
+  const recordedMessages: string[] = [];
   return {
-    messages,
-    close() {
+    close(): void {
       // Focused hub tests leave recording sockets open.
     },
-    send(message) {
-      messages.push(message);
+    messages: recordedMessages,
+    send(message): number {
+      recordedMessages.push(message);
       return message.length;
     },
   };

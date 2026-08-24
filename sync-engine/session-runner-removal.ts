@@ -20,30 +20,32 @@ export interface RunnerRemovalCoordinatorDependencies extends SessionLifecycleDe
   >;
 }
 
-export class RunnerRemovalCoordinator {
-  readonly #dependencies: RunnerRemovalCoordinatorDependencies;
-  readonly #staged = new Map<string, StagedRunnerRemoval>();
+export interface RunnerRemovalCoordinator {
+  readonly removed: (userId: string, runnerId: string) => Promise<void>;
+  readonly removing: (userId: string, runnerId: string) => void;
+}
 
-  constructor(dependencies: RunnerRemovalCoordinatorDependencies) {
-    this.#dependencies = dependencies;
-  }
+export function createRunnerRemovalCoordinator(
+  dependencies: RunnerRemovalCoordinatorDependencies,
+): RunnerRemovalCoordinator {
+  const stagedRemovals = new Map<string, StagedRunnerRemoval>();
 
-  removing(userId: string, runnerId: string): void {
-    if (this.#staged.has(runnerId)) {
+  function removing(userId: string, runnerId: string): void {
+    if (stagedRemovals.has(runnerId)) {
       throw new Error("The runner is already being removed");
     }
-    const interrupted = this.#dependencies.broker
+    const interrupted = dependencies.broker
       .runnerRemoved(runnerId)
       .map(({ command }) => command);
-    for (const session of this.#dependencies.store.list(userId)) {
+    for (const session of dependencies.store.list(userId)) {
       if (session.runnerId === runnerId) {
-        this.#dependencies.runtimes.abort(session.id);
+        dependencies.runtimes.abort(session.id);
         interrupted.push(
-          ...this.#dependencies.broker.cancelSessionCommands(session.id),
+          ...dependencies.broker.cancelSessionCommands(session.id),
         );
       }
     }
-    this.#staged.set(runnerId, {
+    stagedRemovals.set(runnerId, {
       interruptedSessionIds: new Set(
         interrupted.map(({ sessionId }) => sessionId),
       ),
@@ -51,12 +53,12 @@ export class RunnerRemovalCoordinator {
     });
   }
 
-  async removed(userId: string, runnerId: string): Promise<void> {
-    const staged = this.#staged.get(runnerId);
+  async function removed(userId: string, runnerId: string): Promise<void> {
+    const staged = stagedRemovals.get(runnerId);
     if (staged?.userId === userId) {
-      this.#staged.delete(runnerId);
+      stagedRemovals.delete(runnerId);
     }
-    const affected = this.#dependencies.store
+    const affected = dependencies.store
       .list(userId)
       .filter(
         (session) => session.runnerId === runnerId && session.runnerRequired,
@@ -65,30 +67,28 @@ export class RunnerRemovalCoordinator {
       staged?.userId === userId ? staged.interruptedSessionIds : [],
     );
     for (const session of affected) {
-      if (
-        this.#dependencies.broker.cancelSessionCommands(session.id).length > 0
-      ) {
+      if (dependencies.broker.cancelSessionCommands(session.id).length > 0) {
         interruptedSessionIds.add(session.id);
       }
     }
 
     for (const session of affected) {
-      this.#dependencies.runtimes.abort(session.id);
+      dependencies.runtimes.abort(session.id);
       if (
         interruptedSessionIds.has(session.id) &&
-        this.#dependencies.store.get(userId, session.id)?.status === "idle"
+        dependencies.store.get(userId, session.id)?.status === "idle"
       ) {
-        this.#dependencies.store.appendInterruptedRunnerTool(
+        dependencies.store.appendInterruptedRunnerTool(
           session.id,
-          this.#dependencies.now(),
+          dependencies.now(),
         );
       }
-      this.#dependencies.notify(userId, session.id);
+      dependencies.notify(userId, session.id);
     }
     await Promise.allSettled(
-      affected.map((session) =>
-        this.#dependencies.runtimes.settled(session.id),
-      ),
+      affected.map((session) => dependencies.runtimes.settled(session.id)),
     );
   }
+
+  return { removed, removing };
 }

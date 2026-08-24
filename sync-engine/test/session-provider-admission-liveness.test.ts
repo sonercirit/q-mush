@@ -3,7 +3,6 @@ import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import {
@@ -13,10 +12,7 @@ import {
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { AgentModelRequestOptions } from "../../sync-engine/agent-model-options.ts";
-import {
-  createChatCompletionsAgentModel,
-  type ChatCompletionsAgentModel,
-} from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createAuthenticatedRequest,
@@ -28,8 +24,9 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { createDeferredAgentModel } from "./deferred-agent-model.ts";
 import {
-  createFakeProviderSockets,
   expectProviderSocketReleased,
+  createFakeProviderSockets,
+  type FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 import { configuredRealtimeTestIntegration } from "./realtime-test-helpers.ts";
@@ -63,44 +60,43 @@ const temporaryDirectory = useSynchronousTemporaryDirectories(
   "q-mush-provider-admission-",
 );
 
-class StalledReusedSocketModel implements AgentModel {
-  readonly #model: ChatCompletionsAgentModel;
-  readonly requests: AgentConversationMessage[][] = [];
-  readonly sockets = createFakeProviderSockets();
+interface StalledReusedSocketModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  readonly sockets: FakeProviderSockets;
+  close(): void;
+}
 
-  constructor(
-    onDelta: AgentModelRequestOptions["onDelta"],
-    onRequestState: AgentModelRequestOptions["onRequestState"],
-  ) {
-    this.#model = createChatCompletionsAgentModel({
-      credential: {
-        accountId: null,
-        secret: "provider-secret",
-        source: "api_key",
-      },
-      maxOutputTokens: null,
-      model: "session-test-model",
-      ...(onDelta === undefined ? {} : { onDelta }),
-      ...(onRequestState === undefined ? {} : { onRequestState }),
-      provider: "openai",
-      toolSettings: DEFAULT_TOOL_SETTINGS,
-      webSocket: this.sockets.create,
-    });
-  }
-
-  readonly close = (): void => {
-    this.#model.close();
+function createStalledReusedSocketModel(
+  onDelta: AgentModelRequestOptions["onDelta"],
+  onRequestState: AgentModelRequestOptions["onRequestState"],
+): StalledReusedSocketModel {
+  const requests: AgentConversationMessage[][] = [];
+  const sockets = createFakeProviderSockets();
+  const model = createChatCompletionsAgentModel({
+    credential: {
+      accountId: null,
+      secret: "provider-secret",
+      source: "api_key",
+    },
+    maxOutputTokens: null,
+    model: "session-test-model",
+    ...(onDelta === undefined ? {} : { onDelta }),
+    ...(onRequestState === undefined ? {} : { onRequestState }),
+    provider: "openai",
+    toolSettings: DEFAULT_TOOL_SETTINGS,
+    webSocket: sockets.create,
+  });
+  return {
+    requests,
+    sockets,
+    close: () => {
+      model.close();
+    },
+    complete(messages, signal) {
+      requests.push(messages.map((message) => ({ ...message })));
+      return model.complete(messages, signal);
+    },
   };
-
-  complete(
-    messages: readonly AgentConversationMessage[],
-    ...signals: readonly [AbortSignal?]
-  ): Promise<AgentModelStep> {
-    const [signal] = signals;
-    this.requests.push(messages.map((message) => ({ ...message })));
-    const model = this.#model;
-    return model.complete(messages, signal);
-  }
 }
 
 async function createStalledSession(
@@ -117,7 +113,7 @@ async function createStalledSession(
       ...(database === undefined ? {} : { database }),
       liveness: clock.dependencies,
       modelFactory: (options) => {
-        model ??= new StalledReusedSocketModel(
+        model ??= createStalledReusedSocketModel(
           options.onDelta,
           options.onRequestState,
         );

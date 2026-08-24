@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 import { toolSettings } from "../../shared/database/schema.ts";
 import { TOOL_SETTINGS_PATH } from "../../shared/routes.ts";
 import { createRealtimeHub } from "../realtime-hub.ts";
-import { ToolSettingsStore } from "../tool-settings-store.ts";
+import {
+  createToolSettingsStore,
+  type ToolSettingsStore,
+} from "../tool-settings-store.ts";
 import { createToolSettingsIntegration } from "../tool-settings.ts";
 import {
   addTestUser,
@@ -32,14 +35,14 @@ function expectStoredSettings(
 describe("tool settings store", () => {
   test("returns defaults until a user saves settings", () => {
     const database = createAuthenticatedTestDatabase();
-    const store = new ToolSettingsStore(database);
+    const store = createToolSettingsStore(database);
     expect(store.read(TEST_USER_ID)).toEqual(apiSettings(30, 20_000));
     database.$client.close();
   });
 
   test("persists one audited active row and updates it", () => {
     const database = createAuthenticatedTestDatabase();
-    const store = new ToolSettingsStore(database, () => "settings-1");
+    const store = createToolSettingsStore(database, () => "settings-1");
     const latest = apiSettings(11, 98_765);
     store.set(TEST_USER_ID, apiSettings(9, 12_345), TEST_NOW);
     store.set(TEST_USER_ID, latest, TEST_NOW + 1);
@@ -63,7 +66,7 @@ describe("tool settings store", () => {
   test("replaces a soft-deleted row with a new active record", () => {
     const database = createAuthenticatedTestDatabase();
     let sequence = 0;
-    const store = new ToolSettingsStore(database, () => {
+    const store = createToolSettingsStore(database, () => {
       sequence += 1;
       return `settings-${String(sequence)}`;
     });
@@ -90,7 +93,7 @@ describe("tool settings store", () => {
       sequence += 1;
       return `settings-${String(sequence)}`;
     };
-    const store = new ToolSettingsStore(database, generateId);
+    const store = createToolSettingsStore(database, generateId);
     store.set(TEST_USER_ID, apiSettings(3, 4_000), TEST_NOW);
     store.set(TEST_FOREIGN_USER_ID, apiSettings(8, 9_000), TEST_NOW);
 

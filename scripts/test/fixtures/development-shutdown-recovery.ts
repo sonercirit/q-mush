@@ -12,9 +12,9 @@ import {
 } from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../../shared/tool-limits.ts";
-import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
-import { SessionStore } from "../../../sync-engine/session-store.ts";
+import { createSessionStore } from "../../../sync-engine/session-store.ts";
 
 const emptyRuntimes = { pending: (): undefined => undefined };
 const now = Date.now();
@@ -28,7 +28,7 @@ if (
 }
 const database = createDatabase(databasePath);
 function shutdownStore() {
-  return new ShutdownInterruptedSessionStore({
+  return ShutdownInterruptedSessionStore({
     database,
     generateId: (timestamp) => createUuidV7(timestamp),
   });
@@ -91,7 +91,7 @@ if (mode === "start" || mode === "start-no-ack") {
   };
   database.insert(providerCredentials).values(credential).run();
   const generatedIds = [sessionId];
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     (timestamp) => generatedIds.shift() ?? createUuidV7(timestamp),
     () => DEFAULT_TOOL_SETTINGS,
@@ -131,7 +131,7 @@ if (mode === "start" || mode === "start-no-ack") {
   }
   store.transitionRuntime(sessionId, "running", now + 1, 0);
   const interrupted = shutdownStore();
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   runtimes.launch(sessionId, runnerId, 0, "step", ({ restartRequest }) => {
     restartRequest((request, durable) => {
       if (durable) {
@@ -172,7 +172,12 @@ if (mode === "start" || mode === "start-no-ack") {
   interrupted.failInvalid(now);
   interrupted.restore(now);
   const settings = () => DEFAULT_TOOL_SETTINGS;
-  const store = new SessionStore(database, undefined, settings, emptyRuntimes);
+  const store = createSessionStore(
+    database,
+    undefined,
+    settings,
+    emptyRuntimes,
+  );
   store.failInterrupted(now + 1);
   const detail = store.get(state.userId, state.sessionId);
   if (detail === undefined) {

@@ -5,33 +5,31 @@ import {
   type AskQuestionAnswers,
 } from "../shared/ask-questions.ts";
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
-import { createTaggedRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError, isRealtimeCommandError, type RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AskQuestionsStore } from "./ask-questions-store.ts";
 import type {
   RecoverableQuestionIdentity,
   SessionLifecycleDependencies,
 } from "./session-lifecycle-types.ts";
 
-export type QuestionActionFailure = ReturnType<
-  typeof createQuestionActionFailure
->;
+export type QuestionActionFailure = RealtimeCommandError & {
+  readonly tag: "question_action_failure";
+};
 
-function createQuestionActionFailure(code: string) {
-  return createTaggedRealtimeCommandError(
-    code,
-    undefined,
-    "question_action_failure",
-    "QuestionActionFailure",
-  );
+function createQuestionActionFailure(code: string): QuestionActionFailure {
+  return Object.assign(createRealtimeCommandError(code), {
+    name: "QuestionActionFailure",
+    tag: "question_action_failure" as const,
+  });
 }
 
 export function isQuestionActionFailure(
   error: unknown,
 ): error is QuestionActionFailure {
   return (
-    error instanceof Error &&
-    "kind" in error &&
-    error.kind === "question_action_failure"
+    isRealtimeCommandError(error) &&
+    "tag" in error &&
+    error.tag === "question_action_failure"
   );
 }
 
@@ -56,15 +54,16 @@ export interface SessionQuestionActionDependencies extends SessionLifecycleDepen
   >;
 }
 
-function answerFailure(status: "conflict" | "not_found" | "stale"): never {
-  switch (status) {
-    case "conflict":
-      throw createQuestionActionFailure("question_answer_conflict");
-    case "not_found":
-      throw createQuestionActionFailure("not_found");
-    case "stale":
-      throw createQuestionActionFailure("question_request_stale");
-  }
+type AnswerFailureStatus = "conflict" | "not_found" | "stale";
+
+const answerFailureCodes: Record<AnswerFailureStatus, string> = {
+  conflict: "question_answer_conflict",
+  not_found: "not_found",
+  stale: "question_request_stale",
+};
+
+function answerFailure(status: AnswerFailureStatus): never {
+  throw createQuestionActionFailure(answerFailureCodes[status]);
 }
 
 function validAnswers(
@@ -123,18 +122,30 @@ export async function answerSessionQuestionsCommand(
     answers,
     dependencies.now(),
   );
-  switch (answered.status) {
-    case "conflict":
-    case "not_found":
-    case "stale":
-      return answerFailure(answered.status);
-    case "already_answered":
-      return {
+  type AnswerStatus = typeof answered.status;
+  interface CommandResult {
+    readonly launchStarted: boolean;
+    readonly result: string;
+    readonly status: "already_answered" | "answered";
+  }
+  const handlers: Record<AnswerStatus, () => Promise<CommandResult>> = {
+    conflict: () => answerFailure("conflict"),
+    not_found: () => answerFailure("not_found"),
+    stale: () => answerFailure("stale"),
+    already_answered: () => {
+      if (answered.status !== "already_answered") {
+        return Promise.reject(new Error("Unexpected question answer status"));
+      }
+      return Promise.resolve({
         launchStarted: false,
         result: answered.result,
         status: answered.status,
-      };
-    case "answered": {
+      });
+    },
+    answered: async () => {
+      if (answered.status !== "answered") {
+        throw new Error("Unexpected question answer status");
+      }
       dependencies.notify(user.id, payload.sessionId);
       const launchStarted = await dependencies.launchAnswered({
         executionGeneration: answered.request.executionGeneration,
@@ -147,8 +158,9 @@ export async function answerSessionQuestionsCommand(
         result: answered.result,
         status: answered.status,
       };
-    }
-  }
+    },
+  };
+  return handlers[answered.status]();
 }
 
 export async function recoverAnsweredQuestions(

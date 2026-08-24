@@ -3,19 +3,20 @@ import {
   MAXIMUM_TOOL_STREAM_DELTA_BYTES,
   MAXIMUM_TOOL_STREAM_FIELD_BYTES,
   TOOL_STREAM_TRUNCATED_MARKER,
-  applyToolStreamDelta,
   createToolStreamHubState,
+  type ToolStreamHubState,
+  applyToolStreamDelta,
   isProviderToolCallDelta,
   isRunnerCommandOutputDelta,
   isRunnerCommandResult,
   isToolStreamDeltaFrame,
   isToolStreamSnapshotFrame,
   type ToolStreamDeltaFrame,
-  type ToolStreamHubState,
   type ToolStreamTerminalState,
 } from "../../shared/tool-stream.ts";
 import {
-  ToolStreamPublisher,
+  createToolStreamPublisher,
+  type ToolStreamPublisher,
   type ToolStreamTransport,
 } from "../tool-stream-publisher.ts";
 
@@ -49,7 +50,7 @@ function createRecordingTransport(): RecordingTransport {
 function createPublisher(streamId = "step-1") {
   const transport = createRecordingTransport();
   return {
-    publisher: new ToolStreamPublisher({
+    publisher: createToolStreamPublisher({
       sessionId: SESSION_ID,
       streamId,
       transport,
@@ -610,7 +611,7 @@ test("validates the provider, broker, and realtime integration contracts", () =>
 });
 
 test("transport failures never interrupt canonical tool execution", () => {
-  const publisher = new ToolStreamPublisher({
+  const publisher = createToolStreamPublisher({
     sessionId: SESSION_ID,
     streamId: "step-throwing-transport",
     transport: {

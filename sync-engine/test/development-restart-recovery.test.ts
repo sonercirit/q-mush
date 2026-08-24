@@ -27,8 +27,8 @@ import { testLivenessClock } from "./session-liveness-test-helpers.ts";
 // Leaves the session inside a runner tool call that never completes, so the
 // drain cannot reach a handoff boundary and the interrupted marker survives.
 import {
+  createMultiSessionRestartModel,
   createRestartSessions,
-  MultiSessionRestartModel,
   nextCommandId,
 } from "./session-restart-step-resume-helpers.ts";
 
@@ -111,7 +111,7 @@ function restartSessionSetup() {
   const clock = testLivenessClock(1_000, 100, true);
   const timers = drainTimerSeam(clock.now);
   const setup = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     {

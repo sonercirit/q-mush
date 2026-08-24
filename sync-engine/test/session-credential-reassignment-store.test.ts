@@ -17,8 +17,9 @@ import {
   GLOBAL_WORKSPACE_ID,
 } from "../../shared/workspace-model.ts";
 import {
-  SessionCredentialReassignmentStore,
+  createSessionCredentialReassignmentStore,
   type SessionCredentialMetadataUpdate,
+  type SessionCredentialReassignmentStore,
 } from "../session-credential-reassignment-store.ts";
 import { createSchemaCompatibleTestDatabase } from "./authenticated-integration-test-helpers.ts";
 import { closeTrackedDatabases } from "./database-test-helpers.ts";
@@ -96,7 +97,10 @@ function setup(): {
       })
       .run();
   }
-  return { database, store: new SessionCredentialReassignmentStore(database) };
+  return {
+    database,
+    store: createSessionCredentialReassignmentStore(database),
+  };
 }
 
 function addSession(

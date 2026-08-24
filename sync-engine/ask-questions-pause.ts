@@ -5,20 +5,32 @@ import {
 import type { AskQuestionsStore } from "./ask-questions-store.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 
-export class AskQuestionsPause extends Error {
+export type AskQuestionsPause = Error & {
   readonly requestId: string;
+  readonly tag: "ask_questions_pause";
+};
 
-  constructor(requestId: string) {
-    super("The agent session is paused for question answers");
-    this.name = "AskQuestionsPause";
-    this.requestId = requestId;
-  }
+function createAskQuestionsPause(requestId: string): AskQuestionsPause {
+  return Object.assign(
+    new Error("The agent session is paused for question answers"),
+    {
+      name: "AskQuestionsPause",
+      requestId,
+      tag: "ask_questions_pause" as const,
+    },
+  );
 }
 
 export function isAskQuestionsPause(
   error: unknown,
 ): error is AskQuestionsPause {
-  return error instanceof AskQuestionsPause;
+  return (
+    error instanceof Error &&
+    "tag" in error &&
+    error.tag === "ask_questions_pause" &&
+    "requestId" in error &&
+    typeof error.requestId === "string"
+  );
 }
 
 export interface AskQuestionsToolInvocation {
@@ -66,5 +78,5 @@ export function pauseForAskQuestions(
     dependencies.now(),
   );
   dependencies.notify(invocation.userId, invocation.sessionId);
-  throw new AskQuestionsPause(pending.id);
+  throw createAskQuestionsPause(pending.id);
 }

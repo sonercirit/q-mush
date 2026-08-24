@@ -1,6 +1,6 @@
 import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { SessionAgentActionDependencies } from "../../sync-engine/session-agent-action-helpers.ts";
-import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import type { SessionAgentActionsDependencies } from "../../sync-engine/session-agent-actions-dependencies.ts";
 import {
   createTestProviderCredential,
   TEST_NOW,
@@ -43,7 +43,7 @@ export function terminalEventActionSetup(
   }>,
   launchSession: SessionAgentActionDependencies["launchSession"],
   notify: SessionAgentActionDependencies["notify"],
-): ConstructorParameters<typeof SessionAgentActions>[0] {
+): SessionAgentActionsDependencies {
   return {
     ...inactiveSessionAgentActionDefaults(),
     database: setup.database,

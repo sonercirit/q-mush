@@ -1,6 +1,10 @@
 import type { AppDatabase } from "../../shared/database.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createSessionSettingContext } from "../../sync-engine/session-store-settings.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -34,7 +38,7 @@ function storeWithRunner() {
   ];
   const generateId = () =>
     takeValue(credentialIds, "The hardening test ran out of IDs");
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     generateId,
     () => DEFAULT_TOOL_SETTINGS,
@@ -63,10 +67,10 @@ export function testStoreReadResources(
   store: SessionStore,
 ) {
   return {
-    database,
+    ...createSessionSettingContext(database, (userId, sessionId, workspaceId) =>
+      store.get(userId, sessionId, workspaceId),
+    ),
     generateId: () => crypto.randomUUID(),
     toolSettings: () => DEFAULT_TOOL_SETTINGS,
-    read: (userId: string, sessionId: string, workspaceId?: string) =>
-      store.get(userId, sessionId, workspaceId),
   };
 }

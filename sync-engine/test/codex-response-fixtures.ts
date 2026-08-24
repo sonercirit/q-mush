@@ -1,7 +1,5 @@
-import type {
-  ChatCompletionsAgentModel,
-  createChatCompletionsAgentModel,
-} from "../../sync-engine/agent-model.ts";
+import type { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
   testOpenAiOAuthCredential,

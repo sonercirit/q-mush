@@ -1,11 +1,10 @@
 import { describe, expect, test, vi } from "vitest";
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import {
-  AskQuestionsPause,
+  isAskQuestionsPause,
   pauseForAskQuestions,
 } from "../../sync-engine/ask-questions-pause.ts";
 import type {
-  AnswerQuestionRequestResult,
   AskQuestionsStore,
   StoredQuestionRequest,
 } from "../../sync-engine/ask-questions-store.ts";
@@ -17,6 +16,8 @@ import {
   TEST_QUESTION_ANSWERS,
   testAskQuestionsInput,
 } from "./ask-questions-test-fixtures.ts";
+
+type AnswerQuestionRequestResult = ReturnType<AskQuestionsStore["answer"]>;
 
 const USER: AuthenticatedUser = {
   email: "user@example.test",
@@ -106,9 +107,14 @@ describe("ask_questions agent tool", () => {
       userId: USER.id,
     };
 
-    expect(() => pauseForAskQuestions(dependencies, invocation)).toThrow(
-      AskQuestionsPause,
-    );
+    let pause: unknown;
+    try {
+      pauseForAskQuestions(dependencies, invocation);
+    } catch (error) {
+      pause = error;
+    }
+    expect(isAskQuestionsPause(pause)).toBe(true);
+    expect(pause).toEqual(expect.objectContaining({ requestId: "request-1" }));
     expect(create).toHaveBeenCalledWith(
       USER.id,
       "session-1",

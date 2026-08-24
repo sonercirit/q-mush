@@ -239,7 +239,7 @@ function expectPendingParentReport(
 
 test("restart pause preserves an idle-final generation report", () => {
   const { child, setup } = setupAdvancedRunningChild();
-  const restart = new RestartHandoffStore({
+  const restart = RestartHandoffStore({
     database: setup.database,
     generateId: setup.generateId,
     read: (userId, sessionId) =>
@@ -259,7 +259,7 @@ test("restart pause preserves an idle-final generation report", () => {
 
 test("shutdown recovery preserves an idle-final generation report", () => {
   const { child, setup } = setupAdvancedRunningChild();
-  const interrupted = new ShutdownInterruptedSessionStore({
+  const interrupted = ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: setup.generateId,
   });

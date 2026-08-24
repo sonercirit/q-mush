@@ -10,7 +10,7 @@ import {
   type ModelCredentialPool,
 } from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
-import { SessionRestartAbort } from "../session-restart-abort.ts";
+import { createSessionRestartAbort } from "../session-restart-abort.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -202,7 +202,7 @@ describe("balanced session forks", () => {
 });
 
 test("recovery replacement cannot fork after credential candidates resolve", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const storeFork = vi.fn(() => FORKED_RESULT);
   const pool = singleCredentialPool();
   const dependencies = forkDependencies(
