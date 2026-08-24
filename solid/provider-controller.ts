@@ -95,7 +95,7 @@ export class ProviderController {
       return;
     }
 
-    const revision = this.#state.revision.value;
+    const revision = this.#state.revision.value();
     const pending = { dialog, revision };
     this.#pendingSessionReassignment = pending;
     dialog.pending();

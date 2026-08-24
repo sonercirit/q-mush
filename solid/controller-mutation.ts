@@ -12,25 +12,27 @@ export function jsonRequestInit(
   };
 }
 
-class ControllerRevision {
-  #value = 0;
+interface ControllerRevision {
+  readonly value: () => number;
+  readonly advance: () => void;
+  readonly begin: () => number;
+  readonly isCurrent: (revision: number) => boolean;
+}
 
-  get value(): number {
-    return this.#value;
-  }
-
-  advance(): void {
-    this.#value += 1;
-  }
-
-  begin(): number {
-    this.advance();
-    return this.#value;
-  }
-
-  isCurrent(revision: number): boolean {
-    return revision === this.#value;
-  }
+function createControllerRevision(): ControllerRevision {
+  let value = 0;
+  const advance = (): void => {
+    value += 1;
+  };
+  return {
+    value: () => value,
+    advance,
+    begin() {
+      advance();
+      return value;
+    },
+    isCurrent: (revision) => revision === value,
+  };
 }
 
 export interface ControllerMutationOptions<State> {
@@ -48,7 +50,7 @@ export interface ControllerMutationOptions<State> {
 
 export class ControllerState<State extends object> {
   readonly #view: ReactiveState<State>;
-  readonly revision = new ControllerRevision();
+  readonly revision = createControllerRevision();
 
   constructor(view: ReactiveState<State>) {
     this.#view = view;
