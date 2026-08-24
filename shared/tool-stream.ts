@@ -320,26 +320,25 @@ function initialEntry(delta: ToolStreamDelta): ToolStreamEntry {
   };
 }
 
+const channelAppenders: Record<
+  ToolStreamChannel,
+  (entry: ToolStreamEntry, content: string) => ToolStreamEntry
+> = {
+  arguments: (entry, content) => ({
+    ...entry,
+    arguments: entry.arguments + content,
+  }),
+  name: (entry, content) => ({ ...entry, name: entry.name + content }),
+  stderr: (entry, content) => ({ ...entry, stderr: entry.stderr + content }),
+  stdout: (entry, content) => ({ ...entry, stdout: entry.stdout + content }),
+};
+
 function applyChannel(
   entry: ToolStreamEntry,
   channel: ToolStreamChannel,
   content: string,
 ): ToolStreamEntry | undefined {
-  let next: ToolStreamEntry;
-  switch (channel) {
-    case "arguments":
-      next = { ...entry, arguments: entry.arguments + content };
-      break;
-    case "name":
-      next = { ...entry, name: entry.name + content };
-      break;
-    case "stderr":
-      next = { ...entry, stderr: entry.stderr + content };
-      break;
-    case "stdout":
-      next = { ...entry, stdout: entry.stdout + content };
-      break;
-  }
+  const next = channelAppenders[channel](entry, content);
   const field = next[channel];
   return utf8ByteLength(field) <= MAXIMUM_TOOL_STREAM_FIELD_BYTES
     ? next
