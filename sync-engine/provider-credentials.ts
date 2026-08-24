@@ -99,6 +99,12 @@ export type ReadCredentialDetails = (
   details: ProviderCredentialInputDetails,
 ) => Promise<ProviderCredentialDetails>;
 
+type ReadCredential = (
+  userId: string,
+  credentialId: string,
+  workspaceId?: string,
+) => ProviderCredentialAccess | undefined;
+
 export interface ProviderCredentialEndpoints {
   readonly addConnectedAccount: (
     user: AuthenticatedUser,
@@ -108,22 +114,14 @@ export interface ProviderCredentialEndpoints {
   ) => ProviderCredentialSummary;
   readonly authorize: Authenticate;
   readonly credentials: (request: Request) => Promise<Response>;
-  readonly readCredential: (
-    userId: string,
-    credentialId: string,
-    workspaceId?: string,
-  ) => ProviderCredentialAccess | undefined;
+  readonly readCredential: ReadCredential;
   readonly readCredentialMetadata: (
     userId: string,
     credentialId: string,
     workspaceId?: string,
   ) => ProviderCredentialSummary | undefined;
   readonly reconnectCredential: (
-    userId: string,
-    credentialId: string,
-    secret: string,
-    now: number,
-    details: ProviderCredentialDetails,
+    ...values: [string, string, string, number, ProviderCredentialDetails]
   ) => boolean;
   readonly remove: (request: Request, credentialId: string) => Response;
   readonly setDefault: (request: Request, credentialId: string) => Response;
@@ -132,10 +130,7 @@ export interface ProviderCredentialEndpoints {
     credentialId: string,
   ) => Promise<Response>;
   readonly updateCredentialSecret: (
-    userId: string,
-    credentialId: string,
-    secret: string,
-    now: number,
+    ...values: [string, string, string, number]
   ) => boolean;
   readonly validateScopes: (
     userId: string,
