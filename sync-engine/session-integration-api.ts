@@ -56,7 +56,7 @@ type SessionModelsForUser = (
   user: AuthenticatedUser,
 ) => Promise<Response>;
 
-interface SessionIntegrationApiResources {
+export interface SessionIntegrationApiResources {
   readonly auth: GoogleAuth;
   readonly broker: RunnerCommandBroker;
   readonly compactForUser: (
@@ -114,13 +114,11 @@ function isCollectionMethod(method: string): method is CollectionMethod {
   return method === "GET" || method === "POST";
 }
 
-interface SessionIntegrationApi extends SessionDetailReader {
-  collection(request: Request): Response | Promise<Response>;
-}
+export type SessionIntegrationApi = ReturnType<
+  typeof buildSessionIntegrationApi
+>;
 
-export function createSessionIntegrationApi(
-  resources: SessionIntegrationApiResources,
-) {
+function buildSessionIntegrationApi(resources: SessionIntegrationApiResources) {
   const api = {
     forWorkspace(
       request: Request,
@@ -373,7 +371,12 @@ export function createSessionIntegrationApi(
     item(request: Request, sessionId: string): Response {
       const respond = (user: AuthenticatedUser, workspaceId: string) =>
         storedSessionResponse(resources.store, user.id, sessionId, workspaceId);
-      return api.forWorkspace(request, respond);
+      return forRequestWorkspace(
+        resources.requests,
+        resources.workspaces,
+        request,
+        respond,
+      );
     },
 
     listForUser(
@@ -566,3 +569,7 @@ export function createSessionIntegrationApi(
   };
   return api;
 }
+
+export const createSessionIntegrationApi: (
+  resources: SessionIntegrationApiResources,
+) => SessionIntegrationApi = buildSessionIntegrationApi;
