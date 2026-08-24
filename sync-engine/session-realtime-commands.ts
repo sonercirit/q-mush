@@ -261,6 +261,17 @@ function isSessionRealtimeOperation(
   return sessionRealtimeOperationSet.has(value);
 }
 
+function pendingInputHandler(
+  ...parameters: Parameters<SessionRealtimeHandler>
+): AgentSessionDetail {
+  const [sessions, user, payload, workspaceId] = parameters;
+  return sessions.pendingInputForUser(
+    user,
+    requiredRealtimeInput(readSessionPendingInputCommand(payload)),
+    workspaceId,
+  );
+}
+
 const sessionRealtimeHandlers: Record<
   SessionRealtimeOperation,
   SessionRealtimeHandler
@@ -330,23 +341,8 @@ const sessionRealtimeHandlers: Record<
       requiredRealtimeInput(readUserSpawnSession(payload)),
       workspaceId,
     ),
-  [SESSION_REALTIME_OPERATIONS.followUp]: (
-    sessions,
-    user,
-    payload,
-    workspaceId,
-  ) =>
-    sessions.pendingInputForUser(
-      user,
-      requiredRealtimeInput(readSessionPendingInputCommand(payload)),
-      workspaceId,
-    ),
-  [SESSION_REALTIME_OPERATIONS.steer]: (sessions, user, payload, workspaceId) =>
-    sessions.pendingInputForUser(
-      user,
-      requiredRealtimeInput(readSessionPendingInputCommand(payload)),
-      workspaceId,
-    ),
+  [SESSION_REALTIME_OPERATIONS.followUp]: pendingInputHandler,
+  [SESSION_REALTIME_OPERATIONS.steer]: pendingInputHandler,
   [SESSION_REALTIME_OPERATIONS.fork]: (sessions, user, payload, workspaceId) =>
     sessions.forkForUser(
       user,
