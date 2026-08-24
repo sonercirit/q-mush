@@ -6,7 +6,10 @@ import {
   SessionRuntimes,
   type RestartRequest,
 } from "../../sync-engine/session-runtime.ts";
-import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
+import {
+  createSessionRestartTestClock,
+  type SessionRestartTestClock,
+} from "./session-restart-test-clock.ts";
 
 interface PendingRuntime {
   readonly aborted: () => boolean;
@@ -96,7 +99,7 @@ function testRestartControl(
 }
 
 function restartRuntimeFixture(logged: string[] = []) {
-  const clock = new SessionRestartTestClock();
+  const clock = createSessionRestartTestClock();
   const runtimes = new SessionRuntimes(clock.now);
   return {
     clock,

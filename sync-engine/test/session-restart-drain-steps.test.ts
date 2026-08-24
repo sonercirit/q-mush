@@ -29,7 +29,10 @@ import {
   waitForRestartCommands,
   type RestartStepSetup,
 } from "./session-restart-step-resume-helpers.ts";
-import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
+import {
+  createSessionRestartTestClock,
+  type SessionRestartTestClock,
+} from "./session-restart-test-clock.ts";
 
 const AGENT_FILE_COMMAND = "read_agent_file";
 
@@ -193,7 +196,7 @@ async function forceDrainAtDeadline(
 }
 
 test("the production session drain force-parks at its injected deadline", async () => {
-  const clock = new SessionRestartTestClock();
+  const clock = createSessionRestartTestClock();
   const { id, setup } = await deadlineSession(
     new EndlessToolModel(),
     "deadline-command",
@@ -208,7 +211,7 @@ test("the production session drain force-parks at its injected deadline", async 
 });
 
 test("a forced runner drain persists and resumes its runner handoff", async () => {
-  const clock = new SessionRestartTestClock(1_700_000_000_000);
+  const clock = createSessionRestartTestClock(1_700_000_000_000);
   const { id, setup } = await deadlineSession(
     new MultiSessionRestartModel(),
     "runner-deadline-command",
