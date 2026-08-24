@@ -5,16 +5,31 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { createSessionController, type SessionController } from "../../solid/session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
-import { DEFAULT_SESSION_TRANSCRIPT_FILTERS, writeSessionTranscriptFilters } from "../../solid/session-transcript-filters.ts";
-import { expectRealtimeToRemainSilent, installFetch, requestUrl, withRestoredFetch } from "./controller-test-helpers.ts";
+import {
+  DEFAULT_SESSION_TRANSCRIPT_FILTERS,
+  writeSessionTranscriptFilters,
+} from "../../solid/session-transcript-filters.ts";
+import {
+  expectRealtimeToRemainSilent,
+  installFetch,
+  requestUrl,
+  withRestoredFetch,
+} from "./controller-test-helpers.ts";
 import { createMemoryStorage } from "./memory-storage.ts";
 import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
 import { createResponseFetch } from "./session-dom-test-helpers.tsx";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
-import { sessionDetailWithStatus, sessionMessageIds, transcriptMessage } from "./transcript-ordering-fixtures.ts";
+import {
+  sessionDetailWithStatus,
+  sessionMessageIds,
+  transcriptMessage,
+} from "./transcript-ordering-fixtures.ts";
 afterEach(() => {
   vi.restoreAllMocks();
 });
@@ -35,11 +50,25 @@ function promptDraft(state: SessionViewState, prompt: string) {
 function assistantMessage(id = "assistant-1", content = "Response") {
   return transcriptMessage(id, content, "assistant", 2);
 }
-function streamMessageIds(sessionId: string, thinking: boolean): readonly string[] {
-  return [...(thinking ? [`stream:${sessionId}:thinking`] : []), `stream:${sessionId}:assistant`];
+function streamMessageIds(
+  sessionId: string,
+  thinking: boolean,
+): readonly string[] {
+  return [
+    ...(thinking ? [`stream:${sessionId}:thinking`] : []),
+    `stream:${sessionId}:assistant`,
+  ];
 }
-function expectStreamAfter(controller: SessionController, persistedIds: readonly string[], sessionId: string, thinking: boolean): void {
-  expect(sessionMessageIds(controller)).toEqual([...persistedIds, ...streamMessageIds(sessionId, thinking)]);
+function expectStreamAfter(
+  controller: SessionController,
+  persistedIds: readonly string[],
+  sessionId: string,
+  thinking: boolean,
+): void {
+  expect(sessionMessageIds(controller)).toEqual([
+    ...persistedIds,
+    ...streamMessageIds(sessionId, thinking),
+  ]);
 }
 interface SelectedTurn {
   readonly assistant?: AgentSessionDetail["messages"][number];
@@ -50,12 +79,25 @@ interface SelectedTurn {
 interface SelectedIdleTurn extends SelectedTurn {
   readonly assistant: AgentSessionDetail["messages"][number];
 }
-function selectedTurn(sessionId: string, status: "idle"): Promise<SelectedIdleTurn>;
-function selectedTurn(sessionId: string, status: "running"): Promise<SelectedTurn>;
-async function selectedTurn(sessionId: string, status: "idle" | "running"): Promise<SelectedTurn> {
+function selectedTurn(
+  sessionId: string,
+  status: "idle",
+): Promise<SelectedIdleTurn>;
+function selectedTurn(
+  sessionId: string,
+  status: "running",
+): Promise<SelectedTurn>;
+async function selectedTurn(
+  sessionId: string,
+  status: "idle" | "running",
+): Promise<SelectedTurn> {
   const user = transcriptMessage("user-1", "Request", "user", 1);
   const assistant = status === "idle" ? assistantMessage() : undefined;
-  const detail = sessionDetail(status, sessionId, assistant === undefined ? [user] : [user, assistant]);
+  const detail = sessionDetail(
+    status,
+    sessionId,
+    assistant === undefined ? [user] : [user, assistant],
+  );
   return {
     ...(assistant === undefined ? {} : { assistant }),
     controller: await selectedController(detail),
@@ -70,11 +112,21 @@ async function selectedIdleTurn(sessionId: string): Promise<SelectedIdleTurn> {
 function sessionResponse(input: RequestInfo | URL): Promise<Response> {
   const path = new URL(requestUrl(input), "http://localhost").pathname;
   return Promise.resolve(
-    Response.json(path === SESSIONS_PATH ? { sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] } : TEST_SESSION_DETAIL),
+    Response.json(
+      path === SESSIONS_PATH
+        ? { sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] }
+        : TEST_SESSION_DETAIL,
+    ),
   );
 }
 
-function applyDelta(controller: SessionController, sessionId: string, content: string, thinking: string, reset = false): void {
+function applyDelta(
+  controller: SessionController,
+  sessionId: string,
+  content: string,
+  thinking: string,
+  reset = false,
+): void {
   applySessionDelta(controller, {
     content,
     ...(reset ? { reset: true } : {}),
@@ -92,11 +144,18 @@ function sessionDetail(
   return sessionDetailWithStatus(status, messages, sessionId);
 }
 
-function finishSession(controller: SessionController, detail: AgentSessionDetail, messages: AgentSessionDetail["messages"]): void {
+function finishSession(
+  controller: SessionController,
+  detail: AgentSessionDetail,
+  messages: AgentSessionDetail["messages"],
+): void {
   controller.applyDetail({ ...detail, messages, status: "idle" });
 }
 
-function queuedDetail(detail: AgentSessionDetail, messages: AgentSessionDetail["messages"] = detail.messages): AgentSessionDetail {
+function queuedDetail(
+  detail: AgentSessionDetail,
+  messages: AgentSessionDetail["messages"] = detail.messages,
+): AgentSessionDetail {
   return { ...detail, messages, status: "queued" };
 }
 
@@ -109,20 +168,29 @@ function selectedController(
   transport?: Parameters<typeof createSessionController>[3],
 ): Promise<SessionController> {
   globalThis.fetch = jsonFetch(selected);
-  const controller = createRoot(() => createSessionController(undefined, undefined, undefined, transport));
+  const controller = createRoot(() =>
+    createSessionController(undefined, undefined, undefined, transport),
+  );
   return controller.select(selected.id).then(() => controller);
 }
 
 async function selectedControllerWithCommand(
   selected: AgentSessionDetail,
-  command: NonNullable<Parameters<typeof createSessionController>[3]>["command"],
+  command: NonNullable<
+    Parameters<typeof createSessionController>[3]
+  >["command"],
 ): Promise<SessionController> {
   return selectedController(selected, { command });
 }
 
-async function expectReadCommand(command: ReturnType<typeof vi.fn>): Promise<void> {
+async function expectReadCommand(
+  command: ReturnType<typeof vi.fn>,
+): Promise<void> {
   await vi.waitFor(() => {
-    expect(command.mock.calls).toContainEqual(["sessions.read", { sessionId: TEST_SESSION_DETAIL.id }]);
+    expect(command.mock.calls).toContainEqual([
+      "sessions.read",
+      { sessionId: TEST_SESSION_DETAIL.id },
+    ]);
   });
 }
 
@@ -179,7 +247,9 @@ test("renders incremental model deltas in the selected transcript", async () => 
 
   try {
     await controller.load();
-    expect(controller.state.draft.workingDirectory).toBe(TEST_SESSION_DETAIL.workingDirectory);
+    expect(controller.state.draft.workingDirectory).toBe(
+      TEST_SESSION_DETAIL.workingDirectory,
+    );
     applyDelta(controller, TEST_SESSION_DETAIL.id, "Hello", "Considering");
     applyDelta(controller, TEST_SESSION_DETAIL.id, " world", " carefully");
     applyDelta(controller, TEST_SESSION_DETAIL.id, "", "", true);
@@ -187,7 +257,12 @@ test("renders incremental model deltas in the selected transcript", async () => 
     expect(controller.state.detail?.messages).toEqual([]);
 
     controller.applyDetail({ ...TEST_SESSION_DETAIL, status: "queued" });
-    applyDelta(controller, TEST_SESSION_DETAIL.id, "Replacement", "Reconsidering");
+    applyDelta(
+      controller,
+      TEST_SESSION_DETAIL.id,
+      "Replacement",
+      "Reconsidering",
+    );
 
     expect(controller.state.detail?.messages.slice(-2)).toMatchObject([
       { content: "Reconsidering", role: "thinking" },
@@ -218,7 +293,11 @@ test("renders incremental model deltas in the selected transcript", async () => 
 
 test("ignores stale deltas after a finished snapshot and accepts a queued continuation", async () => {
   await withRestoredFetch(async () => {
-    const { controller, detail: running, user } = await selectedTurn("session-stale-delta", "running");
+    const {
+      controller,
+      detail: running,
+      user,
+    } = await selectedTurn("session-stale-delta", "running");
     const sessionId = running.id;
     const assistant = assistantMessage("assistant-1", "Finished response");
     applyDelta(controller, sessionId, "Finished response", "");
@@ -236,15 +315,24 @@ test("ignores stale deltas after a finished snapshot and accepts a queued contin
 
 test("anchors a follow-up stream after the newly persisted user message", async () => {
   await withRestoredFetch(async () => {
-    const { assistant, detail, user } = await selectedIdleTurn("session-follow-up");
+    const { assistant, detail, user } =
+      await selectedIdleTurn("session-follow-up");
     const followUp = transcriptMessage("user-2", "Follow up", "user", 3);
-    const controller = await selectedControllerWithCommand(detail, queuedCommand(detail, [user, assistant, followUp]));
+    const controller = await selectedControllerWithCommand(
+      detail,
+      queuedCommand(detail, [user, assistant, followUp]),
+    );
     const sessionId = detail.id;
     controller.setFollowUp(followUp.content);
     await controller.send();
     applyDelta(controller, sessionId, "Follow-up response", "");
 
-    expectStreamAfter(controller, [user.id, assistant.id, followUp.id], sessionId, false);
+    expectStreamAfter(
+      controller,
+      [user.id, assistant.id, followUp.id],
+      sessionId,
+      false,
+    );
   });
 });
 
@@ -252,7 +340,10 @@ test("anchors a continuation stream after the existing transcript", async () => 
   await withRestoredFetch(async () => {
     const turn = await selectedIdleTurn("session-continuation");
     const { assistant, detail, user } = turn;
-    const controller = await selectedControllerWithCommand(detail, queuedCommand(detail));
+    const controller = await selectedControllerWithCommand(
+      detail,
+      queuedCommand(detail),
+    );
     const sessionId = detail.id;
     await controller.continueSession();
     applyDelta(controller, sessionId, "Continued response", "");
@@ -263,7 +354,11 @@ test("anchors a continuation stream after the existing transcript", async () => 
 
 test("reconciles reset streams with differently finalized persisted messages", async () => {
   const originalFetch = globalThis.fetch;
-  const { controller, detail: running, user } = await selectedTurn("session-stream", "running");
+  const {
+    controller,
+    detail: running,
+    user,
+  } = await selectedTurn("session-stream", "running");
   const sessionId = running.id;
 
   try {
@@ -279,7 +374,11 @@ test("reconciles reset streams with differently finalized persisted messages", a
       ]),
     );
 
-    expect(sessionMessageIds(controller)).toEqual(["user-1", "thinking-1", "assistant-1"]);
+    expect(sessionMessageIds(controller)).toEqual([
+      "user-1",
+      "thinking-1",
+      "assistant-1",
+    ]);
     expect(controller.state.detail?.messages).toHaveLength(3);
   } finally {
     globalThis.fetch = originalFetch;
@@ -332,12 +431,19 @@ test("keeps per-session streams isolated across rapid selection changes", async 
 test("replaces a streaming transcript with a compacted snapshot", async () => {
   const originalFetch = globalThis.fetch;
   const sessionId = "session-compaction";
-  const original = sessionDetail("running", sessionId, [transcriptMessage("old-user", "Original request", "user", 1)]);
+  const original = sessionDetail("running", sessionId, [
+    transcriptMessage("old-user", "Original request", "user", 1),
+  ]);
 
   try {
     const controller = await selectedController(original);
     applyDelta(controller, sessionId, "Temporary", "Temporary thinking");
-    const compacted = transcriptMessage("compacted", "Conversation compacted", "user", 5);
+    const compacted = transcriptMessage(
+      "compacted",
+      "Conversation compacted",
+      "user",
+      5,
+    );
     finishSession(controller, original, [compacted]);
 
     expect(sessionMessageIds(controller)).toEqual([compacted.id]);
@@ -352,7 +458,11 @@ test("loads persisted transcript filters into the controller and keeps them on r
     ...DEFAULT_SESSION_TRANSCRIPT_FILTERS,
     toolDefinitions: false,
   });
-  const controller = createSessionController(createReactiveState(initialSessionViewState()), undefined, storage);
+  const controller = createSessionController(
+    createReactiveState(initialSessionViewState()),
+    undefined,
+    storage,
+  );
 
   expect(controller.state.transcriptFilters.toolDefinitions).toBe(false);
   controller.reset();
@@ -363,29 +473,38 @@ test.each([
   { action: "send", busy: { compacting: true } },
   { action: "continueSession", busy: { stopping: true } },
   { action: "stop", busy: { sending: true } },
-] as const)("guards invalid or duplicate $action mutations in the controller", async ({ action, busy }) => {
-  const active = action === "stop";
-  const detail = {
-    ...TEST_SESSION_DETAIL,
-    status: active ? ("idle" as const) : ("running" as const),
-  };
-  const reactive = createReactiveState<SessionViewState>({
-    ...initialSessionViewState(),
-    ...busy,
-    detail,
-    followUp: "Do not submit",
-    selectedId: detail.id,
-  });
-  const controller = createSessionController(reactive);
-  const fetch = vi.spyOn(globalThis, "fetch");
+] as const)(
+  "guards invalid or duplicate $action mutations in the controller",
+  async ({ action, busy }) => {
+    const active = action === "stop";
+    const detail = {
+      ...TEST_SESSION_DETAIL,
+      status: active ? ("idle" as const) : ("running" as const),
+    };
+    const reactive = createReactiveState<SessionViewState>({
+      ...initialSessionViewState(),
+      ...busy,
+      detail,
+      followUp: "Do not submit",
+      selectedId: detail.id,
+    });
+    const controller = createSessionController(reactive);
+    const fetch = vi.spyOn(globalThis, "fetch");
 
-  await controller[action]();
+    await controller[action]();
 
-  expect(fetch).not.toHaveBeenCalled();
-  expect(controller.state.followUp).toBe("Do not submit");
-});
+    expect(fetch).not.toHaveBeenCalled();
+    expect(controller.state.followUp).toBe("Do not submit");
+  },
+);
 
-test.each(["compact", "continueSession", "stop", "autoCompact", "idleCompact"] as const)(
+test.each([
+  "compact",
+  "continueSession",
+  "stop",
+  "autoCompact",
+  "idleCompact",
+] as const)(
   "rejects %s when the detail does not match the selected session",
   async (action) => {
     const reactive = createReactiveState<SessionViewState>(
@@ -397,7 +516,9 @@ test.each(["compact", "continueSession", "stop", "autoCompact", "idleCompact"] a
     const controller = createSessionController(reactive, undefined, null);
     const fetch = vi.spyOn(globalThis, "fetch");
 
-    await (action === "autoCompact" || action === "idleCompact" ? controller.toggleCompactionFlag(action, false) : controller[action]());
+    await (action === "autoCompact" || action === "idleCompact"
+      ? controller.toggleCompactionFlag(action, false)
+      : controller[action]());
 
     expect(fetch).not.toHaveBeenCalled();
   },
@@ -406,7 +527,12 @@ test("decodes a realtime read result as session detail", async () => {
   const transport = {
     command: vi.fn(() => Promise.resolve(TEST_SESSION_DETAIL)),
   };
-  const controller = createSessionController(undefined, undefined, undefined, transport);
+  const controller = createSessionController(
+    undefined,
+    undefined,
+    undefined,
+    transport,
+  );
 
   await controller.select(TEST_SESSION_DETAIL.id);
 
@@ -420,7 +546,11 @@ test("hydrates the selected session list and detail after a realtime reconnect",
   const hydrated = { ...TEST_SESSION_DETAIL, status: "failed" as const };
   const transport = {
     command: vi.fn((operation: string) =>
-      Promise.resolve(operation === SESSION_REALTIME_OPERATIONS.subscribe ? { sessions: [summaryFromDetail(hydrated)] } : hydrated),
+      Promise.resolve(
+        operation === SESSION_REALTIME_OPERATIONS.subscribe
+          ? { sessions: [summaryFromDetail(hydrated)] }
+          : hydrated,
+      ),
     ),
     onReconnect(listener: () => void) {
       reconnect = listener;
@@ -433,7 +563,12 @@ test("hydrates the selected session list and detail after a realtime reconnect",
     selectedId: TEST_SESSION_DETAIL.id,
     sessions: [TEST_SESSION_DETAIL],
   });
-  const controller = createSessionController(reactive, undefined, undefined, transport);
+  const controller = createSessionController(
+    reactive,
+    undefined,
+    undefined,
+    transport,
+  );
 
   reconnect?.();
   await expectReadCommand(transport.command);
@@ -464,7 +599,11 @@ test("inserting a saved prompt only changes the new-session draft", () => {
 });
 
 test("an unchanged session refresh does not notify the view", async () => {
-  await expectRealtimeToRemainSilent(() => createSessionController(), sessionResponse, [summaryFromDetail(TEST_SESSION_DETAIL)]);
+  await expectRealtimeToRemainSilent(
+    () => createSessionController(),
+    sessionResponse,
+    [summaryFromDetail(TEST_SESSION_DETAIL)],
+  );
 });
 
 test("matching session snapshots skip serializing retained message content", () => {

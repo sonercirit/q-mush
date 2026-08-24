@@ -3,7 +3,7 @@ import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts"
 import { isSessionContextTokenCapError } from "./session-context-limit-store.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import type { SessionContextTokenCapAction } from "./session-realtime-commands.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export function createSessionContextTokenCapAction(
   dependencies: SessionLifecycleDependencies & {

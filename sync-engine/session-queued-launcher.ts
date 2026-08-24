@@ -5,7 +5,7 @@ import {
   type SessionRunnerAvailability,
 } from "./session-runner-availability.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface QueuedSessionLauncherDependencies {
   readonly draining: () => boolean;

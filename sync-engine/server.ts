@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
-import { build } from "vite";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -33,7 +32,7 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import { clientBuildConfiguration, createClientPlugins, readFavicon } from "./client-build.ts";
+import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
@@ -41,9 +40,13 @@ import type { RequestHandlerIntegrations } from "./server-integrations.ts";
 
 const DEFAULT_Q_MUSH_PORT = 12_345;
 
-export function readQmushPort(environment: Readonly<Record<string, string | undefined>>): string | number {
+export function readQmushPort(
+  environment: Readonly<Record<string, string | undefined>>,
+): string | number {
   const configuredPort = environment["PORT"]?.trim();
-  return configuredPort === undefined || configuredPort.length === 0 ? DEFAULT_Q_MUSH_PORT : configuredPort;
+  return configuredPort === undefined || configuredPort.length === 0
+    ? DEFAULT_Q_MUSH_PORT
+    : configuredPort;
 }
 
 const CSS_HEADERS = { "content-type": "text/css; charset=utf-8" };
@@ -66,7 +69,12 @@ interface PreparedBody {
   readonly identityByteLength: number;
 }
 
-const CONTENT_ENCODINGS: readonly ContentEncoding[] = ["zstd", "br", "gzip", "deflate"];
+const CONTENT_ENCODINGS: readonly ContentEncoding[] = [
+  "zstd",
+  "br",
+  "gzip",
+  "deflate",
+];
 
 function parseEncodingPreferences(header: string): ReadonlyMap<string, number> {
   const preferences = new Map<string, number>();
@@ -87,7 +95,8 @@ function parseEncodingPreferences(header: string): ReadonlyMap<string, number> {
 
       if (name === "q") {
         const value = Number(parameter.slice(separatorIndex + 1).trim());
-        quality = Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0;
+        quality =
+          Number.isFinite(value) && value >= 0 && value <= 1 ? value : 0;
       }
     }
 
@@ -99,7 +108,9 @@ function parseEncodingPreferences(header: string): ReadonlyMap<string, number> {
   return preferences;
 }
 
-function selectResponseEncoding(header: string | null): ResponseEncoding | undefined {
+function selectResponseEncoding(
+  header: string | null,
+): ResponseEncoding | undefined {
   if (header === null || header.trim().length === 0) {
     return "identity";
   }
@@ -118,7 +129,8 @@ function selectResponseEncoding(header: string | null): ResponseEncoding | undef
     }
   }
 
-  const identityQuality = preferences.get("identity") ?? (preferences.get("*") === 0 ? 0 : 1);
+  const identityQuality =
+    preferences.get("identity") ?? (preferences.get("*") === 0 ? 0 : 1);
 
   if (identityQuality > bestQuality) {
     return "identity";
@@ -146,8 +158,13 @@ function prepareBody(identity: string): PreparedBody {
   };
 }
 
-function preparedBodyByteLength(body: PreparedBody, encoding: ResponseEncoding): number {
-  return encoding === "identity" ? body.identityByteLength : body.compressed[encoding].byteLength;
+function preparedBodyByteLength(
+  body: PreparedBody,
+  encoding: ResponseEncoding,
+): number {
+  return encoding === "identity"
+    ? body.identityByteLength
+    : body.compressed[encoding].byteLength;
 }
 
 function acceptsEntityTag(request: Request, tag: string): boolean {
@@ -168,9 +185,16 @@ function acceptsEntityTag(request: Request, tag: string): boolean {
   return false;
 }
 
-function createTextResponse(request: Request, body: PreparedBody, headers?: HeadersInit, status = 200): Response {
+function createTextResponse(
+  request: Request,
+  body: PreparedBody,
+  headers?: HeadersInit,
+  status = 200,
+): Response {
   const responseHeaders = new Headers(headers);
-  const encoding = selectResponseEncoding(request.headers.get("accept-encoding"));
+  const encoding = selectResponseEncoding(
+    request.headers.get("accept-encoding"),
+  );
   responseHeaders.set("vary", "Accept-Encoding");
 
   if (encoding === undefined) {
@@ -178,7 +202,10 @@ function createTextResponse(request: Request, body: PreparedBody, headers?: Head
   }
 
   if (request.method === "HEAD") {
-    responseHeaders.set("content-length", String(preparedBodyByteLength(body, encoding)));
+    responseHeaders.set(
+      "content-length",
+      String(preparedBodyByteLength(body, encoding)),
+    );
     if (encoding !== "identity") {
       responseHeaders.set("content-encoding", encoding);
     }
@@ -196,7 +223,11 @@ function createTextResponse(request: Request, body: PreparedBody, headers?: Head
   });
 }
 
-function createFaviconResponse(request: Request, body: PreparedBody, entityTag: string): Response {
+function createFaviconResponse(
+  request: Request,
+  body: PreparedBody,
+  entityTag: string,
+): Response {
   if (request.method !== "GET" && request.method !== "HEAD") {
     const response = createMethodNotAllowedResponse("GET, HEAD");
     response.headers.set("cache-control", "no-store");
@@ -221,7 +252,9 @@ interface ProviderRoutes {
 }
 
 function pathSegments(pathname: string, prefix: string): readonly string[] {
-  return pathname.startsWith(prefix) ? pathname.slice(prefix.length).split("/") : [];
+  return pathname.startsWith(prefix)
+    ? pathname.slice(prefix.length).split("/")
+    : [];
 }
 
 function routeItemId(segments: readonly string[]): string | undefined {
@@ -229,7 +262,10 @@ function routeItemId(segments: readonly string[]): string | undefined {
   return id === undefined || id.length === 0 ? undefined : id;
 }
 
-type SessionItemAction = (request: Request, id: string) => Promise<Response> | Response;
+type SessionItemAction = (
+  request: Request,
+  id: string,
+) => Promise<Response> | Response;
 
 interface SessionItemRoutes {
   readonly compact: SessionItemAction;
@@ -271,7 +307,15 @@ function routeSessionItem(
       if (segments.length !== 2) return undefined;
       const route = segments[1];
       const routes: Readonly<
-        Record<"compact" | "compaction" | "continue" | "messages" | "reassign" | "stop", () => Promise<Response> | Response>
+        Record<
+          | "compact"
+          | "compaction"
+          | "continue"
+          | "messages"
+          | "reassign"
+          | "stop",
+          () => Promise<Response> | Response
+        >
       > = {
         compact: () => sessions.compact(request, id),
         compaction: () => sessions.compaction(request, id),
@@ -301,18 +345,29 @@ interface ItemRouteActions {
   readonly sessionReassignment?: (id: string) => Promise<Response> | Response;
 }
 
-function routeItemSegments(segments: readonly string[], actions: ItemRouteActions): Promise<Response> | Response | undefined {
+function routeItemSegments(
+  segments: readonly string[],
+  actions: ItemRouteActions,
+): Promise<Response> | Response | undefined {
   return routeItemRequest(segments, actions.item, (id) => {
     if (segments.length === 2) {
       const route = segments[1];
       const routes: Readonly<
-        Record<"default" | "scopes" | "session-reassignment", ((id: string) => Promise<Response> | Response) | undefined>
+        Record<
+          "default" | "scopes" | "session-reassignment",
+          ((id: string) => Promise<Response> | Response) | undefined
+        >
       > = {
         default: actions.default,
         scopes: actions.scopes,
         "session-reassignment": actions.sessionReassignment,
       };
-      const handler = route === "default" || route === "scopes" || route === "session-reassignment" ? routes[route] : undefined;
+      const handler =
+        route === "default" ||
+        route === "scopes" ||
+        route === "session-reassignment"
+          ? routes[route]
+          : undefined;
       return handler?.(id);
     }
     return undefined;
@@ -356,7 +411,8 @@ function routeProviderRequest(
     default: (credentialId) => integration.setDefault(request, credentialId),
     item: (credentialId) => integration.remove(request, credentialId),
     scopes: (credentialId) => integration.setScopes(request, credentialId),
-    sessionReassignment: (credentialId) => integration.reassignSessions(request, credentialId),
+    sessionReassignment: (credentialId) =>
+      integration.reassignSessions(request, credentialId),
   });
 }
 
@@ -414,7 +470,11 @@ export function createRequestHandler(
       }
 
       const runnerId = runnerSegments[0];
-      if (runnerId !== undefined && runnerSegments.length === 2 && runnerSegments[1] === RUNNER_DIRECTORIES_SEGMENT) {
+      if (
+        runnerId !== undefined &&
+        runnerSegments.length === 2 &&
+        runnerSegments[1] === RUNNER_DIRECTORIES_SEGMENT
+      ) {
         return sessions.directories(request, runnerId);
       }
 
@@ -434,17 +494,23 @@ export function createRequestHandler(
         return workspaces.collection(request);
       }
 
-      const workspaceResponse = routeItemSegments(pathSegments(pathname, `${WORKSPACES_PATH}/`), {
-        default: (workspaceId) => workspaces.setDefault(request, workspaceId),
-        item: (workspaceId) => workspaces.item(request, workspaceId),
-      });
+      const workspaceResponse = routeItemSegments(
+        pathSegments(pathname, `${WORKSPACES_PATH}/`),
+        {
+          default: (workspaceId) => workspaces.setDefault(request, workspaceId),
+          item: (workspaceId) => workspaces.item(request, workspaceId),
+        },
+      );
       if (workspaceResponse !== undefined) {
         return workspaceResponse;
       }
 
-      const promptResponse = routeItemSegments(pathSegments(pathname, `${PROMPTS_PATH}/`), {
-        item: (promptId) => prompts.item(request, promptId),
-      });
+      const promptResponse = routeItemSegments(
+        pathSegments(pathname, `${PROMPTS_PATH}/`),
+        {
+          item: (promptId) => prompts.item(request, promptId),
+        },
+      );
 
       if (promptResponse !== undefined) {
         return promptResponse;
@@ -454,15 +520,21 @@ export function createRequestHandler(
         return braveSearch.keys(request);
       }
 
-      const braveSearchKeyResponse = routeItemSegments(pathSegments(pathname, `${BRAVE_SEARCH_KEYS_PATH}/`), {
-        item: (keyId) => braveSearch.remove(request, keyId),
-        scopes: (keyId) => braveSearch.setScopes(request, keyId),
-      });
+      const braveSearchKeyResponse = routeItemSegments(
+        pathSegments(pathname, `${BRAVE_SEARCH_KEYS_PATH}/`),
+        {
+          item: (keyId) => braveSearch.remove(request, keyId),
+          scopes: (keyId) => braveSearch.setScopes(request, keyId),
+        },
+      );
       if (braveSearchKeyResponse !== undefined) {
         return braveSearchKeyResponse;
       }
 
-      if (pathname === SESSION_ATTACHMENT_FALLBACKS_PATH && sessions.attachmentFallbacks !== undefined) {
+      if (
+        pathname === SESSION_ATTACHMENT_FALLBACKS_PATH &&
+        sessions.attachmentFallbacks !== undefined
+      ) {
         return sessions.attachmentFallbacks(request);
       }
 
@@ -492,20 +564,30 @@ export function createRequestHandler(
         return openAiResponse;
       }
 
-      const openRouterResponse = routeProviderRequest(pathname, request, openRouter, {
-        credentials: OPENROUTER_CREDENTIALS_PATH,
-        oauth: OPENROUTER_OAUTH_PATH,
-        oauthCallback: OPENROUTER_OAUTH_CALLBACK_PATH,
-      });
+      const openRouterResponse = routeProviderRequest(
+        pathname,
+        request,
+        openRouter,
+        {
+          credentials: OPENROUTER_CREDENTIALS_PATH,
+          oauth: OPENROUTER_OAUTH_PATH,
+          oauthCallback: OPENROUTER_OAUTH_CALLBACK_PATH,
+        },
+      );
 
       if (openRouterResponse !== undefined) {
         return openRouterResponse;
       }
 
       if (generic !== undefined) {
-        const genericResponse = routeProviderRequest(pathname, request, generic, {
-          credentials: GENERIC_CREDENTIALS_PATH,
-        });
+        const genericResponse = routeProviderRequest(
+          pathname,
+          request,
+          generic,
+          {
+            credentials: GENERIC_CREDENTIALS_PATH,
+          },
+        );
         if (genericResponse !== undefined) {
           return genericResponse;
         }
@@ -524,12 +606,15 @@ export function createRequestHandler(
       return createTextResponse(request, appPage, HTML_HEADERS);
     }
 
-    if (pathname === APP_SCRIPT_PATH) return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
+    if (pathname === APP_SCRIPT_PATH)
+      return createTextResponse(request, browserBundle, JAVASCRIPT_HEADERS);
 
     if (pathname === RUNNER_INSTALLER_PATH) return runners.installer(request);
 
-    if (pathname === RUNNER_EXECUTABLE_PATH) return runnerExecutables.serve(request);
-    if (pathname === RUNNER_SUPERVISOR_PATH) return runnerExecutables.serveSupervisor(request);
+    if (pathname === RUNNER_EXECUTABLE_PATH)
+      return runnerExecutables.serve(request);
+    if (pathname === RUNNER_SUPERVISOR_PATH)
+      return runnerExecutables.serveSupervisor(request);
     if (pathname === STYLESHEET_PATH) {
       return createTextResponse(request, styles, CSS_HEADERS);
     }
@@ -538,67 +623,7 @@ export function createRequestHandler(
   };
 }
 
-interface ViteClientAssets {
-  readonly javaScript: string;
-  readonly stylesheet: string;
-}
-
-function isViteOutput(value: Awaited<ReturnType<typeof build>>): value is Extract<Awaited<ReturnType<typeof build>>, { output: unknown }> {
-  return !Array.isArray(value) && "output" in value;
-}
-
-function viteOutputs(
-  result: Awaited<ReturnType<typeof build>>,
-): readonly Extract<Awaited<ReturnType<typeof build>>, { output: unknown }>[] {
-  return Array.isArray(result) ? result.filter(isViteOutput) : isViteOutput(result) ? [result] : [];
-}
-
-function readViteClientAssets(result: Awaited<ReturnType<typeof build>>): ViteClientAssets {
-  const builds = viteOutputs(result);
-
-  if (builds.length === 0) {
-    throw new Error("The Vite browser build did not return output");
-  }
-
-  let javaScript: string | undefined;
-  let stylesheet: string | undefined;
-
-  for (const { output: outputs } of builds) {
-    for (const output of outputs) {
-      if (output.type === "chunk" && output.isEntry) {
-        javaScript = output.code;
-      } else if (output.type === "asset" && output.fileName.endsWith(".css")) {
-        stylesheet = typeof output.source === "string" ? output.source : new TextDecoder().decode(output.source);
-      }
-    }
-  }
-
-  if (javaScript === undefined || stylesheet === undefined) {
-    throw new Error("The Vite browser build did not produce JavaScript and CSS");
-  }
-
-  return { javaScript, stylesheet };
-}
-
-let clientAssets: Promise<ViteClientAssets> | undefined;
-
-function buildClientAssets(): Promise<ViteClientAssets> {
-  clientAssets ??= build({
-    build: {
-      ...clientBuildConfiguration,
-      write: false,
-    },
-    configFile: false,
-    logLevel: "silent",
-    plugins: createClientPlugins(),
-  }).then(readViteClientAssets);
-  return clientAssets;
-}
-
-export async function buildClientStylesheet(): Promise<string> {
-  return (await buildClientAssets()).stylesheet;
-}
-
-export async function buildClientJavaScript(): Promise<string> {
-  return (await buildClientAssets()).javaScript;
-}
+export {
+  buildClientJavaScript,
+  buildClientStylesheet,
+} from "./client-assets.ts";

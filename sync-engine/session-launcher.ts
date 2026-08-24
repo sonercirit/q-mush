@@ -16,7 +16,7 @@ import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { runPersistedSession } from "./session-run.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export type FinishSession = (
   detail: AgentSessionDetail,

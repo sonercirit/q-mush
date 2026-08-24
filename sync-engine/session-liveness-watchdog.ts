@@ -6,6 +6,7 @@ import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import {
   activeSessionCondition,
   readStoredSessionSnapshots,
@@ -14,7 +15,6 @@ import {
   failInterruptedStoredSession,
   type InterruptedStoredSession,
 } from "./session-store-reassignment.ts";
-import type { SessionStore } from "./session-store.ts";
 
 const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
 export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;

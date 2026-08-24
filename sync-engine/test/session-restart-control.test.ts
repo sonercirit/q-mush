@@ -4,7 +4,10 @@ import {
   readSessionRestartCredential,
   type RestartRuntimeControl,
 } from "../../sync-engine/session-restart-control.ts";
-import type { RestartRequest, RestartScope } from "../../sync-engine/session-runtime.ts";
+import type {
+  RestartRequest,
+  RestartScope,
+} from "../../sync-engine/session-runtime.ts";
 import { restartTestCredential } from "./session-restart-cpd-helpers.ts";
 
 const OPENROUTER_CREDENTIAL = restartTestCredential("openrouter-credential", {
@@ -14,7 +17,10 @@ const OPENROUTER_CREDENTIAL = restartTestCredential("openrouter-credential", {
   secret: "openrouter-secret",
 });
 
-function runnerGate(gates: Map<string, RestartRequest>, runnerId: string): RestartRequest | undefined {
+function runnerGate(
+  gates: Map<string, RestartRequest>,
+  runnerId: string,
+): RestartRequest | undefined {
   return gates.get(runnerId);
 }
 
@@ -56,7 +62,11 @@ function createTestRestartRuntimes(): TestRestartRuntimes {
       return serverRequest !== undefined;
     },
     accepts(runnerId) {
-      return !runtimes.draining && !runtimes.blocked.has(runnerId) && !runnerRequests.has(runnerId);
+      return (
+        !runtimes.draining &&
+        !runtimes.blocked.has(runnerId) &&
+        !runnerRequests.has(runnerId)
+      );
     },
     blockRunner(runnerId) {
       runtimes.blocked.add(runnerId);
@@ -75,22 +85,31 @@ function createTestRestartRuntimes(): TestRestartRuntimes {
     },
     mark(scope, restartId) {
       const persistence = runtimes.drain(scope, restartId);
-      return runtimes.markGate === undefined ? persistence : persistence.then(() => runtimes.markGate);
+      return runtimes.markGate === undefined
+        ? persistence
+        : persistence.then(() => runtimes.markGate);
     },
     drainProgress: () => [],
     forcePark(scope) {
       runtimes.forceParkCalls += 1;
       runtimes.forceParkScopes.push(scope);
-      return runtimes.forceParkFailure === undefined ? Promise.resolve(runtimes.forceParked) : Promise.reject(runtimes.forceParkFailure);
+      return runtimes.forceParkFailure === undefined
+        ? Promise.resolve(runtimes.forceParked)
+        : Promise.reject(runtimes.forceParkFailure);
     },
     requestDrain(scope, restartId) {
       runtimes.requestedDrains += 1;
       const persistence = runtimes.drain(scope, restartId).then(() => {
-        if (runtimes.persistenceFailure !== undefined) throw runtimes.persistenceFailure;
+        if (runtimes.persistenceFailure !== undefined)
+          throw runtimes.persistenceFailure;
       });
-      if (runtimes.settleDrainsImmediately) return { persistence, settled: persistence };
+      if (runtimes.settleDrainsImmediately)
+        return { persistence, settled: persistence };
       const settled = new Promise<void>((resolve) => {
-        settleDrains.set(scope.kind === "server" ? "server" : `runner:${scope.runnerId}`, resolve);
+        settleDrains.set(
+          scope.kind === "server" ? "server" : `runner:${scope.runnerId}`,
+          resolve,
+        );
       });
       return { persistence, settled };
     },
@@ -104,17 +123,24 @@ function createTestRestartRuntimes(): TestRestartRuntimes {
       settleDrains.clear();
     },
     drainRequest(scope) {
-      return scope.kind === "server" ? serverRequest : runnerGate(runnerRequests, scope.runnerId);
+      return scope.kind === "server"
+        ? serverRequest
+        : runnerGate(runnerRequests, scope.runnerId);
     },
     resumeRunner(runnerId, restartId) {
-      if (runnerGate(runnerRequests, runnerId)?.restartId !== restartId) return false;
+      if (runnerGate(runnerRequests, runnerId)?.restartId !== restartId)
+        return false;
       runnerRequests.delete(runnerId);
       return true;
     },
     restoreRunner(runnerId, restartId) {
       const existing = runnerGate(runnerRequests, runnerId);
-      if (existing !== undefined && existing.restartId !== restartId) throw new Error("A different restart is already draining this scope");
-      runnerRequests.set(runnerId, existing ?? { boundary: "handoff", requestedBy: "runner", restartId });
+      if (existing !== undefined && existing.restartId !== restartId)
+        throw new Error("A different restart is already draining this scope");
+      runnerRequests.set(
+        runnerId,
+        existing ?? { boundary: "handoff", requestedBy: "runner", restartId },
+      );
       return true;
     },
     start(runnerId) {
@@ -125,7 +151,10 @@ function createTestRestartRuntimes(): TestRestartRuntimes {
   return runtimes;
 }
 
-function control(generateRestartId: () => string = () => "unused", options: Parameters<typeof createSessionRestartControl>[2] = {}) {
+function control(
+  generateRestartId: () => string = () => "unused",
+  options: Parameters<typeof createSessionRestartControl>[2] = {},
+) {
   const runtimes = createTestRestartRuntimes();
   return {
     restart: createSessionRestartControl(runtimes, generateRestartId, options),
@@ -163,7 +192,9 @@ function recordedDeadlineControl() {
   return { ...setup, clock, delays };
 }
 
-async function settledServerDrainAfter(elapsedMs: number): Promise<ReturnType<typeof recordedDeadlineControl>> {
+async function settledServerDrainAfter(
+  elapsedMs: number,
+): Promise<ReturnType<typeof recordedDeadlineControl>> {
   const setup = recordedDeadlineControl();
   const drain = setup.restart.drainServer();
   setup.runtimes.settleDrain();
@@ -172,7 +203,10 @@ async function settledServerDrainAfter(elapsedMs: number): Promise<ReturnType<ty
   return setup;
 }
 
-function expectRecovery(restart: ReturnType<typeof createSessionRestartControl>, runnerId?: string): (string | undefined)[] {
+function expectRecovery(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  runnerId?: string,
+): (string | undefined)[] {
   const recovered: (string | undefined)[] = [];
   restart.recover((recoveredRunnerId) => {
     recovered.push(recoveredRunnerId);
@@ -180,16 +214,25 @@ function expectRecovery(restart: ReturnType<typeof createSessionRestartControl>,
   return recovered;
 }
 
-function recoverRunner(restart: ReturnType<typeof createSessionRestartControl>, restartId: string): (string | undefined)[] {
+function recoverRunner(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  restartId: string,
+): (string | undefined)[] {
   expect(restart.resumeRunner("runner-1", restartId)).toBe(true);
   return expectRecovery(restart, "runner-1");
 }
 
-function expectRunnerAdmission(restart: ReturnType<typeof createSessionRestartControl>, expected: boolean): void {
+function expectRunnerAdmission(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  expected: boolean,
+): void {
   expect(restart.accepts("runner-1")).toBe(expected);
 }
 
-function expectRejectedRecovery(restart: ReturnType<typeof createSessionRestartControl>, restartId: string): void {
+function expectRejectedRecovery(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  restartId: string,
+): void {
   expect(restart.resumeRunner("runner-1", restartId)).toBe(false);
   expectRunnerAdmission(restart, false);
 }
@@ -215,16 +258,25 @@ function pendingSharedDrain() {
   return { ...setup, runner, server };
 }
 
-async function finishSharedDrain(runtimes: TestRestartRuntimes, pending: readonly Promise<void>[]): Promise<void> {
+async function finishSharedDrain(
+  runtimes: TestRestartRuntimes,
+  pending: readonly Promise<void>[],
+): Promise<void> {
   runtimes.settleDrain();
   await Promise.all(pending);
 }
 
-function drainRunner(restart: ReturnType<typeof createSessionRestartControl>, restartId = "runner-restart"): Promise<void> {
+function drainRunner(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  restartId = "runner-restart",
+): Promise<void> {
   return restart.drainRunner("runner-1", restartId);
 }
 
-function escalateRunner(restart: ReturnType<typeof createSessionRestartControl>, restartId: string): boolean {
+function escalateRunner(
+  restart: ReturnType<typeof createSessionRestartControl>,
+  restartId: string,
+): boolean {
   return restart.escalateRunnerDrain("runner-1", restartId);
 }
 
@@ -240,7 +292,10 @@ describe("session restart control", () => {
     await restart.drainServer();
 
     expect(generated).toBe(1);
-    expect(runtimes.drains.map(({ restartId }) => restartId)).toEqual(["server-1", "server-1"]);
+    expect(runtimes.drains.map(({ restartId }) => restartId)).toEqual([
+      "server-1",
+      "server-1",
+    ]);
   });
 
   test.each([
@@ -264,9 +319,11 @@ describe("session restart control", () => {
     runtimes.markGate = marker.promise;
     const preparing = restart.prepareServerShutdown();
     let runnerSettled = false;
-    const runner = restart.drainRunner("runner-1", "final-runner").finally(() => {
-      runnerSettled = true;
-    });
+    const runner = restart
+      .drainRunner("runner-1", "final-runner")
+      .finally(() => {
+        runnerSettled = true;
+      });
     await Promise.resolve();
     expect(runnerSettled).toBe(false);
     expectNoForcePark(runtimes);
@@ -281,7 +338,9 @@ describe("session restart control", () => {
     const { restart: validServer } = control(() => "server");
 
     await expect(invalidServer.drainServer()).rejects.toThrow("ID is invalid");
-    await expect(validServer.drainRunner("runner-1", "   ")).rejects.toThrow("ID is invalid");
+    await expect(validServer.drainRunner("runner-1", "   ")).rejects.toThrow(
+      "ID is invalid",
+    );
   });
 
   test("uses the exact server handoff when runner drain overlaps it", async () => {
@@ -294,7 +353,9 @@ describe("session restart control", () => {
       { restartId: "server-1", scope: { kind: "server" } },
       { restartId: "server-1", scope: { kind: "server" } },
     ]);
-    expect(restart.escalateRunnerDrain("runner-overlap", "runner-1")).toBe(false);
+    expect(restart.escalateRunnerDrain("runner-overlap", "runner-1")).toBe(
+      false,
+    );
   });
 
   test("runner drain joins a pending server drain without escalating it", async () => {
@@ -333,11 +394,17 @@ describe("session restart control", () => {
     const server = restart.drainServer();
     runtimes.settleDrain("server");
     await server;
-    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(true);
-    expect(runtimes.forceParkScopes).toEqual([{ kind: "runner", runnerId: "runner-1" }]);
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      true,
+    );
+    expect(runtimes.forceParkScopes).toEqual([
+      { kind: "runner", runnerId: "runner-1" },
+    ]);
     runtimes.settleDrain("runner:runner-1");
     await drain;
-    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(false);
+    expect(restart.escalateRunnerDrain("runner-1", "runner-restart")).toBe(
+      false,
+    );
 
     expect(runtimes.drains).toEqual([
       {
@@ -353,7 +420,9 @@ describe("session restart control", () => {
         scope: { kind: "server" },
       },
     ]);
-    expect(warnings).toEqual(["The active server restart deadline was unavailable; starting a dedicated runner drain"]);
+    expect(warnings).toEqual([
+      "The active server restart deadline was unavailable; starting a dedicated runner drain",
+    ]);
   });
 
   // A late runner gets the server remainder; a later server drain gets its own full bound.
@@ -361,7 +430,8 @@ describe("session restart control", () => {
     ["a late runner keeps the original server deadline", drainRunner, 60_000],
     [
       "a later server drain arms its own full bound",
-      (restart: ReturnType<typeof createSessionRestartControl>) => restart.drainServer(),
+      (restart: ReturnType<typeof createSessionRestartControl>) =>
+        restart.drainServer(),
       120_000,
     ],
   ] as const)("%s", async (_name, secondDrain, expectedBound) => {
@@ -402,10 +472,14 @@ describe("session restart control", () => {
     runtimes.settleDrainsImmediately = false;
 
     await expectTimerFailure(restart.drainServer());
-    await expectTimerFailure(restart.drainRunner("runner-1", "stale-runner-restart"));
+    await expectTimerFailure(
+      restart.drainRunner("runner-1", "stale-runner-restart"),
+    );
 
     const retriedServerDrain = restart.drainServer();
-    expect(restart.escalateRunnerDrain("runner-1", "stale-runner-restart")).toBe(false);
+    expect(
+      restart.escalateRunnerDrain("runner-1", "stale-runner-restart"),
+    ).toBe(false);
     expect(runtimes.forceParkCalls).toBe(0);
 
     runtimes.settleDrain();
@@ -422,7 +496,9 @@ describe("session restart control", () => {
     const pending = restart.drainServer();
     expect(restart.escalateServerDrain()).toBe(true);
     await pending;
-    expect(warnings).toEqual(["Q Mush restart force-park failed: Error: persistence failed"]);
+    expect(warnings).toEqual([
+      "Q Mush restart force-park failed: Error: persistence failed",
+    ]);
   });
 
   test("a runner-scope drain settling does not drop shared server associations", async () => {
@@ -441,7 +517,11 @@ describe("session restart control", () => {
   });
 
   test.each([
-    ["a late runner escalates the shared server drain with its restart ID", "runner-restart", true],
+    [
+      "a late runner escalates the shared server drain with its restart ID",
+      "runner-restart",
+      true,
+    ],
     ["server drain rejects a stale late-runner escalation", "stale", false],
   ] as const)("%s", async (_name, restartId, expected) => {
     const { restart, runtimes, runner, server } = pendingSharedDrain();
@@ -519,7 +599,15 @@ describe("session restart control", () => {
       });
     await expect(read("openai")).resolves.toBeUndefined();
     await expect(read("openrouter")).resolves.toBe(OPENROUTER_CREDENTIAL);
-    expect(readOpenai).toHaveBeenCalledWith("user", "openai-credential", "workspace-1");
-    expect(readOpenrouter).toHaveBeenCalledWith("user", "openrouter-credential", "workspace-1");
+    expect(readOpenai).toHaveBeenCalledWith(
+      "user",
+      "openai-credential",
+      "workspace-1",
+    );
+    expect(readOpenrouter).toHaveBeenCalledWith(
+      "user",
+      "openrouter-credential",
+      "workspace-1",
+    );
   });
 });

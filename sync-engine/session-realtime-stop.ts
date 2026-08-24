@@ -6,7 +6,7 @@ import type {
   WorkspaceSessionRealtimeActionOptions,
 } from "./session-realtime-action-types.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface StopSessionStore {
   get: SessionStore["get"];

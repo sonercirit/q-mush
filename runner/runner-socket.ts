@@ -8,27 +8,29 @@ import {
 export function createRunnerRegistrationRejectedError(): RunnerConnectionError {
   return createRunnerConnectionError(
     "The runner registration was rejected by Q Mush",
-    "RunnerRegistrationRejectedError",
+    "runner_registration_rejected",
   );
+}
+
+function isRunnerConnectionKind(error: unknown, kind: string): error is Error {
+  return error instanceof Error && "kind" in error && error.kind === kind;
 }
 
 export function isRunnerRegistrationRejectedError(
   error: unknown,
 ): error is Error {
-  return (
-    error instanceof Error && error.name === "RunnerRegistrationRejectedError"
-  );
+  return isRunnerConnectionKind(error, "runner_registration_rejected");
 }
 
 function createRunnerSupersededError(): RunnerConnectionError {
   return createRunnerConnectionError(
     "The runner connection was superseded by a newer process",
-    "RunnerSupersededError",
+    "runner_superseded",
   );
 }
 
 export function isRunnerSupersededError(error: unknown): error is Error {
-  return error instanceof Error && error.name === "RunnerSupersededError";
+  return isRunnerConnectionKind(error, "runner_superseded");
 }
 
 function parseOptionalRecord<Message extends Readonly<Record<string, unknown>>>(

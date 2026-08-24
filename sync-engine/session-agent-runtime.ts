@@ -75,7 +75,7 @@ import {
 import { runtimeCredentialRefresher } from "./session-runtime-credential-refresh.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import { boundSessionToolOutput } from "./session-tool-output.ts";
 import {
   createToolStreamPublisher,

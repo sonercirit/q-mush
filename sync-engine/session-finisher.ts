@@ -6,7 +6,7 @@ import type { SessionNotification } from "./session-creation.ts";
 import type { FinishSession } from "./session-launcher.ts";
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { sessionHasStatus } from "./session-status.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 function safeErrorMessage(error: unknown): string {
   const message = error instanceof Error ? error.message : "Unknown error";

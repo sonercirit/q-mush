@@ -17,7 +17,7 @@ import {
 } from "./session-creation.ts";
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
 import type { SessionExecutionAuthority } from "./session-execution-authority.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 function readCompactionMode(value: unknown): boolean | undefined {
   return typeof value === "object" &&

@@ -1,13 +1,14 @@
 export type RunnerConnectionError = Error & {
+  readonly kind?: string;
   readonly runnerConnectionError: true;
 };
 
 export function createRunnerConnectionError(
   message: string,
-  name = "RunnerConnectionError",
+  kind?: string,
 ): RunnerConnectionError {
   return Object.assign(new Error(message), {
-    name,
+    ...(kind === undefined ? {} : { kind }),
     runnerConnectionError: true as const,
   });
 }

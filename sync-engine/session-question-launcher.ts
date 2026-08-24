@@ -11,7 +11,7 @@ import {
   sessionRunnerIsAvailable,
   type SessionQuestionLaunchBoundary,
 } from "./session-runner-availability.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface AnsweredQuestionLauncherDependencies extends SessionQuestionLaunchBoundary {
   readonly launch: (

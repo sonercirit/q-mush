@@ -8,7 +8,7 @@ import { createRecordingTestSocket } from "../../shared/test/websocket-fixtures.
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
   return expect(failure).resolves.toMatchObject({
-    name: "RunnerSupersededError",
+    kind: "runner_superseded",
   });
 }
 

@@ -96,12 +96,10 @@ function expectReauthenticationState(
   store: ProviderCredentialStore,
   required: boolean,
 ): void {
-  expect(store.list(TEST_USER_ID)).toContainEqual(
-    expect.objectContaining({
-      id: CREDENTIAL_ID,
-      requiresReauthentication: required,
-    }),
-  );
+  const credential = store
+    .list(TEST_USER_ID)
+    .find(({ id }) => id === CREDENTIAL_ID);
+  expect(credential?.requiresReauthentication).toBe(required);
 }
 
 function gatedRefreshSetup() {

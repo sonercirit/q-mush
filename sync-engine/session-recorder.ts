@@ -3,7 +3,7 @@ import type {
   SessionTerminalOutput,
 } from "./session-recorder-types.ts";
 import { invokeRuntimeWrite } from "./session-runtime-write.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface SessionRecorder {
   readonly messages: (...output: SessionRecordedOutput) => void;

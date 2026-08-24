@@ -1,28 +1,4 @@
 {
   "plugins": ["prettier-plugin-organize-imports"],
-  "proseWrap": "always",
-  "overrides": [
-    {
-      "files": [
-        "shared/runner-command-broker.ts",
-        "shared/tool-stream.ts",
-        "solid/custom-select.tsx",
-        "solid/realtime-client.ts",
-        "solid/realtime-stream-buffer.ts",
-        "solid/test/session-controller-reconciliation-fixtures.ts",
-        "solid/test/session-controller.test.ts",
-        "sync-engine/server.ts",
-        "sync-engine/session-agent-actions.ts",
-        "sync-engine/session-realtime-integration.ts",
-        "sync-engine/session-store.ts",
-        "sync-engine/test/openai.test.ts",
-        "sync-engine/test/session-agent-tools.test.ts",
-        "sync-engine/test/session-restart-control.test.ts",
-        "sync-engine/test/session-store.test.ts"
-      ],
-      "options": {
-        "printWidth": 140
-      }
-    }
-  ]
+  "proseWrap": "always"
 }

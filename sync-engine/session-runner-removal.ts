@@ -1,7 +1,7 @@
 import type { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
 import type { SessionLifecycleDependencies } from "./session-lifecycle-types.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface StagedRunnerRemoval {
   readonly interruptedSessionIds: ReadonlySet<string>;

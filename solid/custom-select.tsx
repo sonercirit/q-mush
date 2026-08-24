@@ -1,4 +1,13 @@
-import { createEffect, createMemo, createSignal, For, on, Show, untrack, type JSX } from "solid-js";
+import {
+  createEffect,
+  createMemo,
+  createSignal,
+  For,
+  on,
+  Show,
+  untrack,
+  type JSX,
+} from "solid-js";
 import { isDispatchKey } from "../shared/dispatch.ts";
 import { normalizeSearchText } from "../shared/search.ts";
 
@@ -23,109 +32,31 @@ export interface CustomSelectProps {
   readonly selectedValue: string;
 }
 
-const PAGE_SIZE = 10;
-const CONTROL_CLASSES =
-  "mt-2 flex min-h-12 w-full min-w-0 items-center justify-between gap-3 rounded-xl border border-white/10 bg-slate-900 px-4 py-3 text-left text-sm text-white transition hover:border-white/20 focus:border-emerald-300/50 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50";
-const OPTION_CLASSES = "flex min-h-11 w-full min-w-0 items-center rounded-lg px-3 py-2.5 text-left text-sm transition";
-const PAGE_BUTTON_CLASSES =
-  "min-h-10 rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold text-slate-300 transition hover:border-emerald-300/30 hover:text-emerald-200 disabled:cursor-not-allowed disabled:opacity-40";
-
-type InitialOption = "first" | "last" | "selected";
-type OpenFocus = "listbox" | "search";
-
-function indexForValue(options: readonly CustomSelectOption[], value: string | undefined): number {
-  return options.findIndex((option) => option.value === value);
-}
-
-function selectedPage(options: readonly CustomSelectOption[], selectedValue: string): number {
-  return Math.max(0, Math.floor(indexForValue(options, selectedValue) / PAGE_SIZE));
-}
-
-function OptionContent(props: { readonly option: CustomSelectOption }): JSX.Element {
-  return (
-    <span class="flex min-w-0 flex-1 flex-col items-start gap-1 sm:flex-row sm:justify-between sm:gap-3">
-      <span class="min-w-0 flex-1">
-        <span class="path-wrap block min-w-0 break-words">{props.option.label}</span>
-        <Show when={props.option.description}>
-          {(description) => <span class="path-wrap mt-1 block whitespace-pre-line text-xs leading-5 text-slate-500">{description()}</span>}
-        </Show>
-      </span>
-      <Show when={props.option.detail}>
-        {(detail) => <span class="path-wrap text-xs text-slate-500 sm:shrink-0 sm:text-right">{detail()}</span>}
-      </Show>
-    </span>
-  );
-}
-
-function PageControls(props: {
-  readonly currentPage: number;
-  readonly filteredCount: number;
-  readonly label: string;
-  readonly listboxId: string;
-  readonly name: string;
-  readonly onChange: (page: number) => void;
-  readonly pageCount: number;
-  readonly paginationId: string;
-  readonly searching: boolean;
-}): JSX.Element {
-  const end = (): number => Math.min((props.currentPage + 1) * PAGE_SIZE, props.filteredCount);
-  return (
-    <Show when={props.pageCount > 1}>
-      <div
-        class="flex flex-col gap-2 border-t border-white/10 p-2 sm:flex-row sm:items-center sm:justify-between"
-        data-custom-select-page={props.name}
-        id={props.paginationId}
-      >
-        <p aria-live="polite" class="px-1 text-xs text-slate-500">
-          {props.currentPage * PAGE_SIZE + 1}–{end()} of {props.filteredCount} {props.searching ? "results" : "options"}
-          <span class="sr-only">, </span>
-          <span class="ml-1 whitespace-nowrap">
-            Page {props.currentPage + 1} of {props.pageCount}
-          </span>
-        </p>
-        <div class="grid grid-cols-2 gap-2">
-          <button
-            aria-controls={props.listboxId}
-            aria-label={`Previous page of ${props.label}`}
-            class={PAGE_BUTTON_CLASSES}
-            data-custom-select-previous={props.name}
-            disabled={props.currentPage === 0}
-            onClick={() => {
-              props.onChange(props.currentPage - 1);
-            }}
-            type="button"
-          >
-            Previous
-          </button>
-          <button
-            aria-controls={props.listboxId}
-            aria-label={`Next page of ${props.label}`}
-            class={PAGE_BUTTON_CLASSES}
-            data-custom-select-next={props.name}
-            disabled={props.currentPage === props.pageCount - 1}
-            onClick={() => {
-              props.onChange(props.currentPage + 1);
-            }}
-            type="button"
-          >
-            Next
-          </button>
-        </div>
-      </div>
-    </Show>
-  );
-}
-
+import type { InitialOption, OpenFocus } from "./custom-select-parts.tsx";
+import {
+  CONTROL_CLASSES,
+  indexForValue,
+  OPTION_CLASSES,
+  OptionContent,
+  PAGE_SIZE,
+  PageControls,
+  selectedPage,
+} from "./custom-select-parts.tsx";
 export function CustomSelect(props: CustomSelectProps): JSX.Element {
   const listboxId = (): string => `${props.id}-options`;
   const searchId = (): string => `${props.id}-search`;
   const searchStatusId = (): string => `${props.id}-search-status`;
   const paginationId = (): string => `${props.id}-pagination`;
-  const selected = (): CustomSelectOption | undefined => props.options.find((option) => option.value === props.selectedValue);
+  const selected = (): CustomSelectOption | undefined =>
+    props.options.find((option) => option.value === props.selectedValue);
   const searchable = (): boolean => props.options.length > PAGE_SIZE;
   const [query, setQuery] = createSignal("");
-  const [page, setPage] = createSignal(untrack(() => selectedPage(props.options, props.selectedValue)));
-  const [activeValue, setActiveValue] = createSignal(untrack(() => selected()?.value ?? props.options[0]?.value));
+  const [page, setPage] = createSignal(
+    untrack(() => selectedPage(props.options, props.selectedValue)),
+  );
+  const [activeValue, setActiveValue] = createSignal(
+    untrack(() => selected()?.value ?? props.options[0]?.value),
+  );
   const [trigger, setTrigger] = createSignal<HTMLButtonElement>();
   const [searchInput, setSearchInput] = createSignal<HTMLInputElement>();
   const [listbox, setListbox] = createSignal<HTMLUListElement>();
@@ -136,19 +67,24 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
     }
     return props.options.filter((option) =>
       [option.label, option.value, option.description, option.detail].some(
-        (value) => value !== undefined && normalizeSearchText(value).includes(search),
+        (value) =>
+          value !== undefined && normalizeSearchText(value).includes(search),
       ),
     );
   });
-  const maximumPage = (): number => Math.max(0, Math.ceil(filteredOptions().length / PAGE_SIZE) - 1);
+  const maximumPage = (): number =>
+    Math.max(0, Math.ceil(filteredOptions().length / PAGE_SIZE) - 1);
   const currentPage = (): number => Math.min(page(), maximumPage());
   const pageOptions = (): readonly CustomSelectOption[] => {
     const start = currentPage() * PAGE_SIZE;
     return filteredOptions().slice(start, start + PAGE_SIZE);
   };
-  const pageCount = (): number => Math.ceil(filteredOptions().length / PAGE_SIZE);
-  const activeOption = (): CustomSelectOption | undefined => filteredOptions().find((option) => option.value === activeValue());
-  const optionId = (option: CustomSelectOption): string => `${props.id}-option-${encodeURIComponent(option.value)}`;
+  const pageCount = (): number =>
+    Math.ceil(filteredOptions().length / PAGE_SIZE);
+  const activeOption = (): CustomSelectOption | undefined =>
+    filteredOptions().find((option) => option.value === activeValue());
+  const optionId = (option: CustomSelectOption): string =>
+    `${props.id}-option-${encodeURIComponent(option.value)}`;
   const activeOptionId = (): string | undefined => {
     const option = activeOption();
     return option === undefined ? undefined : optionId(option);
@@ -179,7 +115,8 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
       scrollActiveOption();
     }
   };
-  const activeIndex = (): number => indexForValue(filteredOptions(), activeValue());
+  const activeIndex = (): number =>
+    indexForValue(filteredOptions(), activeValue());
   const moveActive = (offset: -1 | 1): void => {
     const index = activeIndex();
     const fallback = offset === 1 ? 0 : filteredOptions().length - 1;
@@ -216,7 +153,9 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
     props.onChoose(value);
     focusSoon(trigger);
   };
-  const optionClick: JSX.EventHandler<HTMLButtonElement, MouseEvent> = (event): void => {
+  const optionClick: JSX.EventHandler<HTMLButtonElement, MouseEvent> = (
+    event,
+  ): void => {
     const value = event.currentTarget.dataset["optionValue"];
     if (value !== undefined) {
       choose(value);
@@ -254,7 +193,10 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
       setActiveIndex(0);
     },
   } satisfies Record<string, () => void>;
-  const isNavigationKey = (key: string): key is keyof typeof navigationHandlers => isDispatchKey(navigationHandlers, key);
+  const isNavigationKey = (
+    key: string,
+  ): key is keyof typeof navigationHandlers =>
+    isDispatchKey(navigationHandlers, key);
   const handleNavigationKey = (event: KeyboardEvent): boolean => {
     if (!isNavigationKey(event.key)) return false;
     navigationHandlers[event.key]();
@@ -289,13 +231,22 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
         handleEscape(event);
       },
     } satisfies Record<string, () => void>;
-    const isListAction = (key: string): key is keyof typeof keyHandlers => isDispatchKey(keyHandlers, key);
-    const handler = isListAction(event.key) ? keyHandlers[event.key] : undefined;
+    const isListAction = (key: string): key is keyof typeof keyHandlers =>
+      isDispatchKey(keyHandlers, key);
+    const handler = isListAction(event.key)
+      ? keyHandlers[event.key]
+      : undefined;
     if (handler !== undefined) {
       handler();
       return;
     }
-    if (searchable() && event.key.length === 1 && !event.altKey && !event.ctrlKey && !event.metaKey) {
+    if (
+      searchable() &&
+      event.key.length === 1 &&
+      !event.altKey &&
+      !event.ctrlKey &&
+      !event.metaKey
+    ) {
       event.preventDefault();
       updateSearch(`${query()}${event.key}`);
       focusSoon(searchInput);
@@ -304,12 +255,17 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
   const handleTriggerKey = (event: KeyboardEvent): void => {
     const openPositions = {
       ArrowDown: (): InitialOption => "selected",
-      ArrowUp: (): InitialOption => (props.selectedValue.length === 0 ? "last" : "selected"),
+      ArrowUp: (): InitialOption =>
+        props.selectedValue.length === 0 ? "last" : "selected",
       End: (): InitialOption => "last",
       Home: (): InitialOption => "first",
     } satisfies Record<string, () => InitialOption>;
-    const isOpenPositionKey = (key: string): key is keyof typeof openPositions => isDispatchKey(openPositions, key);
-    const positionForKey = isOpenPositionKey(event.key) ? openPositions[event.key] : undefined;
+    const isOpenPositionKey = (
+      key: string,
+    ): key is keyof typeof openPositions => isDispatchKey(openPositions, key);
+    const positionForKey = isOpenPositionKey(event.key)
+      ? openPositions[event.key]
+      : undefined;
     if (positionForKey === undefined) {
       if (event.key === "Enter" || event.key === " ") {
         if (event.detail === 0) toggleFromTrigger(event);
@@ -366,7 +322,10 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
           return;
         }
         setQuery("");
-        const index = Math.max(0, indexForValue(props.options, props.selectedValue));
+        const index = Math.max(
+          0,
+          indexForValue(props.options, props.selectedValue),
+        );
         setPage(Math.floor(index / PAGE_SIZE));
         setActiveValue(props.options[index]?.value);
       },
@@ -389,11 +348,23 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
   );
 
   return (
-    <div class="relative" data-custom-select={props.name} data-custom-select-open={String(props.open)}>
-      <label class="text-sm font-medium text-slate-200" id={`${props.id}-label`}>
+    <div
+      class="relative"
+      data-custom-select={props.name}
+      data-custom-select-open={String(props.open)}
+    >
+      <label
+        class="text-sm font-medium text-slate-200"
+        id={`${props.id}-label`}
+      >
         {props.label}
       </label>
-      <input name={props.name} required={props.required} type="hidden" value={selected()?.value ?? ""} />
+      <input
+        name={props.name}
+        required={props.required}
+        type="hidden"
+        value={selected()?.value ?? ""}
+      />
       <button
         aria-activedescendant={props.open ? activeOptionId() : undefined}
         aria-controls={listboxId()}
@@ -413,7 +384,10 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
             {(option) => <OptionContent option={option()} />}
           </Show>
         </span>
-        <span aria-hidden="true" class={`shrink-0 text-slate-500 transition ${props.open ? "rotate-180" : ""}`}>
+        <span
+          aria-hidden="true"
+          class={`shrink-0 text-slate-500 transition ${props.open ? "rotate-180" : ""}`}
+        >
           ▾
         </span>
       </button>
@@ -472,9 +446,11 @@ export function CustomSelect(props: CustomSelectProps): JSX.Element {
           >
             <For each={pageOptions()}>
               {(option) => {
-                const selectedOption = (): boolean => option.value === selected()?.value;
+                const selectedOption = (): boolean =>
+                  option.value === selected()?.value;
                 const focused = (): boolean => option.value === activeValue();
-                const position = (): number => indexForValue(filteredOptions(), option.value) + 1;
+                const position = (): number =>
+                  indexForValue(filteredOptions(), option.value) + 1;
                 return (
                   <li role="presentation">
                     <button

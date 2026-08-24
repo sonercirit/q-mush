@@ -118,7 +118,7 @@ consume(unknownValue as string);
 class DeclaredService {}
 const ExpressedService = class {};
 
-${"sw" + "itch"} (choice) {
+switch (choice) {
   case "first":
     console.log(choice);
 }

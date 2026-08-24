@@ -19,7 +19,7 @@ import {
   throwIfServerRestarting,
   withRestartErrorTranslation,
 } from "./session-restart-gate.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface SessionCredentialReader {
   readonly credential: (

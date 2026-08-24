@@ -20,7 +20,7 @@ import {
 } from "./session-restart-gate.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { CreateAgentSession } from "./session-store-create.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface SessionLaunchBoundary {
   readonly launch: SessionLaunch;

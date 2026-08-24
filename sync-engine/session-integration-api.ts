@@ -41,7 +41,7 @@ import type { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import { readSessionStopInput } from "./session-stop-input.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import { forRequestWorkspace } from "./session-workspace-request.ts";
 import {
   requestSessionWorkspaceId,

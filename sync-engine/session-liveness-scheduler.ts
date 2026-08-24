@@ -12,7 +12,7 @@ import {
 } from "./session-liveness-watchdog.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 const DEFAULT_SESSION_LIVENESS_INTERVAL_MS = 30_000;
 const MIN_SESSION_LIVENESS_INTERVAL_MS = 10_000;

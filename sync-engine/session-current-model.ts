@@ -4,7 +4,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { usesAnthropicFormat } from "./agent-model-options.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import type { SessionRuntimeWriter } from "./session-runtime-write.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 type CurrentModelSource = Pick<
   AttachmentFallbackRuntimeResources,
   "discoverModels"

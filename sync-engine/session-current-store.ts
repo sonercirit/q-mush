@@ -2,7 +2,7 @@ import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentRecordedMessage } from "../shared/agent-loop.ts";
 import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface CurrentSessionStore {
   appendAgentMessage(

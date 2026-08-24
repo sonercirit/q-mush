@@ -1,6 +1,6 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import type { SessionHistoryPage } from "../shared/session-history.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface SessionHistoryAuthority {
   readonly cursor: string | null;

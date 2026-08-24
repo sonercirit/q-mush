@@ -1,16 +1,29 @@
 import { describe, expect, test } from "vitest";
-import { AGENT_SESSION_TOOL_NAMES, type AgentSessionToolName } from "../../shared/agent-tools.ts";
+import {
+  AGENT_SESSION_TOOL_NAMES,
+  type AgentSessionToolName,
+} from "../../shared/agent-tools.ts";
 import { agentMessages } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import type { AgentSessionDetail, AgentSessionMessage } from "../../shared/session-model.ts";
+import type {
+  AgentSessionDetail,
+  AgentSessionMessage,
+} from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
-import { TEST_NOW, TEST_USER_ID, testAuditFields } from "./authenticated-integration-test-helpers.ts";
+import {
+  TEST_NOW,
+  TEST_USER_ID,
+  testAuditFields,
+} from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
-import { markTestSessionRunning, runningStore } from "./session-store-lifecycle-test-helpers.ts";
+import {
+  markTestSessionRunning,
+  runningStore,
+} from "./session-store-lifecycle-test-helpers.ts";
 import {
   closeSessionStoreTestSetup,
   expectRecoveredSession,
@@ -18,7 +31,12 @@ import {
   removeAndReadSession,
   removeTestRunnerAndExpect,
 } from "./session-store-reassignment-helpers.ts";
-import { createStore, createTestSession, STORE_RUNNER_ID, STORE_SESSION_ID } from "./session-store-test-fixtures.ts";
+import {
+  createStore,
+  createTestSession,
+  STORE_RUNNER_ID,
+  STORE_SESSION_ID,
+} from "./session-store-test-fixtures.ts";
 const RUNNER_ID = STORE_RUNNER_ID;
 const SESSION_ID = STORE_SESSION_ID;
 const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
@@ -26,7 +44,10 @@ const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
 const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
 const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
 
-function testUserImageMessage(id: string, content: string): AgentSessionMessage {
+function testUserImageMessage(
+  id: string,
+  content: string,
+): AgentSessionMessage {
   const baseMessage = {
     content,
     createdAt: 2,
@@ -67,8 +88,17 @@ function expectPersistedTurns(
   ]);
 }
 
-function expectedTranscriptRoles(includeError: boolean, includeFollowUp = false): readonly string[] {
-  return ["user", "assistant", ...(includeError ? ["error"] : []), "tool", ...(includeFollowUp ? ["user"] : [])];
+function expectedTranscriptRoles(
+  includeError: boolean,
+  includeFollowUp = false,
+): readonly string[] {
+  return [
+    "user",
+    "assistant",
+    ...(includeError ? ["error"] : []),
+    "tool",
+    ...(includeFollowUp ? ["user"] : []),
+  ];
 }
 
 function initialConversation() {
@@ -105,13 +135,20 @@ describe("session store", () => {
     expect(created.title).toBe("Inspect the repository");
     expect(created.messages).toEqual([
       {
-        ...testUserImageMessage(USER_MESSAGE_ID, "Inspect the repository\nand make it shine"),
+        ...testUserImageMessage(
+          USER_MESSAGE_ID,
+          "Inspect the repository\nand make it shine",
+        ),
         createdAt: TEST_NOW,
         turnId: USER_MESSAGE_ID,
       },
     ]);
     markTestSessionRunning(store);
-    store.setCurrentAgentFile(SESSION_ID, { content: "Use Bun for tests.", name: "AGENTS.md" }, TEST_NOW + 2);
+    store.setCurrentAgentFile(
+      SESSION_ID,
+      { content: "Use Bun for tests.", name: "AGENTS.md" },
+      TEST_NOW + 2,
+    );
 
     const thinkingMessage = {
       content: "I should inspect the repository before changing it.",
@@ -137,11 +174,19 @@ describe("session store", () => {
     store.appendCurrentAgentMessage(SESSION_ID, thinkingMessage, TEST_NOW + 3);
     store.appendCurrentAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 4);
     store.appendCurrentAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
-    store.updateCurrentUsage(SESSION_ID, { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 }, TEST_NOW + 5);
-    store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: "estimated", costUsd: 0.05 }, TEST_NOW + 5);
-    const settled = store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6);
-    expect(settled).toBe(true);
-    expect(store.list(TEST_USER_ID)).toEqual([expect.objectContaining({ id: SESSION_ID, status: "idle" })]);
+    store.updateCurrentUsage(
+      SESSION_ID,
+      { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 },
+      TEST_NOW + 5,
+    );
+    store.updateCurrentUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "estimated", costUsd: 0.05 },
+      TEST_NOW + 5,
+    );
+    expect(store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6)).toBe(
+      true,
+    );
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
     expect(detail?.agentFile).toEqual({
@@ -201,7 +246,11 @@ describe("session store", () => {
   test("ending an already-ended turn is a no-op", () => {
     const setup = runningStore();
     const settledNow = TEST_NOW + 3;
-    const didSettle = setup.store.transitionCurrent(SESSION_ID, "idle", settledNow);
+    const didSettle = setup.store.transitionCurrent(
+      SESSION_ID,
+      "idle",
+      settledNow,
+    );
     expect(didSettle).toBe(true);
     const settled = setup.store.get(TEST_USER_ID, SESSION_ID)?.turns;
 
@@ -243,10 +292,22 @@ describe("session store", () => {
   test("keeps an estimated cost basis after a provider-reported charge", () => {
     const { database, store } = runningStore();
 
-    store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: "estimated", costUsd: 0.02 }, TEST_NOW + 2);
-    store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: "reported", costUsd: 0.03 }, TEST_NOW + 3);
+    store.updateCurrentUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "estimated", costUsd: 0.02 },
+      TEST_NOW + 2,
+    );
+    store.updateCurrentUsage(
+      SESSION_ID,
+      { contextTokens: null, costBasis: "reported", costUsd: 0.03 },
+      TEST_NOW + 3,
+    );
     expect(() => {
-      store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: null, costUsd: 0.01 }, TEST_NOW + 4);
+      store.updateCurrentUsage(
+        SESSION_ID,
+        { contextTokens: null, costBasis: null, costUsd: 0.01 },
+        TEST_NOW + 4,
+      );
     }).toThrow("usage is invalid");
 
     expect(store.get(TEST_USER_ID, SESSION_ID)).toMatchObject({
@@ -320,7 +381,11 @@ describe("session store", () => {
     const session = createTestSession(store);
     expect(session.status).toBe("queued");
     markTestSessionRunning(store);
-    store.appendCurrentAgentMessage(SESSION_ID, { content: "Work in progress.", role: "assistant", toolCalls: [] }, TEST_NOW + 2);
+    store.appendCurrentAgentMessage(
+      SESSION_ID,
+      { content: "Work in progress.", role: "assistant", toolCalls: [] },
+      TEST_NOW + 2,
+    );
 
     store.compactCurrentConversation(
       SESSION_ID,
@@ -331,7 +396,9 @@ describe("session store", () => {
 
     expect(store.conversation(SESSION_ID)).toEqual([
       {
-        content: testCompactionHandoffMessage("Keep the completed work and run tests."),
+        content: testCompactionHandoffMessage(
+          "Keep the completed work and run tests.",
+        ),
         role: "user",
       },
     ]);
@@ -341,8 +408,14 @@ describe("session store", () => {
 
   test("persists timing for a user-less continuation", () => {
     const setup = runningStore();
-    setup.store.appendCurrentAgentMessage(SESSION_ID, { content: "First response", role: "assistant", toolCalls: [] }, TEST_NOW + 2);
-    expect(setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 3)).toBe(true);
+    setup.store.appendCurrentAgentMessage(
+      SESSION_ID,
+      { content: "First response", role: "assistant", toolCalls: [] },
+      TEST_NOW + 2,
+    );
+    expect(
+      setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 3),
+    ).toBe(true);
     const before = setup.store.get(TEST_USER_ID, SESSION_ID);
 
     const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 100);
@@ -353,26 +426,48 @@ describe("session store", () => {
       startedAt: TEST_NOW + 100,
     });
 
-    expect(setup.store.transitionRuntime(SESSION_ID, "running", TEST_NOW + 101, queued.detail.generation)).toBe(true);
+    expect(
+      setup.store.transitionRuntime(
+        SESSION_ID,
+        "running",
+        TEST_NOW + 101,
+        queued.detail.generation,
+      ),
+    ).toBe(true);
     setup.store.appendRuntimeAgentMessages(
       SESSION_ID,
       [{ content: "Continued response", role: "assistant", toolCalls: [] }],
       TEST_NOW + 102,
       queued.detail.generation,
     );
-    expect(setup.store.transitionRuntime(SESSION_ID, "idle", TEST_NOW + 103, queued.detail.generation)).toBe(true);
-    expectPersistedTurns(setup.store.get(TEST_USER_ID, SESSION_ID)?.turns, before?.messages.at(-1)?.id, {
-      endedAt: TEST_NOW + 103,
-      startedAt: TEST_NOW + 100,
-    });
+    expect(
+      setup.store.transitionRuntime(
+        SESSION_ID,
+        "idle",
+        TEST_NOW + 103,
+        queued.detail.generation,
+      ),
+    ).toBe(true);
+    expectPersistedTurns(
+      setup.store.get(TEST_USER_ID, SESSION_ID)?.turns,
+      before?.messages.at(-1)?.id,
+      {
+        endedAt: TEST_NOW + 103,
+        startedAt: TEST_NOW + 100,
+      },
+    );
     const finalDetail = setup.store.get(TEST_USER_ID, SESSION_ID);
-    expect(finalDetail?.turns?.at(-1)?.boundaryMessageId).toBe(finalDetail?.messages.at(-1)?.id);
+    expect(finalDetail?.turns?.at(-1)?.boundaryMessageId).toBe(
+      finalDetail?.messages.at(-1)?.id,
+    );
     setup.database.$client.close();
   });
 
   test("continues without appending a user message", () => {
     const setup = runningStore();
-    expect(setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 2)).toBe(true);
+    expect(
+      setup.store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 2),
+    ).toBe(true);
     const before = setup.store.conversation(SESSION_ID);
 
     const queued = setup.store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3);
@@ -430,7 +525,11 @@ describe("session store", () => {
         generation,
       );
     }).toThrow("agent session was stopped");
-    expect(store.get(TEST_USER_ID, SESSION_ID)?.messages.some(({ content }) => content === "Late stopped output")).toBe(false);
+    expect(
+      store
+        .get(TEST_USER_ID, SESSION_ID)
+        ?.messages.some(({ content }) => content === "Late stopped output"),
+    ).toBe(false);
     closeSessionStoreTestSetup({ database, store });
   });
 
@@ -464,7 +563,11 @@ describe("session store", () => {
 
   test("recovers runner-required sessions without rewriting them on restart", () => {
     const { database, store } = runningStore();
-    const before = removeAndReadSession({ database, store }, RUNNER_ID, SESSION_ID);
+    const before = removeAndReadSession(
+      { database, store },
+      RUNNER_ID,
+      SESSION_ID,
+    );
 
     expectRecoveredSession(database, before, SESSION_ID);
     database.$client.close();
@@ -482,7 +585,8 @@ describe("session store", () => {
       messages: [
         { role: "user" },
         {
-          content: "Session failed: the server stopped before the session completed",
+          content:
+            "Session failed: the server stopped before the session completed",
           role: "error",
         },
       ],
@@ -490,7 +594,9 @@ describe("session store", () => {
     });
     expect(interrupted?.turns).toHaveLength(1);
     expect(interrupted?.turns?.[0]?.endedAt).not.toBeNull();
-    expect(store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3).status).toBe("queued");
+    expect(store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 3).status).toBe(
+      "queued",
+    );
     database.$client.close();
   });
 
@@ -509,13 +615,17 @@ describe("session store", () => {
     store.appendCurrentAgentMessage(SESSION_ID, assistantMessage, TEST_NOW + 2);
     expect(testSessionMessageRoles(store)).toEqual(["user", "assistant"]);
     store.appendCurrentErrorMessage(SESSION_ID, "Session failed", TEST_NOW + 3);
-    expect(store.transitionCurrent(SESSION_ID, "failed", TEST_NOW + 4)).toBe(true);
+    expect(store.transitionCurrent(SESSION_ID, "failed", TEST_NOW + 4)).toBe(
+      true,
+    );
     expectStoredSession(store, SESSION_ID, {
       activeDurationMs: 3,
       activeStartedAt: null,
       status: "failed",
     });
-    expect(testSessionMessageRoles(store)).toEqual(expectedTranscriptRoles(true));
+    expect(testSessionMessageRoles(store)).toEqual(
+      expectedTranscriptRoles(true),
+    );
     expect(
       store.queue(TEST_USER_ID, SESSION_ID, TEST_NOW + 5, {
         content: "Why was it failing?",
@@ -523,14 +633,17 @@ describe("session store", () => {
       }).status,
     ).toBe("queued");
     const interruptedToolResult = {
-      content: "Error: the tool call was interrupted before it returned a result.",
+      content:
+        "Error: the tool call was interrupted before it returned a result.",
       role: "tool" as const,
       toolCallId: interruptedCall.id,
       toolName: interruptedCall.name,
     };
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
-    expect(testSessionMessageRoles(store)).toEqual(expectedTranscriptRoles(true, true));
+    expect(testSessionMessageRoles(store)).toEqual(
+      expectedTranscriptRoles(true, true),
+    );
     expect(detail?.messages[3]).toEqual({
       ...interruptedToolResult,
       createdAt: TEST_NOW + 2,
