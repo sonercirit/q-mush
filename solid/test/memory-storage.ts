@@ -1,15 +1,18 @@
-export class MemoryStorage {
-  readonly #values = new Map<string, string>();
+export interface MemoryStorage {
+  clear(): void;
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
 
-  clear(): void {
-    this.#values.clear();
-  }
-
-  getItem(key: string): string | null {
-    return this.#values.get(key) ?? null;
-  }
-
-  setItem(key: string, value: string): void {
-    this.#values.set(key, value);
-  }
+export function createMemoryStorage(): MemoryStorage {
+  const values = new Map<string, string>();
+  return {
+    clear: () => {
+      values.clear();
+    },
+    getItem: (key) => values.get(key) ?? null,
+    setItem: (key, value) => {
+      values.set(key, value);
+    },
+  };
 }
