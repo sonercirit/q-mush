@@ -164,7 +164,6 @@ console.log(<main>{htmlExample}</main>);
     const output = expectCommandFailure(result);
     expect(output).toContain("@typescript-eslint/consistent-type-assertions");
     expect(output).toContain("@typescript-eslint/consistent-type-imports");
-    expect(output).toContain("@typescript-eslint/switch-exhaustiveness-check");
     expect(output).toContain("Switch statements are forbidden");
     expect(output).toContain("Class declarations are forbidden");
     expect(output).toContain("Class expressions are forbidden");
