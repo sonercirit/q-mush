@@ -42,7 +42,7 @@ import {
   completeLaunchAgentFile,
   runLaunchedSession,
 } from "./session-launch-test-helpers.ts";
-import { createSessionLauncher } from "./session-launcher-fixtures.ts";
+import { createTestSessionLauncher } from "./session-launcher-fixtures.ts";
 import { settleRestartRecovery } from "./session-restart-cpd-helpers.ts";
 import {
   CREDENTIAL,
@@ -109,7 +109,7 @@ function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
   });
   const runtimes = new SessionRuntimes();
   const modelFactories = vi.fn(() => model);
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish: (finishedDetail, userId, error, recovered) => {
@@ -191,7 +191,7 @@ function manualCompactionSetup(
     finisher.finish(...arguments_);
   });
 
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish,

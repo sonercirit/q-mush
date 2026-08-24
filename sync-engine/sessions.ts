@@ -62,7 +62,7 @@ import {
   recoverInterruptedSessions,
   reportPendingSpawns,
 } from "./session-interrupted-recovery.ts";
-import { SessionLauncher } from "./session-launcher.ts";
+import { createSessionLauncher } from "./session-launcher.ts";
 import { createSessionLivenessWatchdog } from "./session-liveness-scheduler.ts";
 import { modelsForUser } from "./session-model-discovery.ts";
 import {
@@ -286,7 +286,7 @@ class DrizzleSessionIntegration
         this.#store.get(userId, sessionId, workspaceId) !== undefined,
       questions: this.#store.questions(),
     };
-    const launcher = new SessionLauncher({
+    const launcher = createSessionLauncher({
       actions: this.#actions,
       attachmentFallbacks: (userId) => this.#fallbacks.store.list(userId),
       beforeLaunch: async (detail) => {

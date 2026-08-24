@@ -15,7 +15,7 @@ import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import type { CompactionStoreSetup } from "./session-compaction-test-helpers.ts";
-import { createSessionLauncher } from "./session-launcher-fixtures.ts";
+import { createTestSessionLauncher } from "./session-launcher-fixtures.ts";
 import {
   CREDENTIAL,
   orchestrationActions,
@@ -69,7 +69,7 @@ export function launchFailureSetup(
     },
     store: storeSetup.store,
   });
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish: finisher.finish.bind(finisher),
