@@ -317,31 +317,31 @@ function reconciliationSettled(
       : patch[reconciliation.options.pending] === false;
 }
 
-export class SessionReconciliationController {
-  #activeGeneration: number | undefined;
-  #generation = 0;
-  readonly #loader: SessionLoadController;
-  #pending: UnknownMutationReconciliation | undefined;
-  #reconnectGeneration = 0;
-  #retryPending = false;
-  readonly #view: RevisionState<SessionViewState>;
+export interface SessionReconciliationController {
+  readonly creation: (revision: number, error: unknown, baseline: ReadonlySet<string>, descriptor: SessionCreationDescriptor) => Promise<void>;
+  readonly detail: (revision: number, error: unknown, options: DetailMutationOptions, baseline: AgentSessionDetail) => Promise<void>;
+  readonly fork: (revision: number, error: unknown, baseline: ReadonlySet<string>) => Promise<void>;
+  readonly reconnect: () => void;
+  readonly reset: () => void;
+}
 
-  constructor(
-    view: RevisionState<SessionViewState>,
-    loader: SessionLoadController,
-  ) {
-    this.#loader = loader;
-    this.#view = view;
-  }
-
-  async creation(
+export function createSessionReconciliationController(
+  view: RevisionState<SessionViewState>, loader: SessionLoadController,
+): SessionReconciliationController {
+  const state: {
+    activeGeneration: number | undefined; generation: number;
+    pending: UnknownMutationReconciliation | undefined;
+    reconnectGeneration: number; retryPending: boolean;
+  } = { activeGeneration: undefined, generation: 0, pending: undefined,
+    reconnectGeneration: 0, retryPending: false };
+  const creation = async (
     revision: number,
     error: unknown,
     baseline: ReadonlySet<string>,
     descriptor: SessionCreationDescriptor,
-  ): Promise<void> {
+  ): Promise<void> => {
     const retained = cappedSessionCreationIds(baseline);
-    await this.#start({
+    await start({
       baseline: retained,
       descriptor,
       error,
@@ -350,12 +350,12 @@ export class SessionReconciliationController {
     });
   }
 
-  async fork(
+  const fork = async (
     revision: number,
     error: unknown,
     baseline: ReadonlySet<string>,
-  ): Promise<void> {
-    await this.#start({
+  ): Promise<void> => {
+    await start({
       baseline: cappedSessionCreationIds(baseline),
       error,
       kind: "fork",
@@ -363,13 +363,13 @@ export class SessionReconciliationController {
     });
   }
 
-  async detail(
+  const detail = async (
     revision: number,
     error: unknown,
     options: DetailMutationOptions,
     baseline: AgentSessionDetail,
-  ): Promise<void> {
-    await this.#start({
+  ): Promise<void> => {
+    await start({
       baseline,
       error,
       kind: "detail",
@@ -378,123 +378,124 @@ export class SessionReconciliationController {
     });
   }
 
-  async #start(reconciliation: UnknownMutationReconciliation): Promise<void> {
-    this.#pending = reconciliation;
-    await this.#run(reconciliation);
+  const start = async (reconciliation: UnknownMutationReconciliation): Promise<void> => {
+    state.pending = reconciliation;
+    await run(reconciliation);
   }
 
-  reconnect(): void {
-    this.#loader.hydrateAfterReconnect();
-    this.#reconnectGeneration += 1;
-    const pending = this.#pending;
+  const reconnect = (): void => {
+    loader.hydrateAfterReconnect();
+    state.reconnectGeneration += 1;
+    const pending = state.pending;
     if (pending !== undefined) {
-      if (this.#activeGeneration === this.#generation) {
-        this.#retryPending = true;
+      if (state.activeGeneration === state.generation) {
+        state.retryPending = true;
       } else {
-        void this.#run(pending);
+        void run(pending);
       }
     }
   }
 
-  reset(): void {
-    this.#generation += 1;
-    this.#activeGeneration = undefined;
-    this.#pending = undefined;
-    this.#reconnectGeneration = 0;
-    this.#retryPending = false;
+  const reset = (): void => {
+    state.generation += 1;
+    state.activeGeneration = undefined;
+    state.pending = undefined;
+    state.reconnectGeneration = 0;
+    state.retryPending = false;
   }
 
-  async #run(reconciliation: UnknownMutationReconciliation): Promise<void> {
-    const generation = this.#generation;
-    const reconnectGeneration = this.#reconnectGeneration;
-    if (this.#activeGeneration === generation) {
+  const run = async (reconciliation: UnknownMutationReconciliation): Promise<void> => {
+    const generation = state.generation;
+    const reconnectGeneration = state.reconnectGeneration;
+    if (state.activeGeneration === generation) {
       return;
     }
-    this.#activeGeneration = generation;
+    state.activeGeneration = generation;
     try {
       if (reconciliation.kind === "creation") {
-        const outcome = await this.#loader.reconcileSessions(
+        const outcome = await loader.reconcileSessions(
           reconciliation.baseline.ids,
         );
-        this.#settleCurrent(
+        settleCurrent(
           generation,
           reconnectGeneration,
           reconciliation,
-          creationState(this.#view.value, reconciliation, outcome),
+          creationState(view.value, reconciliation, outcome),
         );
       } else if (reconciliation.kind === "fork") {
-        const outcome = await this.#loader.reconcileSessions(
+        const outcome = await loader.reconcileSessions(
           reconciliation.baseline.ids,
           "fork",
         );
-        this.#settleCurrent(
+        settleCurrent(
           generation,
           reconnectGeneration,
           reconciliation,
-          forkState(this.#view.value, outcome, reconciliation),
+          forkState(view.value, outcome, reconciliation),
         );
       } else {
         const sessionId = reconciliation.options.payload["sessionId"];
         const detail =
           typeof sessionId === "string"
-            ? await this.#loader.reconcileDetail(sessionId)
+            ? await loader.reconcileDetail(sessionId)
             : undefined;
-        this.#settleCurrent(
+        settleCurrent(
           generation,
           reconnectGeneration,
           reconciliation,
-          detailState(this.#view.value, reconciliation, detail),
+          detailState(view.value, reconciliation, detail),
         );
       }
     } finally {
-      if (generation === this.#generation) {
-        this.#finish(generation);
+      if (generation === state.generation) {
+        finish(generation);
       }
     }
   }
 
-  #finish(generation: number): void {
-    if (this.#activeGeneration !== generation) {
+  const finish = (generation: number): void => {
+    if (state.activeGeneration !== generation) {
       return;
     }
-    this.#activeGeneration = undefined;
-    const pending = this.#pending;
-    if (this.#retryPending && pending !== undefined) {
-      this.#retryPending = false;
-      void this.#run(pending);
+    state.activeGeneration = undefined;
+    const pending = state.pending;
+    if (state.retryPending && pending !== undefined) {
+      state.retryPending = false;
+      void run(pending);
     } else if (pending === undefined) {
-      this.#retryPending = false;
-      this.#loader.continueHydration();
+      state.retryPending = false;
+      loader.continueHydration();
     } else {
-      this.#retryPending = false;
+      state.retryPending = false;
     }
   }
 
-  #settleCurrent(
+  const settleCurrent = (
     generation: number,
     reconnectGeneration: number,
     reconciliation: UnknownMutationReconciliation,
     patch: Partial<SessionViewState>,
-  ): void {
+  ): void => {
     if (
-      generation === this.#generation &&
-      reconnectGeneration === this.#reconnectGeneration
+      generation === state.generation &&
+      reconnectGeneration === state.reconnectGeneration
     ) {
-      this.#settle(reconciliation, patch);
+      settle(reconciliation, patch);
     }
   }
 
-  #settle(
+  const settle = (
     reconciliation: UnknownMutationReconciliation,
     patch: Partial<SessionViewState>,
-  ): void {
-    if (this.#pending !== reconciliation) {
+  ): void => {
+    if (state.pending !== reconciliation) {
       return;
     }
     const settled = reconciliationSettled(reconciliation, patch);
-    const patched = this.#view.patchCurrent(reconciliation.revision, patch);
+    const patched = view.patchCurrent(reconciliation.revision, patch);
     if (settled && patched) {
-      this.#pending = undefined;
+      state.pending = undefined;
     }
   }
+  return { creation, detail, fork, reconnect, reset };
 }

@@ -52,7 +52,8 @@ import {
 import { updatedSessionQuestions } from "./session-controller-question-event.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
 import {
-  SessionReconciliationController,
+  createSessionReconciliationController,
+  type SessionReconciliationController,
   type DetailMutationOptions,
 } from "./session-controller-reconciliation.ts";
 import {
@@ -123,10 +124,7 @@ export class SessionController {
     });
     this.#live = createSessionRealtimeState(this.#view);
     this.#loader = createSessionLoadController(this.#view, this.#live, transport);
-    this.#reconciliation = new SessionReconciliationController(
-      this.#view,
-      this.#loader,
-    );
+    this.#reconciliation = createSessionReconciliationController(this.#view, this.#loader);
     this.#models = createSessionModelController(this.#view, transport);
     this.#providers = createSessionProviderController(this.#view);
     this.#pendingInputs = createSessionPendingInputController({
