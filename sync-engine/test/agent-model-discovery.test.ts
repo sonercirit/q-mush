@@ -23,8 +23,12 @@ function deferredSignal() {
   return Promise.withResolvers<undefined>();
 }
 
-class RequestCapture {
+interface RequestCapture {
   request?: Request;
+}
+
+function createRequestCapture(): RequestCapture {
+  return {};
 }
 
 function discoveryFetch(
@@ -42,7 +46,7 @@ async function capturedDiscovery(
   providerCredential: ProviderCredentialAccess,
   body: unknown,
 ): Promise<{ readonly catalog: AgentModelCatalog; readonly request: Request }> {
-  const capture = new RequestCapture();
+  const capture = createRequestCapture();
   const discovered = await discoverAgentModelsWithFetch(
     provider,
     providerCredential,

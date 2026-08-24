@@ -32,8 +32,12 @@ const OPENROUTER_IMAGE_OPTIONS = {
   model: "openai/gpt-4.1-mini",
   provider: "openrouter" as const,
 };
-class RequestCapture {
+interface RequestCapture {
   request?: Request;
+}
+
+function createRequestCapture(): RequestCapture {
+  return {};
 }
 async function capturedBody(capture: RequestCapture): Promise<unknown> {
   return capture.request?.json();
@@ -127,7 +131,7 @@ function genericModel(
 async function completeGenericModel(
   options: Parameters<typeof genericModel>[1],
 ): Promise<{ readonly body: unknown; readonly capture: RequestCapture }> {
-  const capture = new RequestCapture();
+  const capture = createRequestCapture();
   await completeHello(genericModel(capture, options));
   return { body: await capturedBody(capture), capture };
 }
@@ -170,7 +174,7 @@ function capturedCodexModel(
 
 describe("chat completions agent model", () => {
   test("sends the native tool protocol to OpenRouter and reads tool calls", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const expectedTool = {
       arguments: '{"path":"src/index.ts"}',
       id: "tool-1",
@@ -306,13 +310,13 @@ describe("chat completions agent model", () => {
       ],
     ] as const;
     for (const [openRouterProviderRouting, provider] of selections) {
-      const capture = new RequestCapture();
+      const capture = createRequestCapture();
       const model = routedModel(capture, openRouterProviderRouting);
       await expectOpenRouterProvider(capture, model, provider);
     }
   });
   test("uses only the ordered selected OpenRouter serving provider", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const model = routedModel(capture, {
       tag: "google-vertex/us",
       type: "provider",
@@ -323,14 +327,14 @@ describe("chat completions agent model", () => {
     });
   });
   test("sends the unbounded schema through OpenAI Responses", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const output = [DONE_CODEX_OUTPUT];
     const model = capturedCodexModel(capture, codexEventResponse(output));
     await completeHello(model);
     expectUnboundedParallelSchema(await capturedBody(capture));
   });
   test("filters definitions to the selected tools and skills", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const selectedTools = ["read", "brave_search"] as const;
     const model = openRouterModelWithTools(capture, selectedTools);
     await completeHello(model);
@@ -339,7 +343,7 @@ describe("chat completions agent model", () => {
     );
   });
   test("omits the tool protocol when none are selected", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const model = openRouterModelWithTools(capture, []);
     await completeHello(model);
     const body = await capturedBody(capture);
@@ -347,7 +351,7 @@ describe("chat completions agent model", () => {
     expect(capturedToolNames(body)).toEqual([]);
   });
   test("sends images through chat completions", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const model = respondingModel(
       OPENROUTER_IMAGE_OPTIONS,
       { choices: [{ message: { content: "I see the image." } }] },
@@ -375,7 +379,7 @@ describe("chat completions agent model", () => {
     });
   });
   test("sends image inputs through the Responses protocol", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const model = capturedCodexModel(
       capture,
       codexEventResponse([DONE_CODEX_OUTPUT]),
@@ -398,7 +402,7 @@ describe("chat completions agent model", () => {
     });
   });
   test("uses the OpenAI chat-completions reasoning parameter", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const model = respondingModel(
       {
         credential: apiKeyCredential("sk-openai-secret"),
@@ -417,7 +421,7 @@ describe("chat completions agent model", () => {
     });
   });
   test("uses the Codex Responses protocol for an OpenAI OAuth credential", async () => {
-    const capture = new RequestCapture();
+    const capture = createRequestCapture();
     const response = codexEventResponse(
       [
         {

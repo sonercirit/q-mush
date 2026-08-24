@@ -158,14 +158,14 @@ describe("agent-loop steering boundaries", () => {
       queuedFollowUp,
       { content: "Change direction", kind: "steer" },
     ]);
-    const model = new (class implements AgentModel {
-      complete(messages: Parameters<AgentModel["complete"]>[0]) {
+    const model: AgentModel = {
+      complete(messages) {
         requests.push([...messages]);
         return Promise.resolve(
           requests.length > 1 ? providerStep("Done.") : toolStep("Working."),
         );
-      }
-    })();
+      },
+    };
 
     await runSteeringLoop({
       executeOutput: "Tool output",
