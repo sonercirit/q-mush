@@ -72,15 +72,19 @@ interface SessionAgentActionsError extends Error {
   readonly tag: "session_agent_actions";
 }
 
-export function createSessionAgentActionsError(
+function createSessionAgentActionsError(
   message: string,
 ): SessionAgentActionsError {
-  return Object.assign(new Error(message), {
+  const error = Object.assign(new Error(message), {
     tag: "session_agent_actions" as const,
   });
+  if (!isSessionAgentActionsError(error)) {
+    throw new Error("Failed to create a session agent actions error");
+  }
+  return error;
 }
 
-export function isSessionAgentActionsError(
+function isSessionAgentActionsError(
   error: unknown,
 ): error is SessionAgentActionsError {
   return (

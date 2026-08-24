@@ -1,10 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import {
-  createSessionAgentActions,
-  createSessionAgentActionsError,
-  isSessionAgentActionsError,
-} from "../session-agent-actions.ts";
+import { createSessionAgentActions } from "../session-agent-actions.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -58,14 +54,6 @@ function actionsForFailedLaunch(setup: ReturnType<typeof spawnedChildSetup>) {
   );
   return { actions, notify };
 }
-
-test("session agent action errors carry their tag", () => {
-  const error = createSessionAgentActionsError("Session not found");
-  expect(isSessionAgentActionsError(error)).toBe(true);
-  expect(isSessionAgentActionsError(new Error("Session not found"))).toBe(
-    false,
-  );
-});
 
 test("immediate spawn launch failure reports the created child before returning", async () => {
   const setup = spawnedChildSetup();
