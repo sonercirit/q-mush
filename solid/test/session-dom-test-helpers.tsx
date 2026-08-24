@@ -8,7 +8,10 @@ import type {
 import type { ReactiveState } from "../reactive-state.ts";
 import { RenderDebugProvider, type RenderDebugView } from "../render-debug.tsx";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { SessionDetailBody } from "../session-detail-body.tsx";
 import { SessionDetail } from "../session-detail-client.tsx";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -81,7 +84,7 @@ export function mountSessionDetailBody(
     controller: SessionController,
   ) => JSX.Element,
 ): MountedTestSession {
-  const controller = new SessionController(
+  const controller = createSessionController(
     reactive,
     undefined,
     null,
@@ -165,7 +168,7 @@ export function mountTestSessionDetail(
   transcriptFilterStorage: SessionTranscriptFilterStorage | null = null,
 ): MountedTestSession {
   const reactive = sessionDetailState(detail);
-  const controller = new SessionController(
+  const controller = createSessionController(
     reactive,
     undefined,
     transcriptFilterStorage,
@@ -184,7 +187,7 @@ export function mountTestTranscript(
 ): MountedTestTranscript {
   const detail = runningSessionDetail(messages);
   const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
-  const controller = new SessionController(reactive, undefined, null);
+  const controller = createSessionController(reactive, undefined, null);
   const session = (): JSX.Element =>
     renderTestSessionDetail(controller, reactive.state);
   const container = mountTestView(

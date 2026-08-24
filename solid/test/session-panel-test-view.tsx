@@ -2,13 +2,13 @@ import type { JSX } from "solid-js";
 import { createDirectoryPickerController } from "../directory-picker-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import type { SessionPanelResources } from "../session-panel-resources.ts";
 
 export function sessionPanelTestView(
   options: SessionPanelResources & { readonly state: SessionViewState },
 ): JSX.Element {
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState(options.state),
     createDirectoryPickerController(
       createReactiveState(options.state.directoryPicker),

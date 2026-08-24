@@ -4,7 +4,10 @@ import { createProviderViewState } from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import {
@@ -47,7 +50,7 @@ function mountFocusPanel(
   readonly container: HTMLDivElement;
   readonly controller: SessionController;
 } {
-  const controller = new SessionController(
+  const controller = createSessionController(
     selected
       ? sessionDetailState(TEST_SESSION_DETAIL, sessions)
       : createReactiveState<SessionViewState>({
@@ -254,7 +257,7 @@ test("cap rejections stay visible beside the editor in focus mode", async () => 
   });
   const reactive = sessionDetailState(detail, [summaryFromDetail(detail)]);
   const controllerArguments = [reactive, undefined, null, { command }] as const;
-  const controller = new SessionController(...controllerArguments);
+  const controller = createSessionController(...controllerArguments);
   const container = mountFocusPanelWithController(controller);
   await enterFocusMode(container);
   clickTestButton(container, "[data-session-cap-toggle='true']");

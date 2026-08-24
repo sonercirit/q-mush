@@ -3,7 +3,10 @@ import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { SessionController } from "../../solid/session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../../solid/session-controller.ts";
 import { createDisplaySessionMessage } from "../../solid/session-message.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import { applySessionDelta } from "./session-controller-stream-test-helper.ts";
@@ -22,7 +25,7 @@ function unanchoredDeltaController(
   const reactive = createReactiveState<SessionViewState>(
     initialSessionViewState(),
   );
-  const controller = createRoot(() => new SessionController(reactive));
+  const controller = createRoot(() => createSessionController(reactive));
   const delta = { content, sessionId, thinking } as const;
   applySessionDelta(controller, { ...delta, type: "session_delta" });
   reactive.setState((state) => ({ ...state, selectedId: sessionId }));

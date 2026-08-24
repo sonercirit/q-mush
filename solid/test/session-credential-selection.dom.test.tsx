@@ -11,7 +11,10 @@ import {
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { initialSessionViewState } from "../session-state.ts";
 import {
   chooseTestOption,
@@ -80,7 +83,7 @@ function createSessionTestController(
     ...initialSessionViewState(),
     sessions: [],
   });
-  return new SessionController(reactive, undefined, null, { command });
+  return createSessionController(reactive, undefined, null, { command });
 }
 
 const PRESERVED_DRAFT = {
@@ -195,7 +198,7 @@ test("shows one limits note when both session tool editors are expanded", () => 
   const reactive = createReactiveState<SessionViewState>(
     selectedSessionViewState(sessionClientTestState()),
   );
-  const controller = new SessionController(reactive, undefined, null);
+  const controller = createSessionController(reactive, undefined, null);
   const container = mountPanel(controller, {
     openAi: () => createProviderViewState([{ ...OPEN_AI_CREDENTIAL }]),
     toolSettings: () => CONFIGURED_TOOL_SETTINGS,
@@ -216,7 +219,7 @@ test("new-session Ctrl/Cmd+Enter submits and shows the platform shortcut", () =>
   const reactive = createReactiveState<SessionViewState>(
     sessionClientTestState(),
   );
-  const controller = new SessionController(reactive, undefined, null);
+  const controller = createSessionController(reactive, undefined, null);
   const create = vi.spyOn(controller, "create").mockResolvedValue();
   controller.setDraftField("prompt", "Test the shortcut");
   const panelProps = Object.freeze({

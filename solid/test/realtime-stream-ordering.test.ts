@@ -5,7 +5,10 @@ import type {
   RealtimeStreamBatch,
   RealtimeStreamUpdate,
 } from "../realtime-stream-buffer.ts";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import {
   identifiedModelDelta,
   orderedToolDelta,
@@ -536,7 +539,7 @@ function selectedRunningController(): SessionController {
     id: SESSION_ID,
     status: "running" as const,
   };
-  return new SessionController(sessionDetailState(detail), undefined, null);
+  return createSessionController(sessionDetailState(detail), undefined, null);
 }
 function applyStreamEvent(
   controller: SessionController,

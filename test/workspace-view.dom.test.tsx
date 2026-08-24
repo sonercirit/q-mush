@@ -23,7 +23,7 @@ import type { ProviderPanelConfiguration } from "../solid/provider-panel-configu
 import { createReactiveState } from "../solid/reactive-state.ts";
 import { createRunnerViewState } from "../solid/runner-client.tsx";
 import { createRunnerController } from "../solid/runner-controller.ts";
-import { SessionController } from "../solid/session-controller.ts";
+import { createSessionController } from "../solid/session-controller.ts";
 import { initialSessionViewState } from "../solid/session-state.ts";
 import {
   clickTestButton,
@@ -103,13 +103,11 @@ test("discovers global fallbacks through the mounted workspace", async () => {
   const container = mountTestView(
     () => (
       <Workspace
-        agentSessions={
-          new SessionController(
-            createReactiveState(initialSessionViewState()),
-            undefined,
-            null,
-          )
-        }
+        agentSessions={createSessionController(
+          createReactiveState(initialSessionViewState()),
+          undefined,
+          null,
+        )}
         braveSearch={providerController(BRAVE_SEARCH_PANEL)}
         generic={providerController(GENERIC_PANEL)}
         logout={() => Promise.resolve()}

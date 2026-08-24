@@ -9,7 +9,7 @@ import { SESSION_PROVIDER_CACHE_WARNING } from "../../shared/session-provider-up
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import { SessionProviderUpdateEditor } from "../session-provider-update-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
@@ -393,7 +393,7 @@ test("clears the cap and retries a blocked model change", async () => {
     sessions: [detail],
     transcriptFilters: { ...initial.transcriptFilters },
   });
-  const controller = new SessionController(
+  const controller = createSessionController(
     ...([reactive, undefined, null, { command }] as const),
   );
   const credentials = [
@@ -471,7 +471,7 @@ test("warns and requires explicit confirmation before changing providers", async
     transcriptFilters: Object.assign({}, initial.transcriptFilters),
   });
   const transport: { command: typeof command } = { command };
-  const controller = new SessionController(
+  const controller = createSessionController(
     reactive,
     undefined,
     null,

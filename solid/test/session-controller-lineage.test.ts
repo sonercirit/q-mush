@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import type { AgentSessionSummary } from "../../shared/session-model.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
-import { SessionController } from "../../solid/session-controller.ts";
+import { createSessionController } from "../../solid/session-controller.ts";
 import { initialSessionViewState } from "../../solid/session-state.ts";
 import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
@@ -23,7 +23,7 @@ test("reconnect snapshots retain child lineage regardless of event ordering", ()
     ...initialSessionViewState(),
     sessions: [parent],
   });
-  const controller = createRoot(() => new SessionController(reactive));
+  const controller = createRoot(() => createSessionController(reactive));
 
   controller.applyDetail({
     ...TEST_SESSION_DETAIL,

@@ -14,7 +14,10 @@ import {
 } from "../realtime-stream-buffer.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import { mountTestView } from "./dom-test-helpers.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
@@ -67,7 +70,7 @@ const TEST_CREDENTIAL: ProviderCredential = {
 };
 
 function mountRealSessionPanel(detail: AgentSessionDetail) {
-  const controller = new SessionController(
+  const controller = createSessionController(
     sessionDetailState(detail, sessionSnapshot(detail, 100)),
   );
   const provider = () => createProviderViewState([TEST_CREDENTIAL]);

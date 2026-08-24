@@ -45,7 +45,10 @@ import {
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
 import { createRunnerController } from "./runner-controller.ts";
-import { SessionController } from "./session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "./session-controller.ts";
 import { startRealtimeSessionLoad } from "./session-transport.ts";
 import { storageHealthWarning } from "./storage-health.ts";
 import "./styles.css";
@@ -360,7 +363,7 @@ function App(): JSX.Element {
       selectedSession: (): string | undefined => agentSessions.state.selectedId,
     },
   );
-  const agentSessions: SessionController = new SessionController(
+  const agentSessions: SessionController = createSessionController(
     undefined,
     undefined,
     undefined,
