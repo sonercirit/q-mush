@@ -1,5 +1,5 @@
-import { isDispatchKey } from "../shared/dispatch.ts";
 import { type JSX } from "solid-js";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import {
   findJsonTextSegment,
   type JsonStreamStringToken,
