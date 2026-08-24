@@ -44,12 +44,18 @@ export async function postSessionAction(
 ): Promise<Response> {
   const path = `${SESSIONS_PATH}/${SESSION_ID}/${action}`;
   const handlers: Record<string, () => Promise<Response>> = {
-    compact: () => Promise.resolve(setup.sessions.compact(
-      createAuthenticatedRequest(path, undefined, "POST"), SESSION_ID,
-    )),
-    continue: () => setup.sessions.continue(
-      createAuthenticatedRequest(path, undefined, "POST"), SESSION_ID,
-    ),
+    compact: () =>
+      Promise.resolve(
+        setup.sessions.compact(
+          createAuthenticatedRequest(path, undefined, "POST"),
+          SESSION_ID,
+        ),
+      ),
+    continue: () =>
+      setup.sessions.continue(
+        createAuthenticatedRequest(path, undefined, "POST"),
+        SESSION_ID,
+      ),
     stop: () => stopSessionRequest(setup),
   };
   const handler = handlers[action];

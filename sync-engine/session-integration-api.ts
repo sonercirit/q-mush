@@ -118,458 +118,460 @@ export interface SessionIntegrationApi extends SessionDetailReader {
   collection(request: Request): Response | Promise<Response>;
 }
 
-export function createSessionIntegrationApi(resources: SessionIntegrationApiResources) {
+export function createSessionIntegrationApi(
+  resources: SessionIntegrationApiResources,
+) {
   const api = {
+    forWorkspace(
+      request: Request,
+      action: (
+        user: AuthenticatedUser,
+        workspaceId: string,
+      ) => Promise<Response> | Response,
+    ): Promise<Response> | Response {
+      return forRequestWorkspace(
+        resources.requests,
+        resources.workspaces,
+        request,
+        action,
+      );
+    },
 
-  forWorkspace(
-    request: Request,
-    action: (
-      user: AuthenticatedUser,
-      workspaceId: string,
-    ) => Promise<Response> | Response,
-  ): Promise<Response> | Response {
-    return forRequestWorkspace(
-      resources.requests,
-      resources.workspaces,
-      request,
-      action,
-    );
-  },
+    collection(request: Request): Response | Promise<Response> {
+      return forRequestWorkspace(
+        resources.requests,
+        resources.workspaces,
+        request,
+        (user, workspaceId) => {
+          const handlers: Record<
+            CollectionMethod,
+            () => Response | Promise<Response>
+          > = {
+            GET: () =>
+              createJsonResponse({
+                sessions: resources.store.list(user.id, workspaceId),
+              }),
+            POST: () => resources.createForUser(request, user, workspaceId),
+          };
+          return isCollectionMethod(request.method)
+            ? handlers[request.method]()
+            : createMethodNotAllowedResponse("GET, POST");
+        },
+      );
+    },
 
-  collection(request: Request): Response | Promise<Response> {
-    return forRequestWorkspace(
-      resources.requests,
-      resources.workspaces,
-      request,
-      (user, workspaceId) => {
-      const handlers: Record<
-        CollectionMethod,
-        () => Response | Promise<Response>
-      > = {
-        GET: () =>
-          createJsonResponse({
-            sessions: resources.store.list(user.id, workspaceId),
-          }),
-        POST: () => resources.createForUser(request, user, workspaceId),
+    postForWorkspace(
+      request: Request,
+      action: (
+        user: AuthenticatedUser,
+        workspaceId: string,
+      ) => Response | Promise<Response>,
+    ): Promise<Response> {
+      return Promise.resolve(
+        resources.requests.postForUser(request, (user) => {
+          const run = () =>
+            withRequestSessionWorkspace(
+              request,
+              user,
+              resources.workspaces,
+              (workspaceId) => action(user, workspaceId),
+            );
+          return run();
+        }),
+      );
+    },
+
+    queueWithoutPrompt(request: Request, sessionId: string): Promise<Response> {
+      const queue = resources.queueForUser;
+      return api.postForWorkspace(request, (user, workspaceId) =>
+        queue(user, sessionId, workspaceId),
+      );
+    },
+
+    compact(request: Request, sessionId: string): Promise<Response> {
+      return api.postForWorkspace(request, (user, workspaceId) =>
+        resources.compactForUser(user, sessionId, workspaceId),
+      );
+    },
+
+    continue(request: Request, sessionId: string): Promise<Response> {
+      return api.queueWithoutPrompt(request, sessionId);
+    },
+
+    message(request: Request, sessionId: string): Promise<Response> {
+      const run = async (user: AuthenticatedUser): Promise<Response> => {
+        const input = await parseJsonRequest(request, readPrompt);
+        return input === undefined
+          ? createApiError("invalid_request", 400)
+          : withRequestSessionWorkspace(
+              request,
+              user,
+              resources.workspaces,
+              (workspaceId) =>
+                resources.queueForUser(user, sessionId, workspaceId, input),
+            );
       };
-      return isCollectionMethod(request.method)
-        ? handlers[request.method]()
-        : createMethodNotAllowedResponse("GET, POST");
-    });
-  },
+      return Promise.resolve(
+        resources.requests.authenticate(request, "POST", run),
+      );
+    },
 
-  postForWorkspace(
-    request: Request,
-    action: (
-      user: AuthenticatedUser,
-      workspaceId: string,
-    ) => Response | Promise<Response>,
-  ): Promise<Response> {
-    return Promise.resolve(
-      resources.requests.postForUser(request, (user) => {
-        const run = () =>
-          withRequestSessionWorkspace(
-            request,
-            user,
-            resources.workspaces,
-            (workspaceId) => action(user, workspaceId),
-          );
-        return run();
-      }),
-    );
-  },
+    commitRunnerProcess(runnerId: string, processNonce?: string): void {
+      resources.broker.commitRunnerProcess(runnerId, processNonce);
+    },
 
-  queueWithoutPrompt(request: Request, sessionId: string): Promise<Response> {
-    const queue = resources.queueForUser;
-    return api.postForWorkspace(request, (user, workspaceId) =>
-      queue(user, sessionId, workspaceId),
-    );
-  },
+    completeRunnerCommand(
+      runnerId: string,
+      commandId: string,
+      result: Parameters<RunnerCommandBroker["complete"]>[2],
+    ): boolean {
+      return resources.broker.complete(runnerId, commandId, result);
+    },
 
-  compact(request: Request, sessionId: string): Promise<Response> {
-    return api.postForWorkspace(request, (user, workspaceId) =>
-      resources.compactForUser(user, sessionId, workspaceId),
-    );
-  },
-
-  continue(request: Request, sessionId: string): Promise<Response> {
-    return api.queueWithoutPrompt(request, sessionId);
-  },
-
-  message(request: Request, sessionId: string): Promise<Response> {
-    const run = async (user: AuthenticatedUser): Promise<Response> => {
-      const input = await parseJsonRequest(request, readPrompt);
-      return input === undefined
-        ? createApiError("invalid_request", 400)
-        : withRequestSessionWorkspace(
-            request,
-            user,
-            resources.workspaces,
-            (workspaceId) =>
-              resources.queueForUser(user, sessionId, workspaceId, input),
-          );
-    };
-    return Promise.resolve(
-      resources.requests.authenticate(request, "POST", run),
-    );
-  },
-
-  commitRunnerProcess(runnerId: string, processNonce?: string): void {
-    resources.broker.commitRunnerProcess(runnerId, processNonce);
-  },
-
-  completeRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    result: Parameters<RunnerCommandBroker["complete"]>[2],
-  ): boolean {
-    return resources.broker.complete(runnerId, commandId, result);
-  },
-
-  deliverRunnerCommands: (({
-    connectionGeneration,
-    deliver,
-    deliverCancellation,
-    processNonce,
-    runnerId,
-  }) =>
-    resources.broker.deliverRunnerCommands(
-      runnerId,
-      processNonce,
+    deliverRunnerCommands: (({
+      connectionGeneration,
       deliver,
       deliverCancellation,
-      connectionGeneration,
-    )) satisfies DeliverRunnerCommands,
+      processNonce,
+      runnerId,
+    }) =>
+      resources.broker.deliverRunnerCommands(
+        runnerId,
+        processNonce,
+        deliver,
+        deliverCancellation,
+        connectionGeneration,
+      )) satisfies DeliverRunnerCommands,
 
-  runnerConnectionGeneration(runnerId: string): number {
-    return resources.broker.runnerConnectionGeneration(runnerId);
-  },
+    runnerConnectionGeneration(runnerId: string): number {
+      return resources.broker.runnerConnectionGeneration(runnerId);
+    },
 
-  replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
-    resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
-  },
+    replaceRunnerConnection(
+      runnerId: string,
+      replacedGeneration: number,
+    ): void {
+      resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
+    },
 
-  acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean {
-    return resources.broker.acknowledgeCancellation(runnerId, commandId);
-  },
+    acknowledgeRunnerCancellation(
+      runnerId: string,
+      commandId: string,
+    ): boolean {
+      return resources.broker.acknowledgeCancellation(runnerId, commandId);
+    },
 
-  async drain(
-    deadline = new RestartDeadline(
-      resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
-      resources.now,
-    ),
-  ): Promise<void> {
-    resources.restartController.abort(
-      new DOMException("The server is restarting", "RestartHandoff"),
-    );
-    resources.shutdownInterrupted.beginLiveDrain();
-    await resources.restart.drainServer(deadline);
-    await resources.executionCleanup.drainPending(deadline);
-  },
-
-  async drainFinal(): Promise<void> {
-    await resources.restart.drainServerFinal();
-    await Promise.allSettled(resources.executionCleanup.pending);
-  },
-
-  escalateDrain(): boolean {
-    return resources.restart.escalateServerDrain();
-  },
-
-  drainProgress(
-    userId?: string,
-    workspaceId?: string,
-  ): readonly RestartDrainSessionProgress[] {
-    if (userId === undefined) return resources.restart.drainProgress();
-    return this.drainProgressForSessions(
-      new Set(
-        resources.store.list(userId, workspaceId).map(({ id }) => id),
+    async drain(
+      deadline = new RestartDeadline(
+        resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
+        resources.now,
       ),
-    );
-  },
+    ): Promise<void> {
+      resources.restartController.abort(
+        new DOMException("The server is restarting", "RestartHandoff"),
+      );
+      resources.shutdownInterrupted.beginLiveDrain();
+      await resources.restart.drainServer(deadline);
+      await resources.executionCleanup.drainPending(deadline);
+    },
 
-  drainProgressForSessions(
-    sessionIds: ReadonlySet<string>,
-  ): readonly RestartDrainSessionProgress[] {
-    return resources.restart.drainProgress(undefined, (sessionId) =>
-      sessionIds.has(sessionId),
-    );
-  },
+    async drainFinal(): Promise<void> {
+      await resources.restart.drainServerFinal();
+      await Promise.allSettled(resources.executionCleanup.pending);
+    },
 
-  restoreDevelopmentDrainRecovery(): void {
-    resources.shutdownInterrupted.enableRecovery();
-    resources.restart.restoreServerDrain();
-    resources.restartController.restore();
-    // Sessions the abandoned drain already parked into durable handoffs, and
-    // work queued while the gate was closed, only resume when recovery and
-    // the queued launcher run again.
-    api.resumeParkedAndQueued();
-  },
+    escalateDrain(): boolean {
+      return resources.restart.escalateServerDrain();
+    },
 
-  resumeParkedAndQueued(runnerId?: string): void {
-    resources.restartCoordinator.recover(runnerId);
-    for (const userId of resources.store.queuedSessionOwnerIds()) {
-      resources.launchQueuedSessions(userId);
-    }
-  },
+    drainProgress(
+      userId?: string,
+      workspaceId?: string,
+    ): readonly RestartDrainSessionProgress[] {
+      if (userId === undefined) return resources.restart.drainProgress();
+      return this.drainProgressForSessions(
+        new Set(resources.store.list(userId, workspaceId).map(({ id }) => id)),
+      );
+    },
 
-  async prepareFinalShutdown(): Promise<void> {
-    resources.stopLivenessScans();
-    resources.shutdownInterrupted.enableRecovery();
-    await resources.restart.prepareServerShutdown();
-  },
+    drainProgressForSessions(
+      sessionIds: ReadonlySet<string>,
+    ): readonly RestartDrainSessionProgress[] {
+      return resources.restart.drainProgress(undefined, (sessionId) =>
+        sessionIds.has(sessionId),
+      );
+    },
 
-  drainRunner(runnerId: string, restartId: string): Promise<void> {
-    return resources.restart.drainRunner(runnerId, restartId);
-  },
+    restoreDevelopmentDrainRecovery(): void {
+      resources.shutdownInterrupted.enableRecovery();
+      resources.restart.restoreServerDrain();
+      resources.restartController.restore();
+      // Sessions the abandoned drain already parked into durable handoffs, and
+      // work queued while the gate was closed, only resume when recovery and
+      // the queued launcher run again.
+      api.resumeParkedAndQueued();
+    },
 
-  escalateRunnerDrain(runnerId: string, restartId: string): boolean {
-    return resources.restart.escalateRunnerDrain(runnerId, restartId);
-  },
+    resumeParkedAndQueued(runnerId?: string): void {
+      resources.restartCoordinator.recover(runnerId);
+      for (const userId of resources.store.queuedSessionOwnerIds()) {
+        resources.launchQueuedSessions(userId);
+      }
+    },
 
-  authenticatedWorkspace(
-    request: Request,
-  ):
-    | { readonly user: AuthenticatedUser; readonly workspaceId: string }
-    | Response {
-    const user = resources.auth.authenticatedUser(request);
-    if (user === null) {
-      return createApiError("unauthorized", 401);
-    }
-    const workspaceId = requestSessionWorkspaceId(
-      request,
-      user.id,
-      resources.workspaces,
-    );
-    return workspaceId === undefined
-      ? createApiError("workspace_unavailable", 409)
-      : { user, workspaceId };
-  },
+    async prepareFinalShutdown(): Promise<void> {
+      resources.stopLivenessScans();
+      resources.shutdownInterrupted.enableRecovery();
+      await resources.restart.prepareServerShutdown();
+    },
 
-  async directories(request: Request, runnerId: string): Promise<Response> {
-    const authenticated = api.authenticatedWorkspace(request);
-    return authenticated instanceof Response
-      ? authenticated
-      : resources.requests.directories(
-          request,
-          runnerId,
-          authenticated.workspaceId,
-        );
-  },
+    drainRunner(runnerId: string, restartId: string): Promise<void> {
+      return resources.restart.drainRunner(runnerId, restartId);
+    },
 
-  detailForUser: ((
-    userId,
-    sessionId,
-    workspaceId,
-  ) => resources.store.get(userId, sessionId, workspaceId)) satisfies SessionDetailReader["detailForUser"],
+    escalateRunnerDrain(runnerId: string, restartId: string): boolean {
+      return resources.restart.escalateRunnerDrain(runnerId, restartId);
+    },
 
-  item(request: Request, sessionId: string): Response {
-    return forRequestWorkspace(
-      resources.requests,
-      resources.workspaces,
-      request,
-      (user, workspaceId) =>
-        storedSessionResponse(
-          resources.store,
-          user.id,
-          sessionId,
-          workspaceId,
-        ),
-    );
-  },
-
-  listForUser(
-    userId: string,
-    workspaceId?: string,
-  ): readonly AgentSessionSummary[] {
-    return resources.store.list(userId, workspaceId);
-  },
-
-  pendingQuestionForUser(
-    userId: string,
-    sessionId: string,
-  ): PendingAskQuestions | null {
-    return resources.store.pendingQuestions(userId, sessionId);
-  },
-
-  getForUser(
-    request: Request,
-    action: (user: AuthenticatedUser) => Promise<Response>,
-  ): Promise<Response> {
-    return authenticatedGet(request, {
-      action,
-      forUser: (requested, serve) =>
-        resources.requests.forUser(requested, serve),
-    });
-  },
-
-  models(request: Request): Promise<Response> {
-    return api.getForUser(
-      request,
-      resources.modelsForUser.bind(null, request),
-    );
-  },
-
-  openRouterProviders(request: Request): Promise<Response> {
-    return api.getForUser(request, (user) =>
-      openRouterProvidersForUser({
-        discover: resources.discoverOpenRouterProviders,
-        pool: resources.modelCredentialPool,
+    authenticatedWorkspace(
+      request: Request,
+    ):
+      | { readonly user: AuthenticatedUser; readonly workspaceId: string }
+      | Response {
+      const user = resources.auth.authenticatedUser(request);
+      if (user === null) {
+        return createApiError("unauthorized", 401);
+      }
+      const workspaceId = requestSessionWorkspaceId(
         request,
-        signal: resources.restartController.signal,
-        user,
-        withCredential: resources.withCredentialAccess,
-      }),
-    );
-  },
-
-  pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {
-    const runtimeRestartId =
-      resources.restart.pendingRunnerRestart(runnerId);
-    const durableGate =
-      resources.restartCoordinator.pendingRunnerRestart(runnerId);
-    if (durableGate.status === "conflicted") {
-      return durableGate;
-    }
-    if (runtimeRestartId === undefined) {
-      return durableGate;
-    }
-    if (
-      durableGate.status === "pending" &&
-      (durableGate.requestedBy !== "runner" ||
-        durableGate.restartId !== runtimeRestartId)
-    ) {
-      return { status: "conflicted" };
-    }
-    return {
-      requestedBy: "runner",
-      restartId: runtimeRestartId,
-      status: "pending",
-    };
-  },
-
-  async reassign(request: Request, sessionId: string): Promise<Response> {
-    return reassignSessionRequest(
-      {
-        authenticate: resources.requests.authenticate,
-        notify: resources.notify,
-        now: resources.now,
-        store: resources.store,
-        workspaces: resources.workspaces,
-      },
-      request,
-      sessionId,
-    );
-  },
-
-  runnerConnected(runnerId: string): void {
-    api.resumeParkedAndQueued(runnerId);
-    void recoverAnsweredQuestions(resources.questionActions, runnerId);
-  },
-
-  runnerDisconnected(runnerId: string): void {
-    resources.liveness.runnerDisconnected(runnerId);
-    const restartPending =
-      resources.restart.draining() ||
-      resources.restart.pendingRunnerRestart(runnerId) !== undefined;
-    resources.broker.disconnectRunner(runnerId, !restartPending);
-  },
-
-  streamRunnerCommand(
-    runnerId: string,
-    commandId: string,
-    delta: Parameters<RunnerCommandBroker["stream"]>[2],
-  ): boolean {
-    return resources.broker.stream(runnerId, commandId, delta);
-  },
-
-  runnerRestartReady(runnerId: string, restartId: string): void {
-    if (!resources.restartCoordinator.resumeRunner(runnerId, restartId)) {
-      return;
-    }
-    resources.restartCoordinator.recover(runnerId, restartId);
-  },
-
-  runnerOperational(runnerId: string, restartId?: string): void {
-    resources.liveness.runnerConnected(runnerId);
-    if (restartId !== undefined) {
-      resources.restartCoordinator.recover(runnerId, restartId);
-    }
-  },
-
-  async runnerRemoved(userId: string, runnerId: string): Promise<void> {
-    await resources.runnerRemoval.removed(userId, runnerId);
-  },
-
-  async compaction(request: Request, sessionId: string): Promise<Response> {
-    const methodError = requireRequestMethod(request, "POST");
-    if (methodError !== undefined) {
-      return methodError;
-    }
-    const authenticated = api.authenticatedWorkspace(request);
-    if (authenticated instanceof Response) {
-      return authenticated;
-    }
-    return updateSessionCompactionMode(
-      {
-        auth: resources.auth,
-        now: resources.now,
-        onChanged: (detail, userId) => {
-          resources.notify(userId, detail.id);
-        },
-        requiredWorkspaceId: authenticated.workspaceId,
-        store: resources.store,
-      },
-      request,
-      sessionId,
-    );
-  },
-
-  async stop(request: Request, sessionId: string): Promise<Response> {
-    const cascade =
-      request.headers
-        .get("content-type")
-        ?.toLowerCase()
-        .startsWith("application/json") === true
-        ? await parseJsonRequest(request, readSessionStopInput)
-        : true;
-    if (cascade === undefined) return createApiError("invalid_request", 400);
-    return resources.requests.postForUser(request, (user) =>
-      withRequestSessionWorkspace(
-        request,
-        user,
+        user.id,
         resources.workspaces,
-        (workspaceId) =>
-          withStoredWorkspaceSession(
+      );
+      return workspaceId === undefined
+        ? createApiError("workspace_unavailable", 409)
+        : { user, workspaceId };
+    },
+
+    async directories(request: Request, runnerId: string): Promise<Response> {
+      const authenticated = api.authenticatedWorkspace(request);
+      return authenticated instanceof Response
+        ? authenticated
+        : resources.requests.directories(
+            request,
+            runnerId,
+            authenticated.workspaceId,
+          );
+    },
+
+    detailForUser: ((userId, sessionId, workspaceId) =>
+      resources.store.get(
+        userId,
+        sessionId,
+        workspaceId,
+      )) satisfies SessionDetailReader["detailForUser"],
+
+    item(request: Request, sessionId: string): Response {
+      return forRequestWorkspace(
+        resources.requests,
+        resources.workspaces,
+        request,
+        (user, workspaceId) =>
+          storedSessionResponse(
             resources.store,
-            user,
+            user.id,
             sessionId,
             workspaceId,
-            async (existing) => {
-              resources.runtimes.abort(sessionId);
-              resources.broker.cancelSessionCommands(sessionId);
-              await resources.runtimes.cleared(sessionId);
-              if (existing.status !== "stopped") {
-                resources.store.stop(
+          ),
+      );
+    },
+
+    listForUser(
+      userId: string,
+      workspaceId?: string,
+    ): readonly AgentSessionSummary[] {
+      return resources.store.list(userId, workspaceId);
+    },
+
+    pendingQuestionForUser(
+      userId: string,
+      sessionId: string,
+    ): PendingAskQuestions | null {
+      return resources.store.pendingQuestions(userId, sessionId);
+    },
+
+    getForUser(
+      request: Request,
+      action: (user: AuthenticatedUser) => Promise<Response>,
+    ): Promise<Response> {
+      return authenticatedGet(request, {
+        action,
+        forUser: (requested, serve) =>
+          resources.requests.forUser(requested, serve),
+      });
+    },
+
+    models(request: Request): Promise<Response> {
+      return api.getForUser(
+        request,
+        resources.modelsForUser.bind(null, request),
+      );
+    },
+
+    openRouterProviders(request: Request): Promise<Response> {
+      return api.getForUser(request, (user) =>
+        openRouterProvidersForUser({
+          discover: resources.discoverOpenRouterProviders,
+          pool: resources.modelCredentialPool,
+          request,
+          signal: resources.restartController.signal,
+          user,
+          withCredential: resources.withCredentialAccess,
+        }),
+      );
+    },
+
+    pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {
+      const runtimeRestartId = resources.restart.pendingRunnerRestart(runnerId);
+      const durableGate =
+        resources.restartCoordinator.pendingRunnerRestart(runnerId);
+      if (durableGate.status === "conflicted") {
+        return durableGate;
+      }
+      if (runtimeRestartId === undefined) {
+        return durableGate;
+      }
+      if (
+        durableGate.status === "pending" &&
+        (durableGate.requestedBy !== "runner" ||
+          durableGate.restartId !== runtimeRestartId)
+      ) {
+        return { status: "conflicted" };
+      }
+      return {
+        requestedBy: "runner",
+        restartId: runtimeRestartId,
+        status: "pending",
+      };
+    },
+
+    async reassign(request: Request, sessionId: string): Promise<Response> {
+      return reassignSessionRequest(
+        {
+          authenticate: resources.requests.authenticate,
+          notify: resources.notify,
+          now: resources.now,
+          store: resources.store,
+          workspaces: resources.workspaces,
+        },
+        request,
+        sessionId,
+      );
+    },
+
+    runnerConnected(runnerId: string): void {
+      api.resumeParkedAndQueued(runnerId);
+      void recoverAnsweredQuestions(resources.questionActions, runnerId);
+    },
+
+    runnerDisconnected(runnerId: string): void {
+      resources.liveness.runnerDisconnected(runnerId);
+      const restartPending =
+        resources.restart.draining() ||
+        resources.restart.pendingRunnerRestart(runnerId) !== undefined;
+      resources.broker.disconnectRunner(runnerId, !restartPending);
+    },
+
+    streamRunnerCommand(
+      runnerId: string,
+      commandId: string,
+      delta: Parameters<RunnerCommandBroker["stream"]>[2],
+    ): boolean {
+      return resources.broker.stream(runnerId, commandId, delta);
+    },
+
+    runnerRestartReady(runnerId: string, restartId: string): void {
+      if (!resources.restartCoordinator.resumeRunner(runnerId, restartId)) {
+        return;
+      }
+      resources.restartCoordinator.recover(runnerId, restartId);
+    },
+
+    runnerOperational(runnerId: string, restartId?: string): void {
+      resources.liveness.runnerConnected(runnerId);
+      if (restartId !== undefined) {
+        resources.restartCoordinator.recover(runnerId, restartId);
+      }
+    },
+
+    async runnerRemoved(userId: string, runnerId: string): Promise<void> {
+      await resources.runnerRemoval.removed(userId, runnerId);
+    },
+
+    async compaction(request: Request, sessionId: string): Promise<Response> {
+      const methodError = requireRequestMethod(request, "POST");
+      if (methodError !== undefined) {
+        return methodError;
+      }
+      const authenticated = api.authenticatedWorkspace(request);
+      if (authenticated instanceof Response) {
+        return authenticated;
+      }
+      return updateSessionCompactionMode(
+        {
+          auth: resources.auth,
+          now: resources.now,
+          onChanged: (detail, userId) => {
+            resources.notify(userId, detail.id);
+          },
+          requiredWorkspaceId: authenticated.workspaceId,
+          store: resources.store,
+        },
+        request,
+        sessionId,
+      );
+    },
+
+    async stop(request: Request, sessionId: string): Promise<Response> {
+      const cascade =
+        request.headers
+          .get("content-type")
+          ?.toLowerCase()
+          .startsWith("application/json") === true
+          ? await parseJsonRequest(request, readSessionStopInput)
+          : true;
+      if (cascade === undefined) return createApiError("invalid_request", 400);
+      return resources.requests.postForUser(request, (user) =>
+        withRequestSessionWorkspace(
+          request,
+          user,
+          resources.workspaces,
+          (workspaceId) =>
+            withStoredWorkspaceSession(
+              resources.store,
+              user,
+              sessionId,
+              workspaceId,
+              async (existing) => {
+                resources.runtimes.abort(sessionId);
+                resources.broker.cancelSessionCommands(sessionId);
+                await resources.runtimes.cleared(sessionId);
+                if (existing.status !== "stopped") {
+                  resources.store.stop(user.id, sessionId, resources.now());
+                  if (cascade) resources.stopChildren(existing, user.id);
+                }
+                await resources.executionCleanup.cleanupTerminal(existing);
+                resources.notify(user.id, sessionId);
+                return storedSessionResponse(
+                  resources.store,
                   user.id,
                   sessionId,
-                  resources.now(),
+                  workspaceId,
                 );
-                if (cascade) resources.stopChildren(existing, user.id);
-              }
-              await resources.executionCleanup.cleanupTerminal(existing);
-              resources.notify(user.id, sessionId);
-              return storedSessionResponse(
-                resources.store,
-                user.id,
-                sessionId,
-                workspaceId,
-              );
-            },
-          ),
-      ),
-    );
-  }
+              },
+            ),
+        ),
+      );
+    },
   };
   return api;
 }

@@ -198,7 +198,10 @@ export function createRealtimeSessionCommandsIntegration(
       not_found: () => result,
     };
     const handled = handlers[result.status]();
-    if (handled.status === "already_cancelled" || handled.status === "cancelled") {
+    if (
+      handled.status === "already_cancelled" ||
+      handled.status === "cancelled"
+    ) {
       const updatedDetail = detail(user.id, existing.id, workspaceId);
       dependencies.notify(user.id, sessionId);
       return { detail: updatedDetail, input: handled.input };
