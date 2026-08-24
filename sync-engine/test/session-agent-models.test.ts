@@ -9,7 +9,10 @@ import {
   createProviderStreamAccumulator,
   type ProviderTextDelta,
 } from "../../sync-engine/provider-stream.ts";
-import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
+import {
+  createRealtimeHub,
+  type RealtimeHub,
+} from "../../sync-engine/realtime-hub.ts";
 import {
   createFallbackModel,
   createSessionAgentModels,
@@ -90,7 +93,7 @@ function realtimeSetup(): {
   readonly hub: RealtimeHub;
   readonly socket: RecordingRealtimeSocket;
 } {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const socket = createRecordingRealtimeSocket();
   connectedRealtime(hub, socket);
   return { hub, socket };

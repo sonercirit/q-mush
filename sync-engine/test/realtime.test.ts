@@ -5,7 +5,7 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
-import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
+import { createRealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import type {
   createRealtimeIntegration,
   QmushWebSocketData,
@@ -109,7 +109,7 @@ function openedSessionPublisher(
   let listener: ((userId: string, sessionId: string) => void) | undefined;
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth(USER),
-    hub: new RealtimeHub(),
+    hub: createRealtimeHub(),
     sessions: realtimeTestSessions({
       detailForUser: detail,
       listForUser: () => [detail()],
@@ -373,7 +373,7 @@ test("does not replay a retained command result across workspaces", async () => 
 });
 
 test("restores owned active tool streams", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const reads: unknown[] = [];
   hub.publishToolStream(
     USER.id,
@@ -482,7 +482,7 @@ test("runner removal closes its socket, publishes the list, and responds before 
     throw new Error("The removal test runner did not connect");
   }
 
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth({ ...USER, id: TEST_USER_ID }),
     hub,

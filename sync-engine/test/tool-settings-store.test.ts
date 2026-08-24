@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { toolSettings } from "../../shared/database/schema.ts";
 import { TOOL_SETTINGS_PATH } from "../../shared/routes.ts";
-import { RealtimeHub } from "../realtime-hub.ts";
+import { createRealtimeHub } from "../realtime-hub.ts";
 import { ToolSettingsStore } from "../tool-settings-store.ts";
 import { createToolSettingsIntegration } from "../tool-settings.ts";
 import {
@@ -146,7 +146,7 @@ describe("tool settings API", () => {
 
   test("publishes saved settings only through the authenticated user's channel", async () => {
     const { auth, database } = createAuthenticatedTestContext();
-    const realtime = new RealtimeHub();
+    const realtime = createRealtimeHub();
     const owner = createRecordingRealtimeSocket();
     const other = createRecordingRealtimeSocket();
     realtime.setUser(TEST_USER_ID, owner, true, "workspace-1");

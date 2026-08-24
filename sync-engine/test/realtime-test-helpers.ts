@@ -1,6 +1,6 @@
 import type { AuthenticatedUser } from "../../shared/auth-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
-import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
+import { createRealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import {
   createRealtimeIntegration,
   type QmushWebSocketData,
@@ -425,7 +425,7 @@ export function configuredRealtimeTestIntegration(
 ): ReturnType<typeof createRealtimeIntegration> {
   return createRealtimeIntegration({
     auth: realtimeTestAuth(null),
-    hub: new RealtimeHub(),
+    hub: createRealtimeHub(),
     runnerVersion: "runner-version",
     runners: realtimeTestRunners(undefined),
     sessions: realtimeTestSessions(),

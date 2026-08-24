@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { testRunnerCommand } from "../../shared/test/runner-command-fixtures.ts";
 import {
-  RealtimeHub,
+  createRealtimeHub,
   type RealtimeSocket,
 } from "../../sync-engine/realtime-hub.ts";
 import { createRecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
@@ -18,7 +18,7 @@ function createFailingSocket(): RealtimeSocket {
 }
 
 test("replaces an existing connection for the same runner", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const sockets = [
     createRecordingRealtimeSocket(),
     createRecordingRealtimeSocket(),
@@ -34,7 +34,7 @@ test("replaces an existing connection for the same runner", () => {
 });
 
 test("continues publishing when one user socket is closing", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const active = createRecordingRealtimeSocket();
   const userId = "closing-user";
   hub.setUser(userId, createFailingSocket(), true);
@@ -46,7 +46,7 @@ test("continues publishing when one user socket is closing", () => {
 });
 
 test("publishes snapshots only to the authenticated user's sockets", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const first = createRecordingRealtimeSocket();
   const second = createRecordingRealtimeSocket();
   const other = createRecordingRealtimeSocket();
@@ -69,7 +69,7 @@ test("publishes snapshots only to the authenticated user's sockets", () => {
 });
 
 test("publishes user-wide settings to every owned workspace without cross-user leakage", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const firstWorkspace = createRecordingRealtimeSocket();
   const secondWorkspace = createRecordingRealtimeSocket();
   const global = createRecordingRealtimeSocket();
@@ -94,7 +94,7 @@ test("publishes user-wide settings to every owned workspace without cross-user l
 });
 
 test("delivers queued commands immediately and cancellation to a runner socket", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
 
   const runner = createRecordingRealtimeSocket();
   const command = testRunnerCommand();

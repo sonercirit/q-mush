@@ -1,6 +1,6 @@
 import type { AppDatabase } from "../shared/database.ts";
 import type { GoogleAuth } from "./auth.ts";
-import { RealtimeHub } from "./realtime-hub.ts";
+import { createRealtimeHub, type RealtimeHub } from "./realtime-hub.ts";
 import {
   createWorkspaceStore,
   type WorkspaceStore,
@@ -22,7 +22,7 @@ export function createCoreIntegrationResources(
 ): CoreIntegrationResources {
   const workspaceStore = createWorkspaceStore(database);
   return {
-    realtimeHub: new RealtimeHub(),
+    realtimeHub: createRealtimeHub(),
     workspaceStore,
     workspaces: createWorkspaceIntegration({ auth, store: workspaceStore }),
   };
