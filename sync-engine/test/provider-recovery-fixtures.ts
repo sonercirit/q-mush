@@ -53,8 +53,10 @@ export interface FakeProviderSocket extends RecordingTestSocket {
 export function createFakeProviderSocket(
   headers: Readonly<Record<string, string>> = {},
 ): FakeProviderSocket {
+  const providerCloseEvent = (): Event =>
+    new CloseEvent("close", { code: 1000 });
   const socket = createRecordingTestSocket({
-    closeEvent: () => new CloseEvent("close", { code: 1000 }),
+    closeEvent: providerCloseEvent,
     readyState: WebSocket.CONNECTING,
   });
   const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
@@ -134,8 +136,8 @@ export function createFakeProviderSocket(
       if (callback !== null) changeListener("remove", type, callback);
     },
   });
-  Object.defineProperties(result, Object.getOwnPropertyDescriptors(state));
   Object.defineProperties(result, {
+    ...Object.getOwnPropertyDescriptors(state),
     closeCode: {
       get: () => closeCode,
       set: (value: number | undefined) => {

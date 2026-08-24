@@ -51,17 +51,17 @@ export function createRecordingTestSocket(
     },
     sent,
   });
-  Object.defineProperties(result, Object.getOwnPropertyDescriptors(state));
   Object.defineProperties(result, {
+    ...Object.getOwnPropertyDescriptors(state),
     readyState: {
       get: () => readyState,
-      set: (value: number) => {
+      set(value: number) {
         readyState = value;
       },
     },
     throwOnSend: {
       get: () => throwOnSend,
-      set: (value: boolean) => {
+      set(value: boolean) {
         throwOnSend = value;
       },
     },

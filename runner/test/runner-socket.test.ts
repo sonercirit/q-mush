@@ -32,10 +32,9 @@ test("reports an explicit supersession frame distinctly", () => {
 });
 
 test("reports a supersession close distinctly when its frame is lost", () => {
-  const socket = createRecordingTestSocket({
-    closeEvent: () =>
-      new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE }),
-  });
+  const supersededClose = (): Event =>
+    new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE });
+  const socket = createRecordingTestSocket({ closeEvent: supersededClose });
   const failure = observeOperationalRunnerSocket(socket);
 
   socket.close();
