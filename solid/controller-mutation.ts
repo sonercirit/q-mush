@@ -35,7 +35,7 @@ function createControllerRevision(): ControllerRevision {
   };
 }
 
-export interface ControllerMutationOptions<State> {
+interface ControllerMutationOptions<State> {
   readonly expected: number;
   readonly failure: (error: unknown) => Partial<State>;
   readonly init?: RequestInit;
