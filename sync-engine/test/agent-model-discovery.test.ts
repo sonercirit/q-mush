@@ -9,6 +9,7 @@ import {
   isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { modelOption } from "../../sync-engine/agent-model-discovery-option.ts";
 import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
@@ -402,4 +403,16 @@ describe("agent model discovery", () => {
     expect(request.url).toBe("https://api.openai.com/v1/models");
     expectBearer(request, "sk-openai-secret");
   });
+});
+
+test("inherited model metadata keys are not treated as present", () => {
+  const metadata = Object.create({ toString: 16_384 }) as Record<
+    string,
+    unknown
+  >;
+  metadata["id"] = "inherited-metadata";
+
+  expect(
+    modelOption(metadata, "id", "name", [], ["toString"])?.contextWindow,
+  ).toBeNull();
 });
