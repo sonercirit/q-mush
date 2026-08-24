@@ -1,6 +1,8 @@
+import type { AgentFile } from "../shared/agent-file.ts";
 import type { AgentImage } from "../shared/agent-images.ts";
 import type {
   AgentConversationMessage,
+  AgentRecordedMessage,
   AgentStepTruncation,
 } from "../shared/agent-loop.ts";
 import type { AgentSessionToolName } from "../shared/agent-tools.ts";
@@ -11,6 +13,7 @@ import type { SessionHistoryPage } from "../shared/session-history.ts";
 import type {
   AgentSessionDetail,
   AgentSessionSummary,
+  AgentSessionUsageUpdate,
 } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
 import type { AnthropicReplayIdentity } from "./anthropic-replay-identity.ts";
@@ -21,10 +24,23 @@ import {
 } from "./session-execution-authority.ts";
 import { type SpawnLineageRepairResult } from "./session-lineage-repair.ts";
 import {
-  cancelPendingInput,
+  type cancelPendingInput,
+  type CancelPendingInputResult,
   type EnqueuePendingInputResult,
   type EnqueuePendingSessionInput,
+  type NormalSessionBoundaryResult,
 } from "./session-pending-inputs.ts";
+import type {
+  InvalidRestartSession,
+  RestartHandoff,
+  RestartHandoffIdentity,
+  RestartHandoffStore,
+} from "./session-restart-store.ts";
+import type {
+  RuntimeAppendMessageParameters,
+  RuntimeCompactionParameters,
+  RuntimeTerminalMessageParameters,
+} from "./session-runtime-write-options.ts";
 import { type SpawnedSessionMetadata } from "./session-spawn-reservation-store.ts";
 import {
   type CreateAgentSession,
@@ -32,11 +48,14 @@ import {
 } from "./session-store-create.ts";
 import { type SessionStoreForkResult } from "./session-store-fork.ts";
 import { type QueueSessionResult } from "./session-store-queue.ts";
-import { appendUnknownRestartToolResults } from "./session-store-read.ts";
+import { type appendUnknownRestartToolResults } from "./session-store-read.ts";
 import { type ReassignSessionResult } from "./session-store-reassignment.ts";
-import {
-  type PendingSpawnedSession,
-  type SpawnedReportDisposition,
+import type { ReportedParentEvent } from "./session-store-resources.ts";
+import type { RuntimeModelMetadata } from "./session-store-runtime.ts";
+import type {
+  PendingSpawnedSession,
+  SpawnedReportDisposition,
+  SpawnedSessionLink,
 } from "./session-store-spawns.ts";
 export interface SessionStore {
   failInterrupted(
@@ -45,24 +64,24 @@ export interface SessionStore {
   ): readonly PendingSpawnedSession[];
   claimRestartHandoff: (
     userId: string,
-    identity: import("./session-restart-store.ts").RestartHandoffIdentity,
+    identity: RestartHandoffIdentity,
     now: number,
   ) => AgentSessionDetail | undefined;
   failInvalidRestartHandoff: (
-    invalid: import("./session-restart-store.ts").InvalidRestartSession,
+    invalid: InvalidRestartSession,
     error: string,
     now: number,
   ) => boolean;
-  failRestartHandoff: import("./session-restart-store.ts").RestartHandoffStore["failQueued"];
-  invalidRestartHandoffs: import("./session-restart-store.ts").RestartHandoffStore["invalid"];
-  pauseQueuedForRestart: import("./session-restart-store.ts").RestartHandoffStore["pauseQueued"];
-  pauseRunningForRestart: import("./session-restart-store.ts").RestartHandoffStore["pauseRunning"];
-  pendingRestartHandoffs: import("./session-restart-store.ts").RestartHandoffStore["pending"];
-  restoreInterruptedRestart: import("./session-restart-store.ts").RestartHandoffStore["restoreInterrupted"];
-  restoreRestartHandoff: import("./session-restart-store.ts").RestartHandoffStore["restore"];
-  settleRestartHandoff: import("./session-restart-store.ts").RestartHandoffStore["settle"];
+  failRestartHandoff: RestartHandoffStore["failQueued"];
+  invalidRestartHandoffs: RestartHandoffStore["invalid"];
+  pauseQueuedForRestart: RestartHandoffStore["pauseQueued"];
+  pauseRunningForRestart: RestartHandoffStore["pauseRunning"];
+  pendingRestartHandoffs: RestartHandoffStore["pending"];
+  restoreInterruptedRestart: RestartHandoffStore["restoreInterrupted"];
+  restoreRestartHandoff: RestartHandoffStore["restore"];
+  settleRestartHandoff: RestartHandoffStore["settle"];
   appendRuntimeAgentMessages: (
-    ...parameters: import("./session-runtime-write-options.ts").RuntimeAppendMessageParameters
+    ...parameters: RuntimeAppendMessageParameters
   ) => void;
   appendRuntimeErrorMessage(
     sessionId: string,
@@ -71,16 +90,15 @@ export interface SessionStore {
     generation: number,
   ): void;
   commitRuntimeTerminal: (
-    ...parameters: import("./session-runtime-write-options.ts").RuntimeTerminalMessageParameters
+    ...parameters: RuntimeTerminalMessageParameters
   ) => void;
   compactRuntimeConversation: (
-    ...parameters: import("./session-runtime-write-options.ts").RuntimeCompactionParameters
+    ...parameters: RuntimeCompactionParameters
   ) => void;
   compactRuntimeTerminal: (
     ...parameters: readonly [
-      ...import("./session-runtime-write-options.ts").RuntimeCompactionParameters,
-      restartHandoff:
-        import("./session-restart-store.ts").RestartHandoff | null,
+      ...RuntimeCompactionParameters,
+      restartHandoff: RestartHandoff | null,
     ]
   ) => void;
   markRuntimeStepStart: (
@@ -90,14 +108,14 @@ export interface SessionStore {
   ) => void;
   setRuntimeAgentFile: (
     sessionId: string,
-    agentFile: import("../shared/agent-file.ts").AgentFile | null,
+    agentFile: AgentFile | null,
     now: number,
     generation: number,
   ) => void;
   setRuntimeModelMetadata: (
     sessionId: string,
     credentialId: string,
-    metadata: import("./session-store-runtime.ts").RuntimeModelMetadata,
+    metadata: RuntimeModelMetadata,
     now: number,
     generation: number,
   ) => void;
@@ -109,17 +127,14 @@ export interface SessionStore {
   ): boolean;
   updateRuntimeUsage: (
     sessionId: string,
-    input: import("../shared/session-model.ts").AgentSessionUsageUpdate,
+    input: AgentSessionUsageUpdate,
     now: number,
     generation: number,
   ) => void;
   repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult;
   recoverSpawnedSessionReservations(now: number): number;
   writeResources(workspaceId?: string): {
-    reportParent?: (
-      userId: string,
-      report: import("./session-store-resources.ts").ReportedParentEvent,
-    ) => void;
+    reportParent?: (userId: string, report: ReportedParentEvent) => void;
     database: AppDatabase;
     generateId: IdGenerator;
     read: (userId: string, sessionId: string) => AgentSessionDetail | undefined;
@@ -163,20 +178,18 @@ export interface SessionStore {
     forkPointMessageId: string,
     workspaceId: string,
     now: number,
-    configuration?:
-      | Pick<
-          CreateAgentSession,
-          | "credentialId"
-          | "model"
-          | "provider"
-          | "reasoningEffort"
-          | "providerPricing"
-          | "openRouterProviderTag"
-          | "adaptiveThinking"
-          | "maxContextTokens"
-          | "maxOutputTokens"
-        >
-      | undefined,
+    configuration?: Pick<
+      CreateAgentSession,
+      | "credentialId"
+      | "model"
+      | "provider"
+      | "reasoningEffort"
+      | "providerPricing"
+      | "openRouterProviderTag"
+      | "adaptiveThinking"
+      | "maxContextTokens"
+      | "maxOutputTokens"
+    >,
   ): SessionStoreForkResult;
   questions(): AskQuestionsStore;
   toolSettings(sessionId: string, executionGeneration: number): ToolSettings;
@@ -219,21 +232,21 @@ export interface SessionStore {
     sessionId: string,
     cap: number | null,
     now: number,
-    workspaceId?: string | undefined,
+    workspaceId?: string,
   ): AgentSessionDetail | undefined;
   setAutoCompact(
     userId: string,
     sessionId: string,
     enabled: boolean,
     now: number,
-    workspaceId?: string | undefined,
+    workspaceId?: string,
   ): AgentSessionDetail | undefined;
   setIdleCompact(
     userId: string,
     sessionId: string,
     enabled: boolean,
     now: number,
-    workspaceId?: string | undefined,
+    workspaceId?: string,
   ): AgentSessionDetail | undefined;
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
@@ -243,7 +256,7 @@ export interface SessionStore {
   appendInterruptedRunnerTool(sessionId: string, now: number): void;
   cancelPendingInput(
     options: Omit<Parameters<typeof cancelPendingInput>[0], "database">,
-  ): import("./session-pending-inputs.ts").CancelPendingInputResult;
+  ): CancelPendingInputResult;
   enqueuePendingInput(
     userId: string,
     sessionId: string,
@@ -269,7 +282,7 @@ export interface SessionStore {
     sessionId: string,
     now: number,
     generation: number,
-  ): import("./session-pending-inputs.ts").NormalSessionBoundaryResult;
+  ): NormalSessionBoundaryResult;
   appendUserMessage(
     userId: string,
     sessionId: string,
@@ -302,7 +315,7 @@ export interface SessionStore {
   spawnedSessionLink(
     userId: string,
     sessionId: string,
-  ): import("./session-store-spawns.ts").SpawnedSessionLink | undefined;
+  ): SpawnedSessionLink | undefined;
   pendingSpawnedSessions(limit?: number): readonly PendingSpawnedSession[];
   queuedSessionOwnerIds(): readonly string[];
   queuedSessions(userId: string): readonly AgentSessionDetail[];
@@ -318,7 +331,7 @@ export interface SessionStore {
    */
   appendCurrentAgentMessage: (
     sessionId: string,
-    message: import("../shared/agent-loop.ts").AgentRecordedMessage,
+    message: AgentRecordedMessage,
     now: number,
   ) => void;
   appendCurrentErrorMessage: (
@@ -329,17 +342,17 @@ export interface SessionStore {
   compactCurrentConversation: (
     sessionId: string,
     summary: string,
-    usage: import("../shared/session-model.ts").AgentSessionUsageUpdate,
+    usage: AgentSessionUsageUpdate,
     now: number,
   ) => void;
   setCurrentAgentFile: (
     sessionId: string,
-    agentFile: import("../shared/agent-file.ts").AgentFile | null,
+    agentFile: AgentFile | null,
     now: number,
   ) => void;
   updateCurrentUsage: (
     sessionId: string,
-    input: import("../shared/session-model.ts").AgentSessionUsageUpdate,
+    input: AgentSessionUsageUpdate,
     now: number,
   ) => void;
   transitionCurrent: (
