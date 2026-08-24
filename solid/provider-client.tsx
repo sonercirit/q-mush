@@ -19,7 +19,10 @@ import type { ProviderPanelConfiguration } from "./provider-panel-configuration.
 import { ProviderQuota } from "./provider-quota-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
-import { SessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
+import {
+  createSessionReassignmentDialogController,
+  type SessionReassignmentDialogController,
+} from "./session-reassignment-dialog-controller.ts";
 import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
 export {
@@ -314,7 +317,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   const [form, setForm] = createSignal<HTMLFormElement>();
   const [reassignmentTrigger, setReassignmentTrigger] =
     createSignal<HTMLElement>();
-  const reassignmentDialog = new SessionReassignmentDialogController();
+  const reassignmentDialog = createSessionReassignmentDialogController();
   const addCredential = async (
     apiKey: string,
     label: string | undefined,
