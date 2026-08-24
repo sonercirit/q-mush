@@ -39,7 +39,7 @@ import type {
 } from "./provider-quota.ts";
 import { createSessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
 import {
-  SessionCredentialReassignmentEndpoints,
+  createSessionCredentialReassignmentEndpoints,
   type SessionCredentialProviderPreparationContext,
   type SessionCredentialProviderPreparationResult,
 } from "./session-credential-reassignment.ts";
@@ -158,7 +158,7 @@ export function createProviderIntegration(options: {
     options.configuration === undefined
       ? undefined
       : createSessionCredentialReassignmentStore(runtime.database);
-  const reassignment = new SessionCredentialReassignmentEndpoints({
+  const reassignment = createSessionCredentialReassignmentEndpoints({
     auth: options.auth,
     now: runtime.now,
     ...(options.dependencies.onSessionsChanged === undefined
