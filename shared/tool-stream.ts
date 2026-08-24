@@ -582,138 +582,65 @@ interface UserToolStreamState {
   size: number;
 }
 
-export class ToolStreamHubState {
-  readonly #maximumStreamsPerSession: number;
-  readonly #maximumStreamsPerUser: number;
-  readonly #users = new Map<string, UserToolStreamState>();
-
-  constructor(options: ToolStreamHubStateOptions = {}) {
-    this.#maximumStreamsPerSession = boundedMaximum(
-      options.maximumStreamsPerSession,
-      MAXIMUM_TOOL_STREAMS_PER_SESSION,
-      MAXIMUM_TOOL_STREAMS_PER_SESSION,
-    );
-    this.#maximumStreamsPerUser = boundedMaximum(
-      options.maximumStreamsPerUser,
-      MAXIMUM_TOOL_STREAMS_PER_USER,
-      MAXIMUM_TOOL_STREAMS_PER_USER,
-    );
-  }
-
-  #user(userId: string): UserToolStreamState | undefined {
-    if (!isBoundedIdentifier(userId)) {
-      return undefined;
-    }
-    return (
-      this.#users.get(userId) ?? {
-        sessions: new Map<string, ToolStreamSnapshotStore>(),
-        size: 0,
-      }
-    );
-  }
-
-  #store(
-    user: UserToolStreamState,
-    sessionId: string,
-  ): {
-    readonly existing: ToolStreamSnapshotStore | undefined;
-    readonly store: ToolStreamSnapshotStore;
-  } {
-    const existing = user.sessions.get(sessionId);
-    return {
-      existing,
-      store:
-        existing ??
-        createToolStreamSnapshotStore({
-          maximumStreams: this.#maximumStreamsPerSession,
-          sessionId,
-        }),
-    };
-  }
-
-  #storeUser(userId: string, user: UserToolStreamState): void {
-    if (user.size > 0) {
-      this.#users.set(userId, user);
-      return;
-    }
-    this.#users.delete(userId);
-  }
-
-  #commit(
-    userId: string,
-    user: UserToolStreamState,
-    sessionId: string,
-    store: ToolStreamSnapshotStore,
-    before: number,
-  ): void {
-    user.size += store.size - before;
-    if (store.size === 0) {
-      user.sessions.delete(sessionId);
-    } else {
-      user.sessions.set(sessionId, store);
-    }
-    this.#trim(user);
-    this.#storeUser(userId, user);
-  }
-
-  apply(userId: string, delta: ToolStreamDelta): boolean {
-    const user = this.#user(userId);
-    if (user === undefined) {
-      return false;
-    }
-    const { store } = this.#store(user, delta.sessionId);
-    const before = store.size;
-    if (!store.apply(delta)) {
-      return false;
-    }
-    this.#commit(userId, user, delta.sessionId, store, before);
-    return true;
-  }
-
+export interface ToolStreamHubState {
+  apply(userId: string, delta: ToolStreamDelta): boolean;
   snapshot(
     userId: string,
     sessionId: string,
     streamId: string,
-  ): ToolStreamSnapshotFrame {
+  ): ToolStreamSnapshotFrame;
+  replace(userId: string, snapshot: ToolStreamSnapshotFrame): boolean;
+  clearSession(userId: string, sessionId: string): void;
+  clearUser(userId: string): void;
+}
+
+export function createToolStreamHubState(
+  options: ToolStreamHubStateOptions = {},
+): ToolStreamHubState {
+  const maximumStreamsPerSession = boundedMaximum(
+    options.maximumStreamsPerSession,
+    MAXIMUM_TOOL_STREAMS_PER_SESSION,
+    MAXIMUM_TOOL_STREAMS_PER_SESSION,
+  );
+  const maximumStreamsPerUser = boundedMaximum(
+    options.maximumStreamsPerUser,
+    MAXIMUM_TOOL_STREAMS_PER_USER,
+    MAXIMUM_TOOL_STREAMS_PER_USER,
+  );
+  const users = new Map<string, UserToolStreamState>();
+
+  const getUser = (userId: string): UserToolStreamState | undefined => {
+    if (!isBoundedIdentifier(userId)) {
+      return undefined;
+    }
     return (
-      this.#users.get(userId)?.sessions.get(sessionId)?.snapshot(streamId) ??
-      createToolStreamSnapshotFrame(sessionId, streamId, [])
+      users.get(userId) ?? {
+        sessions: new Map<string, ToolStreamSnapshotStore>(),
+        size: 0,
+      }
     );
-  }
+  };
 
-  replace(userId: string, snapshot: ToolStreamSnapshotFrame): boolean {
-    const user = this.#user(userId);
-    if (user === undefined || !isToolStreamSnapshotFrame(snapshot)) {
-      return false;
+  const getStore = (
+    user: UserToolStreamState,
+    sessionId: string,
+  ): ToolStreamSnapshotStore =>
+    user.sessions.get(sessionId) ??
+    createToolStreamSnapshotStore({
+      maximumStreams: maximumStreamsPerSession,
+      sessionId,
+    });
+
+  const storeUser = (userId: string, user: UserToolStreamState): void => {
+    if (user.size > 0) {
+      users.set(userId, user);
+    } else {
+      users.delete(userId);
     }
-    const { store } = this.#store(user, snapshot.sessionId);
-    const before = store.size;
-    if (!store.replace(snapshot)) {
-      return false;
-    }
-    this.#commit(userId, user, snapshot.sessionId, store, before);
-    return true;
-  }
+  };
 
-  clearSession(userId: string, sessionId: string): void {
-    const user = this.#users.get(userId);
-    const store = user?.sessions.get(sessionId);
-    if (user === undefined || store === undefined) {
-      return;
-    }
-    user.size -= store.size;
-    store.clear();
-
-    user.sessions.delete(sessionId);
-    this.#storeUser(userId, user);
-  }
-
-  clearUser(userId: string): void {
-    this.#users.delete(userId);
-  }
-
-  #trim(user: UserToolStreamState): void {
-    while (user.size > this.#maximumStreamsPerUser) {
+  const trim = (user: UserToolStreamState): void => {
+    while (user.size > maximumStreamsPerUser) {
       const oldestSessionId = user.sessions.keys().next().value;
       if (oldestSessionId === undefined) {
         user.size = 0;
@@ -729,7 +656,77 @@ export class ToolStreamHubState {
         user.sessions.delete(oldestSessionId);
       }
     }
-  }
+  };
+
+  const commit = (
+    userId: string,
+    user: UserToolStreamState,
+    sessionId: string,
+    snapshotStore: ToolStreamSnapshotStore,
+    before: number,
+  ): void => {
+    user.size += snapshotStore.size - before;
+    if (snapshotStore.size === 0) {
+      user.sessions.delete(sessionId);
+    } else {
+      user.sessions.set(sessionId, snapshotStore);
+    }
+    trim(user);
+    storeUser(userId, user);
+  };
+
+  return {
+    apply(userId, delta): boolean {
+      const user = getUser(userId);
+      if (user === undefined) {
+        return false;
+      }
+      const snapshotStore = getStore(user, delta.sessionId);
+      const before = snapshotStore.size;
+      if (!snapshotStore.apply(delta)) {
+        return false;
+      }
+      commit(userId, user, delta.sessionId, snapshotStore, before);
+      return true;
+    },
+
+    snapshot(userId, sessionId, streamId): ToolStreamSnapshotFrame {
+      return (
+        users.get(userId)?.sessions.get(sessionId)?.snapshot(streamId) ??
+        createToolStreamSnapshotFrame(sessionId, streamId, [])
+      );
+    },
+
+    replace(userId, snapshot): boolean {
+      const user = getUser(userId);
+      if (user === undefined || !isToolStreamSnapshotFrame(snapshot)) {
+        return false;
+      }
+      const snapshotStore = getStore(user, snapshot.sessionId);
+      const before = snapshotStore.size;
+      if (!snapshotStore.replace(snapshot)) {
+        return false;
+      }
+      commit(userId, user, snapshot.sessionId, snapshotStore, before);
+      return true;
+    },
+
+    clearSession(userId, sessionId): void {
+      const user = users.get(userId);
+      const snapshotStore = user?.sessions.get(sessionId);
+      if (user === undefined || snapshotStore === undefined) {
+        return;
+      }
+      user.size -= snapshotStore.size;
+      snapshotStore.clear();
+      user.sessions.delete(sessionId);
+      storeUser(userId, user);
+    },
+
+    clearUser(userId): void {
+      users.delete(userId);
+    },
+  };
 }
 
 function entryKey(streamId: string, index: number): string {

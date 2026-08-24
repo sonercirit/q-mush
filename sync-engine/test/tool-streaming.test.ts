@@ -3,14 +3,15 @@ import {
   MAXIMUM_TOOL_STREAM_DELTA_BYTES,
   MAXIMUM_TOOL_STREAM_FIELD_BYTES,
   TOOL_STREAM_TRUNCATED_MARKER,
-  ToolStreamHubState,
+  createToolStreamHubState,
+  type ToolStreamDeltaFrame,
+  type ToolStreamHubState,
   applyToolStreamDelta,
   isProviderToolCallDelta,
   isRunnerCommandOutputDelta,
   isRunnerCommandResult,
   isToolStreamDeltaFrame,
   isToolStreamSnapshotFrame,
-  type ToolStreamDeltaFrame,
   type ToolStreamTerminalState,
 } from "../../shared/tool-stream.ts";
 import {
@@ -23,7 +24,7 @@ const USER_ID = "user-stream";
 
 class RecordingTransport implements ToolStreamTransport {
   readonly frames: ToolStreamDeltaFrame[] = [];
-  readonly store = new ToolStreamHubState();
+  readonly store = createToolStreamHubState();
   readonly users: string[] = [];
 
   publishToolStream(userId: string, frame: ToolStreamDeltaFrame): void {
@@ -123,7 +124,7 @@ function beginProviderReconciliation(streamId: string) {
 }
 
 function populateCappedHub(options?: { maximumStreamsPerUser: number }) {
-  const hub = new ToolStreamHubState({
+  const hub = createToolStreamHubState({
     maximumStreamsPerSession: 2,
     ...options,
   });
@@ -497,7 +498,7 @@ test("per-user hub state bounds sessions and isolates users", () => {
 });
 
 test("reconnect snapshots replace stale state without rolling back newer deltas", () => {
-  const store = new ToolStreamHubState();
+  const store = createToolStreamHubState();
   const apply = (delta: ToolStreamDeltaFrame): boolean =>
     store.apply(USER_ID, delta);
   apply(frame("step-reconnect", "current-call", 1, 0, { state: "preparing" }));
