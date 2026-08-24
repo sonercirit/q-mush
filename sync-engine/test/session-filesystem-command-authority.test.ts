@@ -11,8 +11,9 @@ import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { loadSessionAgentFile } from "../../sync-engine/session-agent-file.ts";
 import {
-  SessionRequestHelpers,
+  createSessionRequestHelpers,
   type RunnerDirectoryRequest,
+  type SessionRequestHelpers,
 } from "../../sync-engine/session-request-helpers.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
@@ -99,7 +100,7 @@ function helpers(broker: RunnerCommandBroker) {
   };
   return {
     close,
-    requests: new SessionRequestHelpers(auth, broker, {
+    requests: createSessionRequestHelpers(auth, broker, {
       runnerIsAvailable: () => true,
     }),
   };

@@ -70,7 +70,10 @@ import { launchAnsweredQuestionSession } from "./session-question-launcher.ts";
 import { launchQueuedSessions } from "./session-queued-launcher.ts";
 import { createRealtimeSessionCommands } from "./session-realtime-factory.ts";
 import type { RealtimeSessionCommands } from "./session-realtime-integration.ts";
-import { SessionRequestHelpers } from "./session-request-helpers.ts";
+import {
+  createSessionRequestHelpers,
+  type SessionRequestHelpers,
+} from "./session-request-helpers.ts";
 import { createSessionRestartAbort } from "./session-restart-abort.ts";
 import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
@@ -181,7 +184,7 @@ class DrizzleSessionIntegration
       readCredential: this.#readCredential,
     });
     this.#workspaces = dependencies.workspaces ?? permissiveWorkspaceReader;
-    this.#requests = new SessionRequestHelpers(auth, this.#broker, runners);
+    this.#requests = createSessionRequestHelpers(auth, this.#broker, runners);
     this.#runners = runners;
     const reportParent = (
       userId: string,

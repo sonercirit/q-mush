@@ -80,34 +80,54 @@ interface RunnerAvailability {
   ): boolean;
 }
 
-export class SessionRequestHelpers {
-  readonly #auth: GoogleAuth;
-  readonly #broker: RunnerCommandBroker;
-  readonly #runners: RunnerAvailability;
+export interface SessionRequestHelpers {
+  readonly authenticate: SessionRequestAuthenticator;
+  browseDirectories(
+    request: RunnerDirectoryRequest,
+    signal?: AbortSignal,
+  ): Promise<RunnerDirectoryBrowseResult>;
+  directories(
+    request: Request,
+    runnerId: string,
+    workspaceId?: string,
+  ): Promise<Response>;
+  forUser<Result extends Promise<Response> | Response>(
+    request: Request,
+    action: (user: AuthenticatedUser) => Result,
+  ): Response | Result;
+  postForUser(
+    request: Request,
+    action: (user: AuthenticatedUser) => Promise<Response> | Response,
+  ): Promise<Response> | Response;
+  recordWorkResult(
+    request: Request,
+    runnerId: string,
+    commandId: string,
+  ): Promise<Response>;
+}
 
-  constructor(
-    auth: GoogleAuth,
-    broker: RunnerCommandBroker,
-    runners: RunnerAvailability,
-  ) {
-    this.#auth = auth;
-    this.#broker = broker;
-    this.#runners = runners;
-  }
-
-  authenticate: SessionRequestAuthenticator = (request, method, action) => {
+export function createSessionRequestHelpers(
+  auth: GoogleAuth,
+  broker: RunnerCommandBroker,
+  runners: RunnerAvailability,
+): SessionRequestHelpers {
+  const authenticate: SessionRequestAuthenticator = (
+    request,
+    method,
+    action,
+  ) => {
     if (request.method !== method) {
       return createMethodNotAllowedResponse(method);
     }
-    return withAuthenticatedUser(this.#auth, request, action);
+    return withAuthenticatedUser(auth, request, action);
   };
 
-  async browseDirectories(
+  const browseDirectories = async (
     request: RunnerDirectoryRequest,
     signal: AbortSignal = AbortSignal.timeout(15_000),
-  ): Promise<RunnerDirectoryBrowseResult> {
+  ): Promise<RunnerDirectoryBrowseResult> => {
     if (
-      !this.#runners.runnerIsAvailable(
+      !runners.runnerIsAvailable(
         request.userId,
         request.runnerId,
         request.workspaceId,
@@ -118,7 +138,7 @@ export class SessionRequestHelpers {
     }
 
     try {
-      const result = await this.#broker.dispatch(
+      const result = await broker.dispatch(
         {
           arguments: {},
           executionEnvironment: "bare_metal",
@@ -134,87 +154,37 @@ export class SessionRequestHelpers {
       );
       throwIfSignalAborted(signal, "Directory browsing was canceled");
       const value: unknown = JSON.parse(result.output);
-      return {
-        listing: readRunnerDirectoryListing(value),
-        status: "listed",
-      };
+      return { listing: readRunnerDirectoryListing(value), status: "listed" };
     } catch {
       throwIfSignalAborted(signal, "Directory browsing was canceled");
       return { status: "directory_unavailable" };
     }
-  }
+  };
 
-  directories(
-    request: Request,
-    runnerId: string,
-    workspaceId?: string,
-  ): Promise<Response> {
-    return Promise.resolve(
-      this.authenticate(request, "POST", (user) =>
-        this.#directoriesForUser(request, user, runnerId, workspaceId),
-      ),
-    );
-  }
+  const forUser: SessionRequestHelpers["forUser"] = (request, action) =>
+    withAuthenticatedUser(auth, request, action);
 
-  forUser<Result extends Promise<Response> | Response>(
-    request: Request,
-    action: (user: AuthenticatedUser) => Result,
-  ): Response | Result {
-    return withAuthenticatedUser(this.#auth, request, action);
-  }
-
-  postForUser(
-    request: Request,
-    action: (user: AuthenticatedUser) => Promise<Response> | Response,
-  ): Promise<Response> | Response {
-    if (request.method !== "POST") {
-      return createMethodNotAllowedResponse("POST");
-    }
-    return this.forUser(request, action);
-  }
-
-  async recordWorkResult(
-    request: Request,
-    runnerId: string,
-    commandId: string,
-  ): Promise<Response> {
-    const output = await parseJsonRequest(request, (value) => {
-      const parsed = isRecord(value) ? value["output"] : undefined;
-      return typeof parsed === "string" ? parsed : undefined;
-    });
-
-    if (output === undefined) {
-      return createApiError("invalid_request", 400);
-    }
-
-    return this.#broker.complete(runnerId, commandId, {
-      output,
-      state: "completed",
-    })
-      ? createNoContentResponse()
-      : createApiError("not_found", 404);
-  }
-
-  async #directoriesForUser(
+  const directoriesForUser = async (
     request: Request,
     user: AuthenticatedUser,
     runnerId: string,
     workspaceId?: string,
-  ): Promise<Response> {
+  ): Promise<Response> => {
     const path = await parseJsonRequest(request, (value) => {
       const parsed = readStringField(
         value,
         "path",
         MAXIMUM_RUNNER_PATH_LENGTH,
-        { trim: true },
+        {
+          trim: true,
+        },
       );
       return parsed?.includes("\0") === false ? parsed : undefined;
     });
-
     if (
       path === undefined ||
       readIdentifier(runnerId) === undefined ||
-      !this.#runners.runnerIsAvailable(user.id, runnerId, workspaceId)
+      !runners.runnerIsAvailable(user.id, runnerId, workspaceId)
     ) {
       return path === undefined
         ? createApiError("invalid_request", 400)
@@ -227,7 +197,7 @@ export class SessionRequestHelpers {
     ]);
     let result: RunnerDirectoryBrowseResult;
     try {
-      result = await this.browseDirectories(
+      result = await browseDirectories(
         {
           path,
           runnerId,
@@ -237,18 +207,49 @@ export class SessionRequestHelpers {
         browseSignal,
       );
     } catch (error) {
-      // Browser disconnects and the route deadline cancel the broker command.
-      // The HTTP boundary must still settle with its normal browse error.
       if (!browseSignal.aborted) throw error;
       result = { status: "directory_unavailable" };
     }
-    switch (result.status) {
-      case "directory_unavailable":
-        return createApiError("directory_unavailable", 502);
-      case "listed":
-        return createJsonResponse(result.listing);
-      case "runner_unavailable":
-        return createApiError("runner_unavailable", 409);
-    }
-  }
+    const handlers: Record<
+      RunnerDirectoryBrowseResult["status"],
+      () => Response
+    > = {
+      directory_unavailable: () => createApiError("directory_unavailable", 502),
+      listed: () =>
+        result.status === "listed"
+          ? createJsonResponse(result.listing)
+          : createApiError("directory_unavailable", 502),
+      runner_unavailable: () => createApiError("runner_unavailable", 409),
+    };
+    return handlers[result.status]();
+  };
+
+  return {
+    authenticate,
+    browseDirectories,
+    directories: (request, runnerId, workspaceId) =>
+      Promise.resolve(
+        authenticate(request, "POST", (user) =>
+          directoriesForUser(request, user, runnerId, workspaceId),
+        ),
+      ),
+    forUser,
+    postForUser: (request, action) =>
+      request.method === "POST"
+        ? forUser(request, action)
+        : createMethodNotAllowedResponse("POST"),
+    recordWorkResult: async (request, runnerId, commandId) => {
+      const output = await parseJsonRequest(request, (value) => {
+        const parsed = isRecord(value) ? value["output"] : undefined;
+        return typeof parsed === "string" ? parsed : undefined;
+      });
+      if (output === undefined) return createApiError("invalid_request", 400);
+      return broker.complete(runnerId, commandId, {
+        output,
+        state: "completed",
+      })
+        ? createNoContentResponse()
+        : createApiError("not_found", 404);
+    },
+  };
 }
