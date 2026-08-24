@@ -1,7 +1,10 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { prompts } from "../../shared/database/schema.ts";
-import { PromptStore } from "../../sync-engine/prompt-store.ts";
+import {
+  createPromptStore,
+  type PromptStore,
+} from "../../sync-engine/prompt-store.ts";
 import {
   addTestUser,
   createAuthenticatedTestDatabase,
@@ -34,7 +37,7 @@ function createStore() {
   ];
   return {
     database,
-    store: new PromptStore(database, () =>
+    store: createPromptStore(database, () =>
       takeValue(ids, "The test ran out of prompt IDs"),
     ),
   };
@@ -206,7 +209,7 @@ describe("prompt store", () => {
         store.remove(TEST_USER_ID, first.id, TEST_NOW + 3, first.revision),
       );
 
-      const limited = new PromptStore(database, () => SECOND_PROMPT_ID, 1);
+      const limited = createPromptStore(database, () => SECOND_PROMPT_ID, 1);
       expect(() =>
         limited.create(
           TEST_USER_ID,

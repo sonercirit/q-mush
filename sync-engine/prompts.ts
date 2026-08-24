@@ -17,7 +17,11 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
-import { isPromptStoreErrorKind, PromptStore } from "./prompt-store.ts";
+import {
+  createPromptStore,
+  isPromptStoreErrorKind,
+  type PromptStore,
+} from "./prompt-store.ts";
 
 interface PromptDependencies {
   readonly database?: AppDatabase;
@@ -130,7 +134,7 @@ class DrizzlePromptIntegration
     super(auth);
     const database = dependencies.database ?? createDatabase(":memory:");
     this.#now = dependencies.now ?? Date.now;
-    this.#store = new PromptStore(
+    this.#store = createPromptStore(
       database,
       dependencies.randomId ?? createUuidV7,
       dependencies.maximumCount,
