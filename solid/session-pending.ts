@@ -31,6 +31,7 @@ export interface PendingCommandCapacity {
   reserve(userId: string, bytes: number): PendingCommandReservation | undefined;
 }
 
+/** @public Creates an aggregate command-capacity ledger. */
 export function createPendingCommandCapacity(
   maximumBytes = MAXIMUM_AGGREGATE_PENDING_COMMAND_BYTES,
 ): PendingCommandCapacity {

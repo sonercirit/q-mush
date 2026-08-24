@@ -5,7 +5,7 @@ export interface HttpResponseError extends Error {
   readonly status: number;
 }
 
-export function createHttpResponseError(
+function createHttpResponseError(
   status: number,
   code?: string,
   detail?: string,
