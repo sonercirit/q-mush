@@ -56,7 +56,7 @@ import type {
   SpawnedSessionLink,
 } from "./session-store-spawns.ts";
 import type { SpawnedReportParameters } from "./session-store-types.ts";
-export interface SessionStoreLifecycle {
+interface SessionStoreLifecycle {
   failInterrupted(
     now: number,
     active?: (id: string, generation: number) => boolean,
@@ -72,7 +72,7 @@ export interface SessionStoreLifecycle {
   };
 }
 
-export interface SessionStoreSpawns {
+interface SessionStoreSpawns {
   create(input: CreateAgentSession, now: number): CreateSessionResult;
   prepareSpawnedSession(
     identity: { readonly generation: number; readonly sessionId: string },
@@ -101,7 +101,7 @@ export interface SessionStoreSpawns {
   ): boolean;
 }
 
-export interface SessionStoreQueries {
+interface SessionStoreQueries {
   fork(...parameters: SessionStoreForkParameters): SessionStoreForkResult;
   questions(): AskQuestionsStore;
   toolSettings(sessionId: string, executionGeneration: number): ToolSettings;
@@ -150,7 +150,7 @@ export interface SessionStoreQueries {
   ): AgentSessionDetail | undefined;
 }
 
-export interface SessionStoreInputs {
+interface SessionStoreInputs {
   appendUnknownRestartToolResults(
     database: Parameters<typeof appendUnknownRestartToolResults>[0]["database"],
     sessionId: string,
@@ -183,7 +183,7 @@ export interface SessionStoreInputs {
   ): NormalSessionBoundaryResult;
 }
 
-export type SessionQueueParameters = readonly [
+type SessionQueueParameters = readonly [
   userId: string,
   sessionId: string,
   now: number,
@@ -192,7 +192,7 @@ export type SessionQueueParameters = readonly [
   workspaceId?: string,
 ];
 
-export interface SessionStoreLineage {
+interface SessionStoreLineage {
   appendUserMessage(
     userId: string,
     sessionId: string,
