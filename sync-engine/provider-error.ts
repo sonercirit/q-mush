@@ -138,7 +138,7 @@ interface ProviderStreamErrorOptions {
   readonly status?: number | undefined;
 }
 
-export function createProviderStreamError(
+function createProviderStreamError(
   message: string,
   transient: boolean,
   options: ProviderStreamErrorOptions = {},

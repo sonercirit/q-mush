@@ -51,7 +51,7 @@ interface ProviderWebSocketErrorOptions {
   readonly retryAfterMilliseconds?: number | undefined;
 }
 
-export function createProviderWebSocketError(
+function createProviderWebSocketError(
   message: string,
   started: boolean,
   options: ProviderWebSocketErrorOptions = {},
