@@ -288,8 +288,8 @@ export function withInterruptedInternalToolResults(
 
   for (const internal of messages) {
     const { message } = internal;
-    switch (message.role) {
-      case "assistant":
+    const handlers: Record<AgentSessionMessage["role"], () => void> = {
+      assistant: () => {
         finishPending();
         complete.push(internal);
         pending = message.toolCalls.map((call) => ({
@@ -297,22 +297,21 @@ export function withInterruptedInternalToolResults(
           createdAt: message.createdAt,
           messageId: message.id,
         }));
-        break;
-      case "tool":
+      },
+      tool: () => {
         complete.push(internal);
         pending = pending.filter(({ call }) => call.id !== message.toolCallId);
-        break;
-      case "user":
+      },
+      user: () => {
         finishPending();
         complete.push(internal);
-        break;
-      case "compaction_request":
-      case "error":
-      case "system":
-      case "thinking":
-        complete.push(internal);
-        break;
-    }
+      },
+      compaction_request: () => complete.push(internal),
+      error: () => complete.push(internal),
+      system: () => complete.push(internal),
+      thinking: () => complete.push(internal),
+    };
+    handlers[message.role]();
   }
   if (finishTrailingCalls) {
     finishPending();
@@ -421,8 +420,8 @@ export function conversationFromInternalMessages(
         ? { message: source.message }
         : replayForIdentity(source, identity);
     const message = internal.message;
-    switch (message.role) {
-      case "assistant":
+    const handlers: Record<AgentSessionMessage["role"], () => void> = {
+      assistant: () => {
         conversation.push({
           content: message.content,
           ...(internal.providerReplay === undefined
@@ -431,8 +430,8 @@ export function conversationFromInternalMessages(
           role: "assistant",
           toolCalls: message.toolCalls,
         });
-        break;
-      case "tool":
+      },
+      tool: () => {
         if (message.toolCallId === null || message.toolName === null) {
           throw new Error("A stored tool result has no tool identity");
         }
@@ -442,22 +441,21 @@ export function conversationFromInternalMessages(
           toolCallId: message.toolCallId,
           toolName: message.toolName,
         });
-        break;
-      case "user": {
+      },
+      user: () => {
         const attachments = message.attachments ?? message.images;
         conversation.push({
           content: message.content,
           ...(attachments.length === 0 ? {} : { images: attachments }),
           role: "user",
         });
-        break;
-      }
-      case "compaction_request":
-      case "error":
-      case "system":
-      case "thinking":
-        break;
-    }
+      },
+      compaction_request: () => undefined,
+      error: () => undefined,
+      system: () => undefined,
+      thinking: () => undefined,
+    };
+    handlers[message.role]();
   }
   return conversation;
 }

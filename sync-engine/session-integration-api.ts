@@ -113,6 +113,12 @@ type WorkspaceResponseAction<Result extends Promise<Response> | Response> = (
   workspaceId: string,
 ) => Result;
 
+type CollectionMethod = "GET" | "POST";
+
+function isCollectionMethod(method: string): method is CollectionMethod {
+  return method === "GET" || method === "POST";
+}
+
 export abstract class SessionIntegrationApi implements SessionDetailReader {
   protected abstract readonly resources: SessionIntegrationApiResources;
 
@@ -141,16 +147,19 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
 
   collection(request: Request): Response | Promise<Response> {
     return this.#forWorkspace(request, (user, workspaceId) => {
-      switch (request.method) {
-        case "GET":
-          return createJsonResponse({
+      const handlers: Record<
+        CollectionMethod,
+        () => Promise<Response> | Response
+      > = {
+        GET: () =>
+          createJsonResponse({
             sessions: this.resources.store.list(user.id, workspaceId),
-          });
-        case "POST":
-          return this.resources.createForUser(request, user, workspaceId);
-        default:
-          return createMethodNotAllowedResponse("GET, POST");
-      }
+          }),
+        POST: () => this.resources.createForUser(request, user, workspaceId),
+      };
+      return isCollectionMethod(request.method)
+        ? handlers[request.method]()
+        : createMethodNotAllowedResponse("GET, POST");
     });
   }
 
