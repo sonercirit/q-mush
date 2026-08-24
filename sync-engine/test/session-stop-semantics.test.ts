@@ -25,23 +25,36 @@ import {
   waitForSessionValue,
 } from "./session-integration-helpers.ts";
 
-class BlockingModel implements AgentModel {
-  aborted = false;
-  started = false;
-  complete(
-    _messages: readonly AgentConversationMessage[],
-    signal?: AbortSignal,
-  ): Promise<AgentModelStep> {
-    this.started = true;
-    return new Promise((_resolve, reject) => {
-      const stop = () => {
-        this.aborted = true;
-        reject(new DOMException("Stopped", "AbortError"));
-      };
-      if (signal?.aborted === true) stop();
-      else signal?.addEventListener("abort", stop, { once: true });
-    });
-  }
+interface BlockingModel extends AgentModel {
+  readonly aborted: boolean;
+  readonly started: boolean;
+}
+
+function createBlockingModel(): BlockingModel {
+  let aborted = false;
+  let started = false;
+  return {
+    get aborted() {
+      return aborted;
+    },
+    get started() {
+      return started;
+    },
+    complete(
+      _messages: readonly AgentConversationMessage[],
+      signal?: AbortSignal,
+    ): Promise<AgentModelStep> {
+      started = true;
+      return new Promise((_resolve, reject) => {
+        const stop = () => {
+          aborted = true;
+          reject(new DOMException("Stopped", "AbortError"));
+        };
+        if (signal?.aborted === true) stop();
+        else signal?.addEventListener("abort", stop, { once: true });
+      });
+    },
+  };
 }
 async function stopHttpSession(
   setup: ReturnType<typeof connectedSessionSetup>,
@@ -61,7 +74,7 @@ async function stopHttpSession(
 describe("agent session stop semantics", () => {
   test("stopping a running model request settles its active duration", async () => {
     let now = TEST_NOW;
-    const model = new BlockingModel();
+    const model = createBlockingModel();
     const setup = connectedSessionSetup(model, "api_key", undefined, {
       now: () => now,
     });
@@ -93,7 +106,7 @@ describe("agent session stop semantics", () => {
   });
 
   test("omitted HTTP stop body cascade-stops actual children", async () => {
-    const setup = connectedSessionSetup(new BlockingModel());
+    const setup = connectedSessionSetup(createBlockingModel());
     const createResponse = await setup.sessions.collection(
       createSessionRequest(),
     );
@@ -131,7 +144,7 @@ describe("agent session stop semantics", () => {
   });
 
   test("accepts explicit HTTP parent-only stop semantics", async () => {
-    const setup = connectedSessionSetup(new BlockingModel());
+    const setup = connectedSessionSetup(createBlockingModel());
     await expectSessionReaches(
       setup,
       await setup.sessions.collection(createSessionRequest()),
@@ -146,7 +159,7 @@ describe("agent session stop semantics", () => {
   });
 
   test("rejects malformed HTTP stop semantics", async () => {
-    const setup = connectedSessionSetup(new BlockingModel());
+    const setup = connectedSessionSetup(createBlockingModel());
     await setup.sessions.collection(createSessionRequest());
 
     const stopped = await stopHttpSession(setup, "false");
