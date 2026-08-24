@@ -17,160 +17,142 @@ const OPENROUTER_CREDENTIAL = restartTestCredential("openrouter-credential", {
   secret: "openrouter-secret",
 });
 
-function runnerGate(
-  gates: Map<string, RestartRequest>,
-  runnerId: string,
-): RestartRequest | undefined {
+function runnerGate(gates: Map<string, RestartRequest>, runnerId: string) {
   return gates.get(runnerId);
 }
 
-class TestRestartRuntimes implements RestartRuntimeControl {
-  readonly blocked = new Set<string>();
-  readonly forceParked: string[] = [];
-  readonly forceParkScopes: RestartScope[] = [];
-  forceParkCalls = 0;
+interface TestRestartRuntimes extends RestartRuntimeControl {
+  readonly blocked: Set<string>;
+  readonly forceParked: string[];
+  readonly forceParkScopes: RestartScope[];
+  forceParkCalls: number;
   forceParkFailure: Error | undefined;
   persistenceFailure: Error | undefined;
   markGate: Promise<void> | undefined;
-  settleDrainsImmediately = true;
-  requestedDrains = 0;
+  settleDrainsImmediately: boolean;
+  requestedDrains: number;
   readonly drains: {
     readonly restartId: string;
     readonly scope: RestartScope;
-  }[] = [];
-  readonly started: (string | undefined)[] = [];
-  #runnerRequests = new Map<string, RestartRequest>();
-  #serverRequest: RestartRequest | undefined;
-  #settleDrains = new Map<string, () => void>();
+  }[];
+  readonly started: (string | undefined)[];
+  settleDrain(key?: string): void;
+}
 
-  get draining(): boolean {
-    return this.#serverRequest !== undefined;
-  }
-
-  accepts(runnerId: string): boolean {
-    return (
-      !this.draining &&
-      !this.blocked.has(runnerId) &&
-      !this.#runnerRequests.has(runnerId)
-    );
-  }
-
-  blockRunner(runnerId: string): void {
-    this.blocked.add(runnerId);
-    this.#runnerRequests.delete(runnerId);
-  }
-
-  drain(scope: RestartScope, restartId: string): Promise<void> {
-    this.drains.push({ restartId, scope });
-    const request: RestartRequest = {
-      boundary: scope.kind === "server" ? "step" : "handoff",
-      requestedBy: scope.kind,
-      restartId,
-    };
-    if (scope.kind === "server") {
-      this.#serverRequest = request;
-    } else {
-      this.#runnerRequests.set(scope.runnerId, request);
-    }
-    return Promise.resolve();
-  }
-
-  mark(scope: RestartScope, restartId: string): Promise<void> {
-    const persistence = this.drain(scope, restartId);
-    return this.markGate === undefined
-      ? persistence
-      : persistence.then(() => this.markGate);
-  }
-
-  drainProgress(): readonly [] {
-    return [];
-  }
-
-  forcePark(scope: RestartScope): Promise<readonly string[]> {
-    this.forceParkCalls += 1;
-    this.forceParkScopes.push(scope);
-    return this.forceParkFailure === undefined
-      ? Promise.resolve(this.forceParked)
-      : Promise.reject(this.forceParkFailure);
-  }
-
-  requestDrain(
-    scope: RestartScope,
-    restartId: string,
-  ): {
-    readonly persistence: Promise<unknown>;
-    readonly settled: Promise<unknown>;
-  } {
-    this.requestedDrains += 1;
-    const persistence = this.drain(scope, restartId).then(() => {
-      if (this.persistenceFailure !== undefined) {
-        throw this.persistenceFailure;
-      }
-    });
-    if (this.settleDrainsImmediately) {
-      return { persistence, settled: persistence };
-    }
-    const settled = new Promise<void>((resolve) => {
-      const key =
-        scope.kind === "server" ? "server" : `runner:${scope.runnerId}`;
-      this.#settleDrains.set(key, resolve);
-    });
-    return { persistence, settled };
-  }
-
-  settleDrain(key?: string): void {
-    if (key !== undefined) {
-      this.#settleDrains.get(key)?.();
-      this.#settleDrains.delete(key);
-      return;
-    }
-    for (const settle of this.#settleDrains.values()) settle();
-    this.#settleDrains.clear();
-  }
-
-  drainRequest(scope: RestartScope): RestartRequest | undefined {
-    return scope.kind === "server"
-      ? this.#serverRequest
-      : runnerGate(this.#runnerRequests, scope.runnerId);
-  }
-
-  resumeRunner(runnerId: string, restartId: string): boolean {
-    if (runnerGate(this.#runnerRequests, runnerId)?.restartId !== restartId) {
-      return false;
-    }
-    this.#runnerRequests.delete(runnerId);
-    return true;
-  }
-
-  restoreRunner(runnerId: string, restartId: string): boolean {
-    const existing = runnerGate(this.#runnerRequests, runnerId);
-    if (existing !== undefined && existing.restartId !== restartId) {
-      throw new Error("A different restart is already draining this scope");
-    }
-    this.#runnerRequests.set(
-      runnerId,
-      existing ?? {
-        boundary: "handoff",
-        requestedBy: "runner",
+function createTestRestartRuntimes(): TestRestartRuntimes {
+  const runnerRequests = new Map<string, RestartRequest>();
+  const settleDrains = new Map<string, () => void>();
+  let serverRequest: RestartRequest | undefined;
+  const runtimes: TestRestartRuntimes = {
+    blocked: new Set<string>(),
+    forceParked: [],
+    forceParkScopes: [],
+    forceParkCalls: 0,
+    forceParkFailure: undefined,
+    persistenceFailure: undefined,
+    markGate: undefined,
+    settleDrainsImmediately: true,
+    requestedDrains: 0,
+    drains: [],
+    started: [],
+    get draining() {
+      return serverRequest !== undefined;
+    },
+    accepts(runnerId) {
+      return (
+        !runtimes.draining &&
+        !runtimes.blocked.has(runnerId) &&
+        !runnerRequests.has(runnerId)
+      );
+    },
+    blockRunner(runnerId) {
+      runtimes.blocked.add(runnerId);
+      runnerRequests.delete(runnerId);
+    },
+    drain(scope, restartId) {
+      runtimes.drains.push({ restartId, scope });
+      const request: RestartRequest = {
+        boundary: scope.kind === "server" ? "step" : "handoff",
+        requestedBy: scope.kind,
         restartId,
-      },
-    );
-    return true;
-  }
-
-  start(runnerId?: string): void {
-    this.started.push(runnerId);
-    if (runnerId === undefined) {
-      this.#serverRequest = undefined;
-    }
-  }
+      };
+      if (scope.kind === "server") serverRequest = request;
+      else runnerRequests.set(scope.runnerId, request);
+      return Promise.resolve();
+    },
+    mark(scope, restartId) {
+      const persistence = runtimes.drain(scope, restartId);
+      return runtimes.markGate === undefined
+        ? persistence
+        : persistence.then(() => runtimes.markGate);
+    },
+    drainProgress: () => [],
+    forcePark(scope) {
+      runtimes.forceParkCalls += 1;
+      runtimes.forceParkScopes.push(scope);
+      return runtimes.forceParkFailure === undefined
+        ? Promise.resolve(runtimes.forceParked)
+        : Promise.reject(runtimes.forceParkFailure);
+    },
+    requestDrain(scope, restartId) {
+      runtimes.requestedDrains += 1;
+      const persistence = runtimes.drain(scope, restartId).then(() => {
+        if (runtimes.persistenceFailure !== undefined)
+          throw runtimes.persistenceFailure;
+      });
+      if (runtimes.settleDrainsImmediately)
+        return { persistence, settled: persistence };
+      const settled = new Promise<void>((resolve) => {
+        settleDrains.set(
+          scope.kind === "server" ? "server" : `runner:${scope.runnerId}`,
+          resolve,
+        );
+      });
+      return { persistence, settled };
+    },
+    settleDrain(key) {
+      if (key !== undefined) {
+        settleDrains.get(key)?.();
+        settleDrains.delete(key);
+        return;
+      }
+      for (const settle of settleDrains.values()) settle();
+      settleDrains.clear();
+    },
+    drainRequest(scope) {
+      return scope.kind === "server"
+        ? serverRequest
+        : runnerGate(runnerRequests, scope.runnerId);
+    },
+    resumeRunner(runnerId, restartId) {
+      if (runnerGate(runnerRequests, runnerId)?.restartId !== restartId)
+        return false;
+      runnerRequests.delete(runnerId);
+      return true;
+    },
+    restoreRunner(runnerId, restartId) {
+      const existing = runnerGate(runnerRequests, runnerId);
+      if (existing !== undefined && existing.restartId !== restartId)
+        throw new Error("A different restart is already draining this scope");
+      runnerRequests.set(
+        runnerId,
+        existing ?? { boundary: "handoff", requestedBy: "runner", restartId },
+      );
+      return true;
+    },
+    start(runnerId) {
+      runtimes.started.push(runnerId);
+      if (runnerId === undefined) serverRequest = undefined;
+    },
+  };
+  return runtimes;
 }
 
 function control(
   generateRestartId: () => string = () => "unused",
   options: Parameters<typeof createSessionRestartControl>[2] = {},
 ) {
-  const runtimes = new TestRestartRuntimes();
+  const runtimes = createTestRestartRuntimes();
   return {
     restart: createSessionRestartControl(runtimes, generateRestartId, options),
     runtimes,
@@ -256,10 +238,10 @@ function finalShutdownControl() {
   return control(() => "final-shutdown");
 }
 
-const FINAL_SHUTDOWN_DRAINS = [
-  { restartId: "final-shutdown", scope: { kind: "server" } },
-  { restartId: "final-shutdown", scope: { kind: "server" } },
-] as const;
+const FINAL_SHUTDOWN_DRAINS = Array.from({ length: 2 }, () => ({
+  restartId: "final-shutdown",
+  scope: { kind: "server" as const },
+}));
 
 function expectNoForcePark(runtimes: TestRestartRuntimes): void {
   expect(runtimes.forceParkCalls).toBe(0);

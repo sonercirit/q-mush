@@ -8,8 +8,8 @@ import {
 } from "../database/schema.ts";
 import { SYSTEM_ID } from "../ids.ts";
 import {
-  ProviderQuotaStore,
-  type ResetReservation,
+  createProviderQuotaStore,
+  type ProviderQuotaStore,
 } from "../provider-quota-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
@@ -101,14 +101,14 @@ function setup() {
   ];
   return {
     database,
-    store: new ProviderQuotaStore(database, () => ids.shift() ?? SETTING_ID),
+    store: createProviderQuotaStore(database, () => ids.shift() ?? SETTING_ID),
   };
 }
 
 function expectReservation(
   store: ProviderQuotaStore,
   requestId: string,
-  expected: ResetReservation,
+  expected: ReturnType<ProviderQuotaStore["reserveReset"]>,
   now = TEST_NOW,
 ): void {
   expect(

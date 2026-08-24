@@ -25,7 +25,7 @@ import type {
 import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import type { RestartRequest } from "./session-runtime.ts";
 import { sessionHasStatus } from "./session-status.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface RunPersistedSessionOptions extends SessionRestartRequester {
   readonly controller: AbortController;

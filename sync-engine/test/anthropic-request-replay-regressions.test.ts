@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { completionMessages } from "../../sync-engine/agent-completion.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { anthropicRequestBody } from "../../sync-engine/anthropic-request.ts";
 import {
   ANTHROPIC_READ_CALL,
@@ -110,7 +110,7 @@ async function captureOpenAiFormatReplayRequest(
     capturedRequests.push(request);
     return Promise.resolve(Response.json(chatCompletionsDone()));
   };
-  const model = new ChatCompletionsAgentModel({
+  const model = createChatCompletionsAgentModel({
     credential: { ...ANTHROPIC_TEST_CREDENTIAL, apiFormat: "openai" },
     credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
     fetch: capture,

@@ -211,7 +211,7 @@ export function WorkspacePanel(props: WorkspaceControllerProps): JSX.Element {
   );
 }
 
-interface WorkspacePanelController {
+export interface WorkspacePanelController {
   readonly selectedIdView: Accessor<string>;
   readonly view: Accessor<WorkspaceViewState>;
   create(name: string): Promise<void>;

@@ -4,8 +4,11 @@ import type {
   AgentToolCall,
 } from "../../shared/agent-loop.ts";
 import type { AnthropicAssistantReplay } from "../../shared/anthropic-replay.ts";
-import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import {
   ANTHROPIC_READ_CALL,
   ANTHROPIC_TEST_CREDENTIAL,
@@ -92,7 +95,7 @@ function aliasModel(
   resolution: () => Response,
   requests: Request[],
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: ANTHROPIC_TEST_CREDENTIAL,
     credentialFingerprint: ANTHROPIC_TEST_CREDENTIAL_FINGERPRINT,
     fetch: (request) => {
@@ -181,7 +184,7 @@ describe("Anthropic historical replay degradation", () => {
 
   test("compacts legacy completed tool history without replay", async () => {
     const harness = anthropicHarness([doneAnthropicEvents()]);
-    const compactor = new ModelConversationCompactor({
+    const compactor = createModelConversationCompactor({
       complete: harness.complete,
     });
 

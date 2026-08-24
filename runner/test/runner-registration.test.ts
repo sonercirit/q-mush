@@ -1,20 +1,22 @@
 import { expect, test } from "vitest";
-import { RunnerConnectionError } from "../../runner/runner-connection.ts";
+import { createRunnerConnectionError } from "../../runner/runner-connection.ts";
 import { completeRunnerRegistration } from "../../runner/runner-registration.ts";
-import { RunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
+import { createRunnerRegistrationRejectedError } from "../../runner/runner-socket.ts";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
   type RunnerStartupConnection,
+  type RunnerStartupRestart,
 } from "../../runner/runner-update.ts";
-import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
-
-class RegistrationSocket extends RecordingTestSocket {}
+import {
+  createRecordingTestSocket,
+  type RecordingTestSocket,
+} from "../../shared/test/websocket-fixtures.ts";
 
 interface RegistrationSetup {
   readonly connection: RunnerStartupConnection;
   readonly installed: string[];
   readonly promise: Promise<void>;
-  readonly socket: RegistrationSocket;
+  readonly socket: RecordingTestSocket;
   readonly startup: RunnerStartupRestart;
 }
 
@@ -24,7 +26,7 @@ function registrationForStartup(
   installation: string,
   handlers: Parameters<typeof completeRunnerRegistration>[3] = {},
 ): RegistrationSetup {
-  const socket = new RegistrationSocket();
+  const socket = createRecordingTestSocket();
   const connection = startup.connection();
   const promise = completeRunnerRegistration(
     socket,
@@ -42,7 +44,7 @@ function registration(
   onVersion?: (version: string) => void,
 ): RegistrationSetup {
   return registrationForStartup(
-    new RunnerStartupRestart(restartId ?? undefined),
+    createRunnerStartupRestart(restartId ?? undefined),
     [],
     "operational",
     onVersion === undefined ? {} : { onVersion },
@@ -94,12 +96,12 @@ function receiveThroughFinalized(
 }
 
 function invalidRegistrationError() {
-  return new RunnerConnectionError("The server returned invalid setup data");
+  return createRunnerConnectionError("The server returned invalid setup data");
 }
 
 function expectConnectionError(
   promise: Promise<void>,
-  error: RunnerConnectionError,
+  error: Error,
 ): Promise<void> {
   return expect(promise).rejects.toEqual(error);
 }
@@ -161,7 +163,7 @@ test("reports explicit rejection without mutating startup restart identity", asy
 
   await expectConnectionError(
     setup.promise,
-    new RunnerRegistrationRejectedError(),
+    createRunnerRegistrationRejectedError(),
   );
   expectRestartIdentity(setup);
 });
@@ -211,7 +213,7 @@ registrationTest(
     setup.socket.receive(active("registration-send", "receipt-prepared"));
 
     await expect(setup.promise).rejects.toEqual(
-      new RunnerConnectionError(
+      createRunnerConnectionError(
         "The WebSocket registration acknowledgement failed",
       ),
     );
@@ -243,7 +245,7 @@ test("stores final receipt but does not consume restart identity on a pre-operat
 test("reports the settled restart identity only after operational registration", async () => {
   const operationalRestartIds: (string | undefined)[] = [];
   const setup = registrationForStartup(
-    new RunnerStartupRestart("restart-operational"),
+    createRunnerStartupRestart("restart-operational"),
     [],
     "operational",
     {
@@ -264,7 +266,7 @@ test("reports the settled restart identity only after operational registration",
 
 test("rejects registration when operational restart settlement is invalid", async () => {
   const setup = registrationForStartup(
-    new RunnerStartupRestart("restart-invalid"),
+    createRunnerStartupRestart("restart-invalid"),
     [],
     "operational",
     { onOperational: () => false },
@@ -331,7 +333,7 @@ test("retains finalized restart state when operational acknowledgement throws", 
   setup.socket.throwOnSend = true;
   setup.socket.receive(operational("registration-operational-send"));
 
-  await expect(setup.promise).rejects.toBeInstanceOf(RunnerConnectionError);
+  await expect(setup.promise).rejects.toBeInstanceOf(Error);
 
   installedOperationally(setup);
   finalizedRestartState(setup, "receipt-finalized");

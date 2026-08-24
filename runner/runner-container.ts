@@ -34,7 +34,7 @@ export interface RunnerContainerShellOptions extends Pick<
   ) => void;
 }
 
-export type RunnerContainerRun = (
+type RunnerContainerRun = (
   executable: string,
   arguments_: readonly string[],
   options: RunnerContainerRunOptions,
@@ -251,33 +251,27 @@ function readTrackedContainers(
   }
 }
 
-export class RunnerContainerManager {
-  readonly #containers = new Map<
+export function createRunnerContainerManager(
+  options: RunnerContainerManagerOptions = {},
+) {
+  const containers = new Map<
     string,
     PendingSessionContainer | SessionContainer
   >();
-  readonly #cleanups = new Map<string, Promise<void>>();
-  readonly #image: string;
-  readonly #randomName: () => string;
-  readonly #run: RunnerContainerRun;
-  readonly #runtime: string;
-  readonly #tracked: Map<string, TrackedContainer>;
-  readonly #trackingPath: string | undefined;
+  const cleanups = new Map<string, Promise<void>>();
 
-  constructor(options: RunnerContainerManagerOptions = {}) {
-    const environment = options.environment ?? process.env;
-    const configuration = containerConfiguration(environment);
-    this.#runtime = configuration.runtime;
-    this.#image = configuration.image;
-    this.#randomName =
-      options.randomName ??
-      (() => `q-mush-session-${randomBytes(16).toString("hex")}`);
-    this.#run = options.run ?? runContainerProcess;
-    this.#trackingPath = options.trackingPath;
-    this.#tracked = readTrackedContainers(this.#trackingPath);
-  }
+  const environment = options.environment ?? process.env;
+  const configuration = containerConfiguration(environment);
+  const runtime = configuration.runtime;
+  const image = configuration.image;
+  const randomName =
+    options.randomName ??
+    (() => `q-mush-session-${randomBytes(16).toString("hex")}`);
+  const run = options.run ?? runContainerProcess;
+  const trackingPath = options.trackingPath;
+  const trackedContainers = readTrackedContainers(trackingPath);
 
-  async #removeTracked(
+  async function removeTracked(
     sessionId: string,
     tracked: TrackedContainer,
   ): Promise<boolean> {
@@ -285,13 +279,13 @@ export class RunnerContainerManager {
       return false;
     }
     try {
-      const result = await this.#run(
+      const result = await run(
         tracked.runtime,
         ["rm", "--force", tracked.identifier],
         {},
       );
       if (result.exitCode === 0 || containerWasAbsent(result)) {
-        this.#tracked.delete(sessionId);
+        trackedContainers.delete(sessionId);
         return true;
       }
     } catch {
@@ -300,55 +294,55 @@ export class RunnerContainerManager {
     return false;
   }
 
-  async #removeSessionContainer(
+  async function removeSessionContainer(
     sessionId: string,
     tracked: TrackedContainer,
   ): Promise<void> {
-    if (await this.#removeTracked(sessionId, tracked)) {
-      this.#writeTracking();
+    if (await removeTracked(sessionId, tracked)) {
+      writeTracking();
     }
   }
 
-  async recoverTracked(): Promise<void> {
-    for (const [sessionId, tracked] of [...this.#tracked.entries()]) {
-      await this.#removeTracked(sessionId, tracked);
+  const recoverTracked = async (): Promise<void> => {
+    for (const [sessionId, tracked] of [...trackedContainers.entries()]) {
+      await removeTracked(sessionId, tracked);
     }
-    this.#writeTracking();
-  }
+    writeTracking();
+  };
 
-  async prepare(
+  const prepare = async (
     sessionId: string,
     root: string,
     signal?: AbortSignal,
-  ): Promise<void> {
-    await this.#container(sessionId, root, signal);
-  }
+  ): Promise<void> => {
+    await container(sessionId, root, signal);
+  };
 
-  async executeShell(
+  const executeShell = async (
     sessionId: string,
     root: string,
     command: string,
     timeoutSeconds: number,
     options: RunnerContainerShellOptions = {},
-  ): Promise<string> {
+  ): Promise<string> => {
     const { outputLimitCharacters, publish, signal } = options;
     if (abortSignalIsAborted(signal)) {
       throw new Error("The runner command was stopped");
     }
-    const container = await this.#container(sessionId, root, signal);
+    const sessionContainer = await container(sessionId, root, signal);
     if (abortSignalIsAborted(signal)) {
-      await this.cleanupSession(sessionId);
+      await cleanupSession(sessionId);
       throw new Error("The runner command was stopped");
     }
     let result: RunnerProcessResult;
     try {
-      result = await this.#run(
-        container.runtime,
+      result = await run(
+        sessionContainer.runtime,
         [
           "exec",
           "--workdir",
           CONTAINER_WORKSPACE,
-          container.id,
+          sessionContainer.id,
           "/bin/sh",
           "-lc",
           command,
@@ -357,78 +351,81 @@ export class RunnerContainerManager {
       );
     } catch (error) {
       if (abortSignalIsAborted(signal)) {
-        await this.cleanupSession(sessionId);
+        await cleanupSession(sessionId);
       }
       throw error;
     }
     if (result.termination !== undefined) {
-      await this.cleanupSession(sessionId);
+      await cleanupSession(sessionId);
     }
     return formatShellResult(result, timeoutSeconds);
-  }
+  };
 
-  async cleanupSession(sessionId: string): Promise<void> {
-    const existing = this.#cleanups.get(sessionId);
+  const cleanupSession = async (sessionId: string): Promise<void> => {
+    const existing = cleanups.get(sessionId);
     if (existing !== undefined) {
       return existing;
     }
-    const cleanup = this.#cleanupSession(sessionId);
-    this.#cleanups.set(sessionId, cleanup);
+    const cleanup = cleanupSessionContainer(sessionId);
+    cleanups.set(sessionId, cleanup);
     try {
       await cleanup;
     } finally {
-      if (this.#cleanups.get(sessionId) === cleanup) {
-        this.#cleanups.delete(sessionId);
+      if (cleanups.get(sessionId) === cleanup) {
+        cleanups.delete(sessionId);
       }
     }
-  }
+  };
 
-  async #cleanupSession(sessionId: string): Promise<void> {
-    const stored = this.#containers.get(sessionId);
-    this.#containers.delete(sessionId);
-    let tracked = this.#tracked.get(sessionId);
+  async function cleanupSessionContainer(sessionId: string): Promise<void> {
+    const stored = containers.get(sessionId);
+    containers.delete(sessionId);
+    let sessionTracked = trackedContainers.get(sessionId);
     if (stored !== undefined) {
       try {
         const container = "started" in stored ? await stored.started : stored;
-        tracked = { identifier: container.id, runtime: container.runtime };
+        sessionTracked = {
+          identifier: container.id,
+          runtime: container.runtime,
+        };
       } catch {
         // Fall through to the durable unique identifier, if one was recorded.
       }
     }
-    if (tracked === undefined) {
+    if (sessionTracked === undefined) {
       return;
     }
-    await this.#removeSessionContainer(sessionId, tracked);
+    await removeSessionContainer(sessionId, sessionTracked);
   }
 
-  async cleanupAll(): Promise<void> {
+  const cleanupAll = async (): Promise<void> => {
     const sessionIds = new Set([
-      ...this.#containers.keys(),
-      ...this.#tracked.keys(),
+      ...containers.keys(),
+      ...trackedContainers.keys(),
     ]);
     await Promise.allSettled(
-      [...sessionIds].map((sessionId) => this.cleanupSession(sessionId)),
+      [...sessionIds].map((sessionId) => cleanupSession(sessionId)),
     );
-  }
+  };
 
-  async #container(
+  async function container(
     sessionId: string,
     root: string,
     signal?: AbortSignal,
   ): Promise<SessionContainer> {
-    const existing = this.#existingContainer(sessionId, root);
+    const existing = existingContainer(sessionId, root);
     if (existing !== undefined) {
       return "started" in existing ? await existing.started : existing;
     }
-    const cleanup = this.#cleanups.get(sessionId);
+    const cleanup = cleanups.get(sessionId);
     if (cleanup !== undefined) {
       await cleanup;
-      return this.#container(sessionId, root, signal);
+      return container(sessionId, root, signal);
     }
-    const orphan = this.#tracked.get(sessionId);
+    const orphan = trackedContainers.get(sessionId);
     if (orphan !== undefined) {
-      await this.#removeSessionContainer(sessionId, orphan);
-      if (this.#tracked.has(sessionId)) {
+      await removeSessionContainer(sessionId, orphan);
+      if (trackedContainers.has(sessionId)) {
         throw new Error(
           "Container execution is unavailable: the previous session container could not be removed",
         );
@@ -437,136 +434,146 @@ export class RunnerContainerManager {
     if (abortSignalIsAborted(signal)) {
       throw new Error("The runner command was stopped");
     }
-    return this.#createContainer({ root, sessionId, signal });
+    return createContainer({ root, sessionId, signal });
   }
 
-  async #createContainer(
+  async function createContainer(
     options: NewSessionContainer,
   ): Promise<SessionContainer> {
-    const pending = this.#pendingContainer(options);
-    this.#containers.set(options.sessionId, pending);
+    const pending = pendingContainer(options);
+    containers.set(options.sessionId, pending);
     try {
       const started = await pending.started;
-      this.#replacePendingContainer(options.sessionId, pending, started);
+      replacePendingContainer(options.sessionId, pending, started);
       return started;
     } catch (error) {
-      this.#replacePendingContainer(options.sessionId, pending);
+      replacePendingContainer(options.sessionId, pending);
       throw error;
     }
   }
 
-  #replacePendingContainer(
+  function replacePendingContainer(
     sessionId: string,
     pending: PendingSessionContainer,
     started?: SessionContainer,
   ): void {
-    if (this.#containers.get(sessionId) !== pending) {
+    if (containers.get(sessionId) !== pending) {
       return;
     }
     if (started === undefined) {
-      this.#containers.delete(sessionId);
+      containers.delete(sessionId);
     } else {
-      this.#containers.set(sessionId, started);
+      containers.set(sessionId, started);
     }
   }
 
-  #pendingContainer(options: NewSessionContainer): PendingSessionContainer {
+  function pendingContainer(
+    options: NewSessionContainer,
+  ): PendingSessionContainer {
     return {
       root: options.root,
-      started: this.#start(options),
+      started: start(options),
     };
   }
 
-  #existingContainer(
+  function existingContainer(
     sessionId: string,
     root: string,
   ): PendingSessionContainer | SessionContainer | undefined {
-    const existing = this.#containers.get(sessionId);
+    const existing = containers.get(sessionId);
     if (existing !== undefined && existing.root !== root) {
       throw new Error("The session container workspace changed");
     }
     return existing;
   }
 
-  #forgetSession(sessionId: string): void {
-    this.#tracked.delete(sessionId);
-    this.#writeTracking();
+  function forgetSession(sessionId: string): void {
+    trackedContainers.delete(sessionId);
+    writeTracking();
   }
 
-  async #stoppedDuringStart(
+  async function stoppedDuringStart(
     sessionId: string,
     tracked: TrackedContainer,
     cause?: unknown,
   ): Promise<never> {
-    await this.#removeSessionContainer(sessionId, tracked);
+    await removeSessionContainer(sessionId, tracked);
     throw new Error("The runner command was stopped", {
       ...(cause === undefined ? {} : { cause }),
     });
   }
 
-  async #start(options: NewSessionContainer): Promise<SessionContainer> {
+  async function start(
+    options: NewSessionContainer,
+  ): Promise<SessionContainer> {
     const { root, sessionId, signal } = options;
     if (platform() === "win32") {
       throw new Error(
         "Container execution is unavailable on this runner platform",
       );
     }
-    const name = this.#randomName();
+    const name = randomName();
     const starting = {
       identifier: name,
-      runtime: this.#runtime,
+      runtime: runtime,
     };
-    this.#tracked.set(sessionId, starting);
-    this.#writeTracking();
+    trackedContainers.set(sessionId, starting);
+    writeTracking();
     let result: RunnerProcessResult;
     try {
-      result = await this.#run(
-        this.#runtime,
-        runtimeArguments(root, name, this.#image),
+      result = await run(
+        runtime,
+        runtimeArguments(root, name, image),
         processOptions(signal),
       );
     } catch (error) {
       if (abortSignalIsAborted(signal)) {
-        return this.#stoppedDuringStart(sessionId, starting, error);
+        return stoppedDuringStart(sessionId, starting, error);
       }
-      this.#forgetSession(sessionId);
+      forgetSession(sessionId);
       throw new Error(
-        `Container execution is unavailable: could not start ${this.#runtime}. Install Docker or Podman, or configure Q_MUSH_CONTAINER_RUNTIME.`,
+        `Container execution is unavailable: could not start ${runtime}. Install Docker or Podman, or configure Q_MUSH_CONTAINER_RUNTIME.`,
         { cause: error },
       );
     }
     if (abortSignalIsAborted(signal) || result.termination === "stopped") {
-      return this.#stoppedDuringStart(sessionId, starting);
+      return stoppedDuringStart(sessionId, starting);
     }
     if (result.exitCode !== 0) {
-      await this.#removeSessionContainer(sessionId, starting);
-      throw processError(this.#runtime, "start the configured image", result);
+      await removeSessionContainer(sessionId, starting);
+      throw processError(runtime, "start the configured image", result);
     }
     const id = containerIdentifier(result.standardOutput);
     if (id === undefined) {
-      await this.#removeSessionContainer(sessionId, starting);
+      await removeSessionContainer(sessionId, starting);
       throw new Error(
-        `Container execution is unavailable: ${this.#runtime} returned no container ID`,
+        `Container execution is unavailable: ${runtime} returned no container ID`,
       );
     }
-    this.#tracked.set(sessionId, {
+    trackedContainers.set(sessionId, {
       identifier: id,
-      runtime: this.#runtime,
+      runtime: runtime,
     });
-    this.#writeTracking();
+    writeTracking();
     return {
       id,
       identifier: id,
       root,
-      runtime: this.#runtime,
+      runtime: runtime,
     };
   }
 
-  #writeTracking(): void {
-    const path = this.#trackingPath;
+  function writeTracking(): void {
+    const path = trackingPath;
     if (path === undefined) {
       return;
     }
-    writePrivateJsonFile(path, Object.fromEntries(this.#tracked));
+    writePrivateJsonFile(path, Object.fromEntries(trackedContainers));
   }
+
+  return { cleanupAll, cleanupSession, executeShell, prepare, recoverTracked };
 }
+
+export type RunnerContainerManager = ReturnType<
+  typeof createRunnerContainerManager
+>;

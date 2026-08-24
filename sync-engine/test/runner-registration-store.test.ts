@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { runners, runnerWorkspaces } from "../../shared/database/schema.ts";
 import { RUNNERS_PATH } from "../../shared/routes.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import {
   createStoredTokenHash,
   createTokenDigest,
@@ -535,8 +535,8 @@ describe("runner registration durable state", () => {
 describe("runner token persistence", () => {
   test("stores randomized hashes with deterministic unique digests", () => {
     const database = createAuthenticatedTestDatabase();
-    const first = new RunnerStore(database, () => FIRST_RUNNER_ID);
-    const second = new RunnerStore(database, () => SECOND_RUNNER_ID);
+    const first = createRunnerStore(database, () => FIRST_RUNNER_ID);
+    const second = createRunnerStore(database, () => SECOND_RUNNER_ID);
 
     first.create(TEST_USER_ID, FIRST_TOKEN, TEST_NOW);
     expect(() => second.create(TEST_USER_ID, FIRST_TOKEN, TEST_NOW)).toThrow(
@@ -558,7 +558,7 @@ describe("runner token persistence", () => {
     );
 
     expect(() =>
-      new RunnerStore(database, () => SECOND_RUNNER_ID).create(
+      createRunnerStore(database, () => SECOND_RUNNER_ID).create(
         TEST_USER_ID,
         FIRST_TOKEN,
         TEST_NOW,
@@ -603,7 +603,7 @@ describe("runner token persistence", () => {
       "machine-fingerprint-one",
     );
 
-    expect(new RunnerStore(database).authenticate(FIRST_TOKEN)).toEqual({
+    expect(createRunnerStore(database).authenticate(FIRST_TOKEN)).toEqual({
       id: FIRST_RUNNER_ID,
       userId: TEST_USER_ID,
     });

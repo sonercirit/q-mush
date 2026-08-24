@@ -12,7 +12,10 @@ import { startManualSessionCompaction } from "../../sync-engine/session-compacti
 import { createValidatedSession } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { queueSessionForUser } from "../../sync-engine/session-queue.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import {
   createTestProviderCredential,
   TEST_AUTHENTICATED_USER,
@@ -199,43 +202,62 @@ function failCreatedSession(
   transitionTestSession(setup, detail, "failed", now);
 }
 
+interface LaunchableSessionContext {
+  readonly created: AgentSessionDetail;
+  readonly now: () => number;
+  readonly setup: SessionStoreTestSetup;
+}
+
+type LaunchableSessionHandler = (context: LaunchableSessionContext) => void;
+
+function transitionLaunchableSession(
+  context: LaunchableSessionContext,
+  status: "idle" | "running",
+): void {
+  transitionTestSession(context.setup, context.created, "running", context.now);
+  if (status === "idle") {
+    transitionTestSession(context.setup, context.created, status, context.now);
+  }
+}
+
+const launchableSessionHandlers: Record<
+  AgentSessionStatus,
+  LaunchableSessionHandler
+> = {
+  completed: () => unsupportedFixtureStatus("completed"),
+  failed: ({ created, now, setup }) => {
+    failCreatedSession(setup, created, now);
+  },
+  idle: (context) => {
+    transitionLaunchableSession(context, "idle");
+  },
+  paused: ({ created, now, setup }) => {
+    expect(
+      setup.store.pauseQueuedForRestart(
+        { generation: created.generation, sessionId: created.id },
+        "server",
+        RESTART_ID,
+        "compact",
+        now(),
+      ),
+    ).toBe(true);
+  },
+  queued: () => undefined,
+  running: (context) => {
+    transitionLaunchableSession(context, "running");
+  },
+  stopped: ({ created, now, setup }) => {
+    expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);
+  },
+};
+
 function launchableSessionSetup(
   status: AgentSessionStatus,
 ): FailedLaunchTestSetup {
   const setup = createStore();
   const now = testClock();
   const created = createTestSession(setup.store);
-  switch (status) {
-    case "completed": {
-      return unsupportedFixtureStatus(status);
-    }
-    case "failed":
-      failCreatedSession(setup, created, now);
-      break;
-    case "idle":
-      transitionTestSession(setup, created, "running", now);
-      transitionTestSession(setup, created, "idle", now);
-      break;
-    case "paused":
-      expect(
-        setup.store.pauseQueuedForRestart(
-          { generation: created.generation, sessionId: created.id },
-          "server",
-          RESTART_ID,
-          "compact",
-          now(),
-        ),
-      ).toBe(true);
-      break;
-    case "queued":
-      break;
-    case "running":
-      transitionTestSession(setup, created, "running", now);
-      break;
-    case "stopped":
-      expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);
-      break;
-  }
+  launchableSessionHandlers[status]({ created, now, setup });
   const detail = expectStoredSession(setup, TEST_USER_ID, created.id, {
     status,
   });
@@ -514,7 +536,7 @@ test.each(["failed", "paused", "queued", "running", "stopped"] as const)(
         notify: () => undefined,
         now: setup.now,
         operation: "compact_and_continue",
-        runtimes: new SessionRuntimes(),
+        runtimes: createSessionRuntimes(),
         store: setup.store,
       },
       TEST_AUTHENTICATED_USER,

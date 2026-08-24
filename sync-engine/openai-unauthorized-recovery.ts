@@ -8,8 +8,8 @@ import type {
   AgentProviderCredential,
 } from "./agent-model-options.ts";
 import {
-  ProviderCredentialRejectionError,
-  ProviderStreamError,
+  isProviderCredentialRejection,
+  isProviderStreamError,
 } from "./provider-error.ts";
 
 function isOpenAiOAuthUnauthorized(
@@ -20,9 +20,8 @@ function isOpenAiOAuthUnauthorized(
   return (
     provider === "openai" &&
     source === "oauth" &&
-    ((error instanceof ProviderCredentialRejectionError &&
-      error.status === 401) ||
-      (error instanceof ProviderStreamError &&
+    ((isProviderCredentialRejection(error) && error.status === 401) ||
+      (isProviderStreamError(error) &&
         (error.status === 401 || error.authenticationFailure)))
   );
 }

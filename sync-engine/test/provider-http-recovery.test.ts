@@ -4,8 +4,12 @@ import {
   type AgentModelStep,
   type AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
+import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
@@ -15,9 +19,10 @@ import { createOpenAiOAuthSecret } from "./oauth-test-helpers.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 import { cachedTextMessage } from "./prompt-cache-fixtures.ts";
 import {
+  createFakeProviderSockets,
   failWebSocketAttempts,
-  FakeProviderSockets,
   recordDelay,
+  type FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 
 const FIRST_REQUEST_ID = "d128368f-4052-4f00-9233-61153d3f5953";
@@ -81,33 +86,32 @@ function eventStream(
   });
 }
 
-class ProviderResponses {
-  readonly delays: number[] = [];
-  readonly requests: Request[] = [];
-  readonly #responses: Response[];
+interface ProviderResponses {
+  readonly delays: number[];
+  readonly requests: Request[];
+  readonly fetch: (request: Request) => Promise<Response>;
+  sleep: (milliseconds: number) => Promise<void>;
+}
 
-  constructor(
-    responses: Response[],
-    readonly beforeFetch?: () => Promise<void>,
-  ) {
-    this.#responses = responses;
-  }
-
-  readonly fetch = async (request: Request): Promise<Response> => {
-    await this.beforeFetch?.();
-    const response = this.#responses.shift();
-    this.requests.push(request);
-    if (response === undefined) {
-      return Promise.reject(
-        new RangeError("Missing queued test provider response"),
-      );
-    }
-    return response;
-  };
-
-  sleep = (milliseconds: number): Promise<void> => {
-    this.delays.push(milliseconds);
-    return Promise.resolve();
+function createProviderResponses(
+  responses: Response[],
+  beforeFetch?: () => Promise<void>,
+): ProviderResponses {
+  const delays: number[] = [];
+  const requests: Request[] = [];
+  return {
+    delays,
+    requests,
+    fetch: async (request) => {
+      await beforeFetch?.();
+      const response = responses.shift();
+      requests.push(request);
+      if (response === undefined) {
+        throw new RangeError("Missing queued test provider response");
+      }
+      return response;
+    },
+    sleep: recordingSleep(delays),
   };
 }
 
@@ -116,7 +120,7 @@ function openRouterModel(
   deltas?: ProviderTextDelta[],
   onRequestState?: (state: "active" | "admission") => void,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: testApiKeyCredential("sk-or-secret", {
       id: "test-credential",
     }),
@@ -164,14 +168,14 @@ function resetDeltas(
 
 describe("provider HTTP step recovery", () => {
   test("transfers stalled-admission ownership to a healthy HTTP fallback", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const states: ("active" | "admission")[] = [];
     const controller = new AbortController();
     let releaseHeaders: (() => void) | undefined;
     const headers = new Promise<void>((resolve) => {
       releaseHeaders = resolve;
     });
-    const model = new ChatCompletionsAgentModel({
+    const model = createChatCompletionsAgentModel({
       credential: { accountId: null, secret: "sk-openai", source: "api_key" },
       fetch: async () => {
         await headers;
@@ -215,7 +219,7 @@ describe("provider HTTP step recovery", () => {
     const retryResponse = eventStream([
       errorEvent({ code: 502, message: "Retry" }),
     ]);
-    const provider = new ProviderResponses(
+    const provider = createProviderResponses(
       [retryResponse, eventStream([textEvent("Done.")])],
       async () => {
         attempts += 1;
@@ -235,7 +239,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("resets a partial step and persists only the recovered tool call", async () => {
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([
         textEvent("Discarded partial output."),
         toolEvent("discarded-call"),
@@ -299,7 +303,7 @@ describe("provider HTTP step recovery", () => {
     provider: ProviderResponses,
     refreshes: string[],
   ): ChatCompletionsAgentModel {
-    return new ChatCompletionsAgentModel({
+    return createChatCompletionsAgentModel({
       credential: {
         accountId: "account",
         secret: createOpenAiOAuthSecret(),
@@ -347,9 +351,9 @@ describe("provider HTTP step recovery", () => {
     readonly refreshes: readonly string[];
     readonly sockets: FakeProviderSockets;
   } {
-    const provider = new ProviderResponses([...responses]);
+    const provider = createProviderResponses([...responses]);
     const refreshes: string[] = [];
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const model = oauthHttpRecoveryModel(provider, refreshes);
     const pending = model.complete(USER_MESSAGE);
     return { pending, provider, refreshes, sockets };
@@ -412,7 +416,7 @@ describe("provider HTTP step recovery", () => {
     ];
 
     for (const { expectedDelay, first } of cases) {
-      const provider = new ProviderResponses([first, recoveredResponse()]);
+      const provider = createProviderResponses([first, recoveredResponse()]);
       const deltas: ProviderTextDelta[] = [];
 
       expect(
@@ -431,7 +435,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("repairs malformed replayed tool calls before sending", async () => {
-    const provider = new ProviderResponses([recoveredResponse()]);
+    const provider = createProviderResponses([recoveredResponse()]);
 
     await openRouterModel(provider).complete([
       ...USER_MESSAGE,
@@ -485,7 +489,7 @@ describe("provider HTTP step recovery", () => {
         type: "invalid_request_error",
       },
     });
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       Response.json(
         {
           error: {
@@ -509,7 +513,7 @@ describe("provider HTTP step recovery", () => {
 
   test("bounds transient retries and preserves sanitized request detail", async () => {
     const leakedKey = "sk-proj-secret123456789";
-    const provider = new ProviderResponses(
+    const provider = createProviderResponses(
       Array.from({ length: 4 }, () =>
         eventStream([
           textEvent("Partial."),
@@ -535,7 +539,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("does not retry permanent errors", async () => {
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([
         errorEvent({
           code: 401,
@@ -556,7 +560,7 @@ describe("provider HTTP step recovery", () => {
 
   test("aborts during stream retry backoff", async () => {
     const controller = new AbortController();
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([errorEvent({ code: 502, message: "Unavailable" })]),
     ]);
     provider.sleep = async (milliseconds: number): Promise<void> => {

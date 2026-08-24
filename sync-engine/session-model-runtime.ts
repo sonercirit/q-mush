@@ -12,7 +12,7 @@ import type { AgentModelFactory } from "./session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
 import { hasPendingSteeringInput } from "./session-pending-inputs.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface SessionAgentActionsLike {
   actions(

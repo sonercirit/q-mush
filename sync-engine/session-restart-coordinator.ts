@@ -105,38 +105,46 @@ function restartHandoffsChanged(
   );
 }
 
-export class SessionRestartCoordinator {
-  readonly #options: SessionRestartCoordinatorOptions;
-  #attempts = new Map<string, number>();
-  readonly #clearTimeout: (id: RestartTimer) => void;
-  readonly #recoveries = new Map<string, Promise<unknown>>();
-  readonly #recoveryRescans = new Set<string>();
-  readonly #recoveringInterrupted = new Set<string>();
-  readonly #pendingRestartIds = new Map<string, string>();
-  readonly #setTimeout: RestartSetTimeout;
-  readonly #retryTimers = new Map<string, RestartTimer>();
+export interface SessionRestartCoordinator {
+  readonly pendingRunnerRestart: (runnerId: string) => DurableRunnerRestartGate;
+  readonly recover: (
+    runnerId?: string,
+    restartId?: string,
+    resetRetry?: boolean,
+  ) => void;
+  readonly restoreDurableRunnerGates: () => void;
+  resumeRunner(runnerId: string, restartId: string): boolean;
+}
 
-  constructor(
-    options: SessionRestartCoordinatorOptions,
-    dependencies: SessionRestartCoordinatorDependencies = {},
-  ) {
-    this.#options = options;
-    this.#clearTimeout = dependencies.clearTimeout ?? clearRestartTimer;
-    this.#setTimeout = dependencies.setTimeout ?? setRestartTimer;
-  }
+export function createSessionRestartCoordinator(
+  options: SessionRestartCoordinatorOptions,
+  dependencies: SessionRestartCoordinatorDependencies = {},
+): SessionRestartCoordinator {
+  const attempts = new Map<string, number>();
+  const clearTimeout = dependencies.clearTimeout ?? clearRestartTimer;
+  const recoveries = new Map<string, Promise<unknown>>();
+  const recoveryRescans = new Set<string>();
+  const recoveringInterrupted = new Set<string>();
+  const pendingRestartIds = new Map<string, string>();
+  const setTimeout = dependencies.setTimeout ?? setRestartTimer;
+  const retryTimers = new Map<string, RestartTimer>();
 
-  pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {
+  function pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {
     return durableRunnerRestartGate(
-      this.#options.store.pendingRestartHandoffs(runnerId),
+      options.store.pendingRestartHandoffs(runnerId),
     );
   }
 
-  recover(runnerId?: string, restartId?: string, resetRetry = true): void {
-    if (runnerId !== undefined && this.#options.restart.draining()) {
+  function recover(
+    runnerId?: string,
+    restartId?: string,
+    shouldResetRetry = true,
+  ): void {
+    if (runnerId !== undefined && options.restart.draining()) {
       return;
     }
     if (runnerId !== undefined) {
-      const pending = this.#options.store.pendingRestartHandoffs(runnerId);
+      const pending = options.store.pendingRestartHandoffs(runnerId);
       const gate = pendingRestartGate(pending);
       if (
         gate.status === "conflicted" ||
@@ -146,141 +154,131 @@ export class SessionRestartCoordinator {
       ) {
         return;
       }
-      if (this.#recoveries.has(runnerId)) {
+      if (recoveries.has(runnerId)) {
         if (restartId !== undefined) {
-          this.#pendingRestartIds.set(runnerId, restartId);
+          pendingRestartIds.set(runnerId, restartId);
         }
-        this.#recoveryRescans.add(runnerId);
+        recoveryRescans.add(runnerId);
         return;
       }
-      if (!this.#recoveringInterrupted.has(runnerId)) {
-        this.#options.recoverInterrupted(runnerId);
-        this.#recoveringInterrupted.add(runnerId);
+      if (!recoveringInterrupted.has(runnerId)) {
+        options.recoverInterrupted(runnerId);
+        recoveringInterrupted.add(runnerId);
       }
     }
-    if (runnerId !== undefined && resetRetry) {
-      this.#resetRetry(runnerId);
+    if (runnerId !== undefined && shouldResetRetry) {
+      resetRetry(runnerId);
     }
-    this.#options.restart.recover((selectedRunnerId) => {
+    options.restart.recover((selectedRunnerId) => {
       const runnerIds =
         selectedRunnerId === undefined
           ? new Set([
-              ...this.#options.store
+              ...options.store
                 .pendingRestartHandoffs()
                 .map(({ detail }) => detail.runnerId),
-              ...this.#options.store
+              ...options.store
                 .invalidRestartHandoffs()
                 .map(({ runnerId: invalidRunnerId }) => invalidRunnerId),
             ])
           : [selectedRunnerId];
       for (const selected of runnerIds) {
-        if (!this.#recoveries.has(selected)) {
-          this.#recover(selected, restartId);
+        if (!recoveries.has(selected)) {
+          recoverSelected(selected, restartId);
         }
       }
     }, runnerId);
   }
 
-  #recover(selectedRunnerId: string | undefined, restartId?: string): void {
+  function recoverSelected(
+    selectedRunnerId: string | undefined,
+    restartId?: string,
+  ): void {
     const pendingBefore =
       selectedRunnerId === undefined
         ? new Set<string>()
         : pendingRestartHandoffKeys(
-            this.#options.store.pendingRestartHandoffs(selectedRunnerId),
+            options.store.pendingRestartHandoffs(selectedRunnerId),
           );
     const recovered = recoverSessionRestartHandoffs(
       {
         credential: (userId, selection) =>
-          readSessionRestartCredential(
-            this.#options.providers,
-            userId,
-            selection,
-          ),
-        launch: this.#options.launch,
-        notify: this.#options.notify,
-        now: this.#options.now,
+          readSessionRestartCredential(options.providers, userId, selection),
+        launch: options.launch,
+        notify: options.notify,
+        now: options.now,
         ...(restartId === undefined ? {} : { restartId }),
         runnerIsAvailable: (userId, recoveredRunnerId, workspaceId) =>
-          this.#options.restart.accepts(recoveredRunnerId) &&
-          this.#options.runnerIsAvailable(
-            userId,
-            recoveredRunnerId,
-            workspaceId,
-          ),
-        store: this.#options.store,
+          options.restart.accepts(recoveredRunnerId) &&
+          options.runnerIsAvailable(userId, recoveredRunnerId, workspaceId),
+        store: options.store,
       },
       selectedRunnerId,
     );
     if (selectedRunnerId !== undefined) {
-      this.#trackRecovery(
-        selectedRunnerId,
-        restartId,
-        pendingBefore,
-        recovered,
-      );
+      trackRecovery(selectedRunnerId, restartId, pendingBefore, recovered);
     }
   }
 
-  #retryRecovery(runnerId: string, restartId?: string): void {
-    this.#recoveryRescans.delete(runnerId);
-    this.#scheduleRetry(runnerId, restartId);
+  function retryRecovery(runnerId: string, restartId?: string): void {
+    recoveryRescans.delete(runnerId);
+    scheduleRetry(runnerId, restartId);
   }
 
-  #takeRestartId(runnerId: string, fallback?: string): string | undefined {
-    const restartId = this.#pendingRestartIds.get(runnerId) ?? fallback;
-    this.#pendingRestartIds.delete(runnerId);
+  function takeRestartId(
+    runnerId: string,
+    fallback?: string,
+  ): string | undefined {
+    const restartId = pendingRestartIds.get(runnerId) ?? fallback;
+    pendingRestartIds.delete(runnerId);
     return restartId;
   }
 
-  #trackRecovery(
+  function trackRecovery(
     runnerId: string,
     restartId: string | undefined,
     pendingBefore: ReadonlySet<string>,
     recovered: ReturnType<typeof recoverSessionRestartHandoffs>,
   ): void {
-    this.#recoveries.set(runnerId, recovered);
+    recoveries.set(runnerId, recovered);
     void recovered.then(
       ({ pendingCredentials, pendingLaunches }) => {
-        if (this.#finishRecovery(runnerId, recovered)) {
+        if (finishRecovery(runnerId, recovered)) {
           return;
         }
-        const nextRestartId = this.#takeRestartId(runnerId, restartId);
+        const nextRestartId = takeRestartId(runnerId, restartId);
         if (pendingCredentials || pendingLaunches) {
-          this.#retryRecovery(runnerId, nextRestartId);
+          retryRecovery(runnerId, nextRestartId);
         } else {
           const pendingAfter = pendingRestartHandoffKeys(
-            this.#options.store.pendingRestartHandoffs(runnerId),
+            options.store.pendingRestartHandoffs(runnerId),
           );
-          const rescanRequested = this.#recoveryRescans.delete(runnerId);
+          const rescanRequested = recoveryRescans.delete(runnerId);
           if (
-            !this.#options.restart.draining() &&
+            !options.restart.draining() &&
             pendingAfter.size > 0 &&
             (rescanRequested ||
               restartHandoffsChanged(pendingBefore, pendingAfter))
           ) {
-            this.#recover(runnerId, nextRestartId);
+            recover(runnerId, nextRestartId);
           } else {
-            this.#resetRetry(runnerId);
+            resetRetry(runnerId);
           }
         }
       },
       () => {
-        if (!this.#finishRecovery(runnerId, recovered)) {
-          this.#retryRecovery(
-            runnerId,
-            this.#takeRestartId(runnerId, restartId),
-          );
+        if (!finishRecovery(runnerId, recovered)) {
+          retryRecovery(runnerId, takeRestartId(runnerId, restartId));
         }
       },
     );
   }
 
-  restoreDurableRunnerGates(): void {
-    if (this.#options.restart.draining()) {
+  function restoreDurableRunnerGates(): void {
+    if (options.restart.draining()) {
       return;
     }
     const pendingByRunner = new Map<string, PendingRestartSession[]>();
-    for (const pending of this.#options.store.pendingRestartHandoffs()) {
+    for (const pending of options.store.pendingRestartHandoffs()) {
       const runnerPending = pendingByRunner.get(pending.detail.runnerId) ?? [];
       runnerPending.push(pending);
       pendingByRunner.set(pending.detail.runnerId, runnerPending);
@@ -288,19 +286,19 @@ export class SessionRestartCoordinator {
     for (const [runnerId, pending] of pendingByRunner) {
       const gate = pendingRestartGate(pending);
       if (gate.status === "conflicted") {
-        this.#options.restart.blockRunner(runnerId);
+        options.restart.blockRunner(runnerId);
       } else if (
         gate.status === "pending" &&
         gate.requestedBy === "runner" &&
-        !this.#options.restart.restoreRunner(runnerId, gate.restartId)
+        !options.restart.restoreRunner(runnerId, gate.restartId)
       ) {
-        this.#options.restart.blockRunner(runnerId);
+        options.restart.blockRunner(runnerId);
       }
     }
   }
 
-  resumeRunner(runnerId: string, restartId: string): boolean {
-    const gate = this.pendingRunnerRestart(runnerId);
+  function resumeRunner(runnerId: string, restartId: string): boolean {
+    const gate = pendingRunnerRestart(runnerId);
     if (
       gate.status !== "pending" ||
       gate.requestedBy !== "runner" ||
@@ -308,56 +306,61 @@ export class SessionRestartCoordinator {
     ) {
       return false;
     }
-    if (!this.#options.restart.accepts(runnerId)) {
-      return releaseRunnerForRecovery(
-        this.#options.restart,
-        runnerId,
-        restartId,
-      );
+    if (!options.restart.accepts(runnerId)) {
+      return releaseRunnerForRecovery(options.restart, runnerId, restartId);
     }
     return true;
   }
 
-  #clearRetry(runnerId: string): void {
-    const timer = this.#retryTimers.get(runnerId);
+  function clearRetry(runnerId: string): void {
+    const timer = retryTimers.get(runnerId);
     if (timer !== undefined) {
-      this.#clearTimeout(timer);
-      this.#retryTimers.delete(runnerId);
+      clearTimeout(timer);
+      retryTimers.delete(runnerId);
     }
   }
 
-  #resetRetry(runnerId: string): void {
-    this.#clearRetry(runnerId);
-    this.#attempts.delete(runnerId);
+  function resetRetry(runnerId: string): void {
+    clearRetry(runnerId);
+    attempts.delete(runnerId);
   }
 
-  #finishRecovery(runnerId: string, recovery: Promise<unknown>): boolean {
-    this.#recoveringInterrupted.delete(runnerId);
-    if (this.#recoveries.get(runnerId) !== recovery) {
+  function finishRecovery(
+    runnerId: string,
+    recovery: Promise<unknown>,
+  ): boolean {
+    recoveringInterrupted.delete(runnerId);
+    if (recoveries.get(runnerId) !== recovery) {
       return true;
     }
-    this.#recoveries.delete(runnerId);
+    recoveries.delete(runnerId);
     return false;
   }
 
-  #scheduleRetry(runnerId: string, restartId?: string): void {
-    if (this.#retryTimers.has(runnerId)) {
+  function scheduleRetry(runnerId: string, restartId?: string): void {
+    if (retryTimers.has(runnerId)) {
       return;
     }
-    const attempt = this.#attempts.get(runnerId) ?? 0;
+    const attempt = attempts.get(runnerId) ?? 0;
     const delay = Math.min(
       CREDENTIAL_RETRY_DELAY_MS * 2 ** Math.min(attempt, 6),
       CREDENTIAL_RETRY_MAX_DELAY_MS,
     );
-    this.#attempts.set(runnerId, attempt + 1);
-    const timer = this.#setTimeout(
+    attempts.set(runnerId, attempt + 1);
+    const timer = setTimeout(
       () => {
-        this.#clearRetry(runnerId);
-        this.recover(runnerId, restartId, false);
+        clearRetry(runnerId);
+        recover(runnerId, restartId, false);
       },
       delay,
       { kind: "credential_retry", runnerId },
     );
-    this.#retryTimers.set(runnerId, timer);
+    retryTimers.set(runnerId, timer);
   }
+  return {
+    pendingRunnerRestart,
+    recover,
+    restoreDurableRunnerGates,
+    resumeRunner,
+  };
 }

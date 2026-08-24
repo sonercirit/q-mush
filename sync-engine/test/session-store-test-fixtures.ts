@@ -1,7 +1,10 @@
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { CreateAgentSession } from "../../sync-engine/session-store-create.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
   addTestProviderCredential,
@@ -71,7 +74,7 @@ export function createStore() {
   return {
     database,
     generateId,
-    store: new SessionStore(
+    store: createSessionStore(
       database,
       generateId,
       () => DEFAULT_TOOL_SETTINGS,

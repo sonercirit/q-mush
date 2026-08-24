@@ -6,7 +6,10 @@ import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamEntry } from "../../shared/tool-stream.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -24,7 +27,7 @@ function mountSessionList(sessions: readonly AgentSessionSummary[]): {
     ...initialSessionViewState(),
     sessions,
   };
-  const controller = new SessionController(createReactiveState(state));
+  const controller = createSessionController(createReactiveState(state));
   const container = document.body.appendChild(document.createElement("div"));
   disposals.push(
     render(() => <SessionList controller={controller} />, container),

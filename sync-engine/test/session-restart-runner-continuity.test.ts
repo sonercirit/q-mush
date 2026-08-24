@@ -4,7 +4,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   RUNNER_ID,
@@ -23,7 +23,7 @@ import {
 } from "./session-restart-runner-continuity-helpers.ts";
 
 test("a queued continuation launches when its existing runner reconnects after server recreation", async () => {
-  const model = new ScriptedAgentModel([
+  const model = createScriptedAgentModel([
     { content: "Ready before restart.", toolCalls: [] },
     { content: "Continued after restart.", toolCalls: [] },
   ]);

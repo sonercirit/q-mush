@@ -6,7 +6,7 @@ import {
 import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { hasTestDatabaseTable } from "../../shared/test/database-fixtures.ts";
-import { AttachmentFallbackStore } from "../attachment-fallback-store.ts";
+import { createAttachmentFallbackStore } from "../attachment-fallback-store.ts";
 import { testDatabaseColumns } from "./test-database-columns.ts";
 
 const SELECTION: AttachmentFallbackSelection = {
@@ -80,7 +80,7 @@ function setup() {
   }
   return {
     database,
-    store: new AttachmentFallbackStore(database, () => "fallback-1"),
+    store: createAttachmentFallbackStore(database, () => "fallback-1"),
   };
 }
 

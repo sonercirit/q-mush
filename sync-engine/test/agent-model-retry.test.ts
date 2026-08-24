@@ -1,16 +1,17 @@
 import { describe, expect, test } from "vitest";
+import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import {
   fetchModelRequestAttempt,
-  RetryableModelRequestError,
+  isRetryableModelRequestError,
   runModelRequestWithRetries,
   type ModelRequestSleep,
 } from "../../sync-engine/agent-model-retry.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
+import { isProviderCredentialRejection } from "../../sync-engine/provider-error.ts";
 import { captureRejection, requireError } from "./promise-test-helpers.ts";
 
 function unwrapResponse(error: unknown): Response {
-  if (error instanceof RetryableModelRequestError) {
+  if (isRetryableModelRequestError(error)) {
     if (error.response !== undefined) {
       return error.response;
     }
@@ -45,13 +46,6 @@ function takeResponse(responses: Response[]): Response {
   return response;
 }
 
-function recordDelay(delays: number[]) {
-  return (milliseconds: number) => {
-    delays.push(milliseconds);
-    return Promise.resolve();
-  };
-}
-
 function countedFetch(
   requestCount: { value: number },
   response: () => Promise<Response>,
@@ -71,7 +65,7 @@ async function requestWithRecordedDelays(responses: Response[]) {
   const response = await fetchModelRequestWithRetries(
     fetchResponses(responses),
     REQUEST,
-    recordDelay(delays),
+    recordingSleep(delays),
   );
   return { delays, response };
 }
@@ -90,7 +84,7 @@ describe("agent model request retries", () => {
         return takeResponse(responses);
       },
       REQUEST,
-      recordDelay(delays),
+      recordingSleep(delays),
     );
 
     expect(await response.json()).toEqual({ completion: "Recovered." });
@@ -108,7 +102,7 @@ describe("agent model request retries", () => {
           : Promise.resolve(createJsonResponse({ completion: "Recovered." })),
       ),
       REQUEST,
-      recordDelay(delays),
+      recordingSleep(delays),
     );
 
     expect(response.ok).toBe(true);
@@ -174,7 +168,7 @@ describe("agent model request retries", () => {
         REQUEST.signal,
         () => Promise.resolve(),
       ),
-    ).rejects.toBeInstanceOf(ProviderCredentialRejectionError);
+    ).rejects.toSatisfy(isProviderCredentialRejection);
     expect(attempts).toBe(13);
   });
 

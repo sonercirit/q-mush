@@ -4,18 +4,19 @@ const COPY_FEEDBACK_DURATION_MS = 2_000;
 
 type ClipboardCopyState = "copied" | "failed" | "idle";
 
+const COPY_LABELS: Readonly<
+  Record<ClipboardCopyState, (idle: string) => string>
+> = {
+  copied: () => "Copied!",
+  failed: () => "Copy failed",
+  idle: (idle) => idle,
+};
+
 export function clipboardCopyLabel(
   state: ClipboardCopyState,
   idle: string,
 ): string {
-  switch (state) {
-    case "copied":
-      return "Copied!";
-    case "failed":
-      return "Copy failed";
-    case "idle":
-      return idle;
-  }
+  return COPY_LABELS[state](idle);
 }
 
 interface ClipboardCopy {

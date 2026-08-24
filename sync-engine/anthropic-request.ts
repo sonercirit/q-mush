@@ -110,47 +110,69 @@ function assistantBlocks(
   ];
 }
 
+type ConversationMessageByRole = {
+  readonly [Role in AgentConversationMessage["role"]]: Extract<
+    AgentConversationMessage,
+    { readonly role: Role }
+  >;
+};
+
+type AnthropicMessageHandler<Role extends AgentConversationMessage["role"]> = (
+  message: ConversationMessageByRole[Role],
+  identity: AnthropicReplayIdentity,
+) => AnthropicMessage | undefined;
+
+const anthropicMessageHandlers: {
+  readonly [
+    Role in AgentConversationMessage["role"]
+  ]: AnthropicMessageHandler<Role>;
+} = {
+  assistant: (message, identity) => {
+    const replay = matchingReplay(message, identity);
+    const replayBlocks =
+      replay === undefined
+        ? undefined
+        : anthropicReplayBlocksForRequest(replay.blocks);
+    const content = assistantBlocks(message, replayBlocks);
+    return content.length === 0
+      ? undefined
+      : {
+          content,
+          ...(replayBlocks === undefined ? {} : { replayBlocks }),
+          role: "assistant",
+        };
+  },
+  compaction_notice: () => undefined,
+  tool: (message) => ({
+    content: [
+      {
+        content: message.content,
+        tool_use_id: message.toolCallId,
+        type: "tool_result",
+      },
+    ],
+    role: "user",
+  }),
+  user: (message) => {
+    const content = [
+      ...textInputItems(message.content, "text"),
+      ...userAttachments(message).flatMap(attachmentBlocks),
+    ];
+    return content.length === 0 ? undefined : { content, role: "user" };
+  },
+};
+
 function anthropicMessage(
   message: AgentConversationMessage,
   identity: AnthropicReplayIdentity,
 ): AnthropicMessage | undefined {
-  switch (message.role) {
-    case "user": {
-      const content = [
-        ...textInputItems(message.content, "text"),
-        ...userAttachments(message).flatMap(attachmentBlocks),
-      ];
-      return content.length === 0 ? undefined : { content, role: "user" };
-    }
-    case "assistant": {
-      const replay = matchingReplay(message, identity);
-      const replayBlocks =
-        replay === undefined
-          ? undefined
-          : anthropicReplayBlocksForRequest(replay.blocks);
-      const content = assistantBlocks(message, replayBlocks);
-      return content.length === 0
-        ? undefined
-        : {
-            content,
-            ...(replayBlocks === undefined ? {} : { replayBlocks }),
-            role: "assistant",
-          };
-    }
-    case "compaction_notice":
-      return undefined;
-    case "tool":
-      return {
-        content: [
-          {
-            content: message.content,
-            tool_use_id: message.toolCallId,
-            type: "tool_result",
-          },
-        ],
-        role: "user",
-      };
-  }
+  if (message.role === "assistant")
+    return anthropicMessageHandlers.assistant(message, identity);
+  if (message.role === "compaction_notice")
+    return anthropicMessageHandlers.compaction_notice(message, identity);
+  if (message.role === "tool")
+    return anthropicMessageHandlers.tool(message, identity);
+  return anthropicMessageHandlers.user(message, identity);
 }
 
 function continuationReplay(

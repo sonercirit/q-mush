@@ -6,6 +6,7 @@ import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionNotification } from "./session-creation.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import {
   activeSessionCondition,
   readStoredSessionSnapshots,
@@ -14,13 +15,12 @@ import {
   failInterruptedStoredSession,
   type InterruptedStoredSession,
 } from "./session-store-reassignment.ts";
-import type { SessionStore } from "./session-store.ts";
 
 const MIN_SESSION_LIVENESS_GRACE_MS = 60_000;
 export const DEFAULT_SESSION_LIVENESS_GRACE_MS = 5 * 60_000;
 const SESSION_LIVENESS_CALLBACK_BATCH_SIZE = 100;
 
-interface SessionLivenessWatchdogOptions {
+export interface SessionLivenessWatchdogOptions {
   readonly cleanup: (detail: AgentSessionDetail) => Promise<void> | void;
   readonly actions: Pick<
     SessionAgentActions,
@@ -71,12 +71,19 @@ const LIVENESS_ERRORS: Readonly<Record<MissingRuntimeReason, string>> = {
     "Session failed: the assigned runner did not reconnect during the liveness recovery window",
 };
 
-export class SessionLivenessWatchdog {
-  readonly #options: SessionLivenessWatchdogOptions;
-  readonly #missing = new Map<string, MissingRuntime>();
-  readonly #connectedRunners = new Set<string>();
+export interface SessionLivenessWatchdog {
+  runnerConnected(runnerId: string): void;
+  runnerDisconnected(runnerId: string): void;
+  scan(): void;
+}
 
-  constructor(options: SessionLivenessWatchdogOptions) {
+export function createSessionLivenessWatchdogState(
+  suppliedOptions: SessionLivenessWatchdogOptions,
+): SessionLivenessWatchdog {
+  const missingSessions = new Map<string, MissingRuntime>();
+  const connectedRunners = new Set<string>();
+  const options = (() => {
+    const options = suppliedOptions;
     const graceMs = options.graceMs ?? DEFAULT_SESSION_LIVENESS_GRACE_MS;
     if (
       !Number.isSafeInteger(graceMs) ||
@@ -88,68 +95,68 @@ export class SessionLivenessWatchdog {
         `The session liveness grace must be at least ${String(MIN_SESSION_LIVENESS_GRACE_MS)} ms`,
       );
     }
-    this.#options = { ...options, graceMs };
-  }
+    return { ...options, graceMs };
+  })();
 
-  runnerConnected(runnerId: string): void {
-    this.#connectedRunners.add(runnerId);
-  }
+  const runnerConnected = (runnerId: string): void => {
+    connectedRunners.add(runnerId);
+  };
 
-  runnerDisconnected(runnerId: string): void {
-    this.#connectedRunners.delete(runnerId);
-  }
+  const runnerDisconnected = (runnerId: string): void => {
+    connectedRunners.delete(runnerId);
+  };
 
-  scan(): void {
-    const now = this.#options.now();
-    this.#options.shutdownInterrupted.recover(() => now);
+  const scan = (): void => {
+    const now = options.now();
+    options.shutdownInterrupted.recover(() => now);
     const running: readonly InterruptedStoredSession[] =
       readStoredSessionSnapshots(
-        this.#options.database,
+        options.database,
         activeSessionCondition({ status: "running" }),
       ).map((session) => ({ ...session, status: "running" }));
     const runningIds = new Set(running.map(({ id }) => id));
     for (const session of running) {
-      const missingReason = this.#missingReason(session.id, session.userId);
-      if (missingReason === undefined) {
-        this.#missing.delete(session.id);
+      const observedReason = missingReason(session.id, session.userId);
+      if (observedReason === undefined) {
+        missingSessions.delete(session.id);
         continue;
       }
-      const missing = this.#missing.get(session.id);
+      const missing = missingSessions.get(session.id);
       if (
         missing?.generation !== session.executionGeneration ||
-        missing.reason !== missingReason.reason ||
-        missing.pendingSince !== missingReason.pendingSince
+        missing.reason !== observedReason.reason ||
+        missing.pendingSince !== observedReason.pendingSince
       ) {
-        this.#missing.set(session.id, {
+        missingSessions.set(session.id, {
           generation: session.executionGeneration,
           missingSince: now,
-          pendingSince: missingReason.pendingSince,
-          reason: missingReason.reason,
+          pendingSince: observedReason.pendingSince,
+          reason: observedReason.reason,
         });
         continue;
       }
-      if (now - missing.missingSince < (this.#options.graceMs ?? 0)) {
+      if (now - missing.missingSince < options.graceMs) {
         continue;
       }
-      if (!this.#stillMissing(session, missing)) {
+      if (!stillMissing(session, missing)) {
         continue;
       }
-      this.#fail(session, now, missing);
-      this.#missing.delete(session.id);
+      fail(session, now, missing);
+      missingSessions.delete(session.id);
     }
-    for (const sessionId of this.#missing.keys()) {
+    for (const sessionId of missingSessions.keys()) {
       if (!runningIds.has(sessionId)) {
-        this.#missing.delete(sessionId);
+        missingSessions.delete(sessionId);
       }
     }
-    this.#options.actions.reportAll(
-      this.#options.store.pendingSpawnedSessions(
+    options.actions.reportAll(
+      options.store.pendingSpawnedSessions(
         SESSION_LIVENESS_CALLBACK_BATCH_SIZE,
       ),
     );
-  }
+  };
 
-  #missingReason(
+  const missingReason = (
     sessionId: string,
     userId: string,
   ):
@@ -157,15 +164,15 @@ export class SessionLivenessWatchdog {
         readonly pendingSince: number | undefined;
         readonly reason: MissingRuntimeReason;
       }
-    | undefined {
-    const detail = this.#options.store.get(userId, sessionId);
+    | undefined => {
+    const detail = options.store.get(userId, sessionId);
     if (
       detail === undefined ||
-      !this.#options.runtimes.activeForGeneration(sessionId, detail.generation)
+      !options.runtimes.activeForGeneration(sessionId, detail.generation)
     ) {
       return { pendingSince: undefined, reason: "missing_runtime" };
     }
-    const commandPhase = this.#options.broker.sessionCommandPhase(sessionId);
+    const commandPhase = options.broker.sessionCommandPhase(sessionId);
     if (commandPhase === "runner_disconnected") {
       return { pendingSince: undefined, reason: "runner_disconnected" };
     }
@@ -174,61 +181,60 @@ export class SessionLivenessWatchdog {
     }
     if (
       commandPhase === "in_flight" &&
-      !this.#connectedRunners.has(detail.runnerId)
+      !connectedRunners.has(detail.runnerId)
     ) {
       return { pendingSince: undefined, reason: "runner_disconnected" };
     }
-    const pending = this.#options.runtimes.pending(
-      sessionId,
-      detail.generation,
-    );
+    const pending = options.runtimes.pending(sessionId, detail.generation);
     return pending?.component === "provider_admission"
       ? { pendingSince: pending.since, reason: "provider_admission" }
       : undefined;
-  }
+  };
 
-  #stillMissing(
+  const stillMissing = (
     session: InterruptedStoredSession,
     observed: MissingRuntime,
-  ): boolean {
-    const current = this.#missingReason(session.id, session.userId);
+  ): boolean => {
+    const current = missingReason(session.id, session.userId);
     return (
       current?.reason === observed.reason &&
       current.pendingSince === observed.pendingSince
     );
-  }
+  };
 
-  #fail(
+  const fail = (
     session: InterruptedStoredSession,
     now: number,
     missing: MissingRuntime,
-  ): void {
+  ): void => {
     const error = LIVENESS_ERRORS[missing.reason];
     if (
       !failInterruptedStoredSession(
-        this.#options.database,
+        options.database,
         session,
-        this.#options.generateId(now),
+        options.generateId(now),
         now,
         error,
       )
     ) {
       return;
     }
-    this.#options.broker.cancelSessionCommands(session.id);
-    this.#options.runtimes.abortForGeneration(
+    options.broker.cancelSessionCommands(session.id);
+    options.runtimes.abortForGeneration(
       session.id,
       session.executionGeneration,
       new DOMException(error, "AbortError"),
     );
-    this.#options.broker.cancelSessionCommands(session.id);
-    const detail = this.#options.store.get(session.userId, session.id);
-    this.#options.notify(session.userId, session.id);
+    options.broker.cancelSessionCommands(session.id);
+    const detail = options.store.get(session.userId, session.id);
+    options.notify(session.userId, session.id);
     if (detail === undefined) {
       return;
     }
-    void Promise.resolve(this.#options.cleanup(detail)).catch(() => undefined);
-    this.#options.actions.stopChildren(detail, session.userId);
-    this.#options.actions.finished(detail, session.userId);
-  }
+    void Promise.resolve(options.cleanup(detail)).catch(() => undefined);
+    options.actions.stopChildren(detail, session.userId);
+    options.actions.finished(detail, session.userId);
+  };
+
+  return { runnerConnected, runnerDisconnected, scan };
 }

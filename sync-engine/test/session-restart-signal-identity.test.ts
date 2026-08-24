@@ -1,12 +1,15 @@
 import { expect, test, vi } from "vitest";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import { createCredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import { createModelCredentialPool } from "../model-credential-pool.ts";
 import { sessionAgentOptions } from "../session-agent-options-action.ts";
 import { executeSessionAgentTool } from "../session-agent-tools.ts";
 import { createSessionWithCredentialPool } from "../session-realtime-create.ts";
-import { SessionRestartAbort } from "../session-restart-abort.ts";
+import {
+  createSessionRestartAbort,
+  type SessionRestartAbort,
+} from "../session-restart-abort.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -59,7 +62,7 @@ function recoverFromRestart(
 
 test("model discovery retains restart identity across credential resolution", async () => {
   const credentialId = "restart-credential-resolution";
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   await expectModelDiscoveryFailure({
     credentialId,
     discoverModels: (_provider, _credential, signal) => {
@@ -75,7 +78,7 @@ test("model discovery retains restart identity across credential resolution", as
 });
 
 test("model discovery classifies its captured restart signal after recovery", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   await expectModelDiscoveryFailure({
     credentialId: "restart-credential",
     discoverModels: async () => {
@@ -97,7 +100,7 @@ import {
 } from "./session-launch-race-helpers.ts";
 
 test("recovery replacement cannot create a child", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const credential = createTestProviderCredential("spawn-restart-credential");
   const launchSession = vi.fn(() => true);
   // The pool uses its own database so its credential rows remain representative
@@ -110,9 +113,9 @@ test("recovery replacement cannot create a child", async () => {
     database: poolSetup.database,
     readCredential: () => Promise.resolve(credential),
   };
-  const pool = new ModelCredentialPool(
+  const pool = createModelCredentialPool(
     poolDependencies,
-    new CredentialPoolBalancer(),
+    createCredentialPoolBalancer(),
   );
   vi.spyOn(pool, "candidates").mockImplementation(() => {
     recoverFromRestart(restart, "restart");
@@ -143,7 +146,7 @@ test("recovery replacement cannot create a child", async () => {
 });
 
 test("already-aborted restart returns structured spawn error", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   restart.abort(new DOMException("restart", "AbortError"));
   const setup = agentActionsSetup("none", false, {
     restartSignal: () => restart.signal,
@@ -165,10 +168,10 @@ test("already-aborted restart returns structured spawn error", async () => {
 });
 
 test("restart-aborted credential candidates return server restarting", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const credential = createTestProviderCredential("rejecting-candidate");
   const poolSetup = agentActionsSetup("none", false);
-  const pool = new ModelCredentialPool(
+  const pool = createModelCredentialPool(
     {
       database: poolSetup.database,
       readCredential: () => {
@@ -176,7 +179,7 @@ test("restart-aborted credential candidates return server restarting", async () 
         return Promise.resolve(credential);
       },
     },
-    new CredentialPoolBalancer(),
+    createCredentialPoolBalancer(),
   );
   const setup = agentActionsSetup("none", false, {
     modelCredentialPool: pool,
@@ -201,7 +204,7 @@ test("restart-aborted credential candidates return server restarting", async () 
 });
 
 test("restart-aborted metadata rejection returns server restarting", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const restartReason = new DOMException("restart", "AbortError");
   function restartSignal(): AbortSignal {
     return restart.signal;
@@ -298,12 +301,12 @@ test("recovery replacement cannot create a realtime session", async () => {
     discoverModels,
     discoverOpenRouterProviders: () => Promise.resolve({ providers: [] }),
     launch: () => false,
-    modelCredentialPool: new ModelCredentialPool(
+    modelCredentialPool: createModelCredentialPool(
       {
         database,
         readCredential: () => Promise.resolve(credential),
       },
-      new CredentialPoolBalancer(),
+      createCredentialPoolBalancer(),
     ),
     notify: () => undefined,
     now: () => 0,
@@ -347,7 +350,7 @@ import { createAttachmentFallbackIntegration } from "../attachment-fallback-inte
 
 test("attachment fallback validation retains restart identity across credential lookup", async () => {
   const database = createAuthenticatedTestDatabase();
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const providerDiscovery = vi.fn(() => Promise.resolve({ providers: [] }));
   const integration = createAttachmentFallbackIntegration({
     database,

@@ -1,13 +1,17 @@
 import { describe, expect, test } from "vitest";
-import type { AgentModel, AgentModelStep } from "../../shared/agent-loop.ts";
+import type { AgentModel } from "../../shared/agent-loop.ts";
 import { isRecord } from "../../shared/auth-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createSessionStore } from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedRequest,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { providerStep } from "./provider-step-fixtures.ts";
+import {
+  createPausedParentChildModel,
+  createSelfStoppingChildModel,
+  type PausedParentChildModel,
+} from "./session-agent-model-fixtures.ts";
 import {
   jsonRecord,
   records,
@@ -48,81 +52,6 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 import { waitForTerminalParentNote } from "./session-terminal-parent-helpers.ts";
-class PausedParentChildModel implements AgentModel {
-  #requestCount = 0;
-  #releaseParent: (() => void) | undefined;
-  readonly #resumeParent = Promise.withResolvers<undefined>();
-  readonly parentPaused = new Promise<void>((resolve) => {
-    this.#releaseParent = resolve;
-  });
-  resumeParent(): void {
-    this.#resumeParent.resolve(undefined);
-  }
-  async complete(): Promise<AgentModelStep> {
-    this.#requestCount += 1;
-    let content: string;
-    let toolCalls: ReturnType<typeof spawnCall>[];
-    if (this.#requestCount === 1) {
-      content = "Delegating while I keep running.";
-      toolCalls = [spawnCall("Complete while the parent is paused")];
-    } else if (this.#requestCount === 2) {
-      this.#releaseParent?.();
-      await this.#resumeParent.promise;
-      content = "Parent reached its safe stop boundary.";
-      toolCalls = [];
-    } else if (this.#requestCount === 3) {
-      content = "Child final result.";
-      toolCalls = [];
-    } else {
-      content = "Parent received the child result.";
-      toolCalls = [];
-    }
-    return providerStep(content, { toolCalls });
-  }
-}
-class SelfStoppingChildModel implements AgentModel {
-  childSessionId: string | undefined;
-  #step = 0;
-  complete(): Promise<AgentModelStep> {
-    this.#step += 1;
-    const childSessionId = this.childSessionId;
-    const step =
-      this.#step === 1
-        ? {
-            content: "Delegating stoppable work.",
-            toolCalls: [
-              spawnCall("Stop this delegated task", undefined, [
-                "stop_session",
-              ]),
-            ],
-          }
-        : this.#step === 2
-          ? { content: "Parent complete.", toolCalls: [] }
-          : this.#step === 3
-            ? childSessionId === undefined
-              ? undefined
-              : {
-                  content: "Stopping child.",
-                  toolCalls: [
-                    toolCall("stop_session", { sessionId: childSessionId }),
-                  ],
-                }
-            : {
-                content: "Stop report received.",
-                toolCalls: [],
-              };
-    if (step === undefined) {
-      throw new Error("The child session ID is not available");
-    }
-    return Promise.resolve({
-      ...step,
-      contextTokens: null,
-      costUsd: null,
-      thinking: "",
-      tokenUsage: null,
-    });
-  }
-}
 interface CompletedToolOutput {
   readonly output: string | undefined;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
@@ -168,7 +97,7 @@ async function pausedChildSetup(): Promise<{
   readonly model: PausedParentChildModel;
   readonly setup: Awaited<ReturnType<typeof startToolSession>>;
 }> {
-  const model = new PausedParentChildModel();
+  const model = createPausedParentChildModel();
   const setup = await startToolSession(model);
   await model.parentPaused;
   const child = setup.sessions
@@ -366,7 +295,7 @@ describe("agent tools", () => {
         const preparedForParent =
           child?.parentSessionId === SESSION_ID && child.status === "queued";
         if (preparedForParent) {
-          setup.sessions.abortAgentActionsForRestart?.();
+          setup.sessions.abortAgentActionsForRestart();
         }
       },
     });
@@ -374,7 +303,9 @@ describe("agent tools", () => {
     const detail = await completedParentDetail(setup, "idle");
     expect(
       jsonRecord(findToolResultContent(detail, "spawn_session") ?? "null"),
-    ).toMatchObject({ status: "queued" });
+    ).toMatchObject({
+      status: "queued",
+    });
     expect(queuedChildren(setup).map(({ status }) => status)).toEqual([
       "queued",
     ]);
@@ -399,10 +330,10 @@ describe("agent tools", () => {
         if (
           child?.parentSessionId === SESSION_ID &&
           child.status === "queued" &&
-          !setup.sessions.agentActionsDraining?.()
+          !setup.sessions.agentActionsDraining()
         ) {
           draining = holder.setup?.sessions.drain();
-          expect(holder.setup?.sessions.agentActionsDraining?.()).toBe(true);
+          expect(holder.setup?.sessions.agentActionsDraining()).toBe(true);
         }
       },
     });
@@ -527,7 +458,7 @@ describe("agent tools", () => {
     const child = setup.sessions.detailForUser(TEST_USER_ID, childId);
     expectRunnerRequired(child);
     await expectTranscriptExcludes(setup, "Spawned session completed");
-    const restartedStore = new SessionStore(
+    const restartedStore = createSessionStore(
       setup.database,
       undefined,
       () => DEFAULT_TOOL_SETTINGS,
@@ -541,7 +472,7 @@ describe("agent tools", () => {
     closeSessionTestDatabase(setup.database);
   });
   test("reports a self-stopping child", async () => {
-    const model = new SelfStoppingChildModel();
+    const model = createSelfStoppingChildModel();
     const { setup } = await completedChildTerminalParent(model, (childId) => {
       model.childSessionId = childId;
     });

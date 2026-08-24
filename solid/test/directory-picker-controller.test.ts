@@ -2,7 +2,7 @@ import { createRoot } from "solid-js";
 import { describe, expect, test } from "vitest";
 import { runnerDirectoriesPath } from "../../shared/routes.ts";
 import {
-  DirectoryPickerController,
+  createDirectoryPickerController,
   initialDirectoryPickerState,
 } from "../../solid/directory-picker-controller.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
@@ -29,7 +29,7 @@ describe("directory picker controller", () => {
       }),
     );
     const view = createReactiveState(initialDirectoryPickerState());
-    const controller = new DirectoryPickerController(view);
+    const controller = createDirectoryPickerController(view);
 
     await controller.open("runner/one", "~");
 
@@ -57,7 +57,7 @@ describe("directory picker controller", () => {
       () => Promise.resolve(new Response(null, { status: 409 })),
       { preconnect: globalThis.fetch.preconnect },
     );
-    const controller = createRoot(() => new DirectoryPickerController());
+    const controller = createRoot(() => createDirectoryPickerController());
 
     await controller.open("runner-1", "/missing");
 

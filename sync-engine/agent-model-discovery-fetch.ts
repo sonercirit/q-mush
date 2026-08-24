@@ -7,20 +7,38 @@ const MODEL_CATALOG_TOO_LARGE = "The provider model catalog was too large";
 
 export type AgentModelDiscoveryFetch = (request: Request) => Promise<Response>;
 
-export class AgentModelDiscoveryError extends Error {
+export interface AgentModelDiscoveryError extends Error {
   readonly status: number | undefined;
-
-  constructor(message: string, status?: number) {
-    super(message);
-    this.name = "AgentModelDiscoveryError";
-    this.status = status;
-  }
 }
+
+const agentModelDiscoveryErrors = new WeakSet<object>();
+
+export function isAgentModelDiscoveryError(
+  error: unknown,
+): error is AgentModelDiscoveryError {
+  return error instanceof Error && agentModelDiscoveryErrors.has(error);
+}
+
+export const AgentModelDiscoveryError = Object.defineProperty(
+  function AgentModelDiscoveryError(
+    message: string,
+    status?: number,
+  ): AgentModelDiscoveryError {
+    const error = Object.assign(new Error(message), {
+      name: "AgentModelDiscoveryError",
+      status,
+    });
+    agentModelDiscoveryErrors.add(error);
+    return error;
+  },
+  Symbol.hasInstance,
+  { value: isAgentModelDiscoveryError },
+);
 
 export function isCredentialRejectionError(error: unknown): boolean {
   return (
     isProviderCredentialRejection(error) ||
-    (error instanceof AgentModelDiscoveryError &&
+    (isAgentModelDiscoveryError(error) &&
       (error.status === 401 ||
         error.status === 402 ||
         error.status === 403 ||
@@ -32,11 +50,11 @@ export function modelDiscoveryError(
   message: string,
   status?: number,
 ): AgentModelDiscoveryError {
-  return new AgentModelDiscoveryError(message, status);
+  return AgentModelDiscoveryError(message, status);
 }
 
 export function safeAgentModelDiscoveryError(error: unknown): string {
-  return error instanceof AgentModelDiscoveryError
+  return isAgentModelDiscoveryError(error)
     ? error.message
     : "Model discovery failed because the provider is unavailable";
 }

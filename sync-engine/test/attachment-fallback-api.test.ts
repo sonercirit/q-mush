@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
-import { AttachmentFallbackApi } from "../attachment-fallback-api.ts";
+import { createAttachmentFallbackApi } from "../attachment-fallback-api.ts";
 
 const USER = {
   email: "user@example.test",
@@ -17,7 +17,7 @@ const SELECTION = {
 
 function setup(validate: () => Promise<boolean>) {
   const set = vi.fn();
-  const api = new AttachmentFallbackApi({
+  const api = createAttachmentFallbackApi({
     now: () => 2,
     requests: {
       authenticate: (_request, _method, action) => action(USER),

@@ -1,6 +1,6 @@
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import { attemptBalancedCredentials } from "./session-balanced-credential-attempt.ts";
 import {
@@ -46,17 +46,17 @@ export async function createSessionWithCredentialPool(
   );
   const restarting = (): boolean => restartSignal.aborted;
   if (restarting()) {
-    throw new RealtimeCommandError("server_restarting");
+    throw createRealtimeCommandError("server_restarting");
   }
   if (!dependencies.runnerIsAvailable(user.id, input.runnerId, workspaceId)) {
-    throw new RealtimeCommandError("runner_unavailable");
+    throw createRealtimeCommandError("runner_unavailable");
   }
   const balanced = isBalancedCredentialId(input.provider, input.credentialId);
   const credentials = balanced
     ? await dependencies.modelCredentialPool.candidates(user.id, scopedInput)
     : [await dependencies.readCredential(user.id, scopedInput)];
   if (restarting()) {
-    throw new RealtimeCommandError("server_restarting");
+    throw createRealtimeCommandError("server_restarting");
   }
   requireCredentialCandidates(credentials);
   return successfulCredentialAttempt(
@@ -78,7 +78,7 @@ export async function createSessionWithCredentialPool(
           );
           if ("error" in metadata) {
             await requireJsonResponse(sessionMetadataErrorResponse(metadata));
-            throw new RealtimeCommandError("command_failed");
+            throw createRealtimeCommandError("command_failed");
           }
           const created: { detail?: AgentSessionDetail } = {};
           const response = createPreparedSession(
@@ -96,7 +96,7 @@ export async function createSessionWithCredentialPool(
           );
           await requireJsonResponse(response);
           if (created.detail === undefined) {
-            throw new RealtimeCommandError("command_failed");
+            throw createRealtimeCommandError("command_failed");
           }
           return created.detail;
         },

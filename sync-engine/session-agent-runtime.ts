@@ -67,7 +67,7 @@ import {
 } from "./session-current-model.ts";
 import { withLoadingDeadline } from "./session-loading-deadline.ts";
 import type { AttachmentFallbackRuntimeResources } from "./session-model-resources.ts";
-import { SessionRecorder } from "./session-recorder.ts";
+import { createSessionRecorder } from "./session-recorder.ts";
 import {
   resolveSessionReplayModel,
   sessionRuntimeConversation,
@@ -75,9 +75,12 @@ import {
 import { runtimeCredentialRefresher } from "./session-runtime-credential-refresh.ts";
 import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import { boundSessionToolOutput } from "./session-tool-output.ts";
-import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
+import {
+  createToolStreamPublisher,
+  type ToolStreamPublisher,
+} from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
   readonly activeTools: ActiveSessionTools;
@@ -315,7 +318,7 @@ export async function runSessionAgent(
 ): Promise<"complete" | "handoff"> {
   const settings = runtime.toolSettings;
   const streamId = createUuidV7();
-  const toolStream = new ToolStreamPublisher({
+  const toolStream = createToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
     ...(runtime.realtime === undefined ? {} : { transport: runtime.realtime }),
@@ -502,7 +505,7 @@ export async function runSessionAgent(
     userId: runtime.userId,
     workspaceId: runtime.detail.workspaceId,
   });
-  const recorder = new SessionRecorder(
+  const recorder = createSessionRecorder(
     runtime.store,
     runtime.detail.id,
     runtime.now,

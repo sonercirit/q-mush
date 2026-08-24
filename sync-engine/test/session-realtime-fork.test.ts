@@ -1,13 +1,16 @@
 import { describe, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import { createCredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { SessionForkInput } from "../../shared/session-fork.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "../model-credential-pool.ts";
 import { forkSessionForUser } from "../session-realtime-fork.ts";
-import { SessionRestartAbort } from "../session-restart-abort.ts";
+import { createSessionRestartAbort } from "../session-restart-abort.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -39,7 +42,7 @@ function forkSetup(discoverModels: Parameters<typeof forkDependencies>[0]) {
     return createTestProviderCredential(id);
   });
   const storeFork = vi.fn(() => FORKED_RESULT);
-  const modelCredentialPool = new ModelCredentialPool(
+  const modelCredentialPool = createModelCredentialPool(
     {
       database,
       readCredential: (_userId, selection) =>
@@ -47,7 +50,7 @@ function forkSetup(discoverModels: Parameters<typeof forkDependencies>[0]) {
           credentials.find(({ id }) => id === selection.credentialId),
         ),
     },
-    new CredentialPoolBalancer({ now: () => TEST_NOW }),
+    createCredentialPoolBalancer({ now: () => TEST_NOW }),
   );
   return {
     database,
@@ -125,7 +128,7 @@ describe("balanced session forks", () => {
     const setup = forkSetup((credentialId) => {
       discovered.push(credentialId);
       return credentialId === FIRST_CREDENTIAL_ID
-        ? Promise.reject(new AgentModelDiscoveryError("rejected", 401))
+        ? Promise.reject(AgentModelDiscoveryError("rejected", 401))
         : Promise.resolve(catalog());
     });
 
@@ -147,7 +150,7 @@ describe("balanced session forks", () => {
 
   test("returns a transient probe error without durable writes", async () => {
     const setup = forkSetup(() =>
-      Promise.reject(new AgentModelDiscoveryError("offline", 503)),
+      Promise.reject(AgentModelDiscoveryError("offline", 503)),
     );
 
     await expect(fork(setup.dependencies)).rejects.toMatchObject({
@@ -176,7 +179,7 @@ describe("balanced session forks", () => {
   test("preserves explicit credential metadata fallback", async () => {
     const storeFork = vi.fn(() => FORKED_RESULT);
     const dependencies = forkDependencies(
-      () => Promise.reject(new AgentModelDiscoveryError("offline", 503)),
+      () => Promise.reject(AgentModelDiscoveryError("offline", 503)),
       undefined,
       storeFork,
     );
@@ -199,7 +202,7 @@ describe("balanced session forks", () => {
 });
 
 test("recovery replacement cannot fork after credential candidates resolve", async () => {
-  const restart = new SessionRestartAbort();
+  const restart = createSessionRestartAbort();
   const storeFork = vi.fn(() => FORKED_RESULT);
   const pool = singleCredentialPool();
   const dependencies = forkDependencies(

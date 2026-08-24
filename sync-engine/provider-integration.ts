@@ -3,16 +3,16 @@ import {
   type CredentialCipher,
 } from "../shared/credential-cipher.ts";
 import {
-  ProviderCredentialStore,
+  createProviderCredentialStore,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderId,
 } from "../shared/provider-credential-store.ts";
-import { ProviderQuotaStore } from "../shared/provider-quota-store.ts";
+import { createProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
-  ConnectedAccountOAuth,
+  createConnectedAccountOAuth,
   type ConnectedAccountOAuthConfiguration,
 } from "./connected-account-oauth.ts";
 import {
@@ -25,21 +25,21 @@ import {
 } from "./oauth.ts";
 import type { ProviderCredentialReader } from "./provider-credential-reader.ts";
 import {
-  ProviderCredentialEndpoints,
+  createProviderCredentialEndpoints,
   type ProviderCredentialInputDetails,
 } from "./provider-credentials.ts";
 import {
   createPreparedCredentialReader,
   type ProviderCredentialPreparer,
 } from "./provider-prepared-credential.ts";
-import { ProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
+import { createProviderQuotaEndpoints } from "./provider-quota-endpoints.ts";
 import type {
   ProviderQuotaReader,
   ProviderQuotaResetter,
 } from "./provider-quota.ts";
-import { SessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
+import { createSessionCredentialReassignmentStore } from "./session-credential-reassignment-store.ts";
 import {
-  SessionCredentialReassignmentEndpoints,
+  createSessionCredentialReassignmentEndpoints,
   type SessionCredentialProviderPreparationContext,
   type SessionCredentialProviderPreparationResult,
 } from "./session-credential-reassignment.ts";
@@ -136,13 +136,13 @@ export function createProviderIntegration(options: {
   const store =
     options.configuration === undefined
       ? undefined
-      : new ProviderCredentialStore(
+      : createProviderCredentialStore(
           runtime.database,
           options.configuration.cipher,
           options.provider,
           runtime.generateId,
         );
-  const credentials = new ProviderCredentialEndpoints({
+  const credentials = createProviderCredentialEndpoints({
     ...options.credentialOptions,
     auth: options.auth,
     now: runtime.now,
@@ -153,12 +153,12 @@ export function createProviderIntegration(options: {
   const quotaStore =
     options.configuration === undefined
       ? undefined
-      : new ProviderQuotaStore(runtime.database, runtime.generateId);
+      : createProviderQuotaStore(runtime.database, runtime.generateId);
   const sessionStore =
     options.configuration === undefined
       ? undefined
-      : new SessionCredentialReassignmentStore(runtime.database);
-  const reassignment = new SessionCredentialReassignmentEndpoints({
+      : createSessionCredentialReassignmentStore(runtime.database);
+  const reassignment = createSessionCredentialReassignmentEndpoints({
     auth: options.auth,
     now: runtime.now,
     ...(options.dependencies.onSessionsChanged === undefined
@@ -206,7 +206,7 @@ export function createProviderIntegration(options: {
   const connectedAccount =
     baseOAuthConfiguration === undefined
       ? undefined
-      : new ConnectedAccountOAuth(
+      : createConnectedAccountOAuth(
           {
             ...baseOAuthConfiguration,
             ...(options.configuration?.redirectUri === undefined
@@ -227,7 +227,7 @@ export function createProviderIntegration(options: {
     runtime,
     store,
   });
-  const quota = new ProviderQuotaEndpoints(options.auth, {
+  const quota = createProviderQuotaEndpoints(options.auth, {
     now: runtime.now,
     quotaStore,
     readCredential,

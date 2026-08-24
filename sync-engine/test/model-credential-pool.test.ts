@@ -1,13 +1,21 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import {
+  createCredentialPoolBalancer,
+  type CredentialPoolBalancer,
+} from "../../shared/credential-pool-balancer.ts";
 import { providerCredentials } from "../../shared/database/schema.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
-import { ModelCredentialPool } from "../model-credential-pool.ts";
 import {
-  ProviderCredentialReauthenticationRequiredError,
-  ProviderCredentialRejectionError,
+  createModelCredentialPool,
+  type ModelCredentialPool,
+  type ModelCredentialPoolDependencies,
+} from "../model-credential-pool.ts";
+import {
+  createProviderCredentialReauthenticationRequiredError,
+  createProviderCredentialRejectionError,
+  type ProviderCredentialReauthenticationRequiredError,
 } from "../provider-error.ts";
 import {
   addTestProviderCredential,
@@ -39,12 +47,10 @@ function testDatabase() {
 
 function modelPool(
   database: ReturnType<typeof createAuthenticatedTestDatabase>,
-  readCredential: ConstructorParameters<
-    typeof ModelCredentialPool
-  >[0]["readCredential"],
+  readCredential: ModelCredentialPoolDependencies["readCredential"],
   balancer?: CredentialPoolBalancer,
 ): ModelCredentialPool {
-  return new ModelCredentialPool({ database, readCredential }, balancer);
+  return createModelCredentialPool({ database, readCredential }, balancer);
 }
 
 function createSetup() {
@@ -55,7 +61,7 @@ function createSetup() {
       createTestProviderCredential(id),
     ]),
   );
-  const balancer = new CredentialPoolBalancer();
+  const balancer = createCredentialPoolBalancer();
   const pool = modelPool(
     database,
     (_userId, selection) =>
@@ -158,7 +164,7 @@ describe("model credential pool", () => {
     const pool = modelPool(database, (_userId, selection) => {
       if (selection.credentialId === FIRST_CREDENTIAL_ID) {
         return Promise.reject(
-          new ProviderCredentialRejectionError("rejected", 402),
+          createProviderCredentialRejectionError("rejected", 402),
         );
       }
       const credential = createTestProviderCredential(selection.credentialId);
@@ -227,7 +233,7 @@ describe("model credential pool", () => {
     expect(
       rejectFirstCredential(
         setup.pool,
-        new ProviderCredentialReauthenticationRequiredError("OpenAI"),
+        createProviderCredentialReauthenticationRequiredError("OpenAI"),
       ),
     ).toBe(true);
     expect(await remainingCredentialIds(setup.pool)).toEqual([
@@ -245,7 +251,7 @@ describe("model credential pool", () => {
         TEST_USER_ID,
         SELECTION,
         FIRST_CREDENTIAL_ID,
-        new AgentModelDiscoveryError("rejected", 429),
+        AgentModelDiscoveryError("rejected", 429),
       ),
     ).toBe(true);
 
@@ -256,7 +262,7 @@ describe("model credential pool", () => {
         TEST_USER_ID,
         { ...SELECTION, credentialId: FIRST_CREDENTIAL_ID },
         FIRST_CREDENTIAL_ID,
-        new AgentModelDiscoveryError("rejected", 401),
+        AgentModelDiscoveryError("rejected", 401),
       ),
     ).toBe(false);
     setup.database.$client.close();

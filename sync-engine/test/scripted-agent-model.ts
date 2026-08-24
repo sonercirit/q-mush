@@ -4,7 +4,7 @@ import type {
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
 
-type ScriptedStep = Omit<
+export type ScriptedStep = Omit<
   AgentModelStep,
   "contextTokens" | "costUsd" | "thinking" | "tokenUsage"
 > & {
@@ -16,6 +16,11 @@ type ScriptedStep = Omit<
 
 interface ScriptedModelOptions {
   readonly onComplete?: (requestCount: number) => Promise<void> | void;
+}
+
+export interface ScriptedAgentModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  stepStarts: number;
 }
 
 export function recordAgentModelRequest<T>(
@@ -32,40 +37,32 @@ interface AgentModelRequest<T> {
   readonly requestCount: number;
 }
 
-export class ScriptedAgentModel implements AgentModel {
-  readonly requests: AgentConversationMessage[][] = [];
-  stepStarts = 0;
-  readonly #onComplete:
-    ((requestCount: number) => Promise<void> | void) | undefined;
-  readonly #steps: AgentModelStep[];
-
-  readonly startStep = (): void => {
-    this.stepStarts += 1;
+export function createScriptedAgentModel(
+  scriptedSteps: ScriptedStep[],
+  options: ScriptedModelOptions = {},
+): ScriptedAgentModel {
+  const requests: AgentConversationMessage[][] = [];
+  const steps = scriptedSteps.map((step) => ({
+    ...step,
+    contextTokens: step.contextTokens === undefined ? null : step.contextTokens,
+    costUsd: step.costUsd ?? null,
+    thinking: step.thinking ?? "",
+    tokenUsage: step.tokenUsage ?? null,
+  }));
+  const model: ScriptedAgentModel = {
+    requests,
+    stepStarts: 0,
+    startStep: () => {
+      model.stepStarts += 1;
+    },
+    async complete(messages) {
+      const { requestCount } = recordAgentModelRequest(requests, messages);
+      await options.onComplete?.(requestCount);
+      const step = steps.shift();
+      if (step === undefined)
+        throw new Error("The scripted model ran out of steps");
+      return step;
+    },
   };
-
-  constructor(steps: ScriptedStep[], options: ScriptedModelOptions = {}) {
-    this.#onComplete = options.onComplete;
-    this.#steps = steps.map((step) => ({
-      ...step,
-      contextTokens:
-        step.contextTokens === undefined ? null : step.contextTokens,
-      costUsd: step.costUsd ?? null,
-      thinking: step.thinking ?? "",
-      tokenUsage: step.tokenUsage ?? null,
-    }));
-  }
-
-  async complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    const { requestCount } = recordAgentModelRequest(this.requests, messages);
-    await this.#onComplete?.(requestCount);
-    const step = this.#steps.shift();
-
-    if (step === undefined) {
-      throw new Error("The scripted model ran out of steps");
-    }
-
-    return step;
-  }
+  return model;
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { identifiedModelDelta } from "./realtime-stream-event-fixtures.ts";
 import { sessionDetailState } from "./session-detail-test-state.ts";
 import {
@@ -54,7 +54,7 @@ test("retains the selected stream while its detail fetch is pending", async () =
   );
 
   try {
-    const controller = new SessionController();
+    const controller = createSessionController();
     const selection = controller.select(selected.id);
     expect(resolveFetch).toBeTypeOf("function");
     controller.applyStreamBatch(streamBatch(selected.id));
@@ -76,7 +76,7 @@ test("retains a rendered stale detail stream during navigation", () => {
   const destination = detail("session-destination");
   const reactive = sessionDetailState(rendered);
   reactive.setState((view) => ({ ...view, selectedId: destination.id }));
-  const controller = new SessionController(reactive);
+  const controller = createSessionController(reactive);
   controller.applyStreamBatch(streamBatch(rendered.id));
   reactive.setState((view) => ({ ...view, selectedId: rendered.id }));
   controller.applyDetail(rendered);
@@ -89,7 +89,7 @@ test("retains a rendered stale detail stream during navigation", () => {
 test("bounds frozen mutation rebases while retaining visible sessions", () => {
   const selected = detail("session-selected");
   const reactive = sessionDetailState(selected);
-  const controller = new SessionController(reactive);
+  const controller = createSessionController(reactive);
   const oldest = detail("session-frozen-0");
   reactive.setState((view) => ({
     ...view,

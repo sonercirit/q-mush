@@ -6,20 +6,29 @@ import type {
 } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import type { AgentModelFactory } from "../../sync-engine/session-agent-models.ts";
 import type { SessionAgentRuntimeDependencies } from "../../sync-engine/session-agent-runtime.ts";
-import { SessionFinisher } from "../../sync-engine/session-finisher.ts";
+import {
+  createSessionFinisher,
+  type SessionFinisher,
+} from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
 import { recoverSessionRestartHandoffs } from "../../sync-engine/session-restart-recovery.ts";
 import type {
   RestartHandoffIdentity,
   RestartHandoffSettlement,
 } from "../../sync-engine/session-restart-store.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -39,7 +48,7 @@ import {
   completeLaunchAgentFile,
   runLaunchedSession,
 } from "./session-launch-test-helpers.ts";
-import { createSessionLauncher } from "./session-launcher-fixtures.ts";
+import { createTestSessionLauncher } from "./session-launcher-fixtures.ts";
 import { settleRestartRecovery } from "./session-restart-cpd-helpers.ts";
 import {
   CREDENTIAL,
@@ -95,18 +104,18 @@ function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const actionsFinished = vi.spyOn(actions, "finished");
   const store = storeSetup.store;
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify,
     now: () => TEST_NOW + 5,
     store,
   });
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "restart-agent-file-command",
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const modelFactories = vi.fn(() => model);
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish: (finishedDetail, userId, error, recovered) => {
@@ -157,10 +166,10 @@ function manualCompactionSetup(
   const storeSetup = createStore();
   const detail = createTestSession(storeSetup.store);
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "manual-compaction-agent-file",
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const compactorRequests: AgentConversationMessage[][] = [];
   const modelFactories = vi.fn<AgentModelFactory>((options) => ({
     complete: (messages: readonly AgentConversationMessage[]) => {
@@ -178,7 +187,7 @@ function manualCompactionSetup(
       return Promise.resolve(modelTurn("Durable manual restart summary."));
     },
   }));
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify: () => undefined,
     now: () => TEST_NOW + 5,
@@ -188,7 +197,7 @@ function manualCompactionSetup(
     finisher.finish(...arguments_);
   });
 
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish,

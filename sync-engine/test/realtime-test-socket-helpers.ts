@@ -25,10 +25,11 @@ import {
 import {
   configuredRealtimeTestIntegration,
   connectedRunnerRealtimeTestIntegration,
+  createRealtimeUpgradeServer,
   realtimeTestSessions,
-  RealtimeUpgradeServer,
   type RealtimeRunnerOverrides,
   type RealtimeSessionOverrides,
+  type RealtimeUpgradeServer,
 } from "./realtime-test-helpers.ts";
 
 export interface RealtimeTestSocket {
@@ -58,7 +59,7 @@ export function upgradeRunnerWithToken(
 ): Extract<QmushWebSocketData, { kind: "runner" }> {
   const request = createRunnerRequest(RUNNER_REALTIME_PATH, token);
   request.headers.set("upgrade", "websocket");
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   expect(realtime.upgrade(request, server)).toBeUndefined();
   if (server.data?.kind !== "runner") {
     throw new Error("The runner token did not upgrade a runner socket");
@@ -429,7 +430,7 @@ export function assertRealtimeUpgrade(
   realtime: ReturnType<typeof createRealtimeIntegration>,
   path: string,
 ): QmushWebSocketData {
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   expect(realtimeTestUpgrade(realtime, path, server)).toBeUndefined();
   if (server.data === undefined) {
     throw new Error("The realtime test request did not upgrade");

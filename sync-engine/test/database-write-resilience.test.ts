@@ -3,13 +3,14 @@ import { expect, test, vi } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import { readSqlitePragmaNumber } from "../../shared/test/sqlite.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   installDatabaseWriteResilience,
   isDiskFullFailure,
   runNoncriticalDatabaseWrite,
   startDatabaseRecoveryWatcher,
+  type DatabaseWriteResilience,
 } from "../database-write-resilience.ts";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth, type EngineHealth } from "../engine-health.ts";
 
 const resilienceFixture = sqliteTable("resilience_fixture", {
   payload: blob("payload").notNull(),
@@ -32,7 +33,7 @@ function adjustPageLimit(database: AppDatabase, pages: number): void {
 }
 
 function newHealth(): EngineHealth {
-  return new EngineHealth(vi.fn());
+  return createEngineHealth(vi.fn());
 }
 
 type ResilienceFactory = (
@@ -50,7 +51,7 @@ function resilientDatabase(
   );
   installDatabaseWriteResilience(
     database,
-    configure?.(health, database) ?? new DatabaseWriteResilience({ health }),
+    configure?.(health, database) ?? createDatabaseWriteResilience({ health }),
   );
   return { database, health };
 }
@@ -94,7 +95,7 @@ function recoveringResilience(
   health: EngineHealth,
   database: AppDatabase,
 ): DatabaseWriteResilience {
-  return new DatabaseWriteResilience({
+  return createDatabaseWriteResilience({
     health,
     sleep(delay) {
       delays.push(delay);
@@ -176,7 +177,7 @@ test("bounds critical retries and throws a typed error to the caller", () => {
   const health = newHealth();
   const delays: number[] = [];
   let attempts = 0;
-  const resilience = new DatabaseWriteResilience({
+  const resilience = createDatabaseWriteResilience({
     health,
     sleep(delay) {
       delays.push(delay);
@@ -202,7 +203,7 @@ test("surfaces a non-disk retry failure synchronously", () => {
   const health = newHealth();
   const changedCondition = new Error("the write precondition changed");
   let attempts = 0;
-  const resilience = new DatabaseWriteResilience({
+  const resilience = createDatabaseWriteResilience({
     health,
     sleep: () => undefined,
   });
@@ -246,7 +247,7 @@ test("recovery health waits for pending reconciliation", async () => {
 });
 
 test("closed resilience rejects writes before calling them", () => {
-  const resilience = new DatabaseWriteResilience({ health: newHealth() });
+  const resilience = createDatabaseWriteResilience({ health: newHealth() });
   const write = vi.fn();
 
   resilience.close();

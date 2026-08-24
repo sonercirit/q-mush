@@ -1,48 +1,60 @@
 import { expect, test } from "vitest";
 import {
-  RunnerRestartCoordinator,
-  type RunnerRestartSocket,
+  createRunnerRestartCoordinator,
+  type RunnerRestartCoordinator,
 } from "../../runner/runner-restart.ts";
 
-class TestSocket extends EventTarget implements RunnerRestartSocket {
-  readyState: number = WebSocket.OPEN;
-  readonly #sent: string[] = [];
-
-  get sent(): readonly string[] {
-    return this.#sent;
-  }
-
-  async completeRestart(
+interface TestSocket {
+  readonly readyState: number;
+  readonly addEventListener: EventTarget["addEventListener"];
+  readonly send: (message: string) => void;
+  readonly sent: readonly string[];
+  readonly completeRestart: (
     restartId: string,
     attempt: Promise<string>,
-  ): Promise<void> {
-    this.emitAcknowledgement(restartId);
-    await expect(attempt).resolves.toBe(restartId);
-  }
+  ) => Promise<void>;
+  readonly emitAcknowledgement: (restartId: string) => void;
+  readonly close: () => void;
+}
 
-  emitAcknowledgement(restartId: string): void {
-    const data = JSON.stringify({ restartId, type: "restart_ready" });
-    const event = new MessageEvent("message", { data });
-    this.dispatchEvent(event);
-  }
-
-  close(): void {
-    this.readyState = WebSocket.CLOSED;
-    const event = new CloseEvent("close");
-    this.dispatchEvent(event);
-  }
-
-  send(message: string): void {
-    this.#sent.push(message);
-  }
+function createTestSocket(sendFailure?: Error): TestSocket {
+  const target = new EventTarget();
+  const sent: string[] = [];
+  let readyState: number = WebSocket.OPEN;
+  const socket: TestSocket = {
+    addEventListener: target.addEventListener.bind(target),
+    get readyState() {
+      return readyState;
+    },
+    get sent() {
+      return sent;
+    },
+    completeRestart: async (restartId, attempt) => {
+      socket.emitAcknowledgement(restartId);
+      await expect(attempt).resolves.toBe(restartId);
+    },
+    emitAcknowledgement: (restartId) => {
+      const data = JSON.stringify({ restartId, type: "restart_ready" });
+      target.dispatchEvent(new MessageEvent("message", { data }));
+    },
+    close: () => {
+      readyState = WebSocket.CLOSED;
+      target.dispatchEvent(new CloseEvent("close"));
+    },
+    send: (message) => {
+      if (sendFailure !== undefined) throw sendFailure;
+      sent.push(message);
+    },
+  };
+  return socket;
 }
 
 function coordinator(restartId: string): RunnerRestartCoordinator {
-  return new RunnerRestartCoordinator({ restartId: () => restartId });
+  return createRunnerRestartCoordinator({ restartId: () => restartId });
 }
 
 function incrementalCoordinator(generated: { count: number }) {
-  return new RunnerRestartCoordinator({
+  return createRunnerRestartCoordinator({
     restartId: () => `restart-${String((generated.count += 1))}`,
   });
 }
@@ -55,7 +67,7 @@ function incrementalFixture() {
 function restartFixture(restartId = "restart-1") {
   return {
     restart: coordinator(restartId),
-    sockets: [new TestSocket(), new TestSocket()] as const,
+    sockets: [createTestSocket(), createTestSocket()] as const,
   };
 }
 
@@ -101,7 +113,7 @@ async function nextRestartAttempt(
   restartId = "restart-1",
   expectedCount = 1,
 ): Promise<void> {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
   await expectDurableRetry(
     generated,
     socket,
@@ -127,7 +139,7 @@ async function expectPending(promise: Promise<string>): Promise<void> {
 }
 
 test("restores a startup restart for safe same-lifecycle retries", async () => {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
   const restart = coordinator("unused");
   restart.restore("restart-restored");
 
@@ -153,7 +165,7 @@ test("includes a pending pre-acknowledgement restart in reconnect context", asyn
 });
 
 test("clears an acknowledged restart once the replacement is operational", async () => {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
   const { generated, restart } = incrementalFixture();
   const first = restart.request(socket);
 
@@ -169,7 +181,7 @@ test("clears an acknowledged restart once the replacement is operational", async
 });
 
 test("clears a restart when replacement operation precedes a delayed ready frame", async () => {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
   const restart = coordinator("restart-delayed-ready");
   const attempt = restart.request(socket);
 
@@ -190,7 +202,7 @@ test("retains the acknowledged restart ID for replacement launch", async () => {
 });
 
 test("waits for one matching durable runner restart acknowledgement", async () => {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
   const restart = coordinator("restart-1");
   const first = restart.request(socket);
   const duplicate = restart.request(socket);
@@ -269,7 +281,7 @@ test("binds only the replacement coordinating connection", async () => {
 });
 
 test("rejects invalid generated restart IDs", async () => {
-  const socket = new TestSocket();
+  const socket = createTestSocket();
 
   await expect(coordinator("").request(socket)).rejects.toThrow(
     "ID is invalid",
@@ -281,12 +293,7 @@ test("rejects invalid generated restart IDs", async () => {
 });
 
 test("a failed restart send can retry the same durable restart ID", async () => {
-  class ThrowingSocket extends TestSocket {
-    override send(): void {
-      throw new Error("send failed");
-    }
-  }
-  const failedSocket = new ThrowingSocket();
+  const failedSocket = createTestSocket(new Error("send failed"));
   const { generated, restart } = incrementalFixture();
 
   await expect(restart.request(failedSocket)).rejects.toThrow("send failed");

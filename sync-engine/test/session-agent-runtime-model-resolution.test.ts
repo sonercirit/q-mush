@@ -3,7 +3,7 @@ import {
   agentCredentialFingerprint,
   type AgentModelRequestOptions,
 } from "../agent-model-options.ts";
-import { ChatCompletionsAgentModel } from "../agent-model.ts";
+import { createChatCompletionsAgentModel } from "../agent-model.ts";
 import { anthropicReplayIdentityFrom } from "../anthropic-replay-identity.ts";
 import {
   compactSessionConversation,
@@ -19,7 +19,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completingTestBroker,
   IDLE_RUNTIME_SIGNALS,
@@ -114,7 +114,7 @@ describe("session Anthropic model resolution", () => {
         },
         TEST_NOW + 2,
       );
-      const model = new ScriptedAgentModel([
+      const model = createScriptedAgentModel([
         { content: "Reloaded completion", toolCalls: [] },
       ]);
       const runtime = {
@@ -159,7 +159,7 @@ describe("session Anthropic model resolution", () => {
       anthropicJsonResponse({ blocks: [{ text: "Recovered.", type: "text" }] }),
     ];
     const modelFactory = (options: AgentModelRequestOptions) =>
-      new ChatCompletionsAgentModel({
+      createChatCompletionsAgentModel({
         ...options,
         fetch: (request) => {
           if (request.method === "GET") {

@@ -1,7 +1,7 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 interface InterruptedSessionRecoveryDependencies {
   readonly actions: Pick<SessionAgentActions, "reportAll">;

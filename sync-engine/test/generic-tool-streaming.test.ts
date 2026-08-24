@@ -3,13 +3,16 @@ import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { ToolStreamDeltaFrame } from "../../shared/tool-stream.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import {
   createSessionAgentModels,
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
 import {
-  ToolStreamPublisher,
+  createToolStreamPublisher,
   type ToolStreamTransport,
 } from "../../sync-engine/tool-stream-publisher.ts";
 
@@ -22,12 +25,16 @@ const EXPECTED_TOOL_CALL = {
   name: "read",
 };
 
-class RecordingToolStreamTransport implements ToolStreamTransport {
-  readonly frames: ToolStreamDeltaFrame[] = [];
+interface RecordingToolStreamTransport extends ToolStreamTransport {
+  readonly frames: ToolStreamDeltaFrame[];
+}
 
-  publishToolStream(_userId: string, frame: ToolStreamDeltaFrame): void {
-    this.frames.push(frame);
-  }
+function createRecordingToolStreamTransport(): RecordingToolStreamTransport {
+  const frames: ToolStreamDeltaFrame[] = [];
+  return {
+    frames,
+    publishToolStream: (_userId, frame) => frames.push(frame),
+  };
 }
 
 function chatEvent(value: unknown): string {
@@ -111,8 +118,8 @@ function genericSession(response: Response): {
   readonly frames: ToolStreamDeltaFrame[];
   readonly run: () => ReturnType<ChatCompletionsAgentModel["complete"]>;
 } {
-  const transport = new RecordingToolStreamTransport();
-  const toolStream = new ToolStreamPublisher({
+  const transport = createRecordingToolStreamTransport();
+  const toolStream = createToolStreamPublisher({
     sessionId: TEST_SESSION_DETAIL.id,
     streamId: "initial-step",
     transport,
@@ -121,7 +128,7 @@ function genericSession(response: Response): {
   });
   let fetched = false;
   const factory: AgentModelFactory = (options) =>
-    new ChatCompletionsAgentModel({
+    createChatCompletionsAgentModel({
       ...options,
       fetch: () => {
         if (fetched) {

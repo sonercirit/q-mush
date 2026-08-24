@@ -297,42 +297,43 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
-  switch (untrack(() => props.message.role)) {
-    case "assistant":
-      return (
-        <ConversationTranscriptMessage
-          liveToolStreams={props.liveToolStreams}
-          message={props.message}
-          settings={props.settings()}
-          onFork={props.onForkMessage}
-          showContent={props.filters.assistantMessages}
-          showTools={props.filters.toolActivity}
-          toolStreams={props.streamEntries}
-        />
-      );
-    case "compaction_request":
-      return <CompactionRequestTranscriptMessage message={props.message} />;
-    case "error":
-      return <NoteTranscriptMessage kind="error" message={props.message} />;
-    case "thinking":
-      return <NoteTranscriptMessage kind="thinking" message={props.message} />;
-    case "tool":
-      return (
-        <ToolResultTranscriptMessage
-          callArguments={props.callArguments}
-          message={props.message}
-        />
-      );
-    case "system":
-      return <ConversationTranscriptMessage message={props.message} />;
-    case "user":
-      return (
-        <ConversationTranscriptMessage
-          onFork={props.onForkMessage}
-          message={props.message}
-        />
-      );
+  const role = untrack(() => props.message.role);
+  if (role === "assistant") {
+    return (
+      <ConversationTranscriptMessage
+        liveToolStreams={props.liveToolStreams}
+        message={props.message}
+        settings={props.settings()}
+        onFork={props.onForkMessage}
+        showContent={props.filters.assistantMessages}
+        showTools={props.filters.toolActivity}
+        toolStreams={props.streamEntries}
+      />
+    );
   }
+  if (role === "compaction_request") {
+    return <CompactionRequestTranscriptMessage message={props.message} />;
+  }
+  if (role === "error" || role === "thinking") {
+    return <NoteTranscriptMessage kind={role} message={props.message} />;
+  }
+  if (role === "tool") {
+    return (
+      <ToolResultTranscriptMessage
+        callArguments={props.callArguments}
+        message={props.message}
+      />
+    );
+  }
+  if (role === "system") {
+    return <ConversationTranscriptMessage message={props.message} />;
+  }
+  return (
+    <ConversationTranscriptMessage
+      onFork={props.onForkMessage}
+      message={props.message}
+    />
+  );
 }
 
 function TranscriptMessage(

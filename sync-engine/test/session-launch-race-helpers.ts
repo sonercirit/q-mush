@@ -2,16 +2,23 @@ import { expect } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
 } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import {
+  createSessionAgentActions,
+  type SessionAgentActions,
+} from "../../sync-engine/session-agent-actions.ts";
 import type { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
+import type { SessionAgentActionsDependencies } from "../session-agent-actions-dependencies.ts";
 import {
   createTestProviderCredential,
   TEST_NOW,
@@ -132,7 +139,7 @@ export function launchRace(
   race: LaunchRace,
   now: () => number,
 ): LaunchRaceRun {
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const shouldDrain = race !== "none";
   let launched: AgentSessionDetail | undefined;
   return {
@@ -177,7 +184,7 @@ function helperCredentialAction(credential: ProviderCredentialAccess) {
 export function agentActionsSetup(
   race: LaunchRace,
   includeTarget: boolean,
-  overrides: Partial<ConstructorParameters<typeof SessionAgentActions>[0]> = {},
+  overrides: Partial<SessionAgentActionsDependencies> = {},
 ): AgentActionsTestSetup {
   const setup: SessionStoreTestSetup = createStore();
   const now = testClock();
@@ -187,10 +194,10 @@ export function agentActionsSetup(
   if (target !== undefined) transitionTestSession(setup, target, "failed", now);
   const credential = createTestProviderCredential(parent.credentialId);
   const launch = launchRace(setup, race, now);
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     abortSession: () => undefined,
     activeSession: () => false,
-    broker: new RunnerCommandBroker(),
+    broker: createRunnerCommandBroker(),
     browseDirectories: () =>
       Promise.resolve({ status: "directory_unavailable" }),
     cleanupSession: () => undefined,

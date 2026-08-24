@@ -8,11 +8,11 @@ import {
   TEST_PROVIDER_REPLAY_ASSISTANT,
   TEST_READ_CALL,
 } from "./provider-replay-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 
 test("carries provider replay through a tool turn", async () => {
   const recorded: AgentRecordedMessage[] = [];
-  const model = new ScriptedAgentModel([
+  const model = createScriptedAgentModel([
     {
       ...TEST_PROVIDER_REPLAY_ASSISTANT,
       thinking: "I should read the project documentation first.",

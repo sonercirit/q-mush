@@ -67,6 +67,42 @@ function writeAgentMessages(
   });
 }
 
+function appendMessages(
+  resources: SessionStoreRuntimeResources,
+  parameters: RuntimeAppendMessageParameters,
+): void {
+  const [sessionId, messages, now, generation, usage] = parameters;
+  const appendParameters: RuntimeMessageParameters = [
+    sessionId,
+    messages,
+    now,
+    generation,
+  ];
+  writeAgentMessages(resources, appendParameters, {
+    kind: "append",
+    ...runtimeUsageOption(usage),
+  });
+}
+
+function commitTerminal(
+  resources: SessionStoreRuntimeResources,
+  parameters: RuntimeTerminalMessageParameters,
+): void {
+  const [sessionId, messages, now, generation, restartHandoff, usage] =
+    parameters;
+  const terminalParameters: RuntimeMessageParameters = [
+    sessionId,
+    messages,
+    now,
+    generation,
+  ];
+  writeAgentMessages(resources, terminalParameters, {
+    kind: "terminal",
+    restartHandoff,
+    ...runtimeUsageOption(usage),
+  });
+}
+
 function compactRuntime(
   resources: SessionStoreRuntimeResources,
   parameters:
@@ -99,133 +135,113 @@ function compactRuntime(
   }
 }
 
-export interface RuntimeModelMetadata {
+interface RuntimeModelMetadata {
   readonly adaptiveThinking: boolean | null;
   readonly maxOutputTokens: number | null;
 }
 
-export abstract class SessionStoreRuntime {
-  protected abstract runtimeWriteResources(): SessionStoreWriteResources;
-
-  #runtimeResources(): SessionStoreRuntimeResources {
-    return { write: () => this.runtimeWriteResources() };
-  }
-
-  #target(sessionId: string, now: number, generation: number) {
-    return runtimeTarget(this.#runtimeResources(), sessionId, now, generation);
-  }
-
-  setRuntimeAgentFile(
-    sessionId: string,
-    agentFile: AgentFile | null,
-    now: number,
-    generation: number,
-  ): void {
-    setRuntimeAgentFile({
-      agentFile,
-      ...this.#target(sessionId, now, generation),
-    });
-  }
-
-  markRuntimeStepStart(
-    sessionId: string,
-    now: number,
-    generation: number,
-  ): void {
-    markRuntimeStepStart(this.#target(sessionId, now, generation));
-  }
-
-  setRuntimeModelMetadata(
-    sessionId: string,
-    credentialId: string,
-    metadata: RuntimeModelMetadata,
-    now: number,
-    generation: number,
-  ): void {
-    setRuntimeModelMetadata({
-      credentialId,
-      ...metadata,
-      ...this.#target(sessionId, now, generation),
-    });
-  }
-
-  commitRuntimeTerminal(
-    ...[
-      sessionId,
-      messages,
-      now,
-      generation,
-      restartHandoff,
-      usage,
-    ]: RuntimeTerminalMessageParameters
-  ): void {
-    writeAgentMessages(
-      this.#runtimeResources(),
-      [sessionId, messages, now, generation],
-      {
-        kind: "terminal",
-        restartHandoff,
-        ...runtimeUsageOption(usage),
-      },
-    );
-  }
-
-  compactRuntimeTerminal(
-    ...parameters: readonly [
-      ...RuntimeCompactionParameters,
-      restartHandoff: RestartHandoff | null,
-    ]
-  ): void {
-    compactRuntime(this.#runtimeResources(), parameters);
-  }
-
-  compactRuntimeConversation(...parameters: RuntimeCompactionParameters): void {
-    compactRuntime(this.#runtimeResources(), parameters);
-  }
-
-  updateRuntimeUsage(
-    sessionId: string,
-    input: AgentSessionUsageUpdate,
-    now: number,
-    generation: number,
-  ): void {
-    updateRuntimeUsage({
-      ...runtimeTarget(this.#runtimeResources(), sessionId, now, generation),
-      input,
-    });
-  }
-
-  appendRuntimeAgentMessages(
+export interface SessionStoreRuntime {
+  readonly appendRuntimeAgentMessages: (
     ...parameters: RuntimeAppendMessageParameters
-  ): void {
-    const [sessionId, messages, now, generation, usage] = parameters;
-    const writeOptions: RuntimeMessageWriteOptions = {
-      kind: "append",
-      ...runtimeUsageOption(usage),
-    };
-    writeAgentMessages(
-      this.#runtimeResources(),
-      [sessionId, messages, now, generation],
-      writeOptions,
-    );
-  }
-
-  settleRuntimeFailure(...p: [string, string, number, number]): boolean {
-    return settleRuntimeFailure({
-      content: p[1],
-      ...this.#target(p[0], p[2], p[3]),
-    });
-  }
-
+  ) => void;
   appendRuntimeErrorMessage(
     sessionId: string,
     content: string,
     now: number,
     generation: number,
-  ): void {
-    appendRuntimeErrorMessage({
-      content,
-      ...this.#target(sessionId, now, generation),
-    });
-  }
+  ): void;
+  readonly commitRuntimeTerminal: (
+    ...parameters: RuntimeTerminalMessageParameters
+  ) => void;
+  readonly compactRuntimeConversation: (
+    ...parameters: RuntimeCompactionParameters
+  ) => void;
+  readonly compactRuntimeTerminal: (
+    ...parameters: readonly [
+      ...RuntimeCompactionParameters,
+      restartHandoff: RestartHandoff | null,
+    ]
+  ) => void;
+  readonly markRuntimeStepStart: (
+    sessionId: string,
+    now: number,
+    generation: number,
+  ) => void;
+  readonly setRuntimeAgentFile: (
+    sessionId: string,
+    agentFile: AgentFile | null,
+    now: number,
+    generation: number,
+  ) => void;
+  readonly setRuntimeModelMetadata: (
+    sessionId: string,
+    credentialId: string,
+    metadata: RuntimeModelMetadata,
+    now: number,
+    generation: number,
+  ) => void;
+  settleRuntimeFailure(
+    sessionId: string,
+    content: string,
+    now: number,
+    generation: number,
+  ): boolean;
+  readonly updateRuntimeUsage: (
+    sessionId: string,
+    input: AgentSessionUsageUpdate,
+    now: number,
+    generation: number,
+  ) => void;
+}
+
+export function createSessionStoreRuntime(
+  write: () => SessionStoreWriteResources,
+): SessionStoreRuntime {
+  const resources = { write };
+  const target = (sessionId: string, now: number, generation: number) =>
+    runtimeTarget(resources, sessionId, now, generation);
+  return {
+    appendRuntimeAgentMessages: (...parameters) => {
+      appendMessages(resources, parameters);
+    },
+    appendRuntimeErrorMessage: (sessionId, content, now, generation) => {
+      appendRuntimeErrorMessage({
+        content,
+        ...target(sessionId, now, generation),
+      });
+    },
+    commitRuntimeTerminal: (...parameters) => {
+      commitTerminal(resources, parameters);
+    },
+    compactRuntimeConversation: (...parameters) => {
+      compactRuntime(resources, parameters);
+    },
+    compactRuntimeTerminal: (...parameters) => {
+      compactRuntime(resources, parameters);
+    },
+    markRuntimeStepStart: (sessionId, now, generation) => {
+      markRuntimeStepStart(target(sessionId, now, generation));
+    },
+    setRuntimeAgentFile: (sessionId, agentFile, now, generation) => {
+      setRuntimeAgentFile({ agentFile, ...target(sessionId, now, generation) });
+    },
+    setRuntimeModelMetadata: (
+      sessionId,
+      credentialId,
+      metadata,
+      now,
+      generation,
+    ) => {
+      setRuntimeModelMetadata({
+        credentialId,
+        ...metadata,
+        ...target(sessionId, now, generation),
+      });
+    },
+    settleRuntimeFailure: (sessionId, content, now, generation) =>
+      settleRuntimeFailure({ content, ...target(sessionId, now, generation) }),
+    updateRuntimeUsage: (sessionId, input, now, generation) => {
+      updateRuntimeUsage({ ...target(sessionId, now, generation), input });
+    },
+  };
 }

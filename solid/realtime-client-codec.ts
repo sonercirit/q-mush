@@ -3,6 +3,7 @@ import {
   readDevelopmentRestartProgress,
   type DevelopmentRestartProgress,
 } from "../shared/development-shutdown.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import type { EngineHealthSnapshot } from "../shared/engine-health.ts";
 import {
   parseJsonRecord,
@@ -92,23 +93,53 @@ function requiredString(
   );
 }
 
-export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
-  const value = parseJsonRecord(
-    message,
-    "The realtime server event was invalid",
-  );
+type RealtimeWireEventType =
+  | "command_error"
+  | "command_success"
+  | "health"
+  | "q-mush:development-restart-progress"
+  | "ready"
+  | "runners"
+  | "session"
+  | "session_compaction_request"
+  | "session_compaction_settled"
+  | "session_delta"
+  | "session_questions"
+  | "sessions"
+  | "sessions_changed"
+  | "tool_settings"
+  | "tool_stream"
+  | "tool_stream_snapshot";
 
-  switch (value["type"]) {
-    case "ready":
-      return { instanceId: requiredString(value, "instanceId"), type: "ready" };
-    case "q-mush:development-restart-progress": {
-      const progress = readDevelopmentRestartProgress(value["progress"]);
-      if (progress === undefined) {
+function isRealtimeWireEventType(
+  value: unknown,
+): value is RealtimeWireEventType {
+  return isDispatchKey(realtimeEventReaders, value);
+}
+
+type RealtimeEventReader = (
+  value: Readonly<Record<string, unknown>>,
+) => RealtimeServerEvent;
+
+const realtimeEventReaders: Record<RealtimeWireEventType, RealtimeEventReader> =
+  {
+    command_error: (value) => {
+      const detail = value["detail"];
+      if (detail !== undefined && typeof detail !== "string")
         throw new Error("The realtime server event was invalid");
-      }
-      return { progress, type: "development_restart_progress" };
-    }
-    case "health": {
+      return {
+        commandId: requiredString(value, "commandId"),
+        ...(typeof detail === "string" ? { detail } : {}),
+        error: requiredString(value, "error"),
+        type: "command_error",
+      };
+    },
+    command_success: (value) => ({
+      commandId: requiredString(value, "commandId"),
+      result: value["result"],
+      type: "command_success",
+    }),
+    health: (value) => {
       const health = value["health"];
       if (
         typeof health !== "object" ||
@@ -123,86 +154,42 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
             reason === "disk_full" ||
             reason === "low_disk_space",
         )
-      ) {
+      )
         throw new Error("The realtime server event was invalid");
-      }
       return {
         health: { degraded: health.degraded, reasons: health.reasons },
         type: "health",
       };
-    }
-    case "command_success":
-      return {
-        commandId: requiredString(value, "commandId"),
-        result: value["result"],
-        type: "command_success",
-      };
-    case "command_error": {
-      const detail = value["detail"];
-      if (detail !== undefined && typeof detail !== "string") {
+    },
+    "q-mush:development-restart-progress": (value) => {
+      const progress = readDevelopmentRestartProgress(value["progress"]);
+      if (progress === undefined)
         throw new Error("The realtime server event was invalid");
-      }
-      return {
-        commandId: requiredString(value, "commandId"),
-        ...(typeof detail === "string" ? { detail } : {}),
-        error: requiredString(value, "error"),
-        type: "command_error",
-      };
-    }
-    case "tool_stream":
-      if (!isToolStreamDeltaFrame(value)) {
-        throw new Error("The realtime server event was invalid");
-      }
-      return value;
-    case "tool_stream_snapshot":
-      if (!isToolStreamSnapshotFrame(value)) {
-        throw new Error("The realtime server event was invalid");
-      }
-      return value;
-    case "runners":
-      return { runners: readRunners(value), type: "runners" };
-    case "tool_settings": {
-      const settings = readToolSettings(value["settings"]);
-      if (settings === undefined) {
-        throw new Error("The realtime server event was invalid");
-      }
-      return { settings, type: "tool_settings" };
-    }
-    case "sessions":
-      if (!Array.isArray(value["sessions"])) {
-        throw new Error("The server returned an invalid agent session list");
-      }
-      return {
-        sessions: value["sessions"].map(readSessionSummary),
-        type: "sessions",
-      };
-    case "session":
-      return { session: readSessionDetail(value["session"]), type: "session" };
-    case "session_questions":
-      return {
-        pending: readSessionPendingQuestions(value["pending"]),
-        sessionId: requiredString(value, "sessionId"),
-        type: "session_questions",
-      };
-    case "sessions_changed":
-      return { type: "sessions_changed" };
-    case "session_compaction_request":
-      return {
-        content: requiredString(value, "content"),
-        sessionId: requiredString(value, "sessionId"),
-        streamId: requiredString(value, "streamId"),
-        type: "session_compaction_request",
-      };
-    case "session_compaction_settled":
-      return {
-        sessionId: requiredString(value, "sessionId"),
-        type: "session_compaction_settled",
-      };
-    case "session_delta": {
+      return { progress, type: "development_restart_progress" };
+    },
+    ready: (value) => ({
+      instanceId: requiredString(value, "instanceId"),
+      type: "ready",
+    }),
+    runners: (value) => ({ runners: readRunners(value), type: "runners" }),
+    session: (value) => ({
+      session: readSessionDetail(value["session"]),
+      type: "session",
+    }),
+    session_compaction_request: (value) => ({
+      content: requiredString(value, "content"),
+      sessionId: requiredString(value, "sessionId"),
+      streamId: requiredString(value, "streamId"),
+      type: "session_compaction_request",
+    }),
+    session_compaction_settled: (value) => ({
+      sessionId: requiredString(value, "sessionId"),
+      type: "session_compaction_settled",
+    }),
+    session_delta: (value) => {
       const reset = value["reset"];
-      if (reset !== undefined && reset !== true) {
+      if (reset !== undefined && reset !== true)
         throw new Error("The realtime server event was invalid");
-      }
       return {
         content: requiredString(value, "content"),
         ...(reset === true ? { reset } : {}),
@@ -213,8 +200,46 @@ export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
         thinking: requiredString(value, "thinking"),
         type: "session_delta",
       };
-    }
-    default:
-      throw new Error("The realtime server event type was invalid");
-  }
+    },
+    session_questions: (value) => ({
+      pending: readSessionPendingQuestions(value["pending"]),
+      sessionId: requiredString(value, "sessionId"),
+      type: "session_questions",
+    }),
+    sessions: (value) => {
+      if (!Array.isArray(value["sessions"]))
+        throw new Error("The server returned an invalid agent session list");
+      return {
+        sessions: value["sessions"].map(readSessionSummary),
+        type: "sessions",
+      };
+    },
+    sessions_changed: () => ({ type: "sessions_changed" }),
+    tool_settings: (value) => {
+      const settings = readToolSettings(value["settings"]);
+      if (settings === undefined)
+        throw new Error("The realtime server event was invalid");
+      return { settings, type: "tool_settings" };
+    },
+    tool_stream: (value) => {
+      if (!isToolStreamDeltaFrame(value))
+        throw new Error("The realtime server event was invalid");
+      return value;
+    },
+    tool_stream_snapshot: (value) => {
+      if (!isToolStreamSnapshotFrame(value))
+        throw new Error("The realtime server event was invalid");
+      return value;
+    },
+  };
+
+export function readRealtimeServerEvent(message: string): RealtimeServerEvent {
+  const value = parseJsonRecord(
+    message,
+    "The realtime server event was invalid",
+  );
+  const type = value["type"];
+  if (!isRealtimeWireEventType(type))
+    throw new Error("The realtime server event type was invalid");
+  return realtimeEventReaders[type](value);
 }

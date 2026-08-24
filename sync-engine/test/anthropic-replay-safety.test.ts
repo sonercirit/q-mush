@@ -4,7 +4,10 @@ import {
   type AgentConversationMessage,
   type AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import {
+  createChatCompletionsAgentModel,
+  type ChatCompletionsAgentModel,
+} from "../../sync-engine/agent-model.ts";
 import { resolveAnthropicModelAttempt } from "../../sync-engine/anthropic-model-resolution.ts";
 import {
   ANTHROPIC_TEST_CREDENTIAL,
@@ -245,7 +248,7 @@ function transientResolutionModel(
   firstResolution: () => Promise<Response>,
 ): ChatCompletionsAgentModel {
   let failed = false;
-  return new ChatCompletionsAgentModel(
+  return createChatCompletionsAgentModel(
     modelOptions((request) => {
       if (!recordRequest(requests, request))
         return Promise.resolve(modelCompletion(FIRST_SNAPSHOT));
@@ -272,7 +275,7 @@ function transientContinuationModel(options: {
   const requests: Request[] = [];
   let resolutionCount = 0;
   let completionCount = 0;
-  const model = new ChatCompletionsAgentModel(
+  const model = createChatCompletionsAgentModel(
     modelOptions((request) => {
       if (recordRequest(requests, request)) {
         resolutionCount += 1;
@@ -306,7 +309,7 @@ function testModel(
   response: (request: Request) => Response,
   requests: Request[],
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel(
+  return createChatCompletionsAgentModel(
     modelOptions((request) => {
       requests.push(request);
       return Promise.resolve(response(request));
@@ -362,7 +365,7 @@ function modelCompletion(
 }
 
 function preResolvedModel(requests: Request[]): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     ...modelOptions((request) => {
       requests.push(request);
       return Promise.resolve(modelCompletion(FIRST_SNAPSHOT));

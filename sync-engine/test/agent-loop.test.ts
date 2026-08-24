@@ -10,7 +10,7 @@ import { createAgentSkills } from "../../sync-engine/agent-skills.ts";
 import { registerParallelSkillExecutionTests } from "./agent-parallel-skill-test-suite.ts";
 import { testBraveSearchSkill } from "./agent-skill-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   abortedSignal,
   deferredHandoff,
@@ -134,7 +134,7 @@ describe("first-party agent loop", () => {
       toolCallId: "call-1",
       toolName: "read",
     };
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "I will inspect the project.",
         contextTokens: 12_000,
@@ -179,7 +179,7 @@ describe("first-party agent loop", () => {
       emptyToolCall("call-1", "read"),
       emptyToolCall("call-2", "bash"),
     ];
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Running tools.", toolCalls },
       { content: "This step must wait for recovery.", toolCalls: [] },
     ]);
@@ -218,7 +218,7 @@ describe("first-party agent loop", () => {
   test("completes when restart becomes pending during final persistence", async () => {
     const persistence = promiseGate();
     const terminalModel = completedStep("Durable response.");
-    const model = new ScriptedAgentModel([terminalModel]);
+    const model = createScriptedAgentModel([terminalModel]);
     const persistedMessages: AgentRecordedMessage[] = [];
     const handoff = deferredHandoff();
     const loop = runHandoffLoop(
@@ -261,7 +261,7 @@ describe("first-party agent loop", () => {
   });
 
   test("prepares the conversation immediately before a model request", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Prepared.", toolCalls: [] },
     ]);
     let preparations = 0;
@@ -295,7 +295,7 @@ describe("first-party agent loop", () => {
         },
       ],
     }));
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       ...toolTurns,
       { content: "Long-running task complete.", toolCalls: [] },
     ]);
@@ -318,7 +318,7 @@ describe("first-party agent loop", () => {
   });
 
   test("reports malformed tool arguments to the model without executing them", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "",
         toolCalls: [{ arguments: "not-json", id: "bad-call", name: "write" }],
@@ -356,7 +356,7 @@ describe("first-party agent loop", () => {
       tools: ["brave_search"],
       userId: "user-id",
     });
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "I will search the web.",
         toolCalls: [

@@ -54,6 +54,26 @@ export function providerEventIndex(
   return index;
 }
 
+export function accumulatorResult<Protocol extends string>(options: {
+  readonly completed: () => boolean;
+  readonly finish: () => AgentModelStep;
+  readonly protocol: Protocol;
+  readonly push: (event: unknown) => void;
+  readonly receivedEvent: () => boolean;
+}) {
+  return {
+    get completed() {
+      return options.completed();
+    },
+    finish: options.finish,
+    protocol: options.protocol,
+    push: options.push,
+    get receivedEvent() {
+      return options.receivedEvent();
+    },
+  };
+}
+
 export function providerStep(
   content: string,
   contextTokens: number | null,

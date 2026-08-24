@@ -1,7 +1,7 @@
 import { expect } from "vitest";
 import { RUNNERS_PATH, SESSIONS_PATH } from "../../shared/routes.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createSessionStore } from "../../sync-engine/session-store.ts";
 import { createAuthenticatedRequest } from "./authenticated-integration-test-helpers.ts";
 import {
   RUNNER_ID,
@@ -18,7 +18,7 @@ export type ReassignmentSessionSetup = ReturnType<typeof connectedSessionSetup>;
 
 export function createIdleStoredSession(setup: ReassignmentSessionSetup): void {
   const ids = [SESSION_ID, "race-message-id", "race-follow-up-id"];
-  const store = new SessionStore(
+  const store = createSessionStore(
     setup.database,
     () => ids.shift() ?? "unexpected-race-id",
     () => DEFAULT_TOOL_SETTINGS,
@@ -43,22 +43,26 @@ export async function postSessionAction(
   action: string,
 ): Promise<Response> {
   const path = `${SESSIONS_PATH}/${SESSION_ID}/${action}`;
-  switch (action) {
-    case "compact":
-      return setup.sessions.compact(
+  const handlers: Record<string, () => Promise<Response>> = {
+    compact: () =>
+      Promise.resolve(
+        setup.sessions.compact(
+          createAuthenticatedRequest(path, undefined, "POST"),
+          SESSION_ID,
+        ),
+      ),
+    continue: () =>
+      setup.sessions.continue(
         createAuthenticatedRequest(path, undefined, "POST"),
         SESSION_ID,
-      );
-    case "continue":
-      return setup.sessions.continue(
-        createAuthenticatedRequest(path, undefined, "POST"),
-        SESSION_ID,
-      );
-    case "stop":
-      return stopSessionRequest(setup);
-    default:
-      throw new Error("The session test action is invalid");
+      ),
+    stop: () => stopSessionRequest(setup),
+  };
+  const handler = handlers[action];
+  if (handler === undefined) {
+    throw new Error("The session test action is invalid");
   }
+  return handler();
 }
 
 export function stopSessionRequest(

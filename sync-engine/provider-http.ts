@@ -4,6 +4,7 @@ import type { ProviderId } from "../shared/provider-credential-store.ts";
 import type { AgentProviderCredential } from "./agent-model-options.ts";
 import {
   fetchModelRequestAttempt,
+  isRetryableModelRequestError,
   modelResponseRetryAfterMilliseconds,
   RetryableModelRequestError,
   runModelRequestWithRetries,
@@ -11,7 +12,10 @@ import {
 } from "./agent-model-retry.ts";
 import type { AgentModelFetch } from "./agent-model.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
-import { ProviderStreamError } from "./provider-error.ts";
+import {
+  isProviderStreamError,
+  type ProviderStreamError,
+} from "./provider-error.ts";
 import {
   readProviderEventStream,
   type AnthropicEventStreamOptions,
@@ -38,14 +42,12 @@ export interface ProviderHttpOptions {
 }
 
 function providerName(provider: ProviderId): string {
-  switch (provider) {
-    case "openai":
-      return "OpenAI";
-    case "openrouter":
-      return "OpenRouter";
-    case "generic":
-      return "Generic provider";
-  }
+  const names: Record<ProviderId, string> = {
+    generic: "Generic provider",
+    openai: "OpenAI",
+    openrouter: "OpenRouter",
+  };
+  return names[provider];
 }
 
 function errorDetail(body: string): string {
@@ -100,14 +102,13 @@ function streamFailure(
   error: unknown,
   response: Response,
 ): RetryableModelRequestError | ProviderStreamError {
-  if (error instanceof ProviderStreamError && !error.transient) {
+  if (isProviderStreamError(error) && !error.transient) {
     return error;
   }
-  const retryAfterMilliseconds =
-    error instanceof ProviderStreamError
-      ? error.retryAfterMilliseconds
-      : modelResponseRetryAfterMilliseconds(response);
-  return new RetryableModelRequestError(error, { retryAfterMilliseconds });
+  const retryAfterMilliseconds = isProviderStreamError(error)
+    ? error.retryAfterMilliseconds
+    : modelResponseRetryAfterMilliseconds(response);
+  return RetryableModelRequestError(error, { retryAfterMilliseconds });
 }
 
 function anthropicStreamOptions(
@@ -143,7 +144,7 @@ async function readAcceptedResponse(
       return accumulator.finish();
     } catch (error) {
       if (error instanceof SyntaxError || error instanceof TypeError) {
-        throw new RetryableModelRequestError(error, {
+        throw RetryableModelRequestError(error, {
           retryAfterMilliseconds: modelResponseRetryAfterMilliseconds(response),
         });
       }
@@ -190,7 +191,7 @@ export async function completeProviderHttp(
         },
       });
     } catch (error) {
-      if (streamed && error instanceof RetryableModelRequestError) {
+      if (streamed && isRetryableModelRequestError(error)) {
         options.onDelta?.({ content: "", reset: true, thinking: "" });
         options.onStreamRetry?.();
         streamed = false;
@@ -206,7 +207,7 @@ export async function completeProviderHttp(
       options.sleep,
     );
   } catch (error) {
-    if (error instanceof RetryableModelRequestError) {
+    if (isRetryableModelRequestError(error)) {
       if (error.response !== undefined) {
         throw await requestError(options.provider, error.response);
       }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import { TEST_CREDENTIAL_FINGERPRINT } from "./agent-model-credential-fixtures.ts";
 import {
   chatCompletionsDone,
@@ -9,11 +9,11 @@ import {
 } from "./prompt-cache-fixtures.ts";
 import {
   completedEventResponse,
+  createFakeProviderSockets,
   failWebSocketAttempts,
-  FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 
-type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
+type ModelOptions = Parameters<typeof createChatCompletionsAgentModel>[0];
 
 const SESSION_KEY = "0193dummy-session-id";
 
@@ -44,7 +44,7 @@ async function captureChat(
   options: Omit<ModelOptions, "fetch" | "toolSettings">,
 ): Promise<{ readonly body: unknown; readonly request: Request }> {
   let captured: Request | undefined;
-  const model = new ChatCompletionsAgentModel({
+  const model = createChatCompletionsAgentModel({
     toolSettings: DEFAULT_TOOL_SETTINGS,
     ...options,
     fetch: (request) => {
@@ -98,9 +98,9 @@ describe("prompt cache request state", () => {
   });
 
   test("routes Codex requests with the session_id header and body key", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     let captured: Request | undefined;
-    const model = new ChatCompletionsAgentModel({
+    const model = createChatCompletionsAgentModel({
       toolSettings: DEFAULT_TOOL_SETTINGS,
       credential: codexOAuthCredential(),
       credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,

@@ -113,6 +113,88 @@ function readOptions(value: unknown): readonly AskQuestionOption[] | undefined {
   return options;
 }
 
+type QuestionType = AskQuestion["type"];
+
+type QuestionReader = (
+  value: Record<string, unknown>,
+  id: string,
+  prompt: string,
+) => AskQuestion | undefined;
+
+const QUESTION_READERS: Record<QuestionType, QuestionReader> = {
+  free_text: (value, id, prompt) => {
+    const maxLength = boundedInteger(
+      value["maxLength"],
+      1,
+      MAXIMUM_QUESTION_TEXT_LENGTH,
+    );
+    const minLength =
+      value["minLength"] === undefined
+        ? undefined
+        : boundedInteger(value["minLength"], 0, MAXIMUM_QUESTION_TEXT_LENGTH);
+    return maxLength === undefined ||
+      !hasOnlyKeys(value, ["id", "maxLength", "minLength", "prompt", "type"]) ||
+      (minLength === undefined && value["minLength"] !== undefined) ||
+      (minLength ?? 0) > maxLength
+      ? undefined
+      : {
+          id,
+          maxLength,
+          ...(minLength === undefined ? {} : { minLength }),
+          prompt,
+          type: "free_text",
+        };
+  },
+  multi_choice: (value, id, prompt) => {
+    const options = readOptions(value["options"]);
+    if (options === undefined) return undefined;
+    const maximum = options.length;
+    const maxSelections =
+      value["maxSelections"] === undefined
+        ? undefined
+        : boundedInteger(value["maxSelections"], 1, maximum);
+    const minSelections =
+      value["minSelections"] === undefined
+        ? undefined
+        : boundedInteger(value["minSelections"], 0, maximum);
+    if (
+      !hasOnlyKeys(value, [
+        "id",
+        "maxSelections",
+        "minSelections",
+        "options",
+        "prompt",
+        "type",
+      ]) ||
+      (value["maxSelections"] !== undefined && maxSelections === undefined) ||
+      (value["minSelections"] !== undefined && minSelections === undefined) ||
+      (minSelections ?? 0) > (maxSelections ?? maximum)
+    )
+      return undefined;
+    return {
+      id,
+      ...(maxSelections === undefined ? {} : { maxSelections }),
+      ...(minSelections === undefined ? {} : { minSelections }),
+      options,
+      prompt,
+      type: "multi_choice",
+    };
+  },
+  single_choice: (value, id, prompt) => {
+    if (!hasOnlyKeys(value, ["id", "options", "prompt", "type"])) {
+      return undefined;
+    }
+    const choices = readOptions(value["options"]);
+    return choices === undefined
+      ? undefined
+      : { id, options: choices, prompt, type: "single_choice" };
+  },
+};
+
+function isQuestionType(value: unknown): value is QuestionType {
+  return typeof value === "string" && Object.hasOwn(QUESTION_READERS, value);
+}
+
 function readQuestion(value: unknown): AskQuestion | undefined {
   if (!isRecord(value)) {
     return undefined;
@@ -122,88 +204,16 @@ function readQuestion(value: unknown): AskQuestion | undefined {
     value["prompt"],
     MAXIMUM_QUESTION_PROMPT_LENGTH,
   );
-  if (id === undefined || !ID_PATTERN.test(id) || prompt === undefined) {
+  const type = value["type"];
+  if (
+    id === undefined ||
+    !ID_PATTERN.test(id) ||
+    prompt === undefined ||
+    !isQuestionType(type)
+  ) {
     return undefined;
   }
-
-  switch (value["type"]) {
-    case "free_text": {
-      const maxLength = boundedInteger(
-        value["maxLength"],
-        1,
-        MAXIMUM_QUESTION_TEXT_LENGTH,
-      );
-      const minLength =
-        value["minLength"] === undefined
-          ? undefined
-          : boundedInteger(value["minLength"], 0, MAXIMUM_QUESTION_TEXT_LENGTH);
-      return maxLength === undefined ||
-        !hasOnlyKeys(value, [
-          "id",
-          "maxLength",
-          "minLength",
-          "prompt",
-          "type",
-        ]) ||
-        (minLength === undefined && value["minLength"] !== undefined) ||
-        (minLength ?? 0) > maxLength
-        ? undefined
-        : {
-            id,
-            maxLength,
-            ...(minLength === undefined ? {} : { minLength }),
-            prompt,
-            type: "free_text",
-          };
-    }
-    case "single_choice": {
-      const options = readOptions(value["options"]);
-      return options === undefined ||
-        !hasOnlyKeys(value, ["id", "options", "prompt", "type"])
-        ? undefined
-        : { id, options, prompt, type: "single_choice" };
-    }
-    case "multi_choice": {
-      const options = readOptions(value["options"]);
-      if (options === undefined) {
-        return undefined;
-      }
-      const maximum = options.length;
-      const maxSelections =
-        value["maxSelections"] === undefined
-          ? undefined
-          : boundedInteger(value["maxSelections"], 1, maximum);
-      const minSelections =
-        value["minSelections"] === undefined
-          ? undefined
-          : boundedInteger(value["minSelections"], 0, maximum);
-      if (
-        !hasOnlyKeys(value, [
-          "id",
-          "maxSelections",
-          "minSelections",
-          "options",
-          "prompt",
-          "type",
-        ]) ||
-        (value["maxSelections"] !== undefined && maxSelections === undefined) ||
-        (value["minSelections"] !== undefined && minSelections === undefined) ||
-        (minSelections ?? 0) > (maxSelections ?? maximum)
-      ) {
-        return undefined;
-      }
-      return {
-        id,
-        ...(maxSelections === undefined ? {} : { maxSelections }),
-        ...(minSelections === undefined ? {} : { minSelections }),
-        options,
-        prompt,
-        type: "multi_choice",
-      };
-    }
-    default:
-      return undefined;
-  }
+  return QUESTION_READERS[type](value, id, prompt);
 }
 
 export function readAskQuestionsInput(
@@ -255,25 +265,37 @@ function selectedValues(
     : [...values];
 }
 
+type AnswerReader = (
+  value: unknown,
+  question: AskQuestion,
+) => readonly string[] | string | undefined;
+
+const ANSWER_READERS: Record<QuestionType, AnswerReader> = {
+  free_text: (value, question) => {
+    if (question.type !== "free_text") return undefined;
+    const normalized = readBoundedTrimmedString(value, question.maxLength);
+    return normalized === undefined ||
+      normalized.length < (question.minLength ?? 0)
+      ? undefined
+      : normalized;
+  },
+  multi_choice: (value, question) => {
+    if (question.type !== "multi_choice") return undefined;
+    return typeof value === "string"
+      ? readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH)
+      : selectedValues(value, question);
+  },
+  single_choice: (value, question) =>
+    question.type === "single_choice"
+      ? readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH)
+      : undefined,
+};
+
 export function askQuestionAnswerValue(
   value: unknown,
   question: AskQuestion,
 ): readonly string[] | string | undefined {
-  switch (question.type) {
-    case "free_text": {
-      const normalized = readBoundedTrimmedString(value, question.maxLength);
-      return normalized === undefined ||
-        normalized.length < (question.minLength ?? 0)
-        ? undefined
-        : normalized;
-    }
-    case "single_choice":
-      return readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH);
-    case "multi_choice":
-      return typeof value === "string"
-        ? readBoundedTrimmedString(value, MAXIMUM_QUESTION_TEXT_LENGTH)
-        : selectedValues(value, question);
-  }
+  return ANSWER_READERS[question.type](value, question);
 }
 
 export function readAskQuestionAnswers(

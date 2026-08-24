@@ -4,19 +4,22 @@ import type {
   AgentTokenUsage,
 } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import { requiredRecordString } from "../shared/json-record.ts";
 import { readNonNegativeSafeInteger } from "../shared/validation.ts";
 import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
 } from "./provider-error.ts";
-import { AnthropicReplayCapture } from "./provider-stream-anthropic-replay.ts";
-import { BufferedAccumulator } from "./provider-stream-buffers.ts";
+import { createAnthropicReplayCapture } from "./provider-stream-anthropic-replay.ts";
+import { createBufferedAccumulator } from "./provider-stream-buffers.ts";
 import {
+  accumulatorResult,
   providerEventIndex,
   providerStep,
   type PartialProviderToolCall,
 } from "./provider-stream-helpers.ts";
+import type { ProviderTextDelta } from "./provider-stream.ts";
 
 const INVALID_EVENT = "The Anthropic model returned an invalid event";
 const INVALID_DELTA = "The Anthropic model returned an invalid content delta";
@@ -72,209 +75,241 @@ function eventIndex(
   return readNonNegativeSafeInteger(event["index"]);
 }
 
-export class AnthropicStreamAccumulator extends BufferedAccumulator {
-  readonly protocol = "anthropic" as const;
-  readonly #requestModel: string;
-  readonly #replay: AnthropicReplayCapture;
-  #pauseTurn = false;
-  #stopped = false;
-  #truncation: AgentStepTruncation | undefined;
-  #usage: AgentTokenUsage | null = null;
+type AnthropicEventKind =
+  | "content_block_delta"
+  | "content_block_start"
+  | "content_block_stop"
+  | "message"
+  | "message_delta"
+  | "message_start"
+  | "message_stop";
+type AnthropicDeltaKind = "input_json_delta" | "text_delta" | "thinking_delta";
+type AnthropicBlockKind = "text" | "thinking" | "tool_use";
 
-  constructor(
-    model: string,
-    provenance: string,
-    onDelta?: ConstructorParameters<typeof BufferedAccumulator>[0],
-  ) {
-    super(onDelta);
-    this.#requestModel = model;
-    this.#replay = new AnthropicReplayCapture(provenance);
-  }
+export function createAnthropicStreamAccumulator(
+  model: string,
+  provenance: string,
+  onDelta?: (delta: ProviderTextDelta) => void,
+) {
+  const accumulator = createBufferedAccumulator(onDelta);
+  let pauseTurn = false;
+  let stopped = false;
+  let truncation: AgentStepTruncation | undefined;
+  let usage: AgentTokenUsage | null = null;
 
-  finish(): AgentModelStep {
-    if (!this.#stopped) {
+  const requestModel = model;
+  const replay = createAnthropicReplayCapture(provenance);
+
+  const finish = (): AgentModelStep => {
+    if (!stopped) {
       throw new Error("The provider response ended before completion");
     }
-    const providerReplay = this.#replay.finish();
-    const usage = this.#usage;
+    const providerReplay = replay.finish();
+    const finalUsage = usage;
     const step = providerStep(
-      this.buffers.text.join(""),
-      usage === null ? null : usage.inputTokens,
-      this.buffers.thinking.join(""),
-      this.recordedToolCalls(),
+      accumulator.buffers.text.join(""),
+      finalUsage === null ? null : finalUsage.inputTokens,
+      accumulator.buffers.thinking.join(""),
+      accumulator.recordedToolCalls(),
     );
     return {
       ...step,
       ...(step.toolCalls.length > 0 && providerReplay === undefined
         ? { providerContinuation: "anthropic_replay_unavailable" as const }
-        : this.#pauseTurn
+        : pauseTurn
           ? { providerContinuation: "anthropic_pause_turn" as const }
           : {}),
       ...(providerReplay === undefined
         ? {}
         : {
             providerReplay:
-              providerReplay.model === this.#requestModel
+              providerReplay.model === requestModel
                 ? providerReplay
-                : { ...providerReplay, requestModel: this.#requestModel },
+                : { ...providerReplay, requestModel: requestModel },
           }),
-      tokenUsage: usage,
-      ...(this.#truncation === undefined
-        ? {}
-        : { truncation: this.#truncation }),
+      tokenUsage: finalUsage,
+      ...(truncation === undefined ? {} : { truncation: truncation }),
     };
-  }
+  };
 
-  get completed(): boolean {
-    return this.#stopped;
-  }
+  const completed = (): boolean => {
+    return stopped;
+  };
 
-  push(streamEvent: unknown): void {
-    const event = this.readEvent(streamEvent, INVALID_EVENT);
+  const push = (streamEvent: unknown): void => {
+    const event = accumulator.readEvent(streamEvent, INVALID_EVENT);
     if (isProviderStreamErrorEvent(event)) {
       throw readProviderStreamError(event);
     }
-    switch (event["type"]) {
-      case "message_start":
-        this.#readMessageStart(event["message"]);
-        return;
-      case "content_block_start":
-        this.#startBlock(event);
-        return;
-      case "content_block_delta":
-        this.#pushDelta(event);
-        return;
-      case "content_block_stop":
-        this.#replay.stop(eventIndex(event));
-        return;
-      case "message_delta":
-        this.#readStopReason(event["delta"]);
-        this.#readOutputTokens(event["usage"]);
-        return;
-      case "message_stop":
-        this.#stopped = true;
-        return;
-      case "message":
-        this.#readCompleteMessage(event);
-        return;
-      default:
-        return;
+    const kind = event["type"];
+    if (isDispatchKey(eventHandlers, kind)) {
+      eventHandlers[kind](event);
+      return;
     }
-  }
+    // Anthropic may add ignorable event kinds at runtime.
+  };
 
-  #readMessageStart(message: unknown): void {
-    this.#readUsage(message);
+  const readMessageStart = (message: unknown): void => {
+    readUsage(message);
     if (isRecord(message)) {
-      this.#replay.readModel(message["model"]);
-      this.#replay.readContainer(message["container"]);
+      replay.readModel(message["model"]);
+      replay.readContainer(message["container"]);
     }
-  }
+  };
 
-  #readUsage(message: unknown): void {
+  const readUsage = (message: unknown): void => {
     if (!isRecord(message) || !isRecord(message["usage"])) return;
-    const usage = message["usage"];
-    this.#usage = anthropicUsage(usage, tokenCount(usage["output_tokens"]));
-  }
+    const usageRecord = message["usage"];
+    usage = anthropicUsage(
+      usageRecord,
+      tokenCount(usageRecord["output_tokens"]),
+    );
+  };
 
-  #readOutputTokens(usage: unknown): void {
-    if (!isRecord(usage)) return;
-    const outputTokens = tokenCount(usage["output_tokens"]);
-    this.#usage =
-      this.#usage === null
-        ? anthropicUsage(usage, outputTokens)
-        : { ...this.#usage, outputTokens };
-  }
+  const readOutputTokens = (usageValue: unknown): void => {
+    if (!isRecord(usageValue)) return;
+    const outputTokens = tokenCount(usageValue["output_tokens"]);
+    usage =
+      usage === null
+        ? anthropicUsage(usageValue, outputTokens)
+        : { ...usage, outputTokens };
+  };
 
-  #readStopReason(value: unknown): void {
+  const readStopReason = (value: unknown): void => {
     if (!isRecord(value)) return;
-    this.#truncation ??= readTruncation(value);
-    this.#pauseTurn ||= value["stop_reason"] === "pause_turn";
-    this.#replay.readContainer(value["container"]);
-  }
+    truncation ??= readTruncation(value);
+    pauseTurn ||= value["stop_reason"] === "pause_turn";
+    replay.readContainer(value["container"]);
+  };
 
-  #startBlock(event: Readonly<Record<string, unknown>>): void {
+  const startBlock = (event: Readonly<Record<string, unknown>>): void => {
     const block = event["content_block"];
     if (!isRecord(block)) throw new Error(INVALID_BLOCK);
     const index =
       block["type"] === "tool_use"
         ? providerEventIndex(event, "index", "content block index")
         : eventIndex(event);
-    this.#replay.start(index, block);
+    replay.start(index, block);
     if (block["type"] === "tool_use" && index !== undefined) {
-      this.registerToolCall(index, toolUseCall(block, ""));
+      accumulator.registerToolCall(index, toolUseCall(block, ""));
     }
-  }
+  };
 
-  #pushDelta(event: Readonly<Record<string, unknown>>): void {
+  const pushDelta = (event: Readonly<Record<string, unknown>>): void => {
     const delta = event["delta"];
     if (!isRecord(delta)) throw new Error(INVALID_DELTA);
     const index = eventIndex(event);
-    switch (delta["type"]) {
-      case "text_delta":
-        this.pushText(requiredRecordString(delta, "text", INVALID_DELTA));
-        break;
-      case "thinking_delta":
-        this.pushThinking(
-          requiredRecordString(delta, "thinking", INVALID_DELTA),
-        );
-        break;
-      case "input_json_delta":
-        this.#appendToolInput(event);
-        break;
-      default:
-        break;
+    const kind = delta["type"];
+    if (isDispatchKey(deltaHandlers, kind)) {
+      deltaHandlers[kind](event, delta);
     }
-    this.#replay.delta(index, delta);
-  }
+    replay.delta(index, delta);
+  };
 
-  #appendToolInput(event: Readonly<Record<string, unknown>>): void {
+  const appendToolInput = (event: Readonly<Record<string, unknown>>): void => {
     const index = eventIndex(event);
     const delta = event["delta"];
-    if (index === undefined || !this.toolCalls.has(index) || !isRecord(delta)) {
+    if (
+      index === undefined ||
+      !accumulator.toolCalls.has(index) ||
+      !isRecord(delta)
+    ) {
       return;
     }
-    this.appendToolCallArguments(
+    accumulator.appendToolCallArguments(
       index,
       requiredRecordString(delta, "partial_json", INVALID_DELTA),
     );
-  }
+  };
 
-  #readCompleteMessage(message: Readonly<Record<string, unknown>>): void {
-    this.#replay.readModel(message["model"]);
+  const readCompleteMessage = (
+    message: Readonly<Record<string, unknown>>,
+  ): void => {
+    replay.readModel(message["model"]);
     const content = message["content"];
     if (!Array.isArray(content)) throw new Error(INVALID_MESSAGE);
     for (const [index, value] of content.entries()) {
       if (!isRecord(value)) throw new Error(INVALID_BLOCK);
-      this.#readCompleteBlock(index, value);
+      readCompleteBlock(index, value);
     }
-    this.#readStopReason(message);
-    this.#readUsage(message);
-    this.#stopped = true;
-  }
+    readStopReason(message);
+    readUsage(message);
+    stopped = true;
+  };
 
-  #readCompleteBlock(
+  const readCompleteBlock = (
     index: number,
     block: Readonly<Record<string, unknown>>,
-  ): void {
-    this.#replay.complete(index, block);
-    switch (block["type"]) {
-      case "text":
-        this.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
-        return;
-      case "thinking":
-        this.pushThinking(
-          requiredRecordString(block, "thinking", INVALID_BLOCK),
-        );
-        return;
-      case "tool_use": {
-        // A parsed JSON body always re-serializes; the whole event came from
-        // JSON.parse.
-        const input = JSON.stringify(block["input"] ?? {});
-        this.registerToolCall(index, toolUseCall(block, input));
-        return;
-      }
-      default:
-        return;
+  ): void => {
+    replay.complete(index, block);
+    const kind = block["type"];
+    if (isDispatchKey(blockHandlers, kind)) {
+      blockHandlers[kind](index, block);
     }
-  }
+  };
+
+  const eventHandlers: Record<
+    AnthropicEventKind,
+    (event: Readonly<Record<string, unknown>>) => void
+  > = {
+    content_block_delta: pushDelta,
+    content_block_start: startBlock,
+    content_block_stop: (event) => {
+      replay.stop(eventIndex(event));
+    },
+    message: readCompleteMessage,
+    message_delta: (event) => {
+      readStopReason(event["delta"]);
+      readOutputTokens(event["usage"]);
+    },
+    message_start: (event) => {
+      readMessageStart(event["message"]);
+    },
+    message_stop: () => {
+      stopped = true;
+    },
+  };
+  const deltaHandlers: Record<
+    AnthropicDeltaKind,
+    (
+      event: Readonly<Record<string, unknown>>,
+      delta: Readonly<Record<string, unknown>>,
+    ) => void
+  > = {
+    input_json_delta: appendToolInput,
+    text_delta: (_event, delta) => {
+      accumulator.pushText(requiredRecordString(delta, "text", INVALID_DELTA));
+    },
+    thinking_delta: (_event, delta) => {
+      accumulator.pushThinking(
+        requiredRecordString(delta, "thinking", INVALID_DELTA),
+      );
+    },
+  };
+  const blockHandlers: Record<
+    AnthropicBlockKind,
+    (index: number, block: Readonly<Record<string, unknown>>) => void
+  > = {
+    text: (_index, block) => {
+      accumulator.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
+    },
+    thinking: (_index, block) => {
+      accumulator.pushThinking(
+        requiredRecordString(block, "thinking", INVALID_BLOCK),
+      );
+    },
+    tool_use: (index, block) => {
+      // A parsed JSON body always re-serializes; the whole event came from
+      // JSON.parse.
+      const input = JSON.stringify(block["input"] ?? {});
+      accumulator.registerToolCall(index, toolUseCall(block, input));
+    },
+  };
+  return accumulatorResult({
+    completed,
+    finish,
+    protocol: "anthropic",
+    push,
+    receivedEvent: accumulator.receivedEvent,
+  });
 }

@@ -7,14 +7,14 @@ import {
   SESSION_REALTIME_OPERATIONS,
   type UserRealtimeCommand,
 } from "../../shared/user-realtime-protocol.ts";
-import { RealtimeCommandLedger } from "../realtime-command-ledger.ts";
-import { SessionFinisher } from "../session-finisher.ts";
+import { createRealtimeCommandLedger } from "../realtime-command-ledger.ts";
+import { createSessionFinisher } from "../session-finisher.ts";
 import {
   cancelPendingInput,
   enqueuePendingInput,
   hasPendingSteeringInput,
 } from "../session-pending-inputs.ts";
-import { SessionRuntimes } from "../session-runtime.ts";
+import { createSessionRuntimes } from "../session-runtime.ts";
 import { waitForSessionSteeringInput } from "../session-steering-wakeup.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
 import {
@@ -187,7 +187,7 @@ function expectQueuedBoundary(
 describe("durable pending session inputs", () => {
   test("retries a ledger-recorded send after its acknowledgement is lost", async () => {
     const setup = runningStore();
-    const ledger = new RealtimeCommandLedger();
+    const ledger = createRealtimeCommandLedger();
     const persist = vi.fn(() => {
       const result = enqueueInput(
         setup,
@@ -536,9 +536,9 @@ describe("durable pending session inputs", () => {
   test("relaunches a terminal follow-up only after its runtime clears", async () => {
     const setup = runningStore();
     enqueueInput(setup, "post-runtime-follow-up", "Run after settlement");
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const launchStates: boolean[] = [];
-    const finisher = new SessionFinisher({
+    const finisher = createSessionFinisher({
       actions: { finished: vi.fn(), stopChildren: vi.fn() },
       launchQueued: () => {
         launchStates.push(runtimes.active(setup.detail.id));

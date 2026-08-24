@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { WORKSPACES_PATH, workspaceDefaultPath } from "../../shared/routes.ts";
-import { WorkspaceController } from "../../solid/workspace-controller.ts";
+import { createWorkspaceController } from "../../solid/workspace-controller.ts";
 import {
   installRecordedRequestFetch,
   restoreFetchAfterEach,
@@ -39,7 +39,7 @@ test("loads, selects, renames, defaults, and removes workspaces", async () => {
       ? Response.json(list)
       : new Response(null, { status: 204 });
   });
-  const controller = new WorkspaceController((workspaceId) => {
+  const controller = createWorkspaceController((workspaceId) => {
     selected.push(workspaceId);
   });
 

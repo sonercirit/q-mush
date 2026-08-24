@@ -2,7 +2,7 @@ import type {
   AnthropicReplayBlock,
   AnthropicReplayObject,
 } from "../../shared/anthropic-replay.ts";
-import { AnthropicStreamAccumulator } from "../../sync-engine/provider-stream-anthropic.ts";
+import { createAnthropicStreamAccumulator } from "../../sync-engine/provider-stream-anthropic.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
   anthropicBlockDelta,
@@ -159,7 +159,7 @@ export function finishedAnthropicStep(
   events: readonly unknown[],
   model = KNOWN_ANTHROPIC_MODEL,
 ) {
-  const accumulator = new AnthropicStreamAccumulator(
+  const accumulator = createAnthropicStreamAccumulator(
     model,
     ANTHROPIC_TEST_PROVENANCE,
   );

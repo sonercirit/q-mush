@@ -1,19 +1,17 @@
 import { expect, test } from "vitest";
 import { completeRunnerRegistration } from "../runner/runner-registration.ts";
+import { observeOperationalRunnerSocket } from "../runner/runner-socket.ts";
 import {
-  observeOperationalRunnerSocket,
-  RunnerSupersededError,
-} from "../runner/runner-socket.ts";
-import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
   type RunnerStartupConnection,
 } from "../runner/runner-update.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
-  RunnerCommandBroker,
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import {
   RUNNER_SUPERSEDED_CLOSE_CODE,
   runnerConnectMessage,
@@ -37,40 +35,57 @@ import {
 const RUNNER_ID = "runner-1";
 const RESTART_ID = "restart-duplicate-race";
 
-class FakeRunnerSocket extends EventTarget {
-  received: string[] = [];
-  readyState: number = WebSocket.OPEN;
-  #sendToEngine: (message: string) => void = () => {
+interface FakeRunnerSocket extends EventTarget {
+  readonly received: string[];
+  readyState: number;
+  close(code?: number, reason?: string): void;
+  connect(send: (message: string) => void): void;
+  receive(message: string): number;
+  send(message: string): void;
+}
+
+function createFakeRunnerSocket(): FakeRunnerSocket {
+  const socket = new EventTarget();
+  const received: string[] = [];
+  let readyState: number = WebSocket.OPEN;
+  let sendToEngine: (message: string) => void = () => {
     throw new Error("The fake runner process is not connected");
   };
-
-  connect(send: (message: string) => void): void {
-    this.#sendToEngine = send;
-  }
-
-  close(code = 1000, reason = ""): void {
-    if (this.readyState === WebSocket.CLOSED) return;
-    this.readyState = WebSocket.CLOSED;
-    this.dispatchEvent(new CloseEvent("close", { code, reason }));
-  }
-
-  receive(message: string): number {
-    if (this.readyState !== WebSocket.OPEN) return 0;
-    this.received.push(message);
-    queueMicrotask(() => {
-      if (this.readyState === WebSocket.OPEN) {
-        this.dispatchEvent(new MessageEvent("message", { data: message }));
+  const fakeSocket: FakeRunnerSocket = Object.assign(socket, {
+    received,
+    readyState,
+    connect(send: (message: string) => void): void {
+      sendToEngine = send;
+    },
+    close(code = 1000, reason = ""): void {
+      if (readyState === WebSocket.CLOSED) return;
+      readyState = WebSocket.CLOSED;
+      socket.dispatchEvent(new CloseEvent("close", { code, reason }));
+    },
+    receive(message: string): number {
+      if (readyState !== WebSocket.OPEN) return 0;
+      received.push(message);
+      queueMicrotask(() => {
+        if (readyState === WebSocket.OPEN) {
+          socket.dispatchEvent(new MessageEvent("message", { data: message }));
+        }
+      });
+      return 1;
+    },
+    send(message: string): void {
+      if (readyState !== WebSocket.OPEN) {
+        throw new Error("The fake runner process is disconnected");
       }
-    });
-    return 1;
-  }
-
-  send(message: string): void {
-    if (this.readyState !== WebSocket.OPEN) {
-      throw new Error("The fake runner process is disconnected");
-    }
-    this.#sendToEngine(message);
-  }
+      sendToEngine(message);
+    },
+  });
+  Object.defineProperty(fakeSocket, "readyState", {
+    get: () => readyState,
+    set: (value: number) => {
+      readyState = value;
+    },
+  });
+  return fakeSocket;
 }
 
 interface FakeRunnerProcess {
@@ -85,8 +100,8 @@ function fakeRunnerProcess(
   restartId?: string,
   processNonce = "fake-runner-process",
 ): FakeRunnerProcess {
-  const client = new FakeRunnerSocket();
-  const startup = new RunnerStartupRestart(restartId);
+  const client = createFakeRunnerSocket();
+  const startup = createRunnerStartupRestart(restartId);
   const startupConnection: RunnerStartupConnection = startup.connection();
   let stopped: Promise<Error> | undefined;
   const serverData: QmushWebSocketData = assertRealtimeUpgrade(
@@ -188,7 +203,7 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   let staleRestartProcess: FakeRunnerProcess | undefined;
   let connectionGeneration = 0;
   let nextCommandId = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () =>
       ++nextCommandId === 1
         ? "command-on-stale-restart-process"
@@ -248,11 +263,11 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   expect(supervisedProcess.client.readyState).toBe(WebSocket.OPEN);
   expect(staleProcess.client.readyState).toBe(WebSocket.CLOSED);
   expect(staleProcess.client.received).toContain(runnerSupersededMessage());
-  await expect(staleProcess.stopped()).resolves.toEqual(
-    new RunnerSupersededError(),
-  );
+  await expect(staleProcess.stopped()).resolves.toMatchObject({
+    kind: "runner_superseded",
+  });
   await expect(commandRejection).resolves.toEqual(
-    new RunnerDisconnectedError(
+    createRunnerDisconnectedError(
       "The runner connection was superseded before the command returned",
     ),
   );

@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import type { AgentSessionSummary } from "../../shared/session-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -21,7 +21,7 @@ export function mountedSessionList(
     selectedId,
     sessions,
   });
-  const controller = new SessionController(state);
+  const controller = createSessionController(state);
   return {
     container: mountTestView(
       () => <SessionList controller={controller} />,

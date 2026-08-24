@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
-import { SessionCredentialReassignmentEndpoints } from "../session-credential-reassignment.ts";
+import {
+  createSessionCredentialReassignmentEndpoints,
+  type SessionCredentialReassignmentEndpoints,
+} from "../session-credential-reassignment.ts";
 import {
   createAuthenticatedTestContext,
   TEST_NOW,
@@ -11,7 +14,7 @@ import { testSessionCredentialMetadataUpdate } from "./session-credential-metada
 import { expectErrorResponse } from "./session-reassignment-race-helpers.ts";
 
 type ReassignmentEndpointOptions = Omit<
-  ConstructorParameters<typeof SessionCredentialReassignmentEndpoints>[0],
+  Parameters<typeof createSessionCredentialReassignmentEndpoints>[0],
   "auth" | "now"
 >;
 
@@ -19,7 +22,7 @@ function reassignmentEndpoints(
   context: ReturnType<typeof createAuthenticatedTestContext>,
   options: ReassignmentEndpointOptions,
 ): SessionCredentialReassignmentEndpoints {
-  return new SessionCredentialReassignmentEndpoints({
+  return createSessionCredentialReassignmentEndpoints({
     auth: context.auth,
     now: () => TEST_NOW,
     ...options,
@@ -73,8 +76,8 @@ function request(
 const databases: AppDatabase[] = [];
 
 type ProviderStatePreparation = NonNullable<
-  ConstructorParameters<
-    typeof SessionCredentialReassignmentEndpoints
+  Parameters<
+    typeof createSessionCredentialReassignmentEndpoints
   >[0]["prepareProviderState"]
 >;
 

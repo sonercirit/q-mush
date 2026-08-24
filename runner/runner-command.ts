@@ -26,7 +26,10 @@ import type { RunnerCommandResult } from "../shared/tool-stream.ts";
 import { isRecord, readBoundedString } from "../shared/validation.ts";
 import { loadRunnerAgentFile } from "./runner-agent-file.ts";
 import { executeAttachmentCommand } from "./runner-attachments.ts";
-import { RunnerContainerManager } from "./runner-container.ts";
+import {
+  createRunnerContainerManager,
+  type RunnerContainerManager,
+} from "./runner-container.ts";
 import { listRunnerDirectories } from "./runner-directories.ts";
 import { runnerCommandResultFromOutput } from "./runner-process.ts";
 import {
@@ -161,7 +164,7 @@ export async function executeRunnerCommand(
   command: RunnerToolCommand,
   signal?: AbortSignal,
 ): Promise<string> {
-  return new RunnerCommandExecutor().execute(command, signal);
+  return createRunnerCommandExecutor().execute(command, signal);
 }
 
 type ResolvedRunnerToolCommand = RunnerToolCommand & {
@@ -169,19 +172,34 @@ type ResolvedRunnerToolCommand = RunnerToolCommand & {
   readonly outputLimitCharacters: number;
 };
 
-export class RunnerCommandExecutor {
-  readonly #containers: RunnerContainerCommands;
+type ExecuteRunnerCommandResult =
+  RunnerCommandExecutorFunction<RunnerCommandResult>;
 
-  constructor(containers?: RunnerContainerCommands) {
-    this.#containers = containers ?? new RunnerContainerManager();
-  }
+type RunnerCommandExecutorFunction<Result> = (
+  command: RunnerToolCommand,
+  signal?: AbortSignal,
+  stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
+) => Promise<Result>;
 
-  #toolSettings(
+export interface RunnerCommandExecutor {
+  readonly execute: (
+    command: RunnerToolCommand,
+    signal?: AbortSignal,
+  ) => Promise<string>;
+  readonly executeResult: ExecuteRunnerCommandResult;
+}
+
+export function createRunnerCommandExecutor(
+  providedContainers?: RunnerContainerCommands,
+): RunnerCommandExecutor {
+  const containers = providedContainers ?? createRunnerContainerManager();
+
+  const toolSettings = (
     command: RunnerToolCommand,
   ): Pick<
     ResolvedRunnerToolCommand,
     "executionLimitSeconds" | "outputLimitCharacters"
-  > {
+  > => {
     return {
       executionLimitSeconds:
         command.executionLimitSeconds ??
@@ -190,30 +208,30 @@ export class RunnerCommandExecutor {
         command.outputLimitCharacters ??
         DEFAULT_TOOL_SETTINGS.outputLimitCharacters,
     };
-  }
+  };
 
-  async executeResult(
-    command: RunnerToolCommand,
-    signal?: AbortSignal,
-    stream?: NonNullable<RunnerToolExecutionOptions["stream"]>,
-  ): Promise<RunnerCommandResult> {
-    const resolvedCommand = { ...command, ...this.#toolSettings(command) };
-    const result = await this.#executeResult(resolvedCommand, {
+  const executeResult: ExecuteRunnerCommandResult = async (
+    command,
+    signal,
+    stream,
+  ) => {
+    const resolvedCommand = { ...command, ...toolSettings(command) };
+    const result = await executeResolvedResult(resolvedCommand, {
       ...(signal === undefined ? {} : { signal }),
       ...(stream === undefined ? {} : { stream }),
     });
     return isRunnerAgentToolName(resolvedCommand.tool)
       ? retainToolResultOverflow(result, resolvedCommand)
       : result;
-  }
+  };
 
-  async #executeResult(
+  const executeResolvedResult = async (
     command: ResolvedRunnerToolCommand,
     options: {
       readonly signal?: AbortSignal;
       readonly stream?: NonNullable<RunnerToolExecutionOptions["stream"]>;
     },
-  ): Promise<RunnerCommandResult> {
+  ): Promise<RunnerCommandResult> => {
     const { signal, stream } = options;
     try {
       if (command.tool === RUNNER_DIRECTORY_COMMAND) {
@@ -228,7 +246,7 @@ export class RunnerCommandExecutor {
         const terminal =
           command.arguments[RUNNER_TERMINAL_CLEANUP_ARGUMENT] === true;
         if (command.executionEnvironment === "container") {
-          await this.#containers.cleanupSession(command.sessionId);
+          await containers.cleanupSession(command.sessionId);
         }
         return {
           output: terminal
@@ -246,7 +264,7 @@ export class RunnerCommandExecutor {
         return { output: attachment, state: "completed" };
       }
       if (command.executionEnvironment === "container") {
-        return await this.#executeContainer(command, signal, stream);
+        return await executeContainer(command, signal, stream);
       }
       if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
         return await agentFileResult(
@@ -260,20 +278,20 @@ export class RunnerCommandExecutor {
         command.arguments,
         signal,
         undefined,
-        this.#toolOptions(command, stream),
+        toolOptions(command, stream),
       );
     } catch (error) {
       return failedRunnerCommandResult(error);
     }
-  }
+  };
 
-  async #executeContainer(
+  const executeContainer = async (
     command: ResolvedRunnerToolCommand,
     signal: AbortSignal | undefined,
     stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
-  ): Promise<RunnerCommandResult> {
+  ): Promise<RunnerCommandResult> => {
     const root = await resolveRunnerWorkspace(command.workingDirectory);
-    await this.#containers.prepare(command.sessionId, root, signal);
+    await containers.prepare(command.sessionId, root, signal);
     if (command.tool === RUNNER_AGENT_FILE_COMMAND) {
       return agentFileResult(root, command.arguments, true);
     }
@@ -285,7 +303,7 @@ export class RunnerCommandExecutor {
       shellStream,
     ) =>
       runnerCommandResultFromOutput(
-        await this.#containers.executeShell(
+        await containers.executeShell(
           command.sessionId,
           root,
           shellCommand,
@@ -304,29 +322,30 @@ export class RunnerCommandExecutor {
       signal,
       undefined,
       {
-        ...this.#toolOptions(command, stream),
+        ...toolOptions(command, stream),
         containPaths: true,
         mapAbsolutePath: (path) => mapContainerPath(root, path),
         shell,
       },
     );
-  }
+  };
 
-  #toolOptions(
+  const toolOptions = (
     command: ResolvedRunnerToolCommand,
     stream: NonNullable<RunnerToolExecutionOptions["stream"]> | undefined,
-  ): RunnerToolExecutionOptions {
+  ): RunnerToolExecutionOptions => {
     return {
       executionLimitSeconds: command.executionLimitSeconds,
       outputLimitCharacters: command.outputLimitCharacters,
       ...(stream === undefined ? {} : { stream }),
     };
-  }
+  };
 
-  async execute(
+  const execute = async (
     command: RunnerToolCommand,
     signal?: AbortSignal,
-  ): Promise<string> {
-    return (await this.executeResult(command, signal)).output;
-  }
+  ): Promise<string> => {
+    return (await executeResult(command, signal)).output;
+  };
+  return { execute, executeResult };
 }

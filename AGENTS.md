@@ -190,14 +190,18 @@ Memory.
   optional cross-dialect declarations fail here; app source remains checked.
   Re-enable after an upstream fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
-  presets, imports `.gitignore`, bans non-const assertions, enforces exhaustive
-  switches and canonical named imports (one declaration/module with inline
-  `type` markers). Default imports: only `@eslint/js`, `@tailwindcss/vite`,
-  `vite-plugin-solid`; aliases, namespaces, dynamic imports, import attributes,
-  import-equals, `import()` types, side-effect imports (except
-  production/browser-test `solid/styles.css`) are rejected. First-party code
-  rejects unsafe DOM HTML injection, `dangerouslySetInnerHTML`, HTML-like
-  `Response` bodies; HTML-like data, TSX pass.
+  presets, imports `.gitignore`, bans non-const assertions and all TypeScript
+  `switch` statements and classes: use data-driven dispatch, closure factories,
+  and tagged error factories with type guards instead. Dynamic-key lookups into
+  dispatch records must use shared `isDispatchKey`/`Object.hasOwn`; literal-key
+  `in` narrowing of union or error shapes is allowed. It enforces canonical
+  named imports (one declaration/module with inline `type` markers). Default
+  imports: only `@eslint/js`, `@tailwindcss/vite`, `vite-plugin-solid`; aliases,
+  namespaces, dynamic imports, import attributes, import-equals, `import()`
+  types, side-effect imports (except production/browser-test `solid/styles.css`)
+  are rejected. First-party code rejects unsafe DOM HTML injection,
+  `dangerouslySetInnerHTML`, HTML-like `Response` bodies; HTML-like data, TSX
+  pass.
 - Knip checks all issue types and entry exports in separate test/production
   graphs; shipped browser scripts are production roots, tests can't keep
   production alive, unused test helpers fail. Add Knip roots for

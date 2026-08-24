@@ -1,13 +1,16 @@
 import { eq } from "drizzle-orm";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   createCredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { providerCredentials } from "../../shared/database/schema.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  type ProviderCredentialStore,
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -106,21 +109,7 @@ async function readFormBody(
   );
 }
 
-function createIdToken(email: string, accountId: string): string {
-  const header = Buffer.from(
-    JSON.stringify({ alg: "RS256", typ: "JWT" }),
-  ).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({
-      email,
-      "https://api.openai.com/auth": {
-        chatgpt_account_id: accountId,
-        chatgpt_user_id: `user-${accountId}`,
-      },
-    }),
-  ).toString("base64url");
-  return `${header}.${payload}.test-signature`;
-}
+import { createIdToken } from "./openai-token-fixtures.ts";
 
 const FIRST_ID_TOKEN = createIdToken(
   "one@example.com",
@@ -259,12 +248,18 @@ async function setupConnectedCredential() {
   );
   return {
     ...setup,
-    store: new ProviderCredentialStore(
+    store: createProviderCredentialStore(
       setup.database,
       createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
       "openai",
     ),
   };
+}
+
+function listedCredential(
+  store: ProviderCredentialStore,
+): ReturnType<ProviderCredentialStore["list"]>[number] | undefined {
+  return store.list(TEST_USER_ID).find(({ id }) => id === FIRST_OAUTH_ID);
 }
 
 function markForReconnect(store: ProviderCredentialStore): string | undefined {
@@ -393,7 +388,7 @@ describe("OpenAI credentials", () => {
       redirect_uri: CALLBACK_URL,
     });
     expect(providerRequests).toHaveLength(4);
-    const credentialStore = new ProviderCredentialStore(
+    const credentialStore = createProviderCredentialStore(
       database,
       createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
       "openai",
@@ -441,11 +436,32 @@ describe("OpenAI credentials", () => {
       refresh_token: "oauth-refresh-token-one",
     });
 
+    expect(providerRequests.at(-1)?.method).toBe("POST");
+    expectRemovedProviderCredential(
+      { database, integration, providerRequests },
+      TEST_ROUTES,
+      FIRST_KEY_ID,
+    );
+    database.$client.close();
+  });
+
+  test("rejects an account changed during the callback", async () => {
+    const setup = await setupConnectedCredential();
+    const { database, integration, store } = setup;
+    const unchangedSecret = markForReconnect(store);
+    database.$client.run(`CREATE TRIGGER change_account_during_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN UPDATE provider_credentials SET provider_account_id = 'chatgpt-workspace-two'
+      WHERE id = '${FIRST_OAUTH_ID}'; END`);
+
     try {
-      expectRemovedProviderCredential(
-        { database, integration, providerRequests },
-        TEST_ROUTES,
-        FIRST_KEY_ID,
+      const reconnect = beginReconnect(integration, SECOND_STATE);
+      await expectWrongAccount(integration, reconnect);
+      const credentialAfterRejection = listedCredential(store);
+      expect(credentialAfterRejection?.accountId).toBe("chatgpt-workspace-one");
+      expect(credentialAfterRejection?.requiresReauthentication).toBe(true);
+      expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
+        unchangedSecret,
       );
     } finally {
       database.$client.close();
@@ -476,18 +492,17 @@ describe("OpenAI credentials", () => {
       await integration.complete(reconnect.callbackRequest),
       "http://localhost:3000/app?openai=connected",
     );
-    expect(store.list(TEST_USER_ID)).toContainEqual(
+    const reconnectedCredential = listedCredential(store);
+    expect(reconnectedCredential).toEqual(
       expect.objectContaining({
         accountId: "chatgpt-workspace-one",
-        id: FIRST_OAUTH_ID,
-        isDefault: false,
         requiresReauthentication: false,
       }),
     );
 
-    const endpointReconnect = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockReturnValue(true);
+    database.$client.run(`CREATE TRIGGER reject_unexpected_endpoint_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN SELECT RAISE(ABORT, 'unexpected endpoint reconnect'); END`);
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
     const unflagged = beginReconnect(integration, "openai-state-six");
     database
@@ -516,40 +531,8 @@ describe("OpenAI credentials", () => {
       "openai-state-eight",
     );
     await expectWrongAccount(integration, missingStoredIdentity);
-    expect(endpointReconnect).not.toHaveBeenCalled();
-    endpointReconnect.mockRestore();
+    database.$client.run("DROP TRIGGER reject_unexpected_endpoint_reconnect");
     database.$client.close();
-  });
-
-  test("rejects an account changed during the callback", async () => {
-    const setup = await setupConnectedCredential();
-    const { database, integration, store } = setup;
-    const unchangedSecret = markForReconnect(store);
-    const originalUpdateSecret = store.updateSecret.bind(store);
-    const updateSecret = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockImplementation((...parameters) => {
-        const reconnectOnly = parameters[4] === true;
-        if (reconnectOnly) {
-          database
-            .update(providerCredentials)
-            .set({ providerAccountId: "chatgpt-workspace-two" })
-            .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
-            .run();
-        }
-        return originalUpdateSecret(...parameters);
-      });
-
-    try {
-      const reconnect = beginReconnect(integration, SECOND_STATE);
-      await expectWrongAccount(integration, reconnect);
-      expect(store.readSecret(TEST_USER_ID, FIRST_OAUTH_ID)).toBe(
-        unchangedSecret,
-      );
-    } finally {
-      updateSecret.mockRestore();
-      database.$client.close();
-    }
   });
 
   test("rejects an OAuth callback with unverifiable state", () =>

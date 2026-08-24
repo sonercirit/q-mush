@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { testAgentModelOption } from "../../shared/test/agent-model-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -78,7 +78,7 @@ test("fork editor warns only after choosing a different provider or model", asyn
     ],
   };
   const reactive = selectedForkState(detail);
-  const controller = new SessionController(reactive, undefined, null, {
+  const controller = createSessionController(reactive, undefined, null, {
     command: (operation) =>
       Promise.resolve(
         operation === "sessions.models"
@@ -180,7 +180,7 @@ test("historical transcript pages do not offer fork controls", () => {
       },
     },
   });
-  const controller = new SessionController(reactive, undefined, null);
+  const controller = createSessionController(reactive, undefined, null);
   vi.spyOn(controller, "fork").mockImplementation((messageId) => {
     onFork(messageId);
     return Promise.resolve();

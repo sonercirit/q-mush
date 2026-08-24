@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { type SessionAgentActions } from "../session-agent-actions.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore, type SessionStore } from "../session-store.ts";
 import { testAskQuestionsInput } from "./ask-questions-test-fixtures.ts";
 import {
   TEST_FOREIGN_USER_ID,
@@ -234,7 +234,7 @@ test("durable generation events survive recreation, compaction, and duplicate sc
   );
   compactRunningParent(setup.store, setup.parentId, setup.parentGeneration);
 
-  const recreated = new SessionStore(
+  const recreated = createSessionStore(
     setup.database,
     () => "recreated-child-event-message",
     () => DEFAULT_TOOL_SETTINGS,
@@ -430,7 +430,7 @@ test("continued idle child attempts each deliver exactly once", () => {
   expect(setup.store.pendingSpawnedSessions()).toEqual([]);
 
   setChildStatus(setup, "completed");
-  const replayStore = new SessionStore(
+  const replayStore = createSessionStore(
     setup.database,
     () => "idle-event-replay-message",
     () => DEFAULT_TOOL_SETTINGS,

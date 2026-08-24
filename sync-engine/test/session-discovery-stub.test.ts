@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { startToolSession } from "./session-agent-tool-setup.ts";
 
 test("session creation never reaches the network without injected discovery", async () => {
@@ -9,7 +9,7 @@ test("session creation never reaches the network without injected discovery", as
     .mockRejectedValue(new Error("Tests must not fetch"));
   try {
     const setup = await startToolSession(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         { content: "No discovery needed.", toolCalls: [] },
       ]),
     );

@@ -1,5 +1,5 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export function currentStoredSession(
   store: Pick<SessionStore, "get">,

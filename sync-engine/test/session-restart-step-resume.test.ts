@@ -3,9 +3,9 @@ import { expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import { TEST_AUTHENTICATED_USER } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
@@ -29,9 +29,9 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import {
   completeRestartCommands,
+  createMultiSessionRestartModel,
   createRestartSessions,
   expectRestartPaused,
-  MultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
@@ -56,22 +56,23 @@ function includesContent(
   return messages.some((message) => message.content.includes(content));
 }
 
-class ReportCompactionModel implements AgentModel {
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    expect(includesContent(messages, COMPLETION_REPORT)).toBe(true);
-    return Promise.resolve(providerStep(COMPACTION_REPORT_SUMMARY));
-  }
+function createReportCompactionModel(): AgentModel {
+  return {
+    complete(messages) {
+      expect(includesContent(messages, COMPLETION_REPORT)).toBe(true);
+      return Promise.resolve(providerStep(COMPACTION_REPORT_SUMMARY));
+    },
+  };
 }
 
-class RestartedSpawnModel implements AgentModel {
-  readonly requests: AgentConversationMessage[][] = [];
+interface RestartedSpawnModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+}
 
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    this.requests.push([...messages]);
+function createRestartedSpawnModel(): RestartedSpawnModel {
+  const recorder = createAgentRequestRecorder();
+  const complete: AgentModel["complete"] = (messages) => {
+    recorder.record(messages);
     if (includesContent(messages, COMPLETION_REPORT)) {
       return Promise.resolve(
         providerStep("The parent received the true child completion."),
@@ -101,7 +102,8 @@ class RestartedSpawnModel implements AgentModel {
         toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
       }),
     );
-  }
+  };
+  return { complete, requests: recorder.requests };
 }
 
 async function startChildToolSession(model: AgentModel) {
@@ -166,7 +168,7 @@ function completeCurrentRunnerCommand(
 }
 
 test("a spawned session resumes its interrupted step after server recreation", async () => {
-  const model = new RestartedSpawnModel();
+  const model = createRestartedSpawnModel();
   const { childId, setup: initial } = await startChildToolSession(model);
 
   const drain = initial.sessions.drain();
@@ -215,7 +217,7 @@ test("a spawned session resumes its interrupted step after server recreation", a
 });
 
 test("a reported child event survives parent compaction and is consumed on resume", async () => {
-  const childModel = new RestartedSpawnModel();
+  const childModel = createRestartedSpawnModel();
   const { childId, setup: initial } = await startChildToolSession(childModel);
   completeCurrentRunnerCommand(initial, CHILD_TOOL_OUTPUT);
   await waitForCompletedChild(initial, childId);
@@ -223,7 +225,10 @@ test("a reported child event survives parent compaction and is consumed on resum
   await completeWokenParent(initial);
   expect(completionReports(initial)).toHaveLength(1);
 
-  const compacted = recreateSessionSetup(new ReportCompactionModel(), initial);
+  const compacted = recreateSessionSetup(
+    createReportCompactionModel(),
+    initial,
+  );
   const response = await compacted.sessions.realtimeCommands.compactForUser(
     TEST_AUTHENTICATED_USER,
     SESSION_ID,
@@ -314,7 +319,7 @@ function corruptRestartHandoff(
 }
 
 test("multiple sessions resume their interrupted steps after one server recreation", async () => {
-  const model = new MultiSessionRestartModel();
+  const model = createMultiSessionRestartModel();
   const { ids, initial } = await drainParkedSessions(model);
   expect(ids).toHaveLength(RESTART_SESSION_COUNT);
   assertSessionStatuses(initial, ids, "paused");
@@ -339,7 +344,7 @@ test("multiple sessions resume their interrupted steps after one server recreati
 });
 
 test("one corrupt handoff fails visibly without blocking other restart resumes", async () => {
-  const model: AgentModel = new MultiSessionRestartModel();
+  const model: AgentModel = createMultiSessionRestartModel();
   const parked = await drainParkedSessions(model);
   const { ids, initial } = parked;
   const corruptId = ids[1];

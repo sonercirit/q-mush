@@ -1,6 +1,9 @@
 import { expect, test, vi } from "vitest";
 import { RUNNER_AGENT_FILE_COMMAND } from "../../shared/agent-file.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import {
   RUNNER_DIRECTORY_COMMAND,
   type RunnerDirectoryListing,
@@ -8,13 +11,17 @@ import {
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import { createSessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { loadSessionAgentFile } from "../../sync-engine/session-agent-file.ts";
 import {
-  SessionRequestHelpers,
+  createSessionRequestHelpers,
   type RunnerDirectoryRequest,
+  type SessionRequestHelpers,
 } from "../../sync-engine/session-request-helpers.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   createAuthenticatedTestContext,
   createAuthenticatedTestDatabase,
@@ -50,34 +57,31 @@ function testSession(): AgentSessionDetail {
   };
 }
 
-class CurrentSessionStore extends SessionStore {
-  override get(
-    userId: string,
-    sessionId: string,
-  ): AgentSessionDetail | undefined {
-    const session = testSession();
-    return userId === TEST_USER_ID && sessionId === session.id
-      ? session
-      : undefined;
-  }
-
-  override executionIsCurrent(
-    userId: string,
-    sessionId: string,
-    generation: number,
-  ): boolean {
-    const session = testSession();
-    return (
-      userId === TEST_USER_ID &&
-      sessionId === session.id &&
-      generation === session.generation
-    );
-  }
+function createCurrentSessionStore(): Pick<
+  SessionStore,
+  "executionIsCurrent" | "get"
+> {
+  return {
+    get: (userId, sessionId) => {
+      const session = testSession();
+      return userId === TEST_USER_ID && sessionId === session.id
+        ? session
+        : undefined;
+    },
+    executionIsCurrent: (userId, sessionId, generation) => {
+      const session = testSession();
+      return (
+        userId === TEST_USER_ID &&
+        sessionId === session.id &&
+        generation === session.generation
+      );
+    },
+  };
 }
 
 function queuedBroker() {
   let nextId = 0;
-  return new RunnerCommandBroker({
+  return createRunnerCommandBroker({
     commandId: () => `filesystem-command-${String((nextId += 1))}`,
   });
 }
@@ -99,7 +103,7 @@ function helpers(broker: RunnerCommandBroker) {
   };
   return {
     close,
-    requests: new SessionRequestHelpers(auth, broker, {
+    requests: createSessionRequestHelpers(auth, broker, {
       runnerIsAvailable: () => true,
     }),
   };
@@ -251,14 +255,17 @@ test("agent directory browsing passes parent identity, authorization, and signal
     },
   );
   const database = createAuthenticatedTestDatabase();
-  const store = new CurrentSessionStore(
-    database,
-    undefined,
-    () => DEFAULT_TOOL_SETTINGS,
-    emptyRuntimes,
-  );
+  const store = {
+    ...createSessionStore(
+      database,
+      undefined,
+      () => DEFAULT_TOOL_SETTINGS,
+      emptyRuntimes,
+    ),
+    ...createCurrentSessionStore(),
+  };
   const session = testSession();
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...actionDefaults(),
     browseDirectories: browse,
     database,

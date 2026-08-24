@@ -2,10 +2,8 @@ import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { prompts } from "../../shared/database/schema.ts";
 import {
-  DuplicatePromptNameError,
-  PromptChangedError,
-  PromptLimitError,
-  PromptStore,
+  createPromptStore,
+  type PromptStore,
 } from "../../sync-engine/prompt-store.ts";
 import {
   addTestUser,
@@ -39,7 +37,7 @@ function createStore() {
   ];
   return {
     database,
-    store: new PromptStore(database, () =>
+    store: createPromptStore(database, () =>
       takeValue(ids, "The test ran out of prompt IDs"),
     ),
   };
@@ -95,7 +93,9 @@ function updatePrompt(
 }
 
 function expectPromptChanged(action: () => unknown): void {
-  expect(action).toThrow(PromptChangedError);
+  expect(() => action()).toThrow(
+    expect.objectContaining({ kind: "prompt_changed" }),
+  );
 }
 
 describe("prompt store", () => {
@@ -163,7 +163,7 @@ describe("prompt store", () => {
           { body: "Duplicate", name: "RELEASE  CHECKLIST" },
           TEST_NOW + 3,
         ),
-      ).toThrow(DuplicatePromptNameError);
+      ).toThrow(expect.objectContaining({ kind: "duplicate_prompt_name" }));
       expect(store.get(TEST_USER_ID, OTHER_PROMPT_ID)).toBeUndefined();
       expect(store.get(TEST_FOREIGN_USER_ID, OTHER_PROMPT_ID)).toEqual(other);
       expect(store.remove(TEST_USER_ID, OTHER_PROMPT_ID, TEST_NOW + 4, 1)).toBe(
@@ -209,14 +209,14 @@ describe("prompt store", () => {
         store.remove(TEST_USER_ID, first.id, TEST_NOW + 3, first.revision),
       );
 
-      const limited = new PromptStore(database, () => SECOND_PROMPT_ID, 1);
+      const limited = createPromptStore(database, () => SECOND_PROMPT_ID, 1);
       expect(() =>
         limited.create(
           TEST_USER_ID,
           { body: "Over limit", name: "Second" },
           TEST_NOW + 4,
         ),
-      ).toThrow(PromptLimitError);
+      ).toThrow(expect.objectContaining({ kind: "prompt_limit" }));
       expect(
         limited.create(
           TEST_FOREIGN_USER_ID,

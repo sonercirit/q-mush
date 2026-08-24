@@ -6,12 +6,24 @@ import {
 } from "../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 
-export class SessionExecutionCleanup {
-  readonly #broker: RunnerCommandBroker;
-  #activeDrains = 0;
-  #drainGeneration = 0;
-  readonly #offline = new Set<string>();
-  readonly #pending = new Map<
+export interface SessionExecutionCleanup {
+  readonly pending: Iterable<Promise<void>>;
+  readonly cancelPending: () => void;
+  readonly cleanup: (detail: AgentSessionDetail) => Promise<void>;
+  readonly cleanupTerminal: (detail: AgentSessionDetail) => Promise<void>;
+  readonly clearOffline: (sessionId: string) => void;
+  readonly drainPending: (deadline: RestartDeadline) => Promise<void>;
+  readonly markOffline: (sessionId: string) => void;
+  readonly waitFor: (sessionId: string) => Promise<void> | undefined;
+}
+
+export function createSessionExecutionCleanup(
+  broker: RunnerCommandBroker,
+): SessionExecutionCleanup {
+  let activeDrains = 0;
+  let drainGeneration = 0;
+  const offline = new Set<string>();
+  const pending = new Map<
     string,
     {
       readonly controller: AbortController;
@@ -20,31 +32,23 @@ export class SessionExecutionCleanup {
     }
   >();
 
-  constructor(broker: RunnerCommandBroker) {
-    this.#broker = broker;
-  }
-
-  get pending(): Iterable<Promise<void>> {
-    return [...this.#pending.values()].map(({ promise }) => promise);
-  }
-
-  cancelPending(): void {
-    for (const [sessionId, pending] of this.#pending) {
-      pending.controller.abort(
+  const cancelPending = (): void => {
+    for (const [sessionId, operation] of pending) {
+      operation.controller.abort(
         new DOMException("The server is restarting", "RestartHandoff"),
       );
-      this.#broker.cancelSessionCommands(sessionId);
+      broker.cancelSessionCommands(sessionId);
     }
-  }
+  };
 
-  async drainPending(deadline: RestartDeadline): Promise<void> {
-    this.#activeDrains += 1;
-    this.#drainGeneration += 1;
-    const pending = [...this.pending];
+  const drainPending = async (deadline: RestartDeadline): Promise<void> => {
+    activeDrains += 1;
+    drainGeneration += 1;
+    const operations = [...pending.values()].map(({ promise }) => promise);
     try {
-      if (pending.length === 0) return;
+      if (operations.length === 0) return;
       if (deadline.expired()) {
-        this.cancelPending();
+        cancelPending();
         return;
       }
       let timer: ReturnType<typeof setTimeout> | undefined;
@@ -55,52 +59,32 @@ export class SessionExecutionCleanup {
       });
       try {
         const completed = await Promise.race([
-          Promise.allSettled(pending).then(() => true),
+          Promise.allSettled(operations).then(() => true),
           expired,
         ]);
-        if (!completed) {
-          this.cancelPending();
-        }
+        if (!completed) cancelPending();
       } finally {
         if (timer !== undefined) clearTimeout(timer);
       }
     } finally {
-      this.#activeDrains -= 1;
+      activeDrains -= 1;
     }
-  }
+  };
 
-  clearOffline(sessionId: string): void {
-    this.#offline.delete(sessionId);
-  }
-
-  markOffline(sessionId: string): void {
-    this.#offline.add(sessionId);
-  }
-
-  cleanup(detail: AgentSessionDetail): Promise<void> {
-    if (detail.executionEnvironment !== "container") {
-      return Promise.resolve();
-    }
-    return this.#dispatch(detail, false);
-  }
-
-  cleanupTerminal(detail: AgentSessionDetail): Promise<void> {
-    return this.#dispatch(detail, true);
-  }
-
-  #dispatch(detail: AgentSessionDetail, terminal: boolean): Promise<void> {
-    if (this.#offline.delete(detail.id) || this.#activeDrains > 0) {
-      return Promise.resolve();
-    }
-    const existing = this.#pending.get(detail.id);
+  const dispatch = (
+    detail: AgentSessionDetail,
+    terminal: boolean,
+  ): Promise<void> => {
+    if (offline.delete(detail.id) || activeDrains > 0) return Promise.resolve();
+    const existing = pending.get(detail.id);
     if (existing !== undefined && (!terminal || existing.terminal)) {
       return existing.promise;
     }
-    const drainGeneration = this.#drainGeneration;
-    const dispatch = (signal: AbortSignal) =>
-      this.#activeDrains > 0 || drainGeneration !== this.#drainGeneration
+    const dispatchGeneration = drainGeneration;
+    const run = (signal: AbortSignal) =>
+      activeDrains > 0 || dispatchGeneration !== drainGeneration
         ? Promise.resolve()
-        : this.#broker
+        : broker
             .dispatch(
               {
                 arguments: terminal
@@ -117,21 +101,33 @@ export class SessionExecutionCleanup {
             .then(() => undefined)
             .catch(() => undefined);
     const controller = new AbortController();
-    const cleanup =
+    const promise =
       existing === undefined
-        ? dispatch(controller.signal)
-        : existing.promise.then(() => dispatch(controller.signal));
-    const pending = { controller, promise: cleanup, terminal };
-    this.#pending.set(detail.id, pending);
-    void cleanup.then(() => {
-      if (this.#pending.get(detail.id) === pending) {
-        this.#pending.delete(detail.id);
-      }
+        ? run(controller.signal)
+        : existing.promise.then(() => run(controller.signal));
+    const operation = { controller, promise, terminal };
+    pending.set(detail.id, operation);
+    void promise.then(() => {
+      if (pending.get(detail.id) === operation) pending.delete(detail.id);
     });
-    return cleanup;
-  }
+    return promise;
+  };
 
-  waitFor(sessionId: string): Promise<void> | undefined {
-    return this.#pending.get(sessionId)?.promise;
-  }
+  return {
+    get pending() {
+      return [...pending.values()].map(({ promise }) => promise);
+    },
+    cancelPending,
+    cleanup: (detail) =>
+      detail.executionEnvironment === "container"
+        ? dispatch(detail, false)
+        : Promise.resolve(),
+    cleanupTerminal: (detail) => dispatch(detail, true),
+    clearOffline: (sessionId) => offline.delete(sessionId) && undefined,
+    drainPending,
+    markOffline: (sessionId) => {
+      offline.add(sessionId);
+    },
+    waitFor: (sessionId) => pending.get(sessionId)?.promise,
+  };
 }

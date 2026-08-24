@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { SessionRuntimes } from "../session-runtime.ts";
+import { createSessionRuntimes } from "../session-runtime.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -28,7 +28,7 @@ function markedShutdownSession(
 
 test("a live drain marker is not recovered by production liveness scans", () => {
   const setup = runningSetup();
-  const runtimeSet = new SessionRuntimes();
+  const runtimeSet = createSessionRuntimes();
   const watchdog = watchdogSetup(setup, { runtimes: runtimeSet });
   const runtime = launchRuntime(setup, runtimeSet, setup.detail.generation);
   watchdog.shutdownInterrupted.beginLiveDrain();

@@ -5,6 +5,7 @@ import {
   type AnthropicReplayBlock,
   type AnthropicReplayObject,
 } from "../../shared/anthropic-replay.ts";
+import { createAnthropicReplayCapture } from "../../sync-engine/provider-stream-anthropic-replay.ts";
 import { recordedMessageValues } from "../../sync-engine/session-store-values.ts";
 import {
   ANTHROPIC_TEST_PROVENANCE,
@@ -41,31 +42,7 @@ import {
 } from "./anthropic-response-event-fixtures.ts";
 import { emptyProviderToolCall } from "./provider-step-fixtures.ts";
 
-const ADDITIVE_TOOL_BLOCK = {
-  caller: { type: "direct" },
-  future_tool_field: { token: "opaque" },
-  id: "call-additive",
-  input: { path: "additive-provider-field.md" },
-  name: "read_additive_field",
-  type: "tool_use" as const,
-};
-
-function additiveReplayBlocks() {
-  return [
-    {
-      signature: "signed-thinking",
-      thinking: "Inspect.",
-      type: "thinking" as const,
-      vendor_metadata: { revision: 2 },
-    },
-    {
-      future_text_field: ["opaque", { enabled: true }],
-      text: "Ready.",
-      type: "text" as const,
-    },
-    ADDITIVE_TOOL_BLOCK,
-  ] as const;
-}
+import { additiveReplayBlocks } from "./anthropic-additive-replay-fixtures.ts";
 
 function streamedToolDelta(
   index: number,
@@ -236,6 +213,16 @@ function replayTool(caller?: AnthropicReplayObject): AnthropicReplayObject {
     type: "tool_use",
   };
 }
+
+test("rejects prototype property names as replay delta types", () => {
+  const capture = createAnthropicReplayCapture("test");
+  capture.readModel(KNOWN_ANTHROPIC_MODEL);
+  capture.start(0, { text: "", type: "text" });
+  capture.delta(0, { text: "poison", type: "toString" });
+  capture.stop(0);
+
+  expect(capture.finish()).toBeUndefined();
+});
 
 describe("Anthropic response replay", () => {
   test("streams tool calls and thinking from Messages events", async () => {

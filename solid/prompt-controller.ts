@@ -39,46 +39,53 @@ interface PromptWrite {
   readonly success: (prompt: Prompt) => Partial<PromptViewState>;
 }
 
-export class PromptController {
-  readonly #view: RevisionState<PromptViewState>;
+export interface PromptController {
+  readonly beginEdit: (promptId: string) => void;
+  readonly cancelDelete: () => void;
+  readonly cancelEdit: () => void;
+  readonly create: () => Promise<void>;
+  readonly insertSelected: (insert: (body: string) => boolean) => boolean;
+  readonly load: () => Promise<void>;
+  readonly remove: (promptId: string) => Promise<void>;
+  readonly requestDelete: (promptId: string) => void;
+  readonly reset: () => void;
+  readonly saveEdit: () => Promise<void>;
+  readonly select: (promptId: string) => void;
+  readonly setCreateField: (name: keyof PromptInput, value: string) => void;
+  readonly setEditField: (name: keyof PromptInput, value: string) => void;
+  readonly state: PromptViewState;
+  readonly view: RevisionState<PromptViewState>["accessor"];
+}
 
-  constructor(
-    view: ReactiveState<PromptViewState> = createReactiveState(
-      createPromptViewState(undefined),
-    ),
-  ) {
-    this.#view = reactiveRevisionState(view);
+export function createPromptController(
+  reactive: ReactiveState<PromptViewState> = createReactiveState(
+    createPromptViewState(undefined),
+  ),
+): PromptController {
+  const viewState = reactiveRevisionState(reactive);
+  const state = (): PromptViewState => viewState.value;
+
+  function find(promptId: string | undefined): Prompt | undefined {
+    return state().prompts?.find((prompt) => prompt.id === promptId);
   }
 
-  get state(): PromptViewState {
-    return this.#view.value;
+  function hasActiveSession(): boolean {
+    return state().prompts !== undefined;
   }
 
-  get view() {
-    return this.#view.accessor;
-  }
-
-  #find(promptId: string | undefined): Prompt | undefined {
-    return this.state.prompts?.find((prompt) => prompt.id === promptId);
-  }
-
-  #hasActiveSession(): boolean {
-    return this.state.prompts !== undefined;
-  }
-
-  #withPrompt(promptId: string, use: (prompt: Prompt) => void): void {
-    const prompt = this.#find(promptId);
+  function withPrompt(promptId: string, use: (prompt: Prompt) => void): void {
+    const prompt = find(promptId);
     if (prompt !== undefined) {
       use(prompt);
     }
   }
 
-  beginEdit(promptId: string): void {
-    if (this.#isBusy()) {
+  function beginEdit(promptId: string): void {
+    if (isBusy()) {
       return;
     }
-    this.#withPrompt(promptId, (prompt) => {
-      this.#view.patch({
+    withPrompt(promptId, (prompt) => {
+      viewState.patch({
         confirmDeleteId: undefined,
         editDraft: { body: prompt.body, name: prompt.name },
         editingId: promptId,
@@ -87,128 +94,126 @@ export class PromptController {
     });
   }
 
-  cancelDelete(): void {
-    this.#view.patch({ confirmDeleteId: undefined });
+  function cancelDelete(): void {
+    viewState.patch({ confirmDeleteId: undefined });
   }
 
-  cancelEdit(): void {
-    if (!this.state.saving) {
-      this.#view.patch(this.#closedEditor());
+  function cancelEdit(): void {
+    if (!state().saving) {
+      viewState.patch(closedEditor());
     }
   }
 
-  create(): Promise<void> {
-    return this.#isBusy() || !this.#hasActiveSession()
+  function create(): Promise<void> {
+    return isBusy() || !hasActiveSession()
       ? Promise.resolve()
-      : this.#write({
+      : write({
           error: "We could not save that prompt. Please try again.",
-          input: this.state.createDraft,
+          input: state().createDraft,
           method: "POST",
           path: PROMPTS_PATH,
           success: (prompt) => ({
             createDraft: { body: "", name: "" },
-            prompts: [...(this.state.prompts ?? []), prompt],
+            prompts: [...(state().prompts ?? []), prompt],
           }),
         });
   }
 
-  insertSelected(insert: (body: string) => boolean): boolean {
-    const body = this.#find(this.state.selectedId)?.body;
+  function insertSelected(insert: (body: string) => boolean): boolean {
+    const body = find(state().selectedId)?.body;
     return body === undefined ? false : insert(body);
   }
 
-  async load(): Promise<void> {
-    if (!this.#isBusy()) {
-      await this.#load(true);
+  async function load(): Promise<void> {
+    if (!isBusy()) {
+      await loadPrompts(true);
     }
   }
 
-  remove(promptId: string): Promise<void> {
-    return this.#isBusy() ? Promise.resolve() : this.#remove(promptId);
+  function remove(promptId: string): Promise<void> {
+    return isBusy() ? Promise.resolve() : removePrompt(promptId);
   }
 
-  requestDelete(promptId: string): void {
-    if (!this.#isBusy() && this.#find(promptId) !== undefined) {
-      this.#view.patch({ confirmDeleteId: promptId, error: undefined });
+  function requestDelete(promptId: string): void {
+    if (!isBusy() && find(promptId) !== undefined) {
+      viewState.patch({ confirmDeleteId: promptId, error: undefined });
     }
   }
 
-  reset(): void {
-    this.#view.reset(createPromptViewState(undefined));
+  function reset(): void {
+    viewState.reset(createPromptViewState(undefined));
   }
 
-  saveEdit(): Promise<void> {
-    const promptId = this.state.editingId;
-    if (this.#isBusy() || !this.#hasActiveSession() || promptId === undefined) {
+  function saveEdit(): Promise<void> {
+    const promptId = state().editingId;
+    if (isBusy() || !hasActiveSession() || promptId === undefined) {
       return Promise.resolve();
     }
-    return this.#write({
+    return write({
       error: "We could not update that prompt. Please try again.",
-      input: this.state.editDraft,
+      input: state().editDraft,
       method: "PUT",
       path: promptPath(promptId),
       promptId,
       success: (prompt) => ({
-        ...this.#closedEditor(),
-        prompts: this.state.prompts?.map((existing) =>
+        ...closedEditor(),
+        prompts: state().prompts?.map((existing) =>
           existing.id === prompt.id ? prompt : existing,
         ),
       }),
     });
   }
 
-  select(promptId: string): void {
-    if (this.state.prompts?.some(({ id }) => id === promptId) === true) {
-      this.#view.patch({ selectedId: promptId });
+  function select(promptId: string): void {
+    if (state().prompts?.some(({ id }) => id === promptId) === true) {
+      viewState.patch({ selectedId: promptId });
     }
   }
 
-  #isBusy(): boolean {
+  function isBusy(): boolean {
     return (
-      this.state.loading ||
-      this.state.removingId !== undefined ||
-      this.state.saving
+      state().loading || state().removingId !== undefined || state().saving
     );
   }
 
-  #settleAbandonedOperation(revision: number): void {
-    this.#view.patchCurrent(revision, { saving: false });
+  function settleAbandonedOperation(revision: number): void {
+    viewState.patchCurrent(revision, { saving: false });
   }
 
-  #setDraftField(
+  function setDraftField(
     draft: "createDraft" | "editDraft",
     name: keyof PromptInput,
     value: string,
   ): void {
-    this.#view.patch({ [draft]: { ...this.state[draft], [name]: value } });
+    viewState.patch({ [draft]: { ...state()[draft], [name]: value } });
   }
 
-  setCreateField(name: keyof PromptInput, value: string): void {
-    this.#setDraftField("createDraft", name, value);
+  function setCreateField(name: keyof PromptInput, value: string): void {
+    setDraftField("createDraft", name, value);
   }
 
-  setEditField(name: keyof PromptInput, value: string): void {
-    this.#setDraftField("editDraft", name, value);
+  function setEditField(name: keyof PromptInput, value: string): void {
+    setDraftField("editDraft", name, value);
   }
 
-  async #write(configuration: PromptWrite): Promise<void> {
+  async function write(configuration: PromptWrite): Promise<void> {
     const input = normalizePromptInput(configuration.input);
     if (input === undefined) {
-      this.#view.patch({ error: INVALID_INPUT_ERROR });
+      viewState.patch({ error: INVALID_INPUT_ERROR });
       return;
     }
-    const stored = this.#find(configuration.promptId);
+    const stored = find(configuration.promptId);
     if (configuration.promptId !== undefined && stored === undefined) {
-      this.#view.patch({ error: CHANGED_ERROR });
+      viewState.patch({ error: CHANGED_ERROR });
       return;
     }
 
-    const revision = this.#view.begin({ error: undefined, saving: true });
+    const revision = viewState.begin({ error: undefined, saving: true });
     const finish = (patch: Partial<PromptViewState>): void => {
-      if (this.#view.isCurrent(revision)) {
-        this.#view.patch({ ...patch, saving: false });
+      if (viewState.isCurrent(revision)) {
+        viewState.patch({ ...patch, saving: false });
       } else {
-        this.#settleAbandonedOperation(revision);
+        settleAbandonedOperation(revision);
       }
     };
     try {
@@ -238,12 +243,12 @@ export class PromptController {
         return;
       }
       if (hasHttpStatus(error, 412) && configuration.promptId !== undefined) {
-        const draft = this.state.editDraft;
-        const conflict = await this.#conflictPatch(revision);
-        if (this.#view.isCurrent(revision)) {
-          this.#view.patch({ editDraft: draft, ...conflict, saving: false });
+        const draft = state().editDraft;
+        const conflict = await conflictPatch(revision);
+        if (viewState.isCurrent(revision)) {
+          viewState.patch({ editDraft: draft, ...conflict, saving: false });
         } else {
-          this.#settleAbandonedOperation(revision);
+          settleAbandonedOperation(revision);
         }
         return;
       }
@@ -251,23 +256,23 @@ export class PromptController {
     }
   }
 
-  async #conflictPatch(
+  async function conflictPatch(
     revision: number,
   ): Promise<Pick<PromptViewState, "error"> & Partial<PromptViewState>> {
-    const prompts = await this.#load(false, revision);
+    const prompts = await loadPrompts(false, revision);
     return {
       error: CHANGED_ERROR,
       ...(prompts === undefined ? {} : { prompts }),
     };
   }
 
-  async #load(
+  async function loadPrompts(
     showLoading: boolean,
     activeRevision?: number,
   ): Promise<readonly Prompt[] | undefined> {
     const revision =
       activeRevision ??
-      this.#view.begin({
+      viewState.begin({
         error: undefined,
         loading: true,
         ...(showLoading ? { prompts: undefined } : {}),
@@ -275,12 +280,12 @@ export class PromptController {
     try {
       const prompts = readPromptList(await requestJson(PROMPTS_PATH));
       if (activeRevision === undefined) {
-        this.#view.patchCurrent(revision, { loading: false, prompts });
+        viewState.patchCurrent(revision, { loading: false, prompts });
       }
-      return this.#view.isCurrent(revision) ? prompts : undefined;
+      return viewState.isCurrent(revision) ? prompts : undefined;
     } catch {
       if (activeRevision === undefined) {
-        this.#view.patchCurrent(revision, {
+        viewState.patchCurrent(revision, {
           error: "We could not load your prompts. Please try again.",
           loading: false,
         });
@@ -289,12 +294,12 @@ export class PromptController {
     }
   }
 
-  async #remove(promptId: string): Promise<void> {
-    const prompt = this.#find(promptId);
+  async function removePrompt(promptId: string): Promise<void> {
+    const prompt = find(promptId);
     if (prompt === undefined) {
       return;
     }
-    const revision = this.#view.begin({
+    const revision = viewState.begin({
       confirmDeleteId: undefined,
       error: undefined,
       removingId: promptId,
@@ -304,32 +309,50 @@ export class PromptController {
         headers: versionHeaders(prompt.revision),
         method: "DELETE",
       });
-      this.#view.patchCurrentWith(revision, () => ({
-        ...(this.state.editingId === promptId ? this.#closedEditor() : {}),
-        prompts: this.state.prompts?.filter(({ id }) => id !== promptId),
+      viewState.patchCurrentWith(revision, () => ({
+        ...(state().editingId === promptId ? closedEditor() : {}),
+        prompts: state().prompts?.filter(({ id }) => id !== promptId),
         removingId: undefined,
         selectedId:
-          this.state.selectedId === promptId
-            ? undefined
-            : this.state.selectedId,
+          state().selectedId === promptId ? undefined : state().selectedId,
       }));
     } catch (error) {
       if (hasHttpStatus(error, 412)) {
-        const conflict = await this.#conflictPatch(revision);
-        this.#view.patchCurrent(revision, {
+        const conflict = await conflictPatch(revision);
+        viewState.patchCurrent(revision, {
           ...conflict,
           removingId: undefined,
         });
         return;
       }
-      this.#view.patchCurrent(revision, {
+      viewState.patchCurrent(revision, {
         error: "We could not delete that prompt. Please try again.",
         removingId: undefined,
       });
     }
   }
 
-  #closedEditor(): Pick<PromptViewState, "editDraft" | "editingId"> {
+  function closedEditor(): Pick<PromptViewState, "editDraft" | "editingId"> {
     return { editDraft: { body: "", name: "" }, editingId: undefined };
   }
+
+  return {
+    beginEdit,
+    cancelDelete,
+    cancelEdit,
+    create,
+    insertSelected,
+    load,
+    remove,
+    requestDelete,
+    reset,
+    saveEdit,
+    select,
+    setCreateField,
+    setEditField,
+    get state() {
+      return state();
+    },
+    view: viewState.accessor,
+  };
 }

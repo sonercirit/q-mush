@@ -11,7 +11,10 @@ import {
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { TEST_COMPACTION_HANDOFF_INSTRUCTION } from "./compaction-test-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import {
+  createScriptedAgentModel,
+  type ScriptedAgentModel,
+} from "./scripted-agent-model.ts";
 import { testModelCatalog } from "./session-continuation-test-helpers.ts";
 import {
   connectedSessionSetup,
@@ -108,7 +111,7 @@ describe("session models and compaction", () => {
       return Promise.resolve(catalog);
     };
     const setup = connectedSessionSetup(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         { content: "Discovered model complete.", toolCalls: [] },
       ]),
       "api_key",
@@ -138,11 +141,11 @@ describe("session models and compaction", () => {
 
   test("supports descriptive discovery in the Global scope", async () => {
     const setup = connectedSessionSetup(
-      new ScriptedAgentModel([]),
+      createScriptedAgentModel([]),
       "api_key",
       () =>
         Promise.reject(
-          new AgentModelDiscoveryError(
+          AgentModelDiscoveryError(
             "Model discovery failed with status 503",
             503,
           ),
@@ -162,7 +165,7 @@ describe("session models and compaction", () => {
   });
 
   test("reports server_restarting across production HTTP and realtime gates", async () => {
-    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const setup = connectedSessionSetup(createScriptedAgentModel([]));
     await setup.sessions.drain();
 
     const modelsResponse = await setup.sessions.models(
@@ -193,7 +196,7 @@ describe("session models and compaction", () => {
   });
 
   test("scopes restart progress to the authenticated workspace", async () => {
-    const setup = connectedSessionSetup(new ScriptedAgentModel([]));
+    const setup = connectedSessionSetup(createScriptedAgentModel([]));
     const response = await setup.sessions.collection(createSessionRequest());
     expect(response.ok).toBe(true);
 
@@ -213,7 +216,7 @@ describe("session models and compaction", () => {
   });
 
   test("rejects caps above the discovered model limit during creation", async () => {
-    const setup = compactionSetup(new ScriptedAgentModel([]), "Cap");
+    const setup = compactionSetup(createScriptedAgentModel([]), "Cap");
     const response = await setup.sessions.collection(
       contextCapCreationRequest(),
     );
@@ -227,7 +230,7 @@ describe("session models and compaction", () => {
   });
 
   test("compacts through existing machinery after confirming an exceeded cap", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Large context complete.",
         contextTokens: 90_000,
@@ -285,7 +288,7 @@ describe("session models and compaction", () => {
   });
 
   test("updates compaction mode and manually compacts an idle session", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Initial work complete.",
         contextTokens: 90_000,
@@ -356,7 +359,7 @@ describe("session models and compaction", () => {
   });
 
   test("compacts and continues without appending a user message", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "Initial work complete.", toolCalls: [] },
       { content: "Compact continuation handoff.", toolCalls: [] },
       { content: "Continued work complete.", toolCalls: [] },

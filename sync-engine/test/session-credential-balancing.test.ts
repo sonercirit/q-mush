@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
@@ -10,6 +9,7 @@ import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import type { AgentModelFactory } from "../session-agent-models.ts";
 import type { CreateSessionInput } from "../session-input.ts";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import {
   TEST_AUTHENTICATED_USER,
   TEST_WORKSPACE_ID,
@@ -61,33 +61,37 @@ function input(credentialId: string): CreateSessionInput {
   };
 }
 
-class RestartPinnedModel implements AgentModel {
-  #blockRequest: number | undefined;
-  readonly entered = Promise.withResolvers<undefined>();
-  readonly release = Promise.withResolvers<undefined>();
+interface RestartPinnedModel {
+  readonly complete: AgentModel["complete"];
+  readonly entered: PromiseWithResolvers<undefined>;
+  readonly release: PromiseWithResolvers<undefined>;
   readonly requests: AgentConversationMessage[][];
-
-  constructor(blockRequest?: number) {
-    this.#blockRequest = blockRequest;
-    this.requests = [];
-  }
-
-  complete = async (
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> => {
-    const step = this.requests.length + 1;
-    this.requests.push([...messages]);
-    if (step === this.#blockRequest) {
-      this.entered.resolve(undefined);
-      await this.release.promise;
-      this.#blockRequest = undefined;
-    }
-    const content = `Step ${String(step)}`;
-    return step === 1 || step === 3
-      ? providerStep(content, {
-          toolCalls: [toolCall("list_runners", {})],
-        })
-      : providerStep(content);
+}
+function createRestartPinnedModel(blockedRequest?: number): RestartPinnedModel {
+  let blockRequest = blockedRequest;
+  const entered = Promise.withResolvers<undefined>();
+  const release = Promise.withResolvers<undefined>();
+  const recorder = createAgentRequestRecorder();
+  const { requests } = recorder;
+  return {
+    entered,
+    release,
+    requests,
+    complete: async (messages) => {
+      const step = requests.length + 1;
+      recorder.record(messages);
+      if (step === blockRequest) {
+        entered.resolve(undefined);
+        await release.promise;
+        blockRequest = undefined;
+      }
+      const content = `Step ${String(step)}`;
+      return step === 1 || step === 3
+        ? providerStep(content, {
+            toolCalls: [toolCall("list_runners", {})],
+          })
+        : providerStep(content);
+    },
   };
 }
 
@@ -160,7 +164,7 @@ describe("session credential balancing", () => {
 
   test("pins the resolved credential across steps, continue, and restart resume", async () => {
     const selectedCredentials: string[] = [];
-    const beforeRestart = new RestartPinnedModel(3);
+    const beforeRestart = createRestartPinnedModel(3);
     const initial = connectedSessionSetup(
       beforeRestart,
       "api_key",
@@ -202,7 +206,7 @@ describe("session credential balancing", () => {
       initial.sessions.detailForUser(TEST_AUTHENTICATED_USER.id, created.id),
     ).toMatchObject({ credentialId: CREDENTIAL_ID, status: "paused" });
 
-    const afterRestart = new RestartPinnedModel();
+    const afterRestart = createRestartPinnedModel();
     const recreatedOptions = {
       credentials: balancedCredentials(),
       database: initial.database,
@@ -274,7 +278,7 @@ describe("session credential balancing", () => {
 
   test("rejects a transient balanced probe without creating a session", async () => {
     const sessions = sessionFixture(() =>
-      Promise.reject(new AgentModelDiscoveryError("temporary outage", 503)),
+      Promise.reject(AgentModelDiscoveryError("temporary outage", 503)),
     );
 
     await expect(balancedCreate(sessions)).rejects.toMatchObject({
@@ -289,7 +293,7 @@ describe("session credential balancing", () => {
     const sessions = sessionFixture((_provider, credential) => {
       discovered.push(credential.id);
       return credential.id === CREDENTIAL_ID
-        ? Promise.reject(new AgentModelDiscoveryError("rejected", 429))
+        ? Promise.reject(AgentModelDiscoveryError("rejected", 429))
         : Promise.resolve(TEST_CATALOG);
     });
 

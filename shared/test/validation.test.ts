@@ -1,5 +1,11 @@
 import { describe, expect, test } from "vitest";
-import { executeWithAbortSignal } from "../validation.ts";
+import { executeWithAbortSignal, hasOnlyKeys } from "../validation.ts";
+
+test("hasOnlyKeys ignores inherited prototype properties", () => {
+  const value: Record<string, unknown> = { expected: true };
+  Object.setPrototypeOf(value, { inherited: true });
+  expect(hasOnlyKeys(value, ["expected"])).toBe(true);
+});
 
 describe("executeWithAbortSignal", () => {
   test("rejects promptly when abort cleanup never settles", async () => {

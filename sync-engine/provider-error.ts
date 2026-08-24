@@ -62,59 +62,106 @@ interface ProviderErrorDetails {
   readonly status: number | undefined;
 }
 
-export class ProviderCredentialRejectionError extends Error {
+export type ProviderCredentialRejectionError = Error & {
+  readonly kind:
+    | "provider_credential_rejection"
+    | "provider_credential_reauthentication_required";
   readonly status: 400 | 401 | 402 | 403 | 429;
+};
 
-  constructor(message: string, status: 400 | 401 | 402 | 403 | 429) {
-    super(message);
-    this.name = "ProviderCredentialRejectionError";
-    this.status = status;
-  }
+export function createProviderCredentialRejectionError(
+  message: string,
+  status: 400 | 401 | 402 | 403 | 429,
+): ProviderCredentialRejectionError {
+  return Object.assign(new Error(message), {
+    kind: "provider_credential_rejection" as const,
+    name: "ProviderCredentialRejectionError",
+    status,
+  });
 }
 
-export class ProviderCredentialReauthenticationRequiredError extends ProviderCredentialRejectionError {
-  constructor(providerName: string, status: 400 | 401 | 403 = 401) {
-    super(
+export type ProviderCredentialReauthenticationRequiredError =
+  ProviderCredentialRejectionError & {
+    readonly kind: "provider_credential_reauthentication_required";
+  };
+
+export function createProviderCredentialReauthenticationRequiredError(
+  providerName: string,
+  status: 400 | 401 | 403 = 401,
+): ProviderCredentialReauthenticationRequiredError {
+  return Object.assign(
+    new Error(
       `${providerName} login has expired. Connect the account again to continue.`,
+    ),
+    {
+      kind: "provider_credential_reauthentication_required" as const,
+      name: "ProviderCredentialReauthenticationRequiredError",
       status,
-    );
-    this.name = "ProviderCredentialReauthenticationRequiredError";
-  }
+    },
+  );
 }
 
 export function isProviderCredentialRejection(
   error: unknown,
 ): error is ProviderCredentialRejectionError {
-  return error instanceof ProviderCredentialRejectionError;
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    (error.kind === "provider_credential_rejection" ||
+      error.kind === "provider_credential_reauthentication_required")
+  );
 }
 
-export class ProviderStreamError extends Error {
+export function isProviderCredentialReauthenticationRequiredError(
+  error: unknown,
+): error is ProviderCredentialReauthenticationRequiredError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "provider_credential_reauthentication_required"
+  );
+}
+
+export type ProviderStreamError = Error & {
   readonly authenticationFailure: boolean;
+  readonly kind: "provider_stream";
   readonly reconnectWebSocket: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly status: number | undefined;
   readonly transient: boolean;
-
-  constructor(
-    message: string,
-    transient: boolean,
-    options: ProviderStreamErrorOptions = {},
-  ) {
-    super(message);
-    this.authenticationFailure = options.authenticationFailure === true;
-    this.name = "ProviderStreamError";
-    this.reconnectWebSocket = options.reconnectWebSocket === true;
-    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
-    this.status = options.status;
-    this.transient = transient;
-  }
-}
+};
 
 interface ProviderStreamErrorOptions {
   readonly authenticationFailure?: boolean;
   readonly reconnectWebSocket?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
   readonly status?: number | undefined;
+}
+
+function createProviderStreamError(
+  message: string,
+  transient: boolean,
+  options: ProviderStreamErrorOptions = {},
+): ProviderStreamError {
+  return Object.assign(new Error(message), {
+    authenticationFailure: options.authenticationFailure === true,
+    kind: "provider_stream" as const,
+    name: "ProviderStreamError",
+    reconnectWebSocket: options.reconnectWebSocket === true,
+    retryAfterMilliseconds: options.retryAfterMilliseconds,
+    status: options.status,
+    transient,
+  });
+}
+
+export function isProviderStreamError(
+  error: unknown,
+): error is ProviderStreamError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "provider_stream"
+  );
 }
 
 function requiredTrimmedString(value: unknown): string | undefined {
@@ -277,7 +324,7 @@ export function readProviderStreamError(
   const permanent =
     details.codes.some(codeIsPermanent) ||
     (details.status !== undefined && codeIsPermanent(details.status));
-  return new ProviderStreamError(
+  return createProviderStreamError(
     providerErrorMessage(details),
     !permanent && (transient || isProviderStreamErrorEvent(event)),
     {

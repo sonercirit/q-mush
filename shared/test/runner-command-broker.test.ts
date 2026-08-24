@@ -1,10 +1,11 @@
 import { describe, expect, test, vi } from "vitest";
 import {
-  RunnerCommandBroker,
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -93,7 +94,7 @@ async function expectCanceledCommand(
     ? deliveredBroker(commandId, {
         cancel: (_runnerId, canceledId) => canceled.push(canceledId),
       })
-    : new RunnerCommandBroker({
+    : createRunnerCommandBroker({
         cancel: (_runnerId, canceledId) => canceled.push(canceledId),
         commandId: () => commandId,
       });
@@ -103,7 +104,7 @@ async function expectCanceledCommand(
 
 test("delivers a command immediately when a runner socket is connected", async () => {
   const delivered: unknown[] = [];
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "websocket-command",
     deliver: (runnerId, command) => {
       delivered.push({ command, runnerId });
@@ -189,7 +190,7 @@ describe("runner command broker", () => {
   test("reauthorizes immediately before immediate delivery", async () => {
     let authorizationChecks = 0;
     const delivered: RunnerToolCommand[] = [];
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "immediate-boundary",
       deliver: (_runnerId, command) => {
         delivered.push(command);
@@ -251,7 +252,7 @@ describe("runner command broker", () => {
   });
 
   test("leaves queued commands for an authoritative reconnect", async () => {
-    const broker = new RunnerCommandBroker();
+    const broker = createRunnerCommandBroker();
     const result = broker.dispatch(
       brokerRunnerCommand({ tool: "read_agent_file" }),
     );
@@ -335,7 +336,7 @@ describe("runner command broker", () => {
   });
 
   test("does not accept output while a command remains queued", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "queued-stream-command",
     });
     const result = broker.dispatch(brokerRunnerCommand(), undefined, () => {
@@ -379,7 +380,7 @@ describe("runner command broker", () => {
       originalAdd(type, listener, options);
       controller.abort();
     };
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "racing-command",
       deliver: () => Boolean(delivered.push("delivered")),
     });
@@ -397,7 +398,7 @@ describe("runner command broker", () => {
     };
 
     failListenerCleanup(controller);
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "listener-registration-throw",
     });
 
@@ -408,7 +409,7 @@ describe("runner command broker", () => {
   });
 
   test("rejects and releases a command when immediate delivery throws", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "delivery-throw",
       deliver: () => {
         throw new Error("delivery failed");
@@ -423,7 +424,7 @@ describe("runner command broker", () => {
   });
 
   test("rejects and releases a queued command when reconnect delivery throws", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "reconnect-delivery-throw",
     });
     const result = broker.dispatch(brokerRunnerCommand());
@@ -437,7 +438,7 @@ describe("runner command broker", () => {
   });
 
   test("rejects even when in-flight cancellation throws", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       cancel: () => {
         throw new Error("cancellation cleanup failed");
       },
@@ -473,7 +474,7 @@ describe("runner command broker", () => {
   });
 
   test("delivers a tool command only to its runner and resolves its result", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "command-1",
     });
     const command = {
@@ -520,7 +521,7 @@ describe("runner command broker", () => {
     const current = broker.dispatch(brokerRunnerCommand());
 
     await expect(old).rejects.toEqual(
-      new RunnerDisconnectedError(
+      createRunnerDisconnectedError(
         "The runner connection was superseded before the command returned",
       ),
     );
@@ -541,7 +542,7 @@ describe("runner command broker", () => {
     vi.useFakeTimers();
 
     try {
-      const broker = new RunnerCommandBroker({
+      const broker = createRunnerCommandBroker({
         commandId: () => "command-without-deadline",
       });
       const result = broker.dispatch(
@@ -567,7 +568,7 @@ describe("runner command broker", () => {
 
   test("queues any number of commands for a runner", async () => {
     let nextCommand = 0;
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => `unbounded-command-${String((nextCommand += 1))}`,
     });
     const results = Array.from({ length: 101 }, (_, index) =>
@@ -598,7 +599,7 @@ describe("runner command broker", () => {
   });
 
   test("removes queued and in-flight commands when a session is stopped", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "command-2",
     });
     const result = broker.dispatch(

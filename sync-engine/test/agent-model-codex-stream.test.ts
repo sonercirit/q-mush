@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   codexEventResponse,
   codexModelOptions,
@@ -10,7 +10,7 @@ import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 describe("chat completions agent model", () => {
   test("uses streamed Codex output when the completed response omits it", async () => {
-    const model = new ChatCompletionsAgentModel(
+    const model = createChatCompletionsAgentModel(
       codexModelOptions({
         fetch: () =>
           Promise.resolve(
@@ -52,7 +52,7 @@ describe("chat completions agent model", () => {
 
   test("accepts Codex event streams without a local response-size limit", async () => {
     const padding = `:${"x".repeat(10 * 1_024 * 1_024)}\n\n`;
-    const model = new ChatCompletionsAgentModel(
+    const model = createChatCompletionsAgentModel(
       codexModelOptions({
         fetch: () =>
           Promise.resolve(codexEventResponse([DONE_CODEX_OUTPUT], padding)),

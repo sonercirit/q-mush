@@ -3,7 +3,10 @@ import { createProviderViewState } from "../provider-credential-model.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import { createRunnerViewState } from "../runner-client.tsx";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import {
   mountTestView,
   queryTestElementAs,
@@ -18,7 +21,7 @@ const disposals = trackedDisposals();
 
 function mountNewSessionForm() {
   useFakeTestClock(disposals);
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState<SessionViewState>(sessionClientTestState()),
   );
   const openAiCredential = {

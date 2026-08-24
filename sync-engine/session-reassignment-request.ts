@@ -8,8 +8,8 @@ import {
   type SessionReassignmentInput,
 } from "./session-reassignment.ts";
 import type { SessionRequestAuthenticator } from "./session-request-helpers.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import type { ReassignSessionResult } from "./session-store-reassignment.ts";
-import type { SessionStore } from "./session-store.ts";
 import {
   requestSessionWorkspaceId,
   type SessionWorkspaceReader,

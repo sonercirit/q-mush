@@ -26,3 +26,13 @@ export type SystemStoredMessageInput = Omit<
   StoredMessageInsertOptions,
   "actorId" | "id"
 >;
+
+export type SpawnedReportParameters = readonly [
+  userId: string,
+  childId: string,
+  childGeneration: number,
+  parentId: string,
+  parentGeneration: number,
+  content: string,
+  now: number,
+];

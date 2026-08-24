@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -161,7 +161,7 @@ test("a retained sidebar row keeps ticking its run duration", () => {
     ...initialSessionViewState(),
     sessions: [running, other],
   });
-  const controller = new SessionController(state);
+  const controller = createSessionController(state);
   const container = mountTestView(
     () => <SessionList controller={controller} />,
     disposals,

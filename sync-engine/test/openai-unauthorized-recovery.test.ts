@@ -2,18 +2,20 @@ import { describe, expect, test, vi, type MockInstance } from "vitest";
 import type { AgentModelStep } from "../../shared/agent-loop.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  ChatCompletionsAgentModel,
+  createChatCompletionsAgentModel,
   type AgentProviderCredential,
+  type ChatCompletionsAgentModel,
 } from "../../sync-engine/agent-model.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "../../sync-engine/provider-error.ts";
+import { createProviderCredentialReauthenticationRequiredError } from "../../sync-engine/provider-error.ts";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
 import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
   COMPLETED_EVENT,
-  FakeProviderSockets,
+  createFakeProviderSockets,
   OPENAI_AUTHENTICATION_ERROR_EVENT,
   openAndRejectProviderSocket,
   requireProviderSocket,
+  type FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
@@ -50,7 +52,7 @@ function model(options: {
   ) => Promise<AgentProviderCredential>;
   readonly sockets: FakeProviderSockets;
 }): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: options.credential ?? codexOAuthCredential(),
     fetch: unexpectedHttpFallback,
     ...optionalDelta(options.onDelta),
@@ -72,7 +74,7 @@ function genericUnauthorizedModel(
     credential: AgentProviderCredential,
   ) => Promise<AgentProviderCredential>,
 ): ChatCompletionsAgentModel {
-  return new ChatCompletionsAgentModel({
+  return createChatCompletionsAgentModel({
     credential: {
       ...codexOAuthCredential(),
       baseUrl: "https://example.test/v1",
@@ -105,7 +107,7 @@ function refreshSetup(
   >;
   readonly sockets: FakeProviderSockets;
 } {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const refreshCredential = vi.fn(successfulRefresh);
   const pending = model({ credential, refreshCredential, sockets }).complete(
     USER_MESSAGE,
@@ -178,7 +180,7 @@ describe("OpenAI OAuth unauthorized recovery", () => {
 
   test("clears partial output before retrying with the refreshed token", async () => {
     const deltas: ProviderTextDelta[] = [];
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const pending = model({
       onDelta: (delta) => deltas.push(delta),
       refreshCredential: successfulRefresh,
@@ -235,10 +237,10 @@ describe("OpenAI OAuth unauthorized recovery", () => {
   });
 
   test("surfaces a terminal refresh rejection as an explicit re-login error", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     const refreshCredential = vi.fn(() =>
       Promise.reject(
-        new ProviderCredentialReauthenticationRequiredError("OpenAI", 401),
+        createProviderCredentialReauthenticationRequiredError("OpenAI", 401),
       ),
     );
     const pending = model({ refreshCredential, sockets }).complete(

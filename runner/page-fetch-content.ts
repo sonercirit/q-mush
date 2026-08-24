@@ -28,10 +28,10 @@ export const PAGE_CAPTURE_EXPRESSION = String.raw`(() => {
     if (!content) continue;
     if (content !== rawContent) metadataTruncated = true;
     if (name === "description" || name === "author" || name === "keywords") {
-      if (!(name in metadata)) metadata[name] = content;
+      if (!Object.hasOwn(metadata, name)) metadata[name] = content;
     } else if (property.startsWith("og:")) {
       const key = property.slice(3);
-      if (key && !(key in openGraph)) openGraph[key] = content;
+      if (key && !Object.hasOwn(openGraph, key)) openGraph[key] = content;
     }
   }
   if (Object.keys(openGraph).length > 0) metadata.openGraph = openGraph;

@@ -4,12 +4,24 @@ import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import {
+  createModelCredentialPool,
+  type ModelCredentialPool,
+} from "../../sync-engine/model-credential-pool.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
+import {
+  createSessionAgentActions,
+  type SessionAgentActions,
+} from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import { insertWorkspace } from "../../sync-engine/workspace-write.ts";
 import {
   addTestProviderCredential,
@@ -34,10 +46,17 @@ import { requireCreatedSession } from "./session-store-result-helpers.ts";
 import { addSessionTestRunner } from "./session-store-runner-helpers.ts";
 import { emptyRuntimes } from "./session-store-test-fixtures.ts";
 
-class RejectingModelCredentialPool extends ModelCredentialPool {
-  override candidates(): Promise<never> {
-    return Promise.reject(new Error("candidate boom"));
-  }
+function createRejectingModelCredentialPool(
+  database: AppDatabase,
+): ModelCredentialPool {
+  const pool = createModelCredentialPool({
+    database,
+    readCredential: () => Promise.resolve(undefined),
+  });
+  return {
+    ...pool,
+    candidates: () => Promise.reject(new Error("candidate boom")),
+  };
 }
 
 export const TARGET_SESSION_ID = "018bcfe5-6800-7000-8000-000000000090";
@@ -126,7 +145,7 @@ export function authoritySetup(options: {
     CHILD_SESSION_ID,
     "child-authority-message",
   ];
-  const store = new SessionStore(
+  const store = createSessionStore(
     database,
     () => ids.shift() ?? "unexpected-parent-authority-id",
     () => DEFAULT_TOOL_SETTINGS,
@@ -164,10 +183,10 @@ export function authoritySetup(options: {
   );
   const notify = vi.fn(() => {
     if (options.fenceOnNotify === true) {
-      new RunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
+      createRunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
     }
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   if (options.hidePreparedChild === true) {
     const storedGet = store.get.bind(store);
     let childReads = 0;
@@ -183,7 +202,7 @@ export function authoritySetup(options: {
       return detail;
     });
   }
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...inactiveSessionAgentActionDefaults(),
     compactSession: startManualSessionCompactionForUserId,
     database,
@@ -202,10 +221,7 @@ export function authoritySetup(options: {
     launchSession: launch,
     ...(options.rejectCandidates === true
       ? {
-          modelCredentialPool: new RejectingModelCredentialPool({
-            database,
-            readCredential: () => Promise.resolve(undefined),
-          }),
+          modelCredentialPool: createRejectingModelCredentialPool(database),
         }
       : {}),
     notify,
@@ -245,7 +261,7 @@ export function authoritySetup(options: {
 
 export function fenceParent(setup: AuthoritySetup): void {
   expect(
-    new RunnerStore(setup.database).remove(
+    createRunnerStore(setup.database).remove(
       TEST_USER_ID,
       RUNNER_ID,
       TEST_NOW + 3,

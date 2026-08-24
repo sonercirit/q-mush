@@ -10,7 +10,7 @@ import {
   TEST_USER_ID,
   TEST_WORKSPACE_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   connectedSessionSetup,
   SESSION_ID,
@@ -69,7 +69,7 @@ function answeringSetup(
   let credentialReads = 0;
   let drain: Promise<void> | undefined;
   const answer = Promise.withResolvers<unknown>();
-  const model = new ScriptedAgentModel(
+  const model = createScriptedAgentModel(
     [
       {
         content: "I need a decision.",

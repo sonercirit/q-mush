@@ -1,7 +1,7 @@
 import { abortSignalIsAborted } from "../shared/abort-signal.ts";
 import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { throwIfAgentAborted } from "../shared/agent-loop.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import {
@@ -23,11 +23,11 @@ export async function discoverSessionModelsFromPool(options: {
 }): Promise<AgentModelCatalog> {
   const { discover, pool, selection, signal } = options;
   if (abortSignalIsAborted(signal)) {
-    throw new RealtimeCommandError("server_restarting");
+    throw createRealtimeCommandError("server_restarting");
   }
   const credentials = await pool.representative(selection.userId, selection);
   if (abortSignalIsAborted(signal)) {
-    throw new RealtimeCommandError("server_restarting");
+    throw createRealtimeCommandError("server_restarting");
   }
   requireCredentialCandidates(credentials);
   let lastError: unknown;
@@ -38,12 +38,12 @@ export async function discoverSessionModelsFromPool(options: {
       return catalog;
     } catch (error) {
       if (abortSignalIsAborted(signal)) {
-        throw new RealtimeCommandError("server_restarting");
+        throw createRealtimeCommandError("server_restarting");
       }
       lastError = error;
     }
   }
-  throw new RealtimeCommandError(
+  throw createRealtimeCommandError(
     lastError === undefined
       ? credentialUnavailable().code
       : "provider_unavailable",

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import type { ProviderTextDelta } from "../../sync-engine/provider-stream.ts";
-import { ProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
+import { createProviderWebSocketSession } from "../../sync-engine/provider-websocket.ts";
 import { captureRejection } from "./promise-test-helpers.ts";
 import {
   acknowledgeProviderSocket,
@@ -8,11 +8,13 @@ import {
   chatCompletedResponse,
   complete,
   COMPLETED_EVENT,
+  createFakeProviderSocket,
+  createFakeProviderSockets,
   expectBoundedHttpFallback,
   expectProviderSocketReleased,
   expireProviderSocket,
-  FakeProviderSocket,
-  FakeProviderSockets,
+  type FakeProviderSocket,
+  type FakeProviderSockets,
   providerDelta,
   recordDelay,
   replaceProviderSocket,
@@ -24,10 +26,10 @@ import {
   beginLifecycleRequest,
   completeResponse,
   completeWithSignal,
+  createInstrumentedAbortController,
   expectAbortWithoutHttp,
   expectRequestPending,
   expectRequestStates,
-  InstrumentedAbortController,
   instrumentedProviderRequest,
   lifecycleModel,
   responseEvent,
@@ -39,7 +41,7 @@ test("prefers Responses WebSocket for API keys", async () => {
     webSocket: (url, options) => {
       expect(url).toBe("wss://api.openai.com/v1/responses");
       expect(options.headers["authorization"]).toBe("Bearer sk-openai");
-      const socket = new FakeProviderSocket();
+      const socket = createFakeProviderSocket();
       sockets.push(socket);
       return socket;
     },
@@ -62,7 +64,7 @@ test("prefers Responses WebSocket for API keys", async () => {
 });
 
 test("accepts terminal-only responses on a fresh socket", async () => {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const pending = complete(apiKeyModel({ webSocket: sockets.create }));
   const socket = requireProviderSocket(sockets, 0);
   socket.open();
@@ -114,8 +116,8 @@ test("removes abort listener after abort", async () => {
 });
 
 test("cleans up when send throws", async () => {
-  const controller = new InstrumentedAbortController();
-  const socket = new FakeProviderSocket();
+  const controller = createInstrumentedAbortController();
+  const socket = createFakeProviderSocket();
   socket.throwOnSend = true;
   const model = apiKeyModel({ webSocket: () => socket });
   const pending = completeWithSignal(model, controller.signal);
@@ -224,8 +226,8 @@ test.each([
 );
 
 test("retires rather than evicts a socket whose response-ID fence exceeds one frame", async () => {
-  const sockets = new FakeProviderSockets();
-  const session = new ProviderWebSocketSession();
+  const sockets = createFakeProviderSockets();
+  const session = createProviderWebSocketSession();
   const completeSession = () =>
     session.complete({
       body: {},
@@ -279,7 +281,7 @@ test("retires a socket after an unidentified response", async () => {
 });
 
 test("reuses a socket and reconnects after idle close", async () => {
-  const stepSockets = new FakeProviderSockets();
+  const stepSockets = createFakeProviderSockets();
   const model = apiKeyModel({ webSocket: stepSockets.create });
   const first = complete(model);
   await stepSockets.waitForAttempt(0);
@@ -311,7 +313,7 @@ test("does not start an HTTP fallback after a WebSocket abort", async () => {
   let socket: FakeProviderSocket | undefined;
   const model = apiKeyModel({
     webSocket: () => {
-      socket = new FakeProviderSocket();
+      socket = createFakeProviderSocket();
       return socket;
     },
   });
@@ -323,7 +325,7 @@ test("does not start an HTTP fallback after a WebSocket abort", async () => {
 
 test("aborts immediately during WebSocket retry backoff", async () => {
   const controller = new AbortController();
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const model = apiKeyModel({
     sleep: (_milliseconds, signal) => {
       if (signal !== controller.signal) {
@@ -439,7 +441,7 @@ test("keeps ordinary retry capacity after an immediate expiry reconnect", async 
 test("bounds repeated connection-limit reconnects", async () => {
   const setup: { delays: number[]; sockets: FakeProviderSockets } = {
     delays: [],
-    sockets: new FakeProviderSockets(),
+    sockets: createFakeProviderSockets(),
   };
   const model = apiKeyModel({
     fetch: () => Promise.resolve(chatCompletedResponse()),
@@ -516,7 +518,7 @@ test("retries transient failures and clears partial output", async () => {
 });
 
 test("passes through permanent failures", async () => {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const model = apiKeyModel({
     sleep: () => {
       throw new Error("A permanent error must not be delayed");

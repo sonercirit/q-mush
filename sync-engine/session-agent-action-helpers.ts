@@ -1,7 +1,7 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
-  ProviderCredentialStore,
+  listActiveModelCredentials,
   type ProviderCredentialAccess,
 } from "../shared/provider-credential-store.ts";
 import type {
@@ -20,7 +20,7 @@ import type { SessionExecutionAuthority } from "./session-execution-authority.ts
 import type { SessionRequestModelMetadata } from "./session-provider-selection.ts";
 import { restartSignalIsAborted } from "./session-restart-gate.ts";
 import type { RestartRequest } from "./session-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 type SessionAgentCredentialSelection = Pick<
   AgentSessionDetail,
@@ -173,7 +173,7 @@ export async function spawnAgentSession(options: {
     selection.provider,
     selection.credentialId,
   );
-  const summaries = ProviderCredentialStore.listActiveModelCredentials(
+  const summaries = listActiveModelCredentials(
     dependencies.database,
     userId,
     selection.provider,

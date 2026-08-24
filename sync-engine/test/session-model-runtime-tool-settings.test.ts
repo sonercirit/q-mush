@@ -1,15 +1,15 @@
 import { expect, test } from "vitest";
 import { agentSessionTurns } from "../../shared/database/schema.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { ToolSettings } from "../../shared/tool-limits.ts";
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 import type { SessionAgentToolActions } from "../session-agent-tools.ts";
 import {
   sessionModelRuntime,
   type SessionModelRuntimeResources,
 } from "../session-model-runtime.ts";
-import { SessionStore } from "../session-store.ts";
+import { createSessionStore, type SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -68,7 +68,7 @@ function configuredStore(read: () => ToolSettings): SettingsStoreSetup {
   const setup = createStore();
   return {
     ...setup,
-    store: new SessionStore(
+    store: createSessionStore(
       setup.database,
       setup.generateId,
       read,
@@ -122,8 +122,8 @@ test("threads the persisted run snapshot into actions", () => {
       },
     },
     braveSearch: { execute: () => Promise.resolve("unused") },
-    activeTools: new ActiveSessionTools(),
-    broker: new RunnerCommandBroker(),
+    activeTools: createActiveSessionTools(),
+    broker: createRunnerCommandBroker(),
     modelFactory: () => ({
       complete: () => Promise.reject(new Error("unused")),
     }),

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
+import { recordingSleep } from "../../shared/test/websocket-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
+import { createChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   TEST_CREDENTIAL_FINGERPRINT,
   testApiKeyCredential,
@@ -27,27 +28,23 @@ describe("provider HTTP connection-limit classification", () => {
   test("does not retry a WebSocket-only connection-limit code", async () => {
     let fetchCount = 0;
     const delays: number[] = [];
-    const modelOptions: ConstructorParameters<
-      typeof ChatCompletionsAgentModel
-    >[0] = {
-      credential: testApiKeyCredential("sk-or-secret", {
-        id: "openrouter-test-credential",
-      }),
-      credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
-      fetch: () => {
-        fetchCount += 1;
-        return Promise.resolve(connectionLimitResponse());
-      },
-      maxOutputTokens: null,
-      model: "openai/gpt-4.1-mini",
-      provider: "openrouter",
-      toolSettings: DEFAULT_TOOL_SETTINGS,
-      sleep: (milliseconds) => {
-        delays.push(milliseconds);
-        return Promise.resolve();
-      },
-    };
-    const model = new ChatCompletionsAgentModel(modelOptions);
+    const modelOptions: Parameters<typeof createChatCompletionsAgentModel>[0] =
+      {
+        credential: testApiKeyCredential("sk-or-secret", {
+          id: "openrouter-test-credential",
+        }),
+        credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,
+        fetch: () => {
+          fetchCount += 1;
+          return Promise.resolve(connectionLimitResponse());
+        },
+        maxOutputTokens: null,
+        model: "openai/gpt-4.1-mini",
+        provider: "openrouter",
+        toolSettings: DEFAULT_TOOL_SETTINGS,
+        sleep: recordingSleep(delays),
+      };
+    const model = createChatCompletionsAgentModel(modelOptions);
     const failure = await captureRejection(model.complete(USER_MESSAGE));
 
     expect(fetchCount).toBe(1);

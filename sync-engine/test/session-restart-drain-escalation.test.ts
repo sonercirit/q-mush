@@ -8,8 +8,8 @@ import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { waitForRestartDrainCount } from "./session-restart-progress-test-helpers.ts";
 import {
   completeRestartCommands,
+  createMultiSessionRestartModel,
   createRestartSessions,
-  MultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
@@ -29,7 +29,7 @@ async function startBusySessions(): Promise<{
   readonly setup: RestartStepSetup;
 }> {
   const setup = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     { commandId: nextCommandId("escalation-command") },
@@ -65,7 +65,7 @@ test("a second restart request force-parks sessions stuck in long tool calls", a
   expect(restartSessionStatuses(setup, ids)).not.toContain("stopped");
 
   const recreated = recreateRestartSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     setup,
     "escalated-command",
   );

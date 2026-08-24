@@ -1,11 +1,11 @@
 import { expect, test, vi } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
   toolExecutionLimitMilliseconds,
 } from "../../shared/tool-limits.ts";
-import { ActiveSessionTools } from "../active-session-tools.ts";
+import { createActiveSessionTools } from "../active-session-tools.ts";
 import { runPersistedSession } from "../session-run.ts";
 import {
   TEST_NOW,
@@ -32,7 +32,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
   try {
     const disconnected = Promise.withResolvers<never>();
     let restartRequested = false;
-    const broker = new RunnerCommandBroker();
+    const broker = createRunnerCommandBroker();
     vi.spyOn(broker, "dispatch").mockImplementation(() => {
       restartRequested = true;
       dispatched.resolve();
@@ -52,12 +52,10 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
           {},
           {
             actions: orchestrationActions(setup.database, setup.store),
-            activeTools: new ActiveSessionTools(),
-            braveSearch: new (class {
-              execute(): Promise<string> {
-                return Promise.resolve("unused loading search result");
-              }
-            })(),
+            activeTools: createActiveSessionTools(),
+            braveSearch: {
+              execute: () => Promise.resolve("unused loading search result"),
+            },
             broker,
             modelFactory: () => {
               throw new Error("unreached model factory");
@@ -97,7 +95,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
       toolExecutionLimitMilliseconds(DEFAULT_TOOL_SETTINGS),
     );
     expect(vi.getTimerCount()).toBe(0);
-    disconnected.reject(new RunnerDisconnectedError());
+    disconnected.reject(createRunnerDisconnectedError());
     await run;
 
     expect(requireCompactionSession(setup.store)).toMatchObject({

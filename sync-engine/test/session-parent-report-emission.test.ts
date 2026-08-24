@@ -6,7 +6,7 @@ import {
   agentSessions,
 } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../runner-store.ts";
+import { createRunnerStore } from "../runner-store.ts";
 import { updateStoredSessionProvider } from "../session-provider-update-store.ts";
 import { RestartHandoffStore } from "../session-restart-store.ts";
 import { ShutdownInterruptedSessionStore } from "../session-shutdown-interrupted-store.ts";
@@ -203,7 +203,7 @@ testReportedGenerationVariants("runner removal", ({ setup }) => {
   if (runnerId === undefined)
     throw new Error("The child runner is unavailable");
   expect(
-    new RunnerStore(
+    createRunnerStore(
       setup.database,
       setup.generateId,
       undefined,
@@ -239,7 +239,7 @@ function expectPendingParentReport(
 
 test("restart pause preserves an idle-final generation report", () => {
   const { child, setup } = setupAdvancedRunningChild();
-  const restart = new RestartHandoffStore({
+  const restart = RestartHandoffStore({
     database: setup.database,
     generateId: setup.generateId,
     read: (userId, sessionId) =>
@@ -259,7 +259,7 @@ test("restart pause preserves an idle-final generation report", () => {
 
 test("shutdown recovery preserves an idle-final generation report", () => {
   const { child, setup } = setupAdvancedRunningChild();
-  const interrupted = new ShutdownInterruptedSessionStore({
+  const interrupted = ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: setup.generateId,
   });

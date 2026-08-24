@@ -3,7 +3,7 @@ import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { readIdentifier } from "../shared/validation.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { createApiError, createJsonResponse } from "./http.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export interface SessionWorkspaceReader {
   defaultForUser(userId: string): { readonly id: string } | undefined;

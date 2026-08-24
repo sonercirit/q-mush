@@ -1,8 +1,8 @@
 import { expect, test, vi } from "vitest";
 import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutdown.ts";
-import { RestartDeadline } from "../../shared/restart-deadline.ts";
+import { createRestartDeadline } from "../../shared/restart-deadline.ts";
 import { SESSION_MODELS_PATH } from "../../shared/routes.ts";
-import { DevelopmentRestartLifecycle } from "../../sync-engine/development-restart.ts";
+import { createDevelopmentRestartLifecycle } from "../../sync-engine/development-restart.ts";
 import type { RestartSetTimeout } from "../../sync-engine/session-restart-timers.ts";
 import {
   createAuthenticatedRequest,
@@ -27,8 +27,8 @@ import { testLivenessClock } from "./session-liveness-test-helpers.ts";
 // Leaves the session inside a runner tool call that never completes, so the
 // drain cannot reach a handoff boundary and the interrupted marker survives.
 import {
+  createMultiSessionRestartModel,
   createRestartSessions,
-  MultiSessionRestartModel,
   nextCommandId,
 } from "./session-restart-step-resume-helpers.ts";
 
@@ -111,7 +111,7 @@ function restartSessionSetup() {
   const clock = testLivenessClock(1_000, 100, true);
   const timers = drainTimerSeam(clock.now);
   const setup = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     {
@@ -154,7 +154,7 @@ function restartLifecycle(
   };
   return {
     events,
-    lifecycle: new DevelopmentRestartLifecycle({
+    lifecycle: createDevelopmentRestartLifecycle({
       ...events,
       sessions: setup.sessions,
     }),
@@ -223,7 +223,7 @@ function restartDeadline(
   // The failing bound is the one the timer seam refuses to arm.
   boundMs = DEVELOPMENT_RESTART_LIFECYCLE_MS,
 ) {
-  return new RestartDeadline(clock.now() + boundMs, clock.now);
+  return createRestartDeadline(clock.now() + boundMs, clock.now);
 }
 
 function modelsRequest() {

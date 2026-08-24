@@ -1,5 +1,6 @@
 import {
-  RealtimeCommandError,
+  createRealtimeCommandError,
+  isRealtimeCommandError,
   SESSION_REALTIME_OPERATIONS,
 } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
@@ -35,20 +36,20 @@ function completedResult(result: unknown, maximumResultBytes: number): unknown {
   try {
     const value = JSON.stringify(result);
     if (typeof value !== "string") {
-      throw new RealtimeCommandError("command_failed");
+      throw createRealtimeCommandError("command_failed");
     }
     serialized = value;
   } catch {
-    throw new RealtimeCommandError("command_failed");
+    throw createRealtimeCommandError("command_failed");
   }
   if (utf8ByteLength(serialized) > maximumResultBytes) {
-    throw new RealtimeCommandError("command_result_too_large");
+    throw createRealtimeCommandError("command_result_too_large");
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(serialized);
   } catch {
-    throw new RealtimeCommandError("command_failed");
+    throw createRealtimeCommandError("command_failed");
   }
   return parsed;
 }
@@ -57,7 +58,7 @@ function safeError(
   error: unknown,
 ): Readonly<{ detail?: string; error: string }> {
   if (
-    !(error instanceof RealtimeCommandError) ||
+    !isRealtimeCommandError(error) ||
     !/^[a-z][a-z\d_]{0,99}$/u.test(error.code)
   ) {
     return { error: "command_failed" };

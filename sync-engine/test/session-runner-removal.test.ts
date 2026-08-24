@@ -1,9 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { captureBrokerRejection } from "../../shared/test/promise-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { RunnerRemovalCoordinator } from "../../sync-engine/session-runner-removal.ts";
+import {
+  createRunnerRemovalCoordinator,
+  type RunnerRemovalCoordinator,
+} from "../../sync-engine/session-runner-removal.ts";
 
 const REMOVED_RUNNER_ID = "runner-removed";
 const OTHER_RUNNER_ID = "runner-other";
@@ -112,7 +118,7 @@ function coordinator(
   session = testSession(),
   settled: () => Promise<void> = () => Promise.resolve(),
 ): RunnerRemovalCoordinator {
-  return new RunnerRemovalCoordinator({
+  return createRunnerRemovalCoordinator({
     broker,
     notify: () => undefined,
     now: () => 2,
@@ -130,7 +136,7 @@ function coordinator(
 describe("removed session runners", () => {
   test("rechecks command authority at dispatch", async () => {
     let authorized = true;
-    const broker = new RunnerCommandBroker();
+    const broker = createRunnerCommandBroker();
     authorized = false;
 
     const command = broker.dispatch({
@@ -149,7 +155,7 @@ describe("removed session runners", () => {
 
   test("cancels every affected session command and records the unresolved outer call", async () => {
     const ids = ["runner-command-1", "runner-command-2"];
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => ids.shift() ?? "unexpected-command",
       deliver: (runnerId) => runnerId === REMOVED_RUNNER_ID,
     });
@@ -176,7 +182,7 @@ describe("removed session runners", () => {
   });
 
   test("fences commands before waiting for the database removal callback", async () => {
-    const broker = new RunnerCommandBroker({
+    const broker = createRunnerCommandBroker({
       commandId: () => "call-1",
       deliver: () => true,
     });

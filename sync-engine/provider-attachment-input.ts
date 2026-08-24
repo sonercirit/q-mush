@@ -2,6 +2,7 @@ import {
   agentAttachmentDataUrl,
   agentAttachmentModality,
   type AgentAttachment,
+  type AgentAttachmentModality,
 } from "../shared/agent-attachments.ts";
 import type { AgentConversationMessage } from "../shared/agent-loop.ts";
 import { withPromptCacheControl } from "./provider-prompt-cache.ts";
@@ -19,41 +20,46 @@ export function userAttachments(
   return message.attachments ?? message.images ?? [];
 }
 
+type AttachmentInput = (
+  attachment: AgentAttachment,
+  url: string,
+  responses: boolean,
+) => unknown;
+const fileAttachmentInput: AttachmentInput = (attachment, url, responses) =>
+  responses
+    ? { file_data: url, filename: attachment.name, type: "input_file" }
+    : { file: { file_data: url, filename: attachment.name }, type: "file" };
+
+const attachmentInputs = {
+  audio: (attachment) => ({
+    input_audio: {
+      data: attachment.data,
+      format: attachment.mediaType.split("/")[1] ?? "audio",
+    },
+    type: "input_audio",
+  }),
+  file: fileAttachmentInput,
+  image: (_attachment, url, responses) =>
+    responses
+      ? { image_url: url, type: "input_image" }
+      : { image_url: { url }, type: "image_url" },
+  pdf: fileAttachmentInput,
+  video: (_attachment, url, responses) =>
+    responses
+      ? { video_url: url, type: "input_video" }
+      : { type: "video_url", video_url: { url } },
+} satisfies Record<AgentAttachmentModality, AttachmentInput>;
+
 function providerAttachmentInput(
   attachment: AgentAttachment,
   responses: boolean,
 ): unknown {
-  const url = agentAttachmentDataUrl(attachment);
-  switch (agentAttachmentModality(attachment)) {
-    case "image":
-      return responses
-        ? { image_url: url, type: "input_image" }
-        : { image_url: { url }, type: "image_url" };
-    case "video":
-      return responses
-        ? { video_url: url, type: "input_video" }
-        : { type: "video_url", video_url: { url } };
-    case "audio":
-      return {
-        input_audio: {
-          data: attachment.data,
-          format: attachment.mediaType.split("/")[1] ?? "audio",
-        },
-        type: "input_audio",
-      };
-    case "pdf":
-    case "file":
-      return responses
-        ? {
-            file_data: url,
-            filename: attachment.name,
-            type: "input_file",
-          }
-        : {
-            file: { file_data: url, filename: attachment.name },
-            type: "file",
-          };
-  }
+  const modality = agentAttachmentModality(attachment);
+  return attachmentInputs[modality](
+    attachment,
+    agentAttachmentDataUrl(attachment),
+    responses,
+  );
 }
 
 // A cached message switches its text to content parts so an Anthropic-style
@@ -63,113 +69,140 @@ function chatContent(
   parts: readonly unknown[] | undefined,
   cached: boolean,
 ): unknown {
-  if (!cached) {
-    return parts ?? content;
-  }
-
+  if (!cached) return parts ?? content;
   const items =
     parts ??
     (typeof content === "string" ? textInputItems(content, "text") : []);
   return items.length === 0 ? content : withPromptCacheControl(items);
 }
 
+type Role = AgentConversationMessage["role"];
+type MessageHandler<Result> = Record<Role, () => Result>;
+
+function messageHasRole<SelectedRole extends Role>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+): message is Extract<
+  AgentConversationMessage,
+  { readonly role: SelectedRole }
+> {
+  return message.role === role;
+}
+
+function messageWithRole<SelectedRole extends Role>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+): Extract<AgentConversationMessage, { readonly role: SelectedRole }> {
+  if (!messageHasRole(message, role))
+    throw new Error("Unexpected message role");
+  return message;
+}
+
+function handleMessageRole<SelectedRole extends Role, Result>(
+  message: AgentConversationMessage,
+  role: SelectedRole,
+  handler: (
+    item: Extract<AgentConversationMessage, { readonly role: SelectedRole }>,
+  ) => Result,
+): Result {
+  return handler(messageWithRole(message, role));
+}
+
 export function providerChatMessage(
   message: AgentConversationMessage,
   cached = false,
 ): unknown {
-  switch (message.role) {
-    case "user":
-      return {
+  const handlers = {
+    assistant: () =>
+      handleMessageRole(message, "assistant", (item) => ({
         content: chatContent(
-          message.content,
-          userAttachments(message).length === 0
+          item.content.length === 0 ? null : item.content,
+          undefined,
+          cached,
+        ),
+        role: "assistant",
+        ...(item.toolCalls.length === 0
+          ? {}
+          : {
+              tool_calls: item.toolCalls.map((call) => ({
+                function: { arguments: call.arguments, name: call.name },
+                id: call.id,
+                type: "function",
+              })),
+            }),
+      })),
+    compaction_notice: () => undefined,
+    tool: () =>
+      handleMessageRole(message, "tool", (item) => ({
+        content: chatContent(item.content, undefined, cached),
+        role: "tool",
+        tool_call_id: item.toolCallId,
+      })),
+    user: () =>
+      handleMessageRole(message, "user", (item) => ({
+        content: chatContent(
+          item.content,
+          userAttachments(item).length === 0
             ? undefined
             : [
-                ...textInputItems(message.content, "text"),
-                ...userAttachments(message).map((attachment) =>
+                ...textInputItems(item.content, "text"),
+                ...userAttachments(item).map((attachment) =>
                   providerAttachmentInput(attachment, false),
                 ),
               ],
           cached,
         ),
         role: "user",
-      };
-    case "assistant":
-      return {
-        content: chatContent(
-          message.content.length === 0 ? null : message.content,
-          undefined,
-          cached,
-        ),
-        role: "assistant",
-        ...(message.toolCalls.length === 0
-          ? {}
-          : {
-              tool_calls: message.toolCalls.map((call) => ({
-                function: { arguments: call.arguments, name: call.name },
-                id: call.id,
-                type: "function",
-              })),
-            }),
-      };
-    case "compaction_notice":
-      return undefined;
-    case "tool":
-      return {
-        content: chatContent(message.content, undefined, cached),
-        role: "tool",
-        tool_call_id: message.toolCallId,
-      };
-  }
+      })),
+  } satisfies MessageHandler<unknown>;
+  return handlers[message.role]();
 }
 
 export function providerResponsesInput(
   message: AgentConversationMessage,
 ): readonly unknown[] {
-  switch (message.role) {
-    case "user":
-      return [
+  const assistantInput = () =>
+    handleMessageRole(message, "assistant", (item) => [
+      ...(item.content.length === 0
+        ? []
+        : [
+            {
+              content: [{ text: item.content, type: "output_text" }],
+              role: "assistant",
+              type: "message",
+            },
+          ]),
+      ...item.toolCalls.map((call) => ({
+        arguments: call.arguments,
+        call_id: call.id,
+        name: call.name,
+        type: "function_call",
+      })),
+    ]);
+  const handlers = {
+    assistant: assistantInput,
+    compaction_notice: () => [],
+    tool: () =>
+      handleMessageRole(message, "tool", (item) => [
+        {
+          call_id: item.toolCallId,
+          output: item.content,
+          type: "function_call_output",
+        },
+      ]),
+    user: () =>
+      handleMessageRole(message, "user", (item) => [
         {
           content: [
-            ...textInputItems(message.content, "input_text"),
-            ...userAttachments(message).map((attachment) =>
+            ...textInputItems(item.content, "input_text"),
+            ...userAttachments(item).map((attachment) =>
               providerAttachmentInput(attachment, true),
             ),
           ],
           role: "user",
           type: "message",
         },
-      ];
-    case "assistant": {
-      const textItems =
-        message.content.length === 0
-          ? []
-          : [
-              {
-                content: [{ text: message.content, type: "output_text" }],
-                role: "assistant",
-                type: "message",
-              },
-            ];
-      return [
-        ...textItems,
-        ...message.toolCalls.map((call) => ({
-          arguments: call.arguments,
-          call_id: call.id,
-          name: call.name,
-          type: "function_call",
-        })),
-      ];
-    }
-    case "compaction_notice":
-      return [];
-    case "tool":
-      return [
-        {
-          call_id: message.toolCallId,
-          output: message.content,
-          type: "function_call_output",
-        },
-      ];
-  }
+      ]),
+  } satisfies MessageHandler<readonly unknown[]>;
+  return handlers[message.role]();
 }

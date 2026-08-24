@@ -8,9 +8,14 @@ import type {
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
+import {
+  assistantPrefillError,
+  createAgentRequestRecorder,
+} from "./assistant-prefill-test-helpers.ts";
 import {
   createAuthenticatedRequest,
   TEST_AUTHENTICATED_USER,
@@ -57,53 +62,53 @@ function parentSessionRequests(
   });
 }
 
-class PrefillRejectingSleepWakeCallbackModel implements AgentModel {
-  readonly #childCompletion = Promise.withResolvers<undefined>();
-  readonly #sleepStep = Promise.withResolvers<undefined>();
-  readonly requests: AgentConversationMessage[][] = [];
+interface SleepWakeCallbackModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  finishChild(): void;
+  waitForSleepStep(): Promise<undefined>;
+}
 
-  readonly complete = async (
-    ...parameters: Parameters<AgentModel["complete"]>
-  ) => {
-    const [messages] = parameters;
-    const copied = messages.map((message) => ({ ...message }));
-    this.requests.push(copied);
-    const initial = messages[0]?.content;
-    if (initial === "Complete during the parent sleep") {
-      await this.#childCompletion.promise;
-      return terminalAgentStep(
-        messages.at(-1)?.content === "Continue."
-          ? "Continued child result."
-          : "Child callback result.",
-      );
-    }
-    const parentRequest = parentSessionRequests(this.requests).length;
-    if (parentRequest === 1) {
-      return providerStep("Delegating before sleeping.", {
-        toolCalls: [spawnCall("Complete during the parent sleep")],
-      });
-    }
-    if (parentRequest === 2) {
-      this.#sleepStep.resolve();
-      return providerStep("Waiting for the child callback.", {
-        toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
-      });
-    }
-    if (messages.at(-1)?.role !== "user") {
-      throw new Error(
-        "This model does not support assistant message prefill. The conversation must end with a user message.",
-      );
-    }
-    return terminalAgentStep("Callback handled once.");
+function createPrefillRejectingSleepWakeCallbackModel(): SleepWakeCallbackModel {
+  const childCompletion = Promise.withResolvers<undefined>();
+  const sleepStep = Promise.withResolvers<undefined>();
+  const recorder = createAgentRequestRecorder(true);
+  const { requests } = recorder;
+  return {
+    requests,
+    async complete(messages) {
+      recorder.record(messages);
+      const initial = messages[0]?.content;
+      if (initial === "Complete during the parent sleep") {
+        await childCompletion.promise;
+        return terminalAgentStep(
+          messages.at(-1)?.content === "Continue."
+            ? "Continued child result."
+            : "Child callback result.",
+        );
+      }
+      const parentRequest = parentSessionRequests(requests).length;
+      if (parentRequest === 1) {
+        return providerStep("Delegating before sleeping.", {
+          toolCalls: [spawnCall("Complete during the parent sleep")],
+        });
+      }
+      if (parentRequest === 2) {
+        sleepStep.resolve();
+        return providerStep("Waiting for the child callback.", {
+          toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
+        });
+      }
+      const prefillError = assistantPrefillError(messages);
+      if (prefillError !== undefined) throw prefillError;
+      return terminalAgentStep("Callback handled once.");
+    },
+    finishChild() {
+      childCompletion.resolve();
+    },
+    waitForSleepStep() {
+      return sleepStep.promise;
+    },
   };
-
-  finishChild(): void {
-    this.#childCompletion.resolve();
-  }
-
-  waitForSleepStep(): Promise<undefined> {
-    return this.#sleepStep.promise;
-  }
 }
 
 function completeBrokerCommand(
@@ -124,7 +129,7 @@ function autoCompletingAgentFileBroker(): {
 } {
   const commands: RunnerToolCommand[] = [];
   let commandSequence = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => `phantom-step-command-${String(++commandSequence)}`,
     deliver: (runnerId, command) => {
       commands.push(command);
@@ -139,34 +144,29 @@ function autoCompletingAgentFileBroker(): {
   return { broker, commands };
 }
 
-class PrefillRejectingSteeringModel implements AgentModel {
-  readonly #firstStep = Promise.withResolvers<AgentModelStep>();
-  readonly requests: AgentConversationMessage[][] = [];
+interface SteeringModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  resolveFirstStep(): void;
+}
 
-  readonly complete = (
-    ...parameters: Parameters<AgentModel["complete"]>
-  ): Promise<AgentModelStep> => {
-    const [messages] = parameters;
-    const request = messages.slice();
-    this.requests.push(request);
-    if (this.requests.length === 1) {
-      return this.#firstStep.promise;
-    }
-    if (messages.at(-1)?.role !== "user") {
-      return Promise.reject(
-        new Error(
-          "This model does not support assistant message prefill. The conversation must end with a user message.",
-        ),
-      );
-    }
-    return Promise.resolve(terminalAgentStep("Steer handled safely."));
+function createPrefillRejectingSteeringModel(): SteeringModel {
+  const firstStep = Promise.withResolvers<AgentModelStep>();
+  const recorder = createAgentRequestRecorder();
+  return {
+    requests: recorder.requests,
+    complete(messages) {
+      recorder.record(messages);
+      if (recorder.requests.length === 1) {
+        return firstStep.promise;
+      }
+      const prefillError = assistantPrefillError(messages);
+      if (prefillError !== undefined) return Promise.reject(prefillError);
+      return Promise.resolve(terminalAgentStep("Steer handled safely."));
+    },
+    resolveFirstStep() {
+      firstStep.resolve(terminalAgentStep("Answer completed before steering."));
+    },
   };
-
-  resolveFirstStep(): void {
-    this.#firstStep.resolve(
-      terminalAgentStep("Answer completed before steering."),
-    );
-  }
 }
 
 test("settles one deferred terminal answer without a restart handoff", async () => {
@@ -192,7 +192,7 @@ test("settles one deferred terminal answer without a restart handoff", async () 
 });
 
 test("wakes again for a continued child's callback", async () => {
-  const model = new PrefillRejectingSleepWakeCallbackModel();
+  const model = createPrefillRejectingSleepWakeCallbackModel();
   const { broker, commands } = autoCompletingAgentFileBroker();
   const setup = connectedSessionSetup(model, "api_key", undefined, { broker });
 
@@ -314,7 +314,7 @@ test("wakes again for a continued child's callback", async () => {
 });
 
 test("orders a mid-step steer after the in-flight assistant output", async () => {
-  const model = new PrefillRejectingSteeringModel();
+  const model = createPrefillRejectingSteeringModel();
   const setup = connectedSessionSetup(model);
   const created = await startSessionAndCompleteAgentFile(setup);
   expect(created.status).toBe(201);

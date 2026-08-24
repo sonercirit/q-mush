@@ -9,6 +9,7 @@ import {
   type AnthropicReplayObject,
 } from "../shared/anthropic-replay.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 
 interface MutableThinkingBlock {
   readonly fields: AnthropicReplayObject;
@@ -154,8 +155,14 @@ function initialServerToolBlock(
   };
 }
 
+type ReplayRecord = Readonly<Record<string, unknown>>;
+type IndexedReplayBlock = readonly [
+  index: number | undefined,
+  block: ReplayRecord,
+];
+
 function initialReplayBlock(
-  block: Readonly<Record<string, unknown>>,
+  block: ReplayRecord,
 ): MutableReplayBlock | undefined {
   const type = readAnthropicReplayBlockType(block["type"]);
   if (type === undefined) return undefined;
@@ -234,145 +241,160 @@ function completedStringBlock(
   return value.length === 0 ? { valid: false } : completedCandidate(completed);
 }
 
+type MutableReplayBlockType = MutableReplayBlock["type"];
+type ReplayCompletionHandler = (block: MutableReplayBlock) => ReplayCompletion;
+
+const completedReplayHandlers: Record<
+  MutableReplayBlockType,
+  ReplayCompletionHandler
+> = {
+  bash_code_execution_tool_result: (block) => completedCandidate(block),
+  code_execution_tool_result: (block) => completedCandidate(block),
+  container_upload: (block) => completedCandidate(block),
+  redacted_thinking: (block) => completedCandidate(block),
+  server_tool_use: (block) => completedCandidate(block),
+  streamed_redacted_thinking: (block) =>
+    block.type === "streamed_redacted_thinking"
+      ? completedStringBlock(block, block.data)
+      : { valid: false },
+  streamed_server_tool_use: (block) =>
+    block.type === "streamed_server_tool_use"
+      ? completedServerToolBlock(block)
+      : { valid: false },
+  streamed_text: (block) => {
+    if (block.type !== "streamed_text") return { valid: false };
+    return block.text.length === 0
+      ? { valid: true }
+      : completedCandidate({ ...block.fields, text: block.text });
+  },
+  streamed_thinking: (block) =>
+    block.type === "streamed_thinking"
+      ? completedStringBlock(block, block.signature)
+      : { valid: false },
+  streamed_tool_use: (block) =>
+    block.type === "streamed_tool_use"
+      ? completedToolBlock(block)
+      : { valid: false },
+  text: (block) => completedCandidate(block),
+  text_editor_code_execution_tool_result: (block) => completedCandidate(block),
+  thinking: (block) => completedCandidate(block),
+  tool_search_tool_result: (block) => completedCandidate(block),
+  tool_use: (block) => completedCandidate(block),
+  web_fetch_tool_result: (block) => completedCandidate(block),
+  web_search_tool_result: (block) => completedCandidate(block),
+};
+
 function completedReplayBlock(block: MutableReplayBlock): ReplayCompletion {
-  switch (block.type) {
-    case "streamed_thinking":
-      return completedStringBlock(block, block.signature);
-    case "streamed_redacted_thinking":
-      return completedStringBlock(block, block.data);
-    case "streamed_text": {
-      if (block.text.length === 0) return { valid: true };
-      return completedCandidate({ ...block.fields, text: block.text });
-    }
-    case "streamed_tool_use":
-      return completedToolBlock(block);
-    case "streamed_server_tool_use":
-      return completedServerToolBlock(block);
-    case "redacted_thinking":
-    case "thinking":
-    case "text":
-    case "bash_code_execution_tool_result":
-    case "code_execution_tool_result":
-    case "container_upload":
-    case "server_tool_use":
-    case "text_editor_code_execution_tool_result":
-    case "tool_search_tool_result":
-    case "tool_use":
-    case "web_fetch_tool_result":
-    case "web_search_tool_result":
-      return { block, valid: true };
-  }
+  return completedReplayHandlers[block.type](block);
 }
 
-export class AnthropicReplayCapture {
-  readonly #entries = new Map<number, ReplayEntry>();
-  #available = true;
-  #container: string | undefined;
-  #model: string | undefined;
-  readonly #provenance: string;
+export interface AnthropicReplayCapture {
+  readonly complete: (...[index, block]: IndexedReplayBlock) => void;
+  readonly delta: (
+    index: number | undefined,
+    delta: Readonly<Record<string, unknown>>,
+  ) => void;
+  readonly finish: () => AnthropicAssistantReplay | undefined;
+  readonly invalidate: () => void;
+  readonly readContainer: (value: unknown) => void;
+  readonly readModel: (value: unknown) => void;
+  readonly start: (...[index, block]: IndexedReplayBlock) => void;
+  readonly stop: (index: number | undefined) => void;
+}
 
-  constructor(provenance: string) {
-    this.#provenance = provenance;
-  }
+export function createAnthropicReplayCapture(
+  provenance: string,
+): AnthropicReplayCapture {
+  const entries = new Map<number, ReplayEntry>();
+  let available = true;
+  let container: string | undefined;
+  let model: string | undefined;
 
-  #unavailable(): false {
-    this.#available = false;
+  const unavailable = (): false => {
+    available = false;
     return false;
-  }
-
-  invalidate(): void {
-    this.#unavailable();
-  }
-
-  readModel(value: unknown): void {
+  };
+  const invalidate = (): void => {
+    unavailable();
+  };
+  const readModel = (value: unknown): void => {
     if (
       typeof value !== "string" ||
       value.length === 0 ||
-      (this.#model !== undefined && this.#model !== value)
+      (model !== undefined && model !== value)
     ) {
-      this.invalidate();
+      invalidate();
       return;
     }
-    this.#model = value;
-  }
-
-  readContainer(value: unknown): void {
+    model = value;
+  };
+  const readContainer = (value: unknown): void => {
     if (value === undefined || value === null) return;
     const id = isRecord(value) ? value["id"] : undefined;
     if (
       typeof id !== "string" ||
       id.length === 0 ||
-      (this.#container !== undefined && this.#container !== id)
+      (container !== undefined && container !== id)
     ) {
-      this.invalidate();
+      invalidate();
       return;
     }
-    this.#container = id;
-  }
-
-  #store(index: number | undefined, entry: ReplayEntry | undefined): void {
-    if (index === undefined || entry === undefined) {
-      this.invalidate();
-    } else {
-      this.#entries.set(index, entry);
-    }
-  }
-
-  #update(
+    container = id;
+  };
+  const store = (
+    index: number | undefined,
+    entry: ReplayEntry | undefined,
+  ): void => {
+    if (index === undefined || entry === undefined) invalidate();
+    else entries.set(index, entry);
+  };
+  const update = (
     index: number | undefined,
     mutation: (entry: ReplayEntry) => ReplayEntry | undefined,
-  ): void {
-    const entry = index === undefined ? undefined : this.#entries.get(index);
-    this.#store(index, entry === undefined ? undefined : mutation(entry));
-  }
-
-  start(
-    index: number | undefined,
-    block: Readonly<Record<string, unknown>>,
-  ): void {
+  ): void => {
+    const entry = index === undefined ? undefined : entries.get(index);
+    store(index, entry === undefined ? undefined : mutation(entry));
+  };
+  const start = (...[index, block]: IndexedReplayBlock): void => {
     const replayBlock = initialReplayBlock(block);
-    const duplicate = index !== undefined && this.#entries.has(index);
-    this.#store(
+    const duplicate = index !== undefined && entries.has(index);
+    store(
       index,
       duplicate || replayBlock === undefined
         ? undefined
         : { block: replayBlock, stopped: false },
     );
-  }
-
-  delta(
+  };
+  const delta = (
     index: number | undefined,
-    delta: Readonly<Record<string, unknown>>,
-  ): void {
-    this.#update(index, (entry) => {
-      const block = updatedReplayBlock(entry.block, delta);
+    value: Readonly<Record<string, unknown>>,
+  ): void => {
+    update(index, (entry) => {
+      const block = updatedReplayBlock(entry.block, value);
       return block === undefined ? undefined : { ...entry, block };
     });
-  }
-
-  stop(index: number | undefined): void {
-    this.#update(index, (entry) =>
+  };
+  const stop = (index: number | undefined): void => {
+    update(index, (entry) =>
       entry.stopped ? undefined : { ...entry, stopped: true },
     );
-  }
-
-  complete(index: number, block: Readonly<Record<string, unknown>>): void {
-    this.start(index, block);
-    this.stop(index);
-  }
-
-  finish(): AnthropicAssistantReplay | undefined {
+  };
+  const complete = (...[index, block]: IndexedReplayBlock): void => {
+    start(index, block);
+    stop(index);
+  };
+  const finish = (): AnthropicAssistantReplay | undefined => {
     if (
-      !this.#available ||
-      this.#model === undefined ||
-      [...this.#entries.values()].some(({ stopped }) => !stopped)
+      !available ||
+      model === undefined ||
+      [...entries.values()].some(({ stopped }) => !stopped)
     ) {
       return undefined;
     }
     const blocks: AnthropicReplayBlock[] = [];
-    const entries = Array.from(this.#entries.entries());
-    entries.sort((left, right) => left[0] - right[0]);
-    for (const [, { block }] of entries) {
+    const sortedEntries = Array.from(entries.entries());
+    sortedEntries.sort((left, right) => left[0] - right[0]);
+    for (const [, { block }] of sortedEntries) {
       const completed = completedReplayBlock(block);
       if (!completed.valid) return undefined;
       if (completed.block !== undefined) blocks.push(completed.block);
@@ -381,13 +403,21 @@ export class AnthropicReplayCapture {
       ? undefined
       : createAnthropicAssistantReplay(
           blocks,
-          {
-            model: this.#model,
-            provenance: this.#provenance,
-          },
-          this.#container,
+          { model, provenance },
+          container,
         );
-  }
+  };
+
+  return {
+    complete,
+    delta,
+    finish,
+    invalidate,
+    readContainer,
+    readModel,
+    start,
+    stop,
+  };
 }
 
 function appendCitation(
@@ -419,36 +449,52 @@ function appendServerToolInput(
   return { ...block, partialInput: block.partialInput + partialJson };
 }
 
-function updatedReplayBlock(
+type ReplayDeltaType =
+  | "citations_delta"
+  | "input_json_delta"
+  | "signature_delta"
+  | "text_delta"
+  | "thinking_delta";
+
+type ReplayDeltaHandler = (
   block: MutableReplayBlock,
   delta: Readonly<Record<string, unknown>>,
+) => MutableReplayBlock | undefined;
+
+const replayDeltaHandlers: Record<ReplayDeltaType, ReplayDeltaHandler> = {
+  citations_delta: (block, delta) => appendCitation(block, delta["citation"]),
+  input_json_delta: (block, delta) =>
+    block.type === "streamed_tool_use" &&
+    typeof delta["partial_json"] === "string"
+      ? { ...block, arguments: block.arguments + delta["partial_json"] }
+      : block.type === "streamed_server_tool_use" &&
+          typeof delta["partial_json"] === "string"
+        ? appendServerToolInput(block, delta["partial_json"])
+        : undefined,
+  signature_delta: (block, delta) =>
+    block.type === "streamed_thinking" && typeof delta["signature"] === "string"
+      ? { ...block, signature: block.signature + delta["signature"] }
+      : undefined,
+  text_delta: (block, delta) =>
+    block.type === "streamed_text" && typeof delta["text"] === "string"
+      ? { ...block, text: block.text + delta["text"] }
+      : undefined,
+  thinking_delta: (block, delta) =>
+    block.type === "streamed_thinking" && typeof delta["thinking"] === "string"
+      ? { ...block, thinking: block.thinking + delta["thinking"] }
+      : undefined,
+};
+
+function isReplayDeltaType(value: unknown): value is ReplayDeltaType {
+  return isDispatchKey(replayDeltaHandlers, value);
+}
+
+function updatedReplayBlock(
+  block: MutableReplayBlock,
+  delta: ReplayRecord,
 ): MutableReplayBlock | undefined {
-  switch (delta["type"]) {
-    case "text_delta":
-      return block.type === "streamed_text" && typeof delta["text"] === "string"
-        ? { ...block, text: block.text + delta["text"] }
-        : undefined;
-    case "thinking_delta":
-      return block.type === "streamed_thinking" &&
-        typeof delta["thinking"] === "string"
-        ? { ...block, thinking: block.thinking + delta["thinking"] }
-        : undefined;
-    case "signature_delta":
-      return block.type === "streamed_thinking" &&
-        typeof delta["signature"] === "string"
-        ? { ...block, signature: block.signature + delta["signature"] }
-        : undefined;
-    case "citations_delta":
-      return appendCitation(block, delta["citation"]);
-    case "input_json_delta":
-      return block.type === "streamed_tool_use" &&
-        typeof delta["partial_json"] === "string"
-        ? { ...block, arguments: block.arguments + delta["partial_json"] }
-        : block.type === "streamed_server_tool_use" &&
-            typeof delta["partial_json"] === "string"
-          ? appendServerToolInput(block, delta["partial_json"])
-          : undefined;
-    default:
-      return undefined;
-  }
+  const type = delta["type"];
+  return isReplayDeltaType(type)
+    ? replayDeltaHandlers[type](block, delta)
+    : undefined;
 }

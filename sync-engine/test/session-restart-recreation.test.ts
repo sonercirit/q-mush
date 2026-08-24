@@ -1,17 +1,20 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { CredentialCipher } from "../../shared/credential-cipher.ts";
+import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 import {
   agentSessions,
   providerCredentials,
 } from "../../shared/database/schema.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import { createProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import {
   createSessionRestartControl,
   type SessionRestartControl,
 } from "../../sync-engine/session-restart-control.ts";
-import { SessionRestartCoordinator } from "../../sync-engine/session-restart-coordinator.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRestartCoordinator,
+  type SessionRestartCoordinator,
+} from "../../sync-engine/session-restart-coordinator.ts";
+import { createSessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -28,11 +31,11 @@ import {
 } from "./session-restart-cpd-helpers.ts";
 import { STORE_RUNNER_ID } from "./session-store-test-fixtures.ts";
 
-type RestartCoordinatorLaunch = ConstructorParameters<
-  typeof SessionRestartCoordinator
+type RestartCoordinatorLaunch = Parameters<
+  typeof createSessionRestartCoordinator
 >[0]["launch"];
-type RestartCoordinatorCredentialRead = ConstructorParameters<
-  typeof SessionRestartCoordinator
+type RestartCoordinatorCredentialRead = Parameters<
+  typeof createSessionRestartCoordinator
 >[0]["providers"]["openai"]["readCredential"];
 
 interface RestartCoordinatorFixture {
@@ -49,12 +52,12 @@ function restartCoordinatorFixture(
   readCredential: RestartCoordinatorCredentialRead = () => CREDENTIAL,
 ): RestartCoordinatorFixture {
   const restart = createSessionRestartControl(
-    new SessionRuntimes(),
+    createSessionRuntimes(),
     () => "unused-server-restart",
   );
   let retry: (() => void) | undefined;
   const retryDelays: number[] = [];
-  const coordinator = new SessionRestartCoordinator(
+  const coordinator = createSessionRestartCoordinator(
     {
       launch,
       notify: () => undefined,
@@ -187,8 +190,9 @@ test("recreated runtimes recover a durable runner handoff only through its exact
 test("restart recovery enforces the pending session workspace credential scope", async () => {
   const { identity, setup } = pausedRunnerRestartStore("restart-scope");
   const running = requireCompactionSession(setup.store);
-  const cipher = new CredentialCipher(
-    Uint8Array.from({ length: 32 }, () => 0),
+  const cipher = createCredentialCipher(
+    Buffer.from(Uint8Array.from({ length: 32 }, () => 0)).toString("base64url"),
+    "Credential encryption key",
     (size) => new Uint8Array(size),
   );
   setup.database
@@ -202,7 +206,7 @@ test("restart recovery enforces the pending session workspace credential scope",
     })
     .where(eq(providerCredentials.id, running.credentialId))
     .run();
-  const credentialStore = new ProviderCredentialStore(
+  const credentialStore = createProviderCredentialStore(
     setup.database,
     cipher,
     "openai",

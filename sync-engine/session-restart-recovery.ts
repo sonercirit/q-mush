@@ -14,6 +14,7 @@ import type {
   InvalidRestartSession,
   PendingRestartSession,
   RestartHandoffIdentity,
+  RestartHandoffStore,
 } from "./session-restart-store.ts";
 import {
   sessionRunnerIsAvailable,
@@ -26,12 +27,10 @@ export interface RestartCredentialSelection {
   readonly workspaceId: string;
 }
 
+type FailInvalidRestartHandoff = RestartHandoffStore["failInvalid"];
+
 interface SessionRestartRecoveryStore {
-  readonly failInvalidRestartHandoff: (
-    invalid: InvalidRestartSession,
-    error: string,
-    now: number,
-  ) => boolean;
+  readonly failInvalidRestartHandoff: FailInvalidRestartHandoff;
   readonly failRestartHandoff: (
     userId: string,
     identity: RestartHandoffIdentity,
@@ -41,11 +40,11 @@ interface SessionRestartRecoveryStore {
   readonly invalidRestartHandoffs: (
     runnerId?: string,
   ) => readonly InvalidRestartSession[];
-  readonly claimRestartHandoff: (
+  claimRestartHandoff(
     userId: string,
     identity: RestartHandoffIdentity,
     now: number,
-  ) => AgentSessionDetail | undefined;
+  ): AgentSessionDetail | undefined;
   readonly pendingRestartHandoffs: (
     runnerId?: string,
   ) => readonly PendingRestartSession[];

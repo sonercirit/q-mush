@@ -92,32 +92,32 @@ function reassignmentSelection(
   };
 }
 
-export class SessionCredentialReassignmentEndpoints {
-  readonly #options: SessionCredentialReassignmentEndpointOptions;
+export interface SessionCredentialReassignmentEndpoints {
+  reassign(request: Request, credentialId: string): Promise<Response>;
+}
 
-  constructor(options: SessionCredentialReassignmentEndpointOptions) {
-    this.#options = options;
-  }
-
-  #storeUnavailable(): Response {
-    return this.#options.store === undefined
+export function createSessionCredentialReassignmentEndpoints(
+  options: SessionCredentialReassignmentEndpointOptions,
+): SessionCredentialReassignmentEndpoints {
+  function storeUnavailable(): Response {
+    return options.store === undefined
       ? createApiError("not_configured", 503)
       : createApiError("not_found", 404);
   }
 
-  reassign(request: Request, credentialId: string): Promise<Response> {
+  function reassign(request: Request, credentialId: string): Promise<Response> {
     if (request.method !== "POST") {
       return Promise.resolve(createMethodNotAllowedResponse("POST"));
     }
 
     return Promise.resolve(
-      withAuthenticatedUser(this.#options.auth, request, (user) =>
-        this.#reassignForUser(request, user, credentialId),
+      withAuthenticatedUser(options.auth, request, (user) =>
+        reassignForUser(request, user, credentialId),
       ),
     );
   }
 
-  async #reassignForUser(
+  async function reassignForUser(
     request: Request,
     user: AuthenticatedUser,
     credentialId: string,
@@ -127,13 +127,13 @@ export class SessionCredentialReassignmentEndpoints {
       return createApiError("invalid_request", 400);
     }
     const scope =
-      this.#options.scope === undefined
+      options.scope === undefined
         ? body.workspaceId === undefined
           ? undefined
           : { workspaceId: body.workspaceId }
-        : this.#options.scope(request, user.id);
+        : options.scope(request, user.id);
     if (
-      this.#options.scope !== undefined &&
+      options.scope !== undefined &&
       scope?.workspaceId !== (body.workspaceId ?? GLOBAL_WORKSPACE_ID)
     ) {
       return createApiError("invalid_scope", 409);
@@ -141,22 +141,22 @@ export class SessionCredentialReassignmentEndpoints {
 
     let preparedProviderState:
       PreparedSessionCredentialProviderState | undefined;
-    if (this.#options.prepareProviderState !== undefined) {
+    if (options.prepareProviderState !== undefined) {
       const selection = reassignmentSelection(
         credentialId,
-        this.#options.provider,
+        options.provider,
         scope,
         user.id,
       );
-      const snapshot = this.#options.store?.snapshot?.(selection);
+      const snapshot = options.store?.snapshot?.(selection);
       if (snapshot === undefined) {
-        return this.#storeUnavailable();
+        return storeUnavailable();
       }
       let preparation: SessionCredentialProviderPreparationResult;
       try {
-        preparation = await this.#options.prepareProviderState({
+        preparation = await options.prepareProviderState({
           credentialId,
-          provider: this.#options.provider,
+          provider: options.provider,
           scope,
           snapshot,
           userId: user.id,
@@ -176,26 +176,28 @@ export class SessionCredentialReassignmentEndpoints {
     }
 
     const result: SessionCredentialReassignmentResult | undefined =
-      this.#options.store?.reassign({
+      options.store?.reassign({
         ...reassignmentSelection(
           credentialId,
-          this.#options.provider,
+          options.provider,
           scope,
           user.id,
         ),
-        now: this.#options.now(),
+        now: options.now(),
         ...(preparedProviderState === undefined
           ? {}
           : { preparedProviderState }),
       });
 
     if (result === undefined) {
-      return this.#storeUnavailable();
+      return storeUnavailable();
     }
 
     if (result.migratedSessionCount > 0) {
-      this.#options.onChanged?.(user.id);
+      options.onChanged?.(user.id);
     }
     return createJsonResponse(result);
   }
+
+  return { reassign };
 }

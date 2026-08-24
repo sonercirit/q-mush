@@ -1,7 +1,11 @@
 import type { ModelCredentialPool } from "./model-credential-pool.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import { SessionAgentActions } from "./session-agent-actions.ts";
+import type { SessionAgentActionsDependencies } from "./session-agent-actions-dependencies.ts";
+import {
+  createSessionAgentActions,
+  type SessionAgentActions,
+} from "./session-agent-actions.ts";
 import { discoverSessionAgentMetadata } from "./session-agent-metadata.ts";
 import { startManualSessionCompactionForUserId } from "./session-compaction-actions.ts";
 import type { SessionLaunchBoundary } from "./session-creation.ts";
@@ -9,9 +13,7 @@ import type { SessionExecutionCleanup } from "./session-execution-cleanup.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 
-type AgentActionsDependencies = ConstructorParameters<
-  typeof SessionAgentActions
->[0];
+type AgentActionsDependencies = SessionAgentActionsDependencies;
 
 interface SessionAgentActionsResources extends Pick<
   AgentActionsDependencies,
@@ -35,10 +37,10 @@ interface SessionAgentActionsResources extends Pick<
   readonly runtimes: SessionRuntimes;
 }
 
-export function createSessionAgentActions(
+export function createConfiguredSessionAgentActions(
   resources: SessionAgentActionsResources,
 ): SessionAgentActions {
-  return new SessionAgentActions({
+  return createSessionAgentActions({
     abortSession: resources.runtimes.abort.bind(resources.runtimes),
     activeSession: (id) => resources.runtimes.active(id),
     broker: resources.broker,

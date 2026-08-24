@@ -1,13 +1,17 @@
 import { expect, onTestFinished, test, vi } from "vitest";
-import { RestartDeadline } from "../../shared/restart-deadline.ts";
+import { createRestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
-  RunnerCommandBroker,
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { SessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
+import {
+  createSessionExecutionCleanup,
+  type SessionExecutionCleanup,
+} from "../../sync-engine/session-execution-cleanup.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../sync-engine/session-runtime.ts";
 
 function expectCleanupInactive(broker: RunnerCommandBroker): void {
   expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-command")).toBe(
@@ -43,12 +47,12 @@ function completeCleanup(
 }
 
 function drainExpired(cleanup: SessionExecutionCleanup): Promise<void> {
-  return cleanup.drainPending(new RestartDeadline(0, () => 0));
+  return cleanup.drainPending(createRestartDeadline(0, () => 0));
 }
 
 async function pendingCleanup() {
   const dispatched = Promise.withResolvers<undefined>();
-  const brokerOptions: ConstructorParameters<typeof RunnerCommandBroker>[0] = {
+  const brokerOptions: Parameters<typeof createRunnerCommandBroker>[0] = {
     commandId: () => "cleanup-command",
     deliver: (_runnerId, command) => {
       if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
@@ -57,8 +61,8 @@ async function pendingCleanup() {
       return true;
     },
   };
-  const broker = new RunnerCommandBroker(brokerOptions);
-  const cleanup = new SessionExecutionCleanup(broker);
+  const broker = createRunnerCommandBroker(brokerOptions);
+  const cleanup = createSessionExecutionCleanup(broker);
   const promise = containerCleanup(cleanup);
   await dispatched.promise;
   return { broker, cleanup, promise };
@@ -66,7 +70,7 @@ async function pendingCleanup() {
 
 test("development restart cancels pending execution cleanup without waiting", async () => {
   const { broker, cleanup, promise } = await pendingCleanup();
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const restart = createSessionRestartControl(
     runtimes,
     () => "restart-cleanup",
@@ -109,17 +113,17 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   );
   vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
   let commandSequence = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => `cleanup-${String(++commandSequence)}`,
     deliver: () => true,
   });
   // Keep cancellation inert so the first cleanup remains pending while each
   // drain deadline is advanced independently.
   vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
-  const cleanup = new SessionExecutionCleanup(broker);
+  const cleanup = createSessionExecutionCleanup(broker);
   const first = containerCleanup(cleanup);
-  const shortDrain = cleanup.drainPending(new RestartDeadline(20, () => 0));
-  const longDrain = cleanup.drainPending(new RestartDeadline(100, () => 0));
+  const shortDrain = cleanup.drainPending(createRestartDeadline(20, () => 0));
+  const longDrain = cleanup.drainPending(createRestartDeadline(100, () => 0));
 
   expect(timers).toHaveLength(2);
   timers[0]?.();
@@ -144,11 +148,11 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
 });
 
 test("cleanup dispatch resumes after a completed development drain", async () => {
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "cleanup-command",
     deliver: () => true,
   });
-  const cleanup = new SessionExecutionCleanup(broker);
+  const cleanup = createSessionExecutionCleanup(broker);
 
   await drainExpired(cleanup);
   const promise = containerCleanup(cleanup);

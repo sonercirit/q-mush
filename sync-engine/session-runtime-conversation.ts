@@ -2,7 +2,7 @@ import { agentCredentialFingerprint } from "./agent-model-options.ts";
 import { resolveAnthropicModelAttempt } from "./anthropic-model-resolution.ts";
 import { anthropicReplayIdentityFrom } from "./anthropic-replay-identity.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export async function resolveSessionReplayModel(
   runtime: SessionAgentRuntimeDependencies,

@@ -7,9 +7,9 @@ import {
   compactSessionConversation,
   runSessionAgent,
 } from "../session-agent-runtime.ts";
-import type { RuntimeModelMetadata } from "../session-store-runtime.ts";
+import type { SessionStoreRuntime } from "../session-store-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completingTestBroker,
   IDLE_RUNTIME_SIGNALS,
@@ -20,6 +20,10 @@ import {
   runningCompactionStore,
 } from "./session-compaction-test-helpers.ts";
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
+
+type RuntimeModelMetadata = Parameters<
+  SessionStoreRuntime["setRuntimeModelMetadata"]
+>[2];
 
 // Sessions created before the request-metadata columns - or reassigned onto
 // an Anthropic-format credential - refresh catalog metadata before requesting.
@@ -85,7 +89,7 @@ describe("lazy Anthropic request metadata refresh", () => {
       adaptiveThinking: runtimeDetail.adaptiveThinking,
       maxOutputTokens: runtimeDetail.maxOutputTokens,
     }).toEqual(currentMetadata);
-    const model = new ScriptedAgentModel(
+    const model = createScriptedAgentModel(
       options.steps.map((content) => ({ content, toolCalls: [] })),
     );
     const selections: AgentModelRequestOptions[] = [];

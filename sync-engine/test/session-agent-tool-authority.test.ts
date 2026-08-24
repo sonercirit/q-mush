@@ -5,7 +5,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   completedRunToolOutputs,
   completingTestBroker,
@@ -44,7 +44,7 @@ describe("session agent tool authority", () => {
   test("keeps direct and parallel tools enabled after the live read empties", async () => {
     const setup = runningCompactionStore();
     const detail = requireCompactionSession(setup.store);
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: "Use one tool first.",
         toolCalls: [

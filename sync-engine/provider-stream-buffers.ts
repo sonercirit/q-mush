@@ -8,74 +8,82 @@ import {
 } from "./provider-stream-helpers.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
-export interface StreamBuffers {
+interface StreamBuffers {
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly text: string[];
   readonly thinking: string[];
 }
 
-function createStreamBuffers(
-  onDelta?: (delta: ProviderTextDelta) => void,
-): StreamBuffers {
-  return { onDelta, text: [], thinking: [] };
-}
-
-export abstract class BufferedAccumulator {
+export interface BufferedAccumulator {
+  readonly appendToolCallArguments: (index: number, partial: string) => void;
   readonly buffers: StreamBuffers;
-  protected readonly toolCalls = new Map<number, PartialProviderToolCall>();
-  receivedEvent = false;
-
-  constructor(onDelta?: (delta: ProviderTextDelta) => void) {
-    this.buffers = createStreamBuffers(onDelta);
-  }
-
-  protected readEvent(value: unknown, message: string) {
-    this.receivedEvent = true;
-    return requireRecord(value, message);
-  }
-
-  protected pushText(content: string): void {
-    this.buffers.text.push(content);
-    emitProviderDelta(this.buffers.onDelta, content, "");
-  }
-
-  protected pushThinking(thinking: string): void {
-    this.buffers.thinking.push(thinking);
-    emitProviderDelta(this.buffers.onDelta, "", thinking);
-  }
-
-  protected registerToolCall(
+  readonly emitToolCallProgress: (
+    index: number,
+    delta: PartialProviderToolCall,
+  ) => void;
+  readonly pushText: (content: string) => void;
+  readonly pushThinking: (thinking: string) => void;
+  readonly readEvent: (
+    value: unknown,
+    message: string,
+  ) => Readonly<Record<string, unknown>>;
+  readonly receivedEvent: () => boolean;
+  readonly recordedToolCalls: () => readonly AgentToolCall[];
+  readonly registerToolCall: (
     index: number,
     call: PartialProviderToolCall,
-  ): void {
-    this.toolCalls.set(index, call);
-    emitToolCallDelta(this.buffers.onDelta, { ...call, index });
-  }
+  ) => void;
+  readonly setReceivedEvent: () => void;
+  readonly toolCalls: Map<number, PartialProviderToolCall>;
+}
 
-  protected appendToolCallArguments(index: number, partial: string): void {
-    const call = this.toolCalls.get(index);
-
+export function createBufferedAccumulator(
+  onDelta?: (delta: ProviderTextDelta) => void,
+): BufferedAccumulator {
+  const buffers: StreamBuffers = { onDelta, text: [], thinking: [] };
+  const toolCalls = new Map<number, PartialProviderToolCall>();
+  let hasReceivedEvent = false;
+  const emitToolCallProgress = (
+    index: number,
+    delta: PartialProviderToolCall,
+  ): void => {
+    emitToolCallDelta(buffers.onDelta, { ...delta, index });
+  };
+  const appendToolCallArguments = (index: number, partial: string): void => {
+    const call = toolCalls.get(index);
     if (call === undefined) {
       throw new Error(
         "The provider returned a tool-call delta before its call",
       );
     }
-
-    this.toolCalls.set(index, {
-      ...call,
-      arguments: call.arguments + partial,
-    });
-    this.emitToolCallProgress(index, { arguments: partial, id: "", name: "" });
-  }
-
-  protected emitToolCallProgress(
-    index: number,
-    delta: PartialProviderToolCall,
-  ): void {
-    emitToolCallDelta(this.buffers.onDelta, { ...delta, index });
-  }
-
-  protected recordedToolCalls(): readonly AgentToolCall[] {
-    return sortedToolCalls(this.toolCalls);
-  }
+    toolCalls.set(index, { ...call, arguments: call.arguments + partial });
+    emitToolCallProgress(index, { arguments: partial, id: "", name: "" });
+  };
+  return {
+    appendToolCallArguments,
+    buffers,
+    emitToolCallProgress,
+    pushText: (content) => {
+      buffers.text.push(content);
+      emitProviderDelta(buffers.onDelta, content, "");
+    },
+    pushThinking: (thinking) => {
+      buffers.thinking.push(thinking);
+      emitProviderDelta(buffers.onDelta, "", thinking);
+    },
+    readEvent: (value, message) => {
+      hasReceivedEvent = true;
+      return requireRecord(value, message);
+    },
+    receivedEvent: () => hasReceivedEvent,
+    recordedToolCalls: () => sortedToolCalls(toolCalls),
+    registerToolCall: (index, call) => {
+      toolCalls.set(index, call);
+      emitToolCallDelta(buffers.onDelta, { ...call, index });
+    },
+    setReceivedEvent: () => {
+      hasReceivedEvent = true;
+    },
+    toolCalls,
+  };
 }

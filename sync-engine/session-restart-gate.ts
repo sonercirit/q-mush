@@ -1,5 +1,5 @@
 import { abortSignalIsAborted } from "../shared/abort-signal.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import { createApiError } from "./http.ts";
 
 export type RestartSignalReader = () => AbortSignal;
@@ -35,7 +35,7 @@ export function abortedServerRestartResponse(
 
 export function throwIfServerRestarting(signal: AbortSignal | undefined): void {
   if (abortSignalIsAborted(signal)) {
-    throw new RealtimeCommandError("server_restarting");
+    throw createRealtimeCommandError("server_restarting");
   }
 }
 

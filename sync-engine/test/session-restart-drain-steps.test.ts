@@ -1,9 +1,5 @@
 import { expect, test } from "vitest";
-import type {
-  AgentConversationMessage,
-  AgentModel,
-  AgentModelStep,
-} from "../../shared/agent-loop.ts";
+import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutdown.ts";
 import { parseRestartHandoff } from "../../sync-engine/session-restart-store.ts";
@@ -20,16 +16,19 @@ import { waitForRestartDrainCount } from "./session-restart-progress-test-helper
 import {
   completeRestartCommand,
   completeRestartCommands,
+  createMultiSessionRestartModel,
   createRestartSessions,
   expectRestartPaused,
-  MultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   restartSessionDetail,
   waitForRestartCommands,
   type RestartStepSetup,
 } from "./session-restart-step-resume-helpers.ts";
-import { SessionRestartTestClock } from "./session-restart-test-clock.ts";
+import {
+  createSessionRestartTestClock,
+  type SessionRestartTestClock,
+} from "./session-restart-test-clock.ts";
 
 const AGENT_FILE_COMMAND = "read_agent_file";
 
@@ -43,19 +42,25 @@ function interruptedHandoff(setup: RestartStepSetup) {
 
 // Always asks for one more tool call, so any step started after a drain begins
 // shows up as an extra model request.
-class EndlessToolModel implements AgentModel {
-  steps = 0;
-
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    this.steps += 1;
-    return Promise.resolve(
-      providerStep(`Step ${String(messages.length)}.`, {
-        toolCalls: [toolCall("bash", { command: "printf work", timeout: 30 })],
-      }),
-    );
-  }
+interface EndlessToolModel {
+  readonly complete: AgentModel["complete"];
+  steps: number;
+}
+function createEndlessToolModel(): EndlessToolModel {
+  const model: EndlessToolModel = {
+    steps: 0,
+    complete: (messages) => {
+      model.steps += 1;
+      return Promise.resolve(
+        providerStep(`Step ${String(messages.length)}.`, {
+          toolCalls: [
+            toolCall("bash", { command: "printf work", timeout: 30 }),
+          ],
+        }),
+      );
+    },
+  };
+  return model;
 }
 
 type InitializedSession = Readonly<{
@@ -112,7 +117,7 @@ async function busyEndlessSession(commandPrefix: string): Promise<{
   readonly model: EndlessToolModel;
   readonly setup: RestartStepSetup;
 }> {
-  const model = new EndlessToolModel();
+  const model = createEndlessToolModel();
   return { model, ...(await startBusySession(model, commandPrefix)) };
 }
 
@@ -193,9 +198,9 @@ async function forceDrainAtDeadline(
 }
 
 test("the production session drain force-parks at its injected deadline", async () => {
-  const clock = new SessionRestartTestClock();
+  const clock = createSessionRestartTestClock();
   const { id, setup } = await deadlineSession(
-    new EndlessToolModel(),
+    createEndlessToolModel(),
     "deadline-command",
     clock,
   );
@@ -208,9 +213,9 @@ test("the production session drain force-parks at its injected deadline", async 
 });
 
 test("a forced runner drain persists and resumes its runner handoff", async () => {
-  const clock = new SessionRestartTestClock(1_700_000_000_000);
+  const clock = createSessionRestartTestClock(1_700_000_000_000);
   const { id, setup } = await deadlineSession(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "runner-deadline-command",
     clock,
   );
@@ -230,7 +235,7 @@ test("a forced runner drain persists and resumes its runner handoff", async () =
     status: "paused",
   });
   const recreated = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     {
@@ -270,7 +275,7 @@ test("a forced runner drain persists and resumes its runner handoff", async () =
 
 test("final shutdown promotes an active runner drain to a durable server marker", async () => {
   const { setup } = await startSingleBusySession(
-    new EndlessToolModel(),
+    createEndlessToolModel(),
     "final-promotion-command",
   );
 

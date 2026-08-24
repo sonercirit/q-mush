@@ -10,7 +10,7 @@ import type {
   AgentSessionMessage,
 } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -20,6 +20,14 @@ import {
   testAuditFields,
 } from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
+import {
+  ASSISTANT_MESSAGE_ID,
+  RUNNER_ID,
+  SESSION_ID,
+  THINKING_MESSAGE_ID,
+  TOOL_MESSAGE_ID,
+  USER_MESSAGE_ID,
+} from "./session-store-ids.ts";
 import {
   markTestSessionRunning,
   runningStore,
@@ -34,16 +42,7 @@ import {
 import {
   createStore,
   createTestSession,
-  STORE_RUNNER_ID,
-  STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
-const RUNNER_ID = STORE_RUNNER_ID;
-const SESSION_ID = STORE_SESSION_ID;
-const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
-const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
-const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
-const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
-
 function testUserImageMessage(
   id: string,
   content: string,
@@ -451,7 +450,10 @@ describe("session store", () => {
     expectPersistedTurns(
       setup.store.get(TEST_USER_ID, SESSION_ID)?.turns,
       before?.messages.at(-1)?.id,
-      { endedAt: TEST_NOW + 103, startedAt: TEST_NOW + 100 },
+      {
+        endedAt: TEST_NOW + 103,
+        startedAt: TEST_NOW + 100,
+      },
     );
     const finalDetail = setup.store.get(TEST_USER_ID, SESSION_ID);
     expect(finalDetail?.turns?.at(-1)?.boundaryMessageId).toBe(
@@ -547,7 +549,7 @@ describe("session store", () => {
     const { database, store } = createStore();
     createTestSession(store);
 
-    const runnerStore = new RunnerStore(database);
+    const runnerStore = createRunnerStore(database);
     runnerStore.setOnline(RUNNER_ID, TEST_USER_ID, TEST_NOW + 1, false);
 
     expectStoredSession(store, SESSION_ID, {

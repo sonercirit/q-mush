@@ -1,8 +1,11 @@
 import type { ProviderCredentialAccess } from "../shared/provider-credential-store.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import {
+  createRealtimeCommandError,
+  type RealtimeCommandError,
+} from "../shared/user-realtime-protocol.ts";
 
 export function credentialUnavailable(): RealtimeCommandError {
-  return new RealtimeCommandError("credential_unavailable");
+  return createRealtimeCommandError("credential_unavailable");
 }
 
 export function requireCredentialCandidates(
@@ -26,12 +29,12 @@ export async function requireJsonResponse(response: Response): Promise<void> {
   try {
     value = await response.json();
   } catch {
-    throw new RealtimeCommandError("command_failed");
+    throw createRealtimeCommandError("command_failed");
   }
   if (response.ok) return;
   if (typeof value === "object" && value !== null && "error" in value) {
     const error: unknown = value.error;
-    if (typeof error === "string") throw new RealtimeCommandError(error);
+    if (typeof error === "string") throw createRealtimeCommandError(error);
   }
-  throw new RealtimeCommandError("command_failed");
+  throw createRealtimeCommandError("command_failed");
 }

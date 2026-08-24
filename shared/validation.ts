@@ -80,7 +80,7 @@ export function hasOnlyKeys(
   keys: readonly string[],
 ): boolean {
   const allowed = new Set(keys);
-  for (const key in value) if (!allowed.has(key)) return false;
+  for (const key of Object.keys(value)) if (!allowed.has(key)) return false;
   return true;
 }
 

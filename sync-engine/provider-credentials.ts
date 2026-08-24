@@ -1,11 +1,12 @@
 import { isRecord, type AuthenticatedUser } from "../shared/auth-model.ts";
 import {
-  DuplicateProviderCredentialError,
+  isDuplicateProviderCredentialError,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderCredentialStore,
   type ProviderCredentialSummary,
+  type ReadProviderCredential,
 } from "../shared/provider-credential-store.ts";
 import { isProviderApiFormat } from "../shared/provider-id.ts";
 import {
@@ -16,7 +17,6 @@ import type { GoogleAuth } from "./auth.ts";
 import {
   createConfiguredAuthenticator,
   type Authenticate,
-  type Authenticator,
 } from "./authenticated-request.ts";
 import { scopedCollectionForUser } from "./authenticated-scoped-collection.ts";
 import {
@@ -33,11 +33,25 @@ import { updateAuthenticatedConnectionScopes } from "./scoped-collection.ts";
 const API_KEY_MAXIMUM_LENGTH = 1024;
 const API_KEY_LABEL_MAXIMUM_LENGTH = 100;
 
-export class InvalidProviderApiKeyError extends Error {
-  constructor() {
-    super("The provider rejected the API key");
-    this.name = "InvalidProviderApiKeyError";
-  }
+export type InvalidProviderApiKeyError = Error & {
+  readonly kind: "invalid_provider_api_key";
+};
+
+export function createInvalidProviderApiKeyError(): InvalidProviderApiKeyError {
+  return Object.assign(new Error("The provider rejected the API key"), {
+    kind: "invalid_provider_api_key" as const,
+    name: "InvalidProviderApiKeyError",
+  });
+}
+
+function isInvalidProviderApiKeyError(
+  error: unknown,
+): error is InvalidProviderApiKeyError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "invalid_provider_api_key"
+  );
 }
 
 function invalidApiKeyResponse(): Response {
@@ -69,7 +83,7 @@ async function readApiKeyMetadata(
   });
 
   if (response.status === 401 || response.status === 403) {
-    throw new InvalidProviderApiKeyError();
+    throw createInvalidProviderApiKeyError();
   }
 
   return readJsonRecord(response, errorMessage);
@@ -86,72 +100,88 @@ export type ReadCredentialDetails = (
   details: ProviderCredentialInputDetails,
 ) => Promise<ProviderCredentialDetails>;
 
-export class ProviderCredentialEndpoints {
-  readonly #acceptedApiFormats: readonly ProviderApiFormat[];
-  readonly #apiKeyRequired: boolean;
-  readonly #auth: GoogleAuth;
-  readonly #authenticate: Authenticator;
-  readonly #labelRequired: boolean;
-  readonly #now: () => number;
-  readonly #readBaseUrl: ((value: unknown) => string | undefined) | undefined;
-  readonly #readCredentialDetails: ReadCredentialDetails;
-  readonly #store: ProviderCredentialStore | undefined;
-  readonly #validateApiKey: (apiKey: string) => boolean;
+export interface ProviderCredentialEndpoints {
+  readonly addConnectedAccount: (
+    user: AuthenticatedUser,
+    secret: string,
+    details: ProviderCredentialDetails,
+    workspaceIds?: readonly string[],
+  ) => ProviderCredentialSummary;
+  readonly authorize: Authenticate;
+  readonly credentials: (request: Request) => Promise<Response>;
+  readonly readCredential: ReadProviderCredential;
+  readonly readCredentialMetadata: (
+    userId: string,
+    credentialId: string,
+    workspaceId?: string,
+  ) => ProviderCredentialSummary | undefined;
+  readonly reconnectCredential: (
+    ...values: [string, string, string, number, ProviderCredentialDetails]
+  ) => boolean;
+  readonly remove: (request: Request, credentialId: string) => Response;
+  readonly setDefault: (request: Request, credentialId: string) => Response;
+  readonly setScopes: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response>;
+  readonly updateCredentialSecret: (
+    ...values: [string, string, string, number]
+  ) => boolean;
+  readonly validateScopes: (
+    userId: string,
+    workspaceIds: readonly string[],
+  ) => boolean;
+}
 
-  constructor(options: {
-    readonly acceptedApiFormats?: readonly ProviderApiFormat[];
-    readonly apiKeyRequired?: boolean;
-    readonly auth: GoogleAuth;
-    readonly labelRequired?: boolean;
-    readonly now: () => number;
-    readonly readBaseUrl?: (value: unknown) => string | undefined;
-    readonly readCredentialDetails: ReadCredentialDetails;
-    readonly store: ProviderCredentialStore | undefined;
-    readonly validateApiKey?: (apiKey: string) => boolean;
-  }) {
-    this.#acceptedApiFormats = options.acceptedApiFormats ?? [];
-    this.#apiKeyRequired = options.apiKeyRequired ?? true;
-    this.#auth = options.auth;
-    this.#authenticate = createConfiguredAuthenticator(
-      options.auth,
-      () => this.#store !== undefined,
-    );
-    this.#labelRequired = options.labelRequired ?? false;
-    this.#now = options.now;
-    this.#readBaseUrl = options.readBaseUrl;
-    this.#readCredentialDetails = options.readCredentialDetails;
-    this.#store = options.store;
-    this.#validateApiKey = options.validateApiKey ?? (() => true);
-  }
+export function createProviderCredentialEndpoints(options: {
+  readonly acceptedApiFormats?: readonly ProviderApiFormat[];
+  readonly apiKeyRequired?: boolean;
+  readonly auth: GoogleAuth;
+  readonly labelRequired?: boolean;
+  readonly now: () => number;
+  readonly readBaseUrl?: (value: unknown) => string | undefined;
+  readonly readCredentialDetails: ReadCredentialDetails;
+  readonly store: ProviderCredentialStore | undefined;
+  readonly validateApiKey?: (apiKey: string) => boolean;
+}): ProviderCredentialEndpoints {
+  const acceptedApiFormats = options.acceptedApiFormats ?? [];
+  const apiKeyRequired = options.apiKeyRequired ?? true;
+  const auth = options.auth;
+  const store = options.store;
+  const authenticate = createConfiguredAuthenticator(
+    auth,
+    () => store !== undefined,
+  );
+  const labelRequired = options.labelRequired ?? false;
+  const now = options.now;
+  const readBaseUrl = options.readBaseUrl;
+  const readCredentialDetails = options.readCredentialDetails;
+  const validateApiKey = options.validateApiKey ?? (() => true);
+  const authorize: Authenticate = (request, action) =>
+    authenticate.authenticate(request, action);
 
-  authorize: Authenticate = (request, action) =>
-    this.#authenticate.authenticate(request, action);
-
-  credentials(request: Request): Promise<Response> {
+  function credentials(request: Request): Promise<Response> {
     return Promise.resolve(
-      this.authorize(request, (user) =>
-        this.#credentialsAuthorized(request, user),
-      ),
+      authorize(request, (user) => credentialsAuthorized(request, user)),
     );
   }
 
-  async #credentialsAuthorized(
+  async function credentialsAuthorized(
     request: Request,
     user: AuthenticatedUser,
   ): Promise<Response> {
     return scopedCollectionForUser({
-      create: () => this.#createCredential(request, user),
+      create: () => createCredential(request, user),
       key: "credentials",
       read: (userId, workspaceId) =>
-        this.#credentialStore().list(userId, workspaceId),
+        credentialStore().list(userId, workspaceId),
       request,
       user,
-      validate: (userId, workspaceId) =>
-        this.validateScopes(userId, [workspaceId]),
+      validate: (userId, workspaceId) => validateScopes(userId, [workspaceId]),
     });
   }
 
-  async #createCredential(
+  async function createCredential(
     request: Request,
     user: AuthenticatedUser,
   ): Promise<Response> {
@@ -162,25 +192,23 @@ export class ProviderCredentialEndpoints {
 
       const apiKeyValue = value["apiKey"];
       const apiKey =
-        apiKeyValue === undefined && !this.#apiKeyRequired ? "" : apiKeyValue;
+        apiKeyValue === undefined && !apiKeyRequired ? "" : apiKeyValue;
       const apiFormatValue = value["apiFormat"];
       const apiFormat =
         isProviderApiFormat(apiFormatValue) &&
-        this.#acceptedApiFormats.includes(apiFormatValue)
+        acceptedApiFormats.includes(apiFormatValue)
           ? apiFormatValue
           : undefined;
       const baseUrlValue = value["baseUrl"];
       const label = value["label"];
       const workspaceIds = value["workspaceIds"];
       const baseUrl =
-        this.#readBaseUrl === undefined
-          ? undefined
-          : this.#readBaseUrl(baseUrlValue);
+        readBaseUrl === undefined ? undefined : readBaseUrl(baseUrlValue);
 
       if (
         typeof apiKey !== "string" ||
         (apiFormatValue !== undefined && apiFormat === undefined) ||
-        (this.#readBaseUrl === undefined
+        (readBaseUrl === undefined
           ? baseUrlValue !== undefined
           : baseUrl === undefined) ||
         (label !== undefined && typeof label !== "string") ||
@@ -195,7 +223,7 @@ export class ProviderCredentialEndpoints {
       const normalizedLabel = label?.trim();
 
       if (
-        (this.#labelRequired && normalizedLabel === undefined) ||
+        (labelRequired && normalizedLabel === undefined) ||
         normalizedLabel?.length === 0 ||
         (normalizedLabel?.length ?? 0) > API_KEY_LABEL_MAXIMUM_LENGTH
       ) {
@@ -219,21 +247,21 @@ export class ProviderCredentialEndpoints {
     const apiKey = supplied.apiKey.trim();
 
     if (
-      (this.#apiKeyRequired && apiKey.length === 0) ||
+      (apiKeyRequired && apiKey.length === 0) ||
       apiKey.length > API_KEY_MAXIMUM_LENGTH ||
       /\s/u.test(apiKey) ||
-      !this.#validateApiKey(apiKey)
+      !validateApiKey(apiKey)
     ) {
       return invalidApiKeyResponse();
     }
 
     const workspaceIds = supplied.workspaceIds ?? [GLOBAL_WORKSPACE_ID];
-    if (!this.validateScopes(user.id, workspaceIds)) {
+    if (!validateScopes(user.id, workspaceIds)) {
       return createApiError("invalid_scope", 409);
     }
 
     try {
-      const details = await this.#readCredentialDetails(apiKey, {
+      const details = await readCredentialDetails(apiKey, {
         ...(supplied.apiFormat === undefined
           ? {}
           : { apiFormat: supplied.apiFormat }),
@@ -242,21 +270,21 @@ export class ProviderCredentialEndpoints {
           : { baseUrl: supplied.baseUrl }),
         ...(supplied.label === undefined ? {} : { label: supplied.label }),
       });
-      const credential = this.#credentialStore().add(
+      const credential = credentialStore().add(
         user.id,
         apiKey,
         details,
         "api_key",
-        this.#now(),
+        now(),
         workspaceIds,
       );
       return createJsonResponse(credential, 201);
     } catch (error) {
-      if (error instanceof InvalidProviderApiKeyError) {
+      if (isInvalidProviderApiKeyError(error)) {
         return invalidApiKeyResponse();
       }
 
-      if (error instanceof DuplicateProviderCredentialError) {
+      if (isDuplicateProviderCredentialError(error)) {
         return createApiError("credential_exists", 409);
       }
 
@@ -264,57 +292,60 @@ export class ProviderCredentialEndpoints {
     }
   }
 
-  readCredentialMetadata(
+  function readCredentialMetadata(
     userId: string,
     credentialId: string,
     workspaceId?: string,
   ): ProviderCredentialSummary | undefined {
-    return this.#store
+    return store
       ?.list(userId, workspaceId)
       .find((credential) => credential.id === credentialId);
   }
 
-  readCredential(
+  function readCredential(
     userId: string,
     credentialId: string,
     workspaceId?: string,
   ): ProviderCredentialAccess | undefined {
-    return this.#store?.read(userId, credentialId, workspaceId);
+    return store?.read(userId, credentialId, workspaceId);
   }
 
-  validateScopes(userId: string, workspaceIds: readonly string[]): boolean {
+  function validateScopes(
+    userId: string,
+    workspaceIds: readonly string[],
+  ): boolean {
     try {
-      this.#credentialStore().validateScopes(userId, workspaceIds);
+      credentialStore().validateScopes(userId, workspaceIds);
       return true;
     } catch {
       return false;
     }
   }
 
-  updateCredentialSecret(
+  function updateCredentialSecret(
     userId: string,
     credentialId: string,
     secret: string,
     now: number,
   ): boolean {
-    const store = this.#store;
-    if (store === undefined) {
+    const credentialStoreValue = store;
+    if (credentialStoreValue === undefined) {
       return false;
     }
-    return store.updateSecret(userId, credentialId, secret, now);
+    return credentialStoreValue.updateSecret(userId, credentialId, secret, now);
   }
 
-  reconnectCredential(
+  function reconnectCredential(
     userId: string,
     credentialId: string,
     secret: string,
     now: number,
     details: ProviderCredentialDetails,
   ): boolean {
-    if (this.#store === undefined) {
+    if (store === undefined) {
       return false;
     }
-    return this.#store.updateSecret(
+    return store.updateSecret(
       userId,
       credentialId,
       secret,
@@ -325,65 +356,77 @@ export class ProviderCredentialEndpoints {
     );
   }
 
-  addConnectedAccount(
+  function addConnectedAccount(
     user: AuthenticatedUser,
     secret: string,
     details: ProviderCredentialDetails,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): ProviderCredentialSummary {
-    return this.#credentialStore().add(
+    return credentialStore().add(
       user.id,
       secret,
       details,
       "oauth",
-      this.#now(),
+      now(),
       workspaceIds,
     );
   }
 
-  setDefault(request: Request, credentialId: string): Response {
+  function setDefault(request: Request, credentialId: string): Response {
     const change = (userId: string): boolean =>
-      this.#credentialStore().setDefault(userId, credentialId, this.#now());
-    return setOwnedDefault(request, this.#auth, change);
+      credentialStore().setDefault(userId, credentialId, now());
+    return setOwnedDefault(request, auth, change);
   }
 
-  async setScopes(request: Request, credentialId: string): Promise<Response> {
+  async function setScopes(
+    request: Request,
+    credentialId: string,
+  ): Promise<Response> {
     return updateAuthenticatedConnectionScopes(
       request,
-      (action) => this.authorize(request, action),
+      (action) => authorize(request, action),
       (userId, workspaceIds) =>
-        this.#credentialStore().setScopes(
-          userId,
-          credentialId,
-          workspaceIds,
-          this.#now(),
-        ),
+        credentialStore().setScopes(userId, credentialId, workspaceIds, now()),
     );
   }
 
-  remove(request: Request, credentialId: string): Response {
+  function remove(request: Request, credentialId: string): Response {
     if (request.method !== "DELETE") {
       return createMethodNotAllowedResponse("DELETE");
     }
 
-    return this.authorize(request, (user) =>
-      this.#removeAuthorized(user, credentialId),
-    );
+    return authorize(request, (user) => removeAuthorized(user, credentialId));
   }
 
-  #removeAuthorized(user: AuthenticatedUser, credentialId: string): Response {
-    if (this.#credentialStore().remove(user.id, credentialId, this.#now())) {
+  function removeAuthorized(
+    user: AuthenticatedUser,
+    credentialId: string,
+  ): Response {
+    if (credentialStore().remove(user.id, credentialId, now())) {
       return createNoContentResponse();
     }
 
     return createApiError("not_found", 404);
   }
 
-  #credentialStore(): ProviderCredentialStore {
-    if (this.#store === undefined) {
+  function credentialStore(): ProviderCredentialStore {
+    if (store === undefined) {
       throw new Error("Provider credential storage is not configured");
     }
 
-    return this.#store;
+    return store;
   }
+  return {
+    addConnectedAccount,
+    authorize,
+    credentials,
+    readCredential,
+    readCredentialMetadata,
+    reconnectCredential,
+    remove,
+    setDefault,
+    setScopes,
+    updateCredentialSecret,
+    validateScopes,
+  };
 }

@@ -3,8 +3,11 @@ import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
 import { runners, users } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
+import {
+  createSessionStore,
+  type SessionStore,
+} from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -69,7 +72,7 @@ export function removeTestRunner(
   runnerId: string,
   now = TEST_NOW + 2,
 ): boolean {
-  return new RunnerStore(setup.database).remove(TEST_USER_ID, runnerId, now);
+  return createRunnerStore(setup.database).remove(TEST_USER_ID, runnerId, now);
 }
 
 export function removeTestRunnerAndExpect(
@@ -102,7 +105,7 @@ export function expectRecoveredSession(
   before: ReturnType<SessionStore["get"]>,
   sessionId: string,
 ): void {
-  const restarted = new SessionStore(
+  const restarted = createSessionStore(
     database,
     undefined,
     () => DEFAULT_TOOL_SETTINGS,

@@ -1,10 +1,10 @@
 import {
-  ReconciliationScenario,
   registerReconciliationTests,
   sessionDetail,
   startedHydrationScenario,
   uncertainCreationScenario,
   uncertainStopScenario,
+  unloadedCreationReconciliationScenario,
 } from "./session-controller-reconciliation-fixtures.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 
@@ -34,7 +34,7 @@ registerReconciliationTests({
 
   "does not create before an authoritative session baseline is loaded":
     async () => {
-      const scenario = ReconciliationScenario.unloadedCreation();
+      const scenario = unloadedCreationReconciliationScenario();
       await scenario.controller.create();
 
       scenario.expectCommandCount("create", 0);
@@ -87,7 +87,7 @@ registerReconciliationTests({
   },
 
   "does not create after the initial session list fails to load": async () => {
-    const scenario = ReconciliationScenario.unloadedCreation();
+    const scenario = unloadedCreationReconciliationScenario();
     await scenario.failInitialLoad("transport unavailable");
     await scenario.controller.create();
 

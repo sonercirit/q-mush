@@ -63,55 +63,48 @@ export interface AgentAttachment {
   readonly name: string;
 }
 
+const AGENT_ATTACHMENT_EXTENSION_MEDIA_TYPES = {
+  csv: "text/csv",
+  gif: "image/gif",
+  jpeg: "image/jpeg",
+  jpg: "image/jpeg",
+  json: "application/json",
+  m4a: "audio/mp4",
+  md: "text/markdown",
+  mov: "video/quicktime",
+  mp3: "audio/mpeg",
+  mp4: "video/mp4",
+  ogg: "audio/ogg",
+  pdf: "application/pdf",
+  png: "image/png",
+  txt: "text/plain",
+  wav: "audio/wav",
+  webm: "video/webm",
+  webp: "image/webp",
+  xml: "application/xml",
+  yaml: "application/yaml",
+  yml: "application/yaml",
+  zip: "application/zip",
+} satisfies Record<string, AgentAttachmentMediaType>;
+type AgentAttachmentExtension =
+  keyof typeof AGENT_ATTACHMENT_EXTENSION_MEDIA_TYPES;
+
+function isAgentAttachmentExtension(
+  value: string | undefined,
+): value is AgentAttachmentExtension {
+  return (
+    value !== undefined &&
+    Object.hasOwn(AGENT_ATTACHMENT_EXTENSION_MEDIA_TYPES, value)
+  );
+}
+
 export function agentAttachmentMediaTypeFromName(
   name: string,
 ): AgentAttachmentMediaType {
   const extension = name.toLowerCase().split(".").at(-1);
-  switch (extension) {
-    case "png":
-      return "image/png";
-    case "jpg":
-    case "jpeg":
-      return "image/jpeg";
-    case "gif":
-      return "image/gif";
-    case "webp":
-      return "image/webp";
-    case "mp4":
-      return "video/mp4";
-    case "webm":
-      return "video/webm";
-    case "mov":
-      return "video/quicktime";
-    case "mp3":
-      return "audio/mpeg";
-    case "m4a":
-      return "audio/mp4";
-    case "ogg":
-      return "audio/ogg";
-    case "wav":
-      return "audio/wav";
-    case "pdf":
-      return "application/pdf";
-    case "csv":
-      return "text/csv";
-    case "json":
-      return "application/json";
-    case "md":
-      return "text/markdown";
-    case "txt":
-      return "text/plain";
-    case "xml":
-      return "application/xml";
-    case "yaml":
-    case "yml":
-      return "application/yaml";
-    case "zip":
-      return "application/zip";
-    case undefined:
-    default:
-      return "application/octet-stream";
-  }
+  return isAgentAttachmentExtension(extension)
+    ? AGENT_ATTACHMENT_EXTENSION_MEDIA_TYPES[extension]
+    : "application/octet-stream";
 }
 
 export function isAgentAttachmentMediaType(

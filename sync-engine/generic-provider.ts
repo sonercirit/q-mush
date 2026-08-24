@@ -1,7 +1,7 @@
 import { createCredentialCipher } from "../shared/credential-cipher.ts";
 import type { ProviderCredentialDetails } from "../shared/provider-credential-store.ts";
 import { PROVIDER_API_FORMATS } from "../shared/provider-id.ts";
-import { AgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
+import { isAgentModelDiscoveryError } from "./agent-model-discovery-fetch.ts";
 import { discoverAgentModelsWithFetch } from "./agent-model-discovery.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { normalizeGenericProviderBaseUrl } from "./generic-provider-url.ts";
@@ -11,7 +11,7 @@ import {
   type OAuthRuntime,
 } from "./oauth.ts";
 import {
-  InvalidProviderApiKeyError,
+  createInvalidProviderApiKeyError,
   type ProviderCredentialInputDetails,
 } from "./provider-credentials.ts";
 import {
@@ -71,10 +71,10 @@ async function readGenericCredentialDetails(
     );
   } catch (error) {
     if (
-      error instanceof AgentModelDiscoveryError &&
+      isAgentModelDiscoveryError(error) &&
       (error.status === 401 || error.status === 403)
     ) {
-      throw new InvalidProviderApiKeyError();
+      throw createInvalidProviderApiKeyError();
     }
     throw error;
   }

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import type { AgentConversationMessage } from "../../shared/agent-loop.ts";
 import {
-  ModelConversationCompactor,
+  createModelConversationCompactor,
   shouldCompactContext,
 } from "../../sync-engine/agent-compaction.ts";
 import { completionMessages } from "../../sync-engine/agent-completion.ts";
@@ -10,7 +10,7 @@ import {
   TEST_COMPACTION_REQUEST_MESSAGE,
 } from "./compaction-test-fixtures.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 
 const PARTIAL_ANSWER = {
   content: "Partial answer",
@@ -37,14 +37,14 @@ describe("agent conversation compaction", () => {
   });
 
   test("appends the handoff request without changing the conversation prefix", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       {
         content: " Keep the current changes and run tests. ",
         contextTokens: 12_345,
         toolCalls: [],
       },
     ]);
-    const compactor = new ModelConversationCompactor(model);
+    const compactor = createModelConversationCompactor(model);
     const conversation = [
       { content: "Make the change", role: "user" as const },
       {
@@ -78,10 +78,10 @@ describe("agent conversation compaction", () => {
   });
 
   test("sends a truncation marker only to the compactor", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "The prior answer was truncated.", toolCalls: [] },
     ]);
-    const compactor = new ModelConversationCompactor(model);
+    const compactor = createModelConversationCompactor(model);
 
     await compactor.compact([PARTIAL_ANSWER, truncationNotice()]);
 
@@ -105,7 +105,7 @@ describe("agent conversation compaction", () => {
     async (truncation) => {
       // A truncated summary replaces the whole conversation if accepted;
       // compaction must fail instead of persisting an incomplete handoff.
-      const compactor = new ModelConversationCompactor({
+      const compactor = createModelConversationCompactor({
         complete: () =>
           Promise.resolve(providerStep("Cut-short summary", { truncation })),
       });

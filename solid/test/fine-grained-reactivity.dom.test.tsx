@@ -6,7 +6,7 @@ import type {
   AgentSessionSummary,
 } from "../../shared/session-model.ts";
 import { OPENAI_PANEL } from "../provider-client.tsx";
-import { ProviderController } from "../provider-controller.ts";
+import { createProviderController } from "../provider-controller.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -18,9 +18,12 @@ import {
   createRunnerViewState,
   type RunnerViewState,
 } from "../runner-client.tsx";
-import { RunnerController } from "../runner-controller.ts";
+import { createRunnerController } from "../runner-controller.ts";
 import { SessionPanel, type SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import { SessionList } from "../session-detail-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
@@ -111,7 +114,7 @@ test("provider loading, error, retry, and list updates preserve the panel", asyn
   const reactive = createReactiveState<ProviderViewState>(
     createProviderViewState(undefined),
   );
-  const controller = new ProviderController(OPENAI_PANEL, reactive);
+  const controller = createProviderController(OPENAI_PANEL, reactive);
   const view = (): JSX.Element => openAiProviderPanel(controller);
   const container = mount(view);
   const panel = query(container, "[data-provider-panel='openai']");
@@ -142,7 +145,7 @@ test("realtime runner changes update the list without remounting the panel", () 
   const reactive = createReactiveState<RunnerViewState>(
     createRunnerViewState([]),
   );
-  const controller = new RunnerController(reactive);
+  const controller = createRunnerController(reactive);
   const container = mount(() => <RunnerPanel controller={controller} />);
   const panel = query(container, "[data-runner-panel='true']");
 
@@ -473,7 +476,7 @@ test("selected transcript deltas do not rebuild the multi-session hierarchy", ()
     });
     return summary;
   });
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState<SessionViewState>({
       ...initialSessionViewState(),
       detail: selected,
@@ -550,7 +553,11 @@ test("session resources, drafts, realtime lists, and selected details update in 
   const openRouterState = createReactiveState<ProviderViewState>(
     createProviderViewState(undefined),
   );
-  const controller = new SessionController(sessionState, undefined, undefined);
+  const controller = createSessionController(
+    sessionState,
+    undefined,
+    undefined,
+  );
   const modelLabel = "Reactive model";
   const primaryCredentialLabel = "Primary";
   const model = {

@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import { createProviderCredentialStore } from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import { createOpenRouterIntegrationFromEnvironment } from "../../sync-engine/openrouter.ts";
 import {
@@ -146,7 +146,7 @@ describe("OpenRouter credentials", () => {
       },
     });
     await connectAccount(integration, STATE, "authorization-code");
-    const store = new ProviderCredentialStore(
+    const store = createProviderCredentialStore(
       database,
       createCredentialCipher(ENVIRONMENT.OPENROUTER_CREDENTIAL_KEY),
       "openrouter",

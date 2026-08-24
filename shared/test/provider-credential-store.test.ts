@@ -1,16 +1,17 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import {
-  CredentialCipher,
+  createCredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
-  DuplicateProviderCredentialError,
-  ProviderCredentialStore,
+  createProviderCredentialStore,
+  isDuplicateProviderCredentialError,
   type ProviderCredentialAccess,
+  type ProviderCredentialStore,
 } from "../../shared/provider-credential-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
@@ -93,8 +94,9 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
     name: "Mush Room",
   };
   database.insert(users).values(user).run();
-  const cipher = new CredentialCipher(
-    new Uint8Array(32),
+  const cipher = createCredentialCipher(
+    Buffer.from(new Uint8Array(32)).toString("base64url"),
+    "Credential encryption key",
     () => new Uint8Array(12),
   );
   const ids = [CREDENTIAL_ID, SECOND_CREDENTIAL_ID];
@@ -103,7 +105,7 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
       database.$client.close();
     },
     database,
-    store: new ProviderCredentialStore(
+    store: createProviderCredentialStore(
       database,
       cipher,
       "openrouter",
@@ -176,9 +178,12 @@ function expectRotationCollision(
   secret: string,
   now: number,
 ): void {
-  expect(() =>
-    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, now),
-  ).toThrow(DuplicateProviderCredentialError);
+  try {
+    store.updateSecret(TEST_USER_ID, CREDENTIAL_ID, secret, now);
+    throw new Error("The colliding credential rotation was accepted");
+  } catch (error) {
+    expect(isDuplicateProviderCredentialError(error)).toBe(true);
+  }
   expect(store.readSecret(TEST_USER_ID, CREDENTIAL_ID)).toBe("first-secret");
 }
 
@@ -274,8 +279,8 @@ describe("provider credential agent access", () => {
     const { close, database, store } = createProviderStore();
     createFirstCredential(store);
     const storageFailure = new Error("credential storage unavailable");
-    const originalUpdate = database.update.bind(database);
-    database.update = () => {
+    const originalTransaction = database.transaction.bind(database);
+    database.transaction = () => {
       throw storageFailure;
     };
 
@@ -288,7 +293,7 @@ describe("provider credential agent access", () => {
       ),
     ).toThrow(storageFailure);
 
-    database.update = originalUpdate;
+    database.transaction = originalTransaction;
     close();
   });
 

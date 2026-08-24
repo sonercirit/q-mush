@@ -3,17 +3,17 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
-import { EngineHealth } from "../engine-health.ts";
-import { SessionStore } from "../session-store.ts";
+import { createEngineHealth } from "../engine-health.ts";
+import { createSessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
   closeCompactionStore,
   pauseRestartStore,
@@ -44,7 +44,7 @@ function markerlessStartupSession(database: AppDatabase): void {
     "018bcfe5-6800-7000-8000-000000000065",
   ];
   let idIndex = 0;
-  const startupStore = new SessionStore(
+  const startupStore = createSessionStore(
     database,
     () => {
       const id = ids.at(idIndex);
@@ -101,14 +101,14 @@ test.each([
     vi.useFakeTimers();
     let diskFull = true;
     let writeAttempts = 0;
-    const health = new EngineHealth(vi.fn());
+    const health = createEngineHealth(vi.fn());
     const fullError = Object.assign(new Error("database or disk is full"), {
       code: "SQLITE_FULL",
     });
     const { detail, storeSetup } = setupStore();
     const setup = launchFailureSetup(
       storeSetup,
-      new DatabaseWriteResilience({
+      createDatabaseWriteResilience({
         attempt: (operation) => {
           writeAttempts += 1;
           if (diskFull && writeAttempts !== 5) throw fullError;
@@ -140,7 +140,7 @@ test.each([
     expect(setup.hasPendingReconciliation()).toBe(true);
 
     let unrelatedAttempts = 0;
-    const unrelatedWrite = new DatabaseWriteResilience({
+    const unrelatedWrite = createDatabaseWriteResilience({
       attempt(operation) {
         const thisAttempt = unrelatedAttempts;
         unrelatedAttempts += 1;
@@ -190,7 +190,7 @@ test.each([
 );
 
 test("startup queued-session recovery launches a marker-less row", async () => {
-  const model = new ScriptedAgentModel([
+  const model = createScriptedAgentModel([
     providerStep("Recovered after restart."),
   ]);
   const initial = connectedSessionSetup(model);

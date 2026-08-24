@@ -45,16 +45,16 @@ interface ActiveToolStream {
 function bytesKey(
   channel: ToolStreamChannel,
 ): "argumentBytes" | "nameBytes" | "stderrBytes" | "stdoutBytes" {
-  switch (channel) {
-    case "arguments":
-      return "argumentBytes";
-    case "name":
-      return "nameBytes";
-    case "stderr":
-      return "stderrBytes";
-    case "stdout":
-      return "stdoutBytes";
-  }
+  const keys: Record<
+    ToolStreamChannel,
+    "argumentBytes" | "nameBytes" | "stderrBytes" | "stdoutBytes"
+  > = {
+    arguments: "argumentBytes",
+    name: "nameBytes",
+    stderr: "stderrBytes",
+    stdout: "stdoutBytes",
+  };
+  return keys[channel];
 }
 
 function errorState(error: unknown): ToolStreamTerminalState {
@@ -65,62 +65,63 @@ function errorState(error: unknown): ToolStreamTerminalState {
   return /timed[ -]?out/iu.test(message) ? "timed-out" : "failed";
 }
 
-export class ToolStreamPublisher {
-  readonly #callsById = new Map<string, ActiveToolStream>();
-  readonly #callsByIndex = new Map<number, ActiveToolStream>();
-  readonly #sessionId: string;
-  readonly #transport: ToolStreamTransport | undefined;
-  readonly #userId: string;
-  readonly #workspaceId: string | undefined;
-  #closed = false;
-  #nextIndex = 0;
-  #streamId: string;
+export interface ToolStreamPublisher {
+  startStep(streamId: string): boolean;
+  reset(streamId: string): boolean;
+  provider(delta: ProviderToolCallDelta): boolean;
+  running(callId: string, name: string, arguments_?: string): boolean;
+  output(callId: string, delta: RunnerCommandOutputDelta): boolean;
+  result(callId: string, result: RunnerCommandResult): boolean;
+  completed(callId: string): boolean;
+  finish(callId: string, state: ToolStreamTerminalState): boolean;
+  failed(callId: string, error: unknown): boolean;
+  close(state: Extract<ToolStreamState, "canceled" | "failed">): void;
+}
 
-  constructor(options: {
-    readonly sessionId: string;
-    readonly streamId: string;
-    readonly transport?: ToolStreamTransport;
-    readonly userId: string;
-    readonly workspaceId?: string;
-  }) {
-    this.#sessionId = options.sessionId;
-    this.#streamId = options.streamId;
-    this.#transport = options.transport;
-    this.#userId = options.userId;
-    this.#workspaceId = options.workspaceId;
+export function createToolStreamPublisher(options: {
+  readonly sessionId: string;
+  readonly streamId: string;
+  readonly transport?: ToolStreamTransport;
+  readonly userId: string;
+  readonly workspaceId?: string;
+}): ToolStreamPublisher {
+  const callsById = new Map<string, ActiveToolStream>();
+  const callsByIndex = new Map<number, ActiveToolStream>();
+  let closed = false;
+  let nextIndex = 0;
+  let currentStreamId = options.streamId;
+
+  function startStep(streamId: string): boolean {
+    return begin(streamId);
   }
 
-  startStep(streamId: string): boolean {
-    return this.#begin(streamId);
+  function reset(streamId: string): boolean {
+    return begin(streamId);
   }
 
-  reset(streamId: string): boolean {
-    return this.#begin(streamId);
-  }
-
-  #begin(streamId: string): boolean {
+  function begin(streamId: string): boolean {
     if (
-      this.#closed ||
+      closed ||
       streamId.length === 0 ||
       utf8ByteLength(streamId) > MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH
     ) {
       return false;
     }
-    this.#clear("canceled");
-    this.#streamId = streamId;
-    this.#nextIndex = 0;
+    clear("canceled");
+    currentStreamId = streamId;
+    nextIndex = 0;
     return true;
   }
 
-  #clear(state: ToolStreamTerminalState): void {
-    for (const call of this.#callsById.values()) {
-      this.#state(call, state);
+  function clear(terminalState: ToolStreamTerminalState): void {
+    for (const call of callsById.values()) {
+      state(call, terminalState);
     }
-    this.#callsByIndex.clear();
-    this.#callsById.clear();
+    callsByIndex.clear();
+    callsById.clear();
   }
 
-  #createCall(callId: string, index: number): ActiveToolStream {
+  function createCall(callId: string, index: number): ActiveToolStream {
     return {
       argumentBytes: 0,
       callId,
@@ -132,26 +133,29 @@ export class ToolStreamPublisher {
       sequence: 0,
       stderrBytes: 0,
       stdoutBytes: 0,
-      streamId: this.#streamId,
+      streamId: currentStreamId,
       state: undefined,
       truncated: new Set(),
     };
   }
 
-  #insert(call: ActiveToolStream): void {
-    this.#callsByIndex.set(call.index, call);
-    this.#callsById.set(call.callId, call);
+  function insert(call: ActiveToolStream): void {
+    callsByIndex.set(call.index, call);
+    callsById.set(call.callId, call);
   }
 
-  #insertPreparingCall(callId: string, index: number): ActiveToolStream {
-    const call = this.#createCall(callId, index);
-    this.#insert(call);
-    this.#state(call, "preparing");
+  function insertPreparingCall(
+    callId: string,
+    index: number,
+  ): ActiveToolStream {
+    const call = createCall(callId, index);
+    insert(call);
+    state(call, "preparing");
     return call;
   }
 
-  #rename(call: ActiveToolStream, callId: string): boolean {
-    const existing = this.#callsById.get(callId);
+  function rename(call: ActiveToolStream, callId: string): boolean {
+    const existing = callsById.get(callId);
     if (
       call.state !== "preparing" ||
       (existing !== undefined && existing !== call)
@@ -159,16 +163,16 @@ export class ToolStreamPublisher {
       return false;
     }
     const previousCallId = call.callId;
-    this.#callsById.delete(previousCallId);
+    callsById.delete(previousCallId);
     call.callId = callId;
-    this.#callsById.set(callId, call);
-    this.#publish(call, { previousCallId });
+    callsById.set(callId, call);
+    publish(call, { previousCallId });
     return true;
   }
 
-  provider(delta: ProviderToolCallDelta): boolean {
+  function provider(delta: ProviderToolCallDelta): boolean {
     if (
-      this.#closed ||
+      closed ||
       !Number.isSafeInteger(delta.index) ||
       delta.index < 0 ||
       utf8ByteLength(delta.id) > MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH
@@ -176,17 +180,17 @@ export class ToolStreamPublisher {
       return false;
     }
 
-    let call = this.#callsByIndex.get(delta.index);
+    let call = callsByIndex.get(delta.index);
     if (call === undefined) {
       const callId =
         delta.id.length > 0
           ? delta.id
-          : `pending:${this.#streamId}:${String(delta.index)}`;
-      if (this.#callsById.has(callId)) {
+          : `pending:${currentStreamId}:${String(delta.index)}`;
+      if (callsById.has(callId)) {
         return false;
       }
-      call = this.#insertPreparingCall(callId, delta.index);
-      this.#nextIndex = Math.max(this.#nextIndex, delta.index + 1);
+      call = insertPreparingCall(callId, delta.index);
+      nextIndex = Math.max(nextIndex, delta.index + 1);
     }
 
     if (call.state !== "preparing") {
@@ -198,48 +202,48 @@ export class ToolStreamPublisher {
         return false;
       }
       call.providerId = providerId;
-      if (call.callId !== providerId && !this.#rename(call, providerId)) {
+      if (call.callId !== providerId && !rename(call, providerId)) {
         return false;
       }
     }
-    call.name += this.#content(call, "name", delta.name);
-    this.#content(call, "arguments", delta.arguments);
+    call.name += content(call, "name", delta.name);
+    content(call, "arguments", delta.arguments);
     return true;
   }
 
-  running(callId: string, name: string, arguments_?: string): boolean {
+  function running(callId: string, name: string, arguments_?: string): boolean {
     if (
-      this.#closed ||
+      closed ||
       callId.length === 0 ||
       utf8ByteLength(callId) > MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH
     ) {
       return false;
     }
-    let call = this.#callsById.get(callId);
+    let call = callsById.get(callId);
     if (call === undefined) {
-      call = [...this.#callsByIndex.values()].find(
+      call = [...callsByIndex.values()].find(
         (candidate) =>
           candidate.name === name && candidate.callId.startsWith("pending:"),
       );
-      if (call !== undefined && !this.#rename(call, callId)) {
+      if (call !== undefined && !rename(call, callId)) {
         return false;
       }
     }
     if (call === undefined) {
-      call = this.#insertPreparingCall(callId, this.#nextIndex);
-      this.#nextIndex += 1;
+      call = insertPreparingCall(callId, nextIndex);
+      nextIndex += 1;
     }
     if (call.name.length === 0) {
-      call.name += this.#content(call, "name", name);
+      call.name += content(call, "name", name);
     }
     if (call.argumentBytes === 0 && arguments_ !== undefined) {
-      this.#content(call, "arguments", arguments_);
+      content(call, "arguments", arguments_);
     }
-    return this.#state(call, "running");
+    return state(call, "running");
   }
 
-  output(callId: string, delta: RunnerCommandOutputDelta): boolean {
-    const call = this.#activeCall(callId, "running");
+  function output(callId: string, delta: RunnerCommandOutputDelta): boolean {
+    const call = activeCall(callId, "running");
     if (
       call === undefined ||
       !Number.isSafeInteger(delta.sequence) ||
@@ -249,66 +253,69 @@ export class ToolStreamPublisher {
       return false;
     }
     call.nextRunnerSequence += 1;
-    this.#content(call, delta.channel, delta.content);
+    content(call, delta.channel, delta.content);
     return true;
   }
 
-  result(callId: string, result: RunnerCommandResult): boolean {
-    return this.finish(callId, result.state);
+  function result(callId: string, result: RunnerCommandResult): boolean {
+    return finish(callId, result.state);
   }
 
-  completed(callId: string): boolean {
-    return this.finish(callId, "completed");
+  function completed(callId: string): boolean {
+    return finish(callId, "completed");
   }
 
-  finish(callId: string, state: ToolStreamTerminalState): boolean {
-    const call = this.#activeCall(callId);
+  function finish(
+    callId: string,
+    terminalState: ToolStreamTerminalState,
+  ): boolean {
+    const call = activeCall(callId);
     if (call === undefined) {
       return false;
     }
-    if (!this.#state(call, state)) {
+    if (!state(call, terminalState)) {
       return false;
     }
-    this.#callsById.delete(callId);
-    this.#callsByIndex.delete(call.index);
+    callsById.delete(callId);
+    callsByIndex.delete(call.index);
     return true;
   }
 
-  failed(callId: string, error: unknown): boolean {
-    return this.finish(callId, errorState(error));
+  function failed(callId: string, error: unknown): boolean {
+    return finish(callId, errorState(error));
   }
 
-  #activeCall(
+  function activeCall(
     callId: string,
     requiredState?: ToolStreamState,
   ): ActiveToolStream | undefined {
-    if (this.#closed) {
+    if (closed) {
       return undefined;
     }
-    const call = this.#callsById.get(callId);
+    const call = callsById.get(callId);
     return requiredState === undefined || call?.state === requiredState
       ? call
       : undefined;
   }
 
-  close(state: Extract<ToolStreamState, "canceled" | "failed">): void {
-    if (this.#closed) {
+  function close(state: Extract<ToolStreamState, "canceled" | "failed">): void {
+    if (closed) {
       return;
     }
-    this.#clear(state);
-    this.#closed = true;
+    clear(state);
+    closed = true;
   }
 
-  #state(call: ActiveToolStream, state: ToolStreamState): boolean {
+  function state(call: ActiveToolStream, state: ToolStreamState): boolean {
     if (!canTransitionToolStreamState(call.state, state)) {
       return false;
     }
     call.state = state;
-    this.#publish(call, { state });
+    publish(call, { state });
     return true;
   }
 
-  #content(
+  function content(
     call: ActiveToolStream,
     channel: ToolStreamChannel,
     value: string,
@@ -326,7 +333,7 @@ export class ToolStreamPublisher {
       if (chunk.length === 0) {
         break;
       }
-      this.#publish(call, { channel, content: chunk });
+      publish(call, { channel, content: chunk });
       rest = rest.slice(chunk.length);
     }
     call[key] += utf8ByteLength(accepted);
@@ -334,7 +341,7 @@ export class ToolStreamPublisher {
     if (utf8ByteLength(value) > utf8ByteLength(accepted)) {
       call.truncated.add(channel);
       call[key] += utf8ByteLength(TOOL_STREAM_TRUNCATED_MARKER);
-      this.#publish(call, {
+      publish(call, {
         channel,
         content: TOOL_STREAM_TRUNCATED_MARKER,
       });
@@ -342,7 +349,7 @@ export class ToolStreamPublisher {
     return accepted;
   }
 
-  #publish(
+  function publish(
     call: ActiveToolStream,
     change: Pick<
       ToolStreamDeltaFrame,
@@ -353,20 +360,32 @@ export class ToolStreamPublisher {
       callId: call.callId,
       index: call.index,
       sequence: call.sequence,
-      sessionId: this.#sessionId,
+      sessionId: options.sessionId,
       streamId: call.streamId,
       type: "tool_stream",
       ...change,
     };
     call.sequence += 1;
     try {
-      this.#transport?.publishToolStream(
-        this.#userId,
+      options.transport?.publishToolStream(
+        options.userId,
         frame,
-        this.#workspaceId,
+        options.workspaceId,
       );
     } catch {
       // Live delivery must never interrupt canonical tool execution.
     }
   }
+  return {
+    close,
+    completed,
+    failed,
+    finish,
+    output,
+    provider,
+    reset,
+    result,
+    running,
+    startStep,
+  };
 }

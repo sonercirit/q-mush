@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -210,7 +210,7 @@ describe("session store runner reassignment", () => {
 
     const offlineId = "018bcfe5-6800-7000-8000-000000000096";
     addReplacementRunner(database, offlineId);
-    new RunnerStore(database).setOnline(
+    createRunnerStore(database).setOnline(
       offlineId,
       TEST_USER_ID,
       TEST_NOW + 5,

@@ -4,7 +4,10 @@ import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
 import { sessionComposerUnavailableReason } from "../session-composer-availability.ts";
-import { SessionController } from "../session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../session-controller.ts";
 import {
   platformSessionShortcuts,
   SessionPendingInputs,
@@ -199,7 +202,7 @@ test("retries the clicked unconfirmed payload with its original identity", async
     sessions: [summaryFromDetail(running)],
   };
   const calls: unknown[][] = [];
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState(state),
     undefined,
     null,
@@ -291,7 +294,7 @@ test("authoritative echo settles a send and cancels its confirmation timer", asy
     sessions: Array.of(summaryFromDetail(detail)),
     selectedId: detail.id,
   });
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState<SessionViewState>(state),
     undefined,
     null,
@@ -542,7 +545,7 @@ test("cancel returns a pending instruction to the composer", async () => {
       ]),
     );
   };
-  const controller = new SessionController(reactive, undefined, null, {
+  const controller = createSessionController(reactive, undefined, null, {
     command: cancellationCommand,
   });
 

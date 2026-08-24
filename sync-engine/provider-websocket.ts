@@ -1,7 +1,7 @@
 import type { AgentModelStep } from "../shared/agent-loop.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
-  ProviderStreamError,
+  isProviderStreamError,
   readProviderStreamError,
 } from "./provider-error.ts";
 import type { ProviderRequestLifecycleOptions } from "./provider-request-lifecycle.ts";
@@ -11,7 +11,7 @@ function uncorrelatedError(
   message: string,
   started: boolean,
 ): ProviderWebSocketError {
-  return new ProviderWebSocketError(message, started, {
+  return createProviderWebSocketError(message, started, {
     reconnectImmediately: true,
   });
 }
@@ -39,27 +39,40 @@ const OPEN_STATE = 1;
 const MAX_RETAINED_RESPONSE_ID_BYTES = 16 * 1024 * 1024;
 const textEncoder = new TextEncoder();
 
-export class ProviderWebSocketError extends Error {
+export type ProviderWebSocketError = Error & {
+  readonly kind: "provider_websocket";
   readonly reconnectImmediately: boolean;
   readonly retryAfterMilliseconds: number | undefined;
   readonly started: boolean;
-
-  constructor(
-    message: string,
-    started: boolean,
-    options: ProviderWebSocketErrorOptions = {},
-  ) {
-    super(message);
-    this.name = "ProviderWebSocketError";
-    this.reconnectImmediately = options.reconnectImmediately === true;
-    this.retryAfterMilliseconds = options.retryAfterMilliseconds;
-    this.started = started;
-  }
-}
+};
 
 interface ProviderWebSocketErrorOptions {
   readonly reconnectImmediately?: boolean;
   readonly retryAfterMilliseconds?: number | undefined;
+}
+
+function createProviderWebSocketError(
+  message: string,
+  started: boolean,
+  options: ProviderWebSocketErrorOptions = {},
+): ProviderWebSocketError {
+  return Object.assign(new Error(message), {
+    kind: "provider_websocket" as const,
+    name: "ProviderWebSocketError",
+    reconnectImmediately: options.reconnectImmediately === true,
+    retryAfterMilliseconds: options.retryAfterMilliseconds,
+    started,
+  });
+}
+
+export function isProviderWebSocketError(
+  error: unknown,
+): error is ProviderWebSocketError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "provider_websocket"
+  );
 }
 
 function abortError(): DOMException {
@@ -100,40 +113,49 @@ interface ProviderWebSocketRequest extends ProviderRequestLifecycleOptions {
 // 0%-on-reuse reading did not reproduce), so reuse saves a TLS and WebSocket
 // handshake per step. Failed or aborted requests close the socket; the next
 // step reconnects.
-export class ProviderWebSocketSession {
+export interface ProviderWebSocketSession {
+  readonly close: () => void;
+  readonly complete: (
+    options: ProviderWebSocketRequest,
+  ) => Promise<AgentModelStep>;
+}
+
+export function createProviderWebSocketSession(): ProviderWebSocketSession {
   // A provider controls response-ID length and request completion rate, so the
   // documented 60-minute socket lifetime cannot by itself bound this fence.
   // Retain at most the explicit memory budget above, then retire rather than
   // evicting an ID and reopening the stale-frame admission race. Observed
   // OpenAI `resp_…` IDs are about 53 bytes; correctness does not rely on that.
-  #priorResponseIdBytes = 0;
-  #priorResponseIds = new Set<string>();
-  #socket: ProviderWebSocket | undefined;
-  #socketGeneration = 0;
+  let priorResponseIdBytes = 0;
+  let priorResponseIds = new Set<string>();
+  let socket: ProviderWebSocket | undefined;
+  let socketGeneration = 0;
 
-  close(): void {
-    const socket = this.#socket;
-    this.#socket = undefined;
-    this.#socketGeneration += 1;
-    this.#priorResponseIds.clear();
-    this.#priorResponseIdBytes = 0;
-    socket?.close(1000, "Session complete");
+  function close(): void {
+    const activeSocket = socket;
+    socket = undefined;
+    socketGeneration += 1;
+    priorResponseIds.clear();
+    priorResponseIdBytes = 0;
+    activeSocket?.close(1000, "Session complete");
   }
 
-  #takeOpenSocket(): ProviderWebSocket | undefined {
-    const socket = this.#socket;
-    this.#socket = undefined;
-    if (socket === undefined) {
+  function takeOpenSocket(): ProviderWebSocket | undefined {
+    const openSocket = socket;
+    socket = undefined;
+    if (openSocket === undefined) {
       return undefined;
     }
-    if (socket.readyState === OPEN_STATE) {
-      return socket;
+    if (openSocket.readyState === OPEN_STATE) {
+      return openSocket;
     }
-    socket.close(1000, "Connection expired");
+    openSocket.close(1000, "Connection expired");
     return undefined;
   }
 
-  complete(options: ProviderWebSocketRequest): Promise<AgentModelStep> {
+  function complete(
+    options: ProviderWebSocketRequest,
+  ): Promise<AgentModelStep> {
     if (options.signal?.aborted === true) {
       return Promise.reject(abortError());
     }
@@ -144,19 +166,18 @@ export class ProviderWebSocketSession {
         "responses",
         options.onDelta,
       );
-      const requestGeneration = ++this.#socketGeneration;
-      const reusedSocket = this.#takeOpenSocket();
-      const socket =
+      const requestGeneration = ++socketGeneration;
+      const reusedSocket = takeOpenSocket();
+      const requestSocket =
         reusedSocket ??
         options.createSocket(options.url, { headers: options.headers });
-      const priorResponseIds =
-        reusedSocket === undefined ? new Set<string>() : this.#priorResponseIds;
-      let retainedBytes =
-        reusedSocket === undefined ? 0 : this.#priorResponseIdBytes;
+      const retainedResponseIds =
+        reusedSocket === undefined ? new Set<string>() : priorResponseIds;
+      let retainedBytes = reusedSocket === undefined ? 0 : priorResponseIdBytes;
       // Transfer the fence to this request. The session field accumulates no
-      // duplicate copy while the request owns the only reusable socket.
-      this.#priorResponseIds = new Set<string>();
-      this.#priorResponseIdBytes = 0;
+      // duplicate copy while the request owns the only reusable requestSocket.
+      priorResponseIds = new Set<string>();
+      priorResponseIdBytes = 0;
       let currentResponseId: string | undefined;
       let opened = reusedSocket !== undefined;
       let receivedEvent = false;
@@ -172,32 +193,35 @@ export class ProviderWebSocketSession {
 
         settled = true;
         options.signal?.removeEventListener("abort", onAbort);
-        socket.removeEventListener("open", onOpen);
-        socket.removeEventListener("message", onMessage);
-        socket.removeEventListener("error", onError);
-        socket.removeEventListener("close", onClose);
+        requestSocket.removeEventListener("open", onOpen);
+        requestSocket.removeEventListener("message", onMessage);
+        requestSocket.removeEventListener("error", onError);
+        requestSocket.removeEventListener("close", onClose);
         // Only a successfully completed step leaves this socket reusable, so
         // failed or aborted steps cannot expose its older response ID.
         if (error === undefined && step !== undefined) {
-          if (requestGeneration === this.#socketGeneration) {
+          if (requestGeneration === socketGeneration) {
             if (currentResponseId === undefined) {
-              socket.close(1000, "Unidentified response complete");
+              requestSocket.close(1000, "Unidentified response complete");
             } else {
-              if (!priorResponseIds.has(currentResponseId)) {
-                priorResponseIds.add(currentResponseId);
+              if (!retainedResponseIds.has(currentResponseId)) {
+                retainedResponseIds.add(currentResponseId);
                 retainedBytes +=
                   textEncoder.encode(currentResponseId).byteLength;
               }
               if (retainedBytes <= MAX_RETAINED_RESPONSE_ID_BYTES) {
-                this.#priorResponseIds = priorResponseIds;
-                this.#priorResponseIdBytes = retainedBytes;
-                this.#socket = socket;
+                priorResponseIds = retainedResponseIds;
+                priorResponseIdBytes = retainedBytes;
+                socket = requestSocket;
               } else {
-                socket.close(1000, "Response ID retention limit reached");
+                requestSocket.close(
+                  1000,
+                  "Response ID retention limit reached",
+                );
               }
             }
           } else {
-            socket.close(1000, "Connection superseded");
+            requestSocket.close(1000, "Connection superseded");
           }
           resolve(step);
         } else {
@@ -209,11 +233,11 @@ export class ProviderWebSocketSession {
       };
       const failUnknown = (error: unknown): void => {
         if (
-          error instanceof ProviderStreamError &&
+          isProviderStreamError(error) &&
           (error.transient || error.reconnectWebSocket)
         ) {
           fail(
-            new ProviderWebSocketError(error.message, receivedEvent, {
+            createProviderWebSocketError(error.message, receivedEvent, {
               reconnectImmediately: error.reconnectWebSocket,
               retryAfterMilliseconds: error.reconnectWebSocket
                 ? undefined
@@ -226,29 +250,29 @@ export class ProviderWebSocketSession {
       };
       const onAbort = (): void => {
         fail(abortError());
-        socket.close(1000, "Aborted");
+        requestSocket.close(1000, "Aborted");
       };
       const onOpen = (): void => {
         try {
-          socket.send(
+          requestSocket.send(
             JSON.stringify({ ...options.body, type: "response.create" }),
           );
           opened = true;
         } catch (error) {
           if (reusedSocket === undefined) {
             failUnknown(error);
-            socket.close(1011, "Provider connection failed");
+            requestSocket.close(1011, "Provider connection failed");
             return;
           }
           // A reused socket that rejects a send died between steps; surface
           // the transient connection error so the caller reconnects.
           fail(
-            new ProviderWebSocketError(
+            createProviderWebSocketError(
               "The provider WebSocket connection was unavailable",
               receivedEvent,
             ),
           );
-          socket.close(1011, "Provider connection failed");
+          requestSocket.close(1011, "Provider connection failed");
         }
       };
       const onMessage = (event: Event): void => {
@@ -268,7 +292,7 @@ export class ProviderWebSocketSession {
               if (
                 reusedSocket !== undefined &&
                 eventResponseId !== undefined &&
-                priorResponseIds.has(eventResponseId)
+                retainedResponseIds.has(eventResponseId)
               ) {
                 return;
               }
@@ -287,7 +311,7 @@ export class ProviderWebSocketSession {
                     false,
                   ),
                 );
-                socket.close(1011, "Uncorrelated provider error");
+                requestSocket.close(1011, "Uncorrelated provider error");
                 return;
               }
               accumulator.push(value);
@@ -299,7 +323,7 @@ export class ProviderWebSocketSession {
               eventType.startsWith("response.");
             const retainedResponse =
               eventResponseId !== undefined &&
-              priorResponseIds.has(eventResponseId);
+              retainedResponseIds.has(eventResponseId);
             const admitsRequest =
               responseEvent &&
               !retainedResponse &&
@@ -328,13 +352,13 @@ export class ProviderWebSocketSession {
                 receivedEvent,
               ),
             );
-            socket.close(1011, "Uncorrelated provider error");
+            requestSocket.close(1011, "Uncorrelated provider error");
             return;
           } else if (
             eventResponseId !== undefined &&
             currentResponseId === undefined
           ) {
-            if (priorResponseIds.has(eventResponseId)) {
+            if (retainedResponseIds.has(eventResponseId)) {
               return;
             }
             currentResponseId = eventResponseId;
@@ -352,7 +376,7 @@ export class ProviderWebSocketSession {
           }
         } catch (error) {
           failUnknown(error);
-          socket.close(
+          requestSocket.close(
             invalidProviderMessage ? 1002 : 1011,
             invalidProviderMessage
               ? "Invalid provider message"
@@ -365,17 +389,17 @@ export class ProviderWebSocketSession {
           return;
         }
         fail(
-          new ProviderWebSocketError(
+          createProviderWebSocketError(
             "The provider WebSocket connection failed",
             receivedEvent,
           ),
         );
-        socket.close(1011, "Provider connection failed");
+        requestSocket.close(1011, "Provider connection failed");
       };
       const onClose = (): void => {
         if (!settled) {
           fail(
-            new ProviderWebSocketError(
+            createProviderWebSocketError(
               opened
                 ? "The provider WebSocket closed before completion"
                 : "The provider WebSocket connection was unavailable",
@@ -385,15 +409,16 @@ export class ProviderWebSocketSession {
         }
       };
 
-      socket.addEventListener("message", onMessage);
-      socket.addEventListener("error", onError);
-      socket.addEventListener("close", onClose);
+      requestSocket.addEventListener("message", onMessage);
+      requestSocket.addEventListener("error", onError);
+      requestSocket.addEventListener("close", onClose);
       options.signal?.addEventListener("abort", onAbort);
       if (reusedSocket === undefined) {
-        socket.addEventListener("open", onOpen);
+        requestSocket.addEventListener("open", onOpen);
       } else {
         onOpen();
       }
     });
   }
+  return { close, complete };
 }

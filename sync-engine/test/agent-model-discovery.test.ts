@@ -9,6 +9,7 @@ import {
   isCredentialRejectionError,
   type AgentModelDiscoveryFetch,
 } from "../../sync-engine/agent-model-discovery-fetch.ts";
+import { modelOption } from "../../sync-engine/agent-model-discovery-option.ts";
 import { discoverAgentModelsWithFetch } from "../../sync-engine/agent-model-discovery.ts";
 import { createJsonResponse } from "../../sync-engine/http.ts";
 import { catalog, credential, model } from "./agent-model-discovery-helpers.ts";
@@ -23,8 +24,12 @@ function deferredSignal() {
   return Promise.withResolvers<undefined>();
 }
 
-class RequestCapture {
+interface RequestCapture {
   request?: Request;
+}
+
+function createRequestCapture(): RequestCapture {
+  return {};
 }
 
 function discoveryFetch(
@@ -42,7 +47,7 @@ async function capturedDiscovery(
   providerCredential: ProviderCredentialAccess,
   body: unknown,
 ): Promise<{ readonly catalog: AgentModelCatalog; readonly request: Request }> {
-  const capture = new RequestCapture();
+  const capture = createRequestCapture();
   const discovered = await discoverAgentModelsWithFetch(
     provider,
     providerCredential,
@@ -398,4 +403,25 @@ describe("agent model discovery", () => {
     expect(request.url).toBe("https://api.openai.com/v1/models");
     expectBearer(request, "sk-openai-secret");
   });
+});
+
+test("inherited direct and nested model metadata keys are not treated as present", () => {
+  const nested: Record<string, unknown> = {};
+  Object.setPrototypeOf(nested, { toString: 16_384 });
+  const nestedMetadata: Record<string, unknown> = {
+    capabilities: nested,
+    id: "inherited-nested-metadata",
+  };
+  const directMetadata: Record<string, unknown> = {
+    id: "inherited-direct-metadata",
+  };
+  Object.setPrototypeOf(directMetadata, { toString: 16_384 });
+
+  const candidateKeys = ["toString"];
+  expect(
+    modelOption(nestedMetadata, "id", "name", [], candidateKeys)?.contextWindow,
+  ).toBeNull();
+  expect(
+    modelOption(directMetadata, "id", "name", [], candidateKeys)?.contextWindow,
+  ).toBeNull();
 });

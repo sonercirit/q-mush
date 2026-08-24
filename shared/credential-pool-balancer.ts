@@ -14,50 +14,48 @@ export interface CredentialPoolOptions {
   readonly now?: () => number;
 }
 
+export interface CredentialPoolBalancer {
+  readonly coolDown: (pool: string, credentialId: string) => void;
+  readonly ordered: <Member extends CredentialPoolMember>(
+    pool: string,
+    members: readonly Member[],
+  ) => readonly Member[];
+}
+
 /**
  * Deterministic in-process round robin for credential pools. Pool membership is
  * supplied on every selection, so workspace scoping and removals remain
  * authoritative in the credential store.
  */
-export class CredentialPoolBalancer {
-  readonly #cooldownMilliseconds: number;
-  readonly #now: () => number;
-  readonly #states = new Map<string, CredentialPoolState>();
-
-  constructor(options: CredentialPoolOptions = {}) {
-    this.#cooldownMilliseconds =
-      options.cooldownMilliseconds ?? DEFAULT_CREDENTIAL_COOLDOWN_MILLISECONDS;
-    this.#now = options.now ?? Date.now;
-  }
-
-  ordered<Member extends CredentialPoolMember>(
-    pool: string,
-    members: readonly Member[],
-  ): readonly Member[] {
-    if (members.length === 0) return [];
-    const state = this.#state(pool);
-    const now = this.#now();
-    for (const [credentialId, expiresAt] of state.cooldowns) {
-      if (expiresAt <= now) state.cooldowns.delete(credentialId);
-    }
-    const start = state.cursor % members.length;
-    state.cursor = (start + 1) % members.length;
-    const rotated = [...members.slice(start), ...members.slice(0, start)];
-    return rotated.filter(({ id }) => !state.cooldowns.has(id));
-  }
-
-  coolDown(pool: string, credentialId: string): void {
-    this.#state(pool).cooldowns.set(
-      credentialId,
-      this.#now() + this.#cooldownMilliseconds,
-    );
-  }
-
-  #state(pool: string): CredentialPoolState {
-    const current = this.#states.get(pool);
+export function createCredentialPoolBalancer(
+  options: CredentialPoolOptions = {},
+): CredentialPoolBalancer {
+  const cooldownMilliseconds =
+    options.cooldownMilliseconds ?? DEFAULT_CREDENTIAL_COOLDOWN_MILLISECONDS;
+  const now = options.now ?? Date.now;
+  const states = new Map<string, CredentialPoolState>();
+  const state = (pool: string): CredentialPoolState => {
+    const current = states.get(pool);
     if (current !== undefined) return current;
     const created = { cooldowns: new Map<string, number>(), cursor: 0 };
-    this.#states.set(pool, created);
+    states.set(pool, created);
     return created;
-  }
+  };
+  return {
+    coolDown(pool, credentialId) {
+      state(pool).cooldowns.set(credentialId, now() + cooldownMilliseconds);
+    },
+    ordered(pool, members) {
+      if (members.length === 0) return [];
+      const poolState = state(pool);
+      const timestamp = now();
+      for (const [credentialId, expiresAt] of poolState.cooldowns) {
+        if (expiresAt <= timestamp) poolState.cooldowns.delete(credentialId);
+      }
+      const start = poolState.cursor % members.length;
+      poolState.cursor = (start + 1) % members.length;
+      const rotated = [...members.slice(start), ...members.slice(0, start)];
+      return rotated.filter(({ id }) => !poolState.cooldowns.has(id));
+    },
+  };
 }

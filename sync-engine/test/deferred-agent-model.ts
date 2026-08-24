@@ -17,30 +17,35 @@ export function terminalAgentStep(content: string): AgentModelStep {
   };
 }
 
+export interface DeferredAgentModel extends AgentModel {
+  readonly requests: AgentConversationMessage[][];
+  readonly resolve: (step: AgentModelStep) => void;
+  readonly resolveContent: (content: string) => void;
+}
+
+export function createDeferredAgentModel(): DeferredAgentModel {
+  const requests: AgentConversationMessage[][] = [];
+  const result = Promise.withResolvers<AgentModelStep>();
+  const resolve = (step: AgentModelStep): void => {
+    result.resolve(step);
+  };
+  return {
+    requests,
+    resolve,
+    complete: (messages) => {
+      recordAgentModelRequest(requests, messages);
+      return result.promise;
+    },
+    resolveContent: (content) => {
+      resolve(terminalAgentStep(content));
+    },
+  };
+}
+
 export function deferredSessionSetup(): Readonly<{
   model: DeferredAgentModel;
   setup: ReturnType<typeof connectedSessionSetup>;
 }> {
-  const model = new DeferredAgentModel();
+  const model = createDeferredAgentModel();
   return { model, setup: connectedSessionSetup(model) };
-}
-
-export class DeferredAgentModel implements AgentModel {
-  readonly requests: AgentConversationMessage[][] = [];
-  readonly #result = Promise.withResolvers<AgentModelStep>();
-
-  resolve(step: AgentModelStep): void {
-    this.#result.resolve(step);
-  }
-
-  readonly complete = (
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> => {
-    recordAgentModelRequest(this.requests, messages);
-    return this.#result.promise;
-  };
-
-  resolveContent(content: string): void {
-    this.resolve(terminalAgentStep(content));
-  }
 }

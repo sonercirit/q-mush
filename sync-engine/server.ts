@@ -1,6 +1,5 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
-import { build } from "vite";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -33,11 +32,7 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import {
-  clientBuildConfiguration,
-  createClientPlugins,
-  readFavicon,
-} from "./client-build.ts";
+import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
@@ -311,19 +306,34 @@ function routeSessionItem(
     (id) => {
       if (segments.length !== 2) return undefined;
       const route = segments[1];
-      switch (route) {
-        case "compact":
-        case "compaction":
-        case "continue":
-        case "reassign":
-        case "stop":
-          return sessions[route](request, id);
-        case "messages":
-          return sessions.message(request, id);
-        case undefined:
-        default:
-          return undefined;
-      }
+      const routes: Readonly<
+        Record<
+          | "compact"
+          | "compaction"
+          | "continue"
+          | "messages"
+          | "reassign"
+          | "stop",
+          () => Promise<Response> | Response
+        >
+      > = {
+        compact: () => sessions.compact(request, id),
+        compaction: () => sessions.compaction(request, id),
+        continue: () => sessions.continue(request, id),
+        messages: () => sessions.message(request, id),
+        reassign: () => sessions.reassign(request, id),
+        stop: () => sessions.stop(request, id),
+      };
+      const handler =
+        route === "compact" ||
+        route === "compaction" ||
+        route === "continue" ||
+        route === "messages" ||
+        route === "reassign" ||
+        route === "stop"
+          ? routes[route]
+          : undefined;
+      return handler?.();
     },
   );
 }
@@ -341,17 +351,24 @@ function routeItemSegments(
 ): Promise<Response> | Response | undefined {
   return routeItemRequest(segments, actions.item, (id) => {
     if (segments.length === 2) {
-      switch (segments[1]) {
-        case "default":
-          return actions.default?.(id);
-        case "session-reassignment":
-          return actions.sessionReassignment?.(id);
-        case "scopes":
-          return actions.scopes?.(id);
-        case undefined:
-        default:
-          return undefined;
-      }
+      const route = segments[1];
+      const routes: Readonly<
+        Record<
+          "default" | "scopes" | "session-reassignment",
+          ((id: string) => Promise<Response> | Response) | undefined
+        >
+      > = {
+        default: actions.default,
+        scopes: actions.scopes,
+        "session-reassignment": actions.sessionReassignment,
+      };
+      const handler =
+        route === "default" ||
+        route === "scopes" ||
+        route === "session-reassignment"
+          ? routes[route]
+          : undefined;
+      return handler?.(id);
     }
     return undefined;
   });
@@ -490,7 +507,9 @@ export function createRequestHandler(
 
       const promptResponse = routeItemSegments(
         pathSegments(pathname, `${PROMPTS_PATH}/`),
-        { item: (promptId) => prompts.item(request, promptId) },
+        {
+          item: (promptId) => prompts.item(request, promptId),
+        },
       );
 
       if (promptResponse !== undefined) {
@@ -565,7 +584,9 @@ export function createRequestHandler(
           pathname,
           request,
           generic,
-          { credentials: GENERIC_CREDENTIALS_PATH },
+          {
+            credentials: GENERIC_CREDENTIALS_PATH,
+          },
         );
         if (genericResponse !== undefined) {
           return genericResponse;
@@ -602,80 +623,7 @@ export function createRequestHandler(
   };
 }
 
-interface ViteClientAssets {
-  readonly javaScript: string;
-  readonly stylesheet: string;
-}
-
-function isViteOutput(
-  value: Awaited<ReturnType<typeof build>>,
-): value is Extract<Awaited<ReturnType<typeof build>>, { output: unknown }> {
-  return !Array.isArray(value) && "output" in value;
-}
-
-function viteOutputs(
-  result: Awaited<ReturnType<typeof build>>,
-): readonly Extract<Awaited<ReturnType<typeof build>>, { output: unknown }>[] {
-  return Array.isArray(result)
-    ? result.filter(isViteOutput)
-    : isViteOutput(result)
-      ? [result]
-      : [];
-}
-
-function readViteClientAssets(
-  result: Awaited<ReturnType<typeof build>>,
-): ViteClientAssets {
-  const builds = viteOutputs(result);
-
-  if (builds.length === 0) {
-    throw new Error("The Vite browser build did not return output");
-  }
-
-  let javaScript: string | undefined;
-  let stylesheet: string | undefined;
-
-  for (const { output: outputs } of builds) {
-    for (const output of outputs) {
-      if (output.type === "chunk" && output.isEntry) {
-        javaScript = output.code;
-      } else if (output.type === "asset" && output.fileName.endsWith(".css")) {
-        stylesheet =
-          typeof output.source === "string"
-            ? output.source
-            : new TextDecoder().decode(output.source);
-      }
-    }
-  }
-
-  if (javaScript === undefined || stylesheet === undefined) {
-    throw new Error(
-      "The Vite browser build did not produce JavaScript and CSS",
-    );
-  }
-
-  return { javaScript, stylesheet };
-}
-
-let clientAssets: Promise<ViteClientAssets> | undefined;
-
-function buildClientAssets(): Promise<ViteClientAssets> {
-  clientAssets ??= build({
-    build: {
-      ...clientBuildConfiguration,
-      write: false,
-    },
-    configFile: false,
-    logLevel: "silent",
-    plugins: createClientPlugins(),
-  }).then(readViteClientAssets);
-  return clientAssets;
-}
-
-export async function buildClientStylesheet(): Promise<string> {
-  return (await buildClientAssets()).stylesheet;
-}
-
-export async function buildClientJavaScript(): Promise<string> {
-  return (await buildClientAssets()).javaScript;
-}
+export {
+  buildClientJavaScript,
+  buildClientStylesheet,
+} from "./client-assets.ts";

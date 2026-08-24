@@ -13,7 +13,7 @@ export interface DevtoolsEvent {
   readonly params: unknown;
 }
 
-export interface DevtoolsSubscription {
+interface DevtoolsSubscription {
   close(): void;
   next(): Promise<DevtoolsEvent | undefined>;
 }
@@ -40,74 +40,68 @@ function closedError(): Error {
   return new Error("Chromium closed before the page was ready");
 }
 
-export class DevtoolsConnection {
-  readonly #events = new Map<string, Set<(params: unknown) => void>>();
-  readonly #pending = new Map<
+function createDevtoolsConnection(url: string) {
+  const events = new Map<string, Set<(params: unknown) => void>>();
+  const pending = new Map<
     number,
     {
       readonly reject: (error: Error) => void;
       readonly resolve: (result: unknown) => void;
     }
   >();
-  #nextId = 0;
-  readonly #socket: WebSocket;
+  let nextId = 0;
+  const socket = new WebSocket(url);
 
-  constructor(url: string) {
-    this.#socket = new WebSocket(url);
-    this.#socket.addEventListener("message", (event) => {
-      const message = readMessage(event);
-      if (message === undefined) {
-        return;
-      }
-      if (typeof message.id === "number") {
-        const pending = this.#pending.get(message.id);
-        if (pending !== undefined) {
-          this.#pending.delete(message.id);
-          if (message.error === undefined) {
-            pending.resolve(message.result);
-          } else {
-            pending.reject(
-              new Error(
-                `Chromium command failed: ${errorMessage(message.error)}`,
-              ),
-            );
-          }
-        }
-      } else if (typeof message.method === "string") {
-        for (const listener of this.#events.get(message.method) ?? []) {
-          listener(message.params);
+  socket.addEventListener("message", (event) => {
+    const message = readMessage(event);
+    if (message === undefined) {
+      return;
+    }
+    if (typeof message.id === "number") {
+      const request = pending.get(message.id);
+      if (request !== undefined) {
+        pending.delete(message.id);
+        if (message.error === undefined) {
+          request.resolve(message.result);
+        } else {
+          request.reject(
+            new Error(
+              `Chromium command failed: ${errorMessage(message.error)}`,
+            ),
+          );
         }
       }
-    });
-    const rejectPending = (): void => {
-      for (const pending of this.#pending.values()) {
-        pending.reject(closedError());
+    } else if (typeof message.method === "string") {
+      for (const listener of events.get(message.method) ?? []) {
+        listener(message.params);
       }
-      this.#pending.clear();
-      for (const listeners of this.#events.values()) {
-        for (const listener of listeners) {
-          listener(undefined);
-        }
+    }
+  });
+  const rejectPending = (): void => {
+    for (const request of pending.values()) {
+      request.reject(closedError());
+    }
+    pending.clear();
+    for (const listeners of events.values()) {
+      for (const listener of listeners) {
+        listener(undefined);
       }
-      this.#events.clear();
-    };
-    this.#socket.addEventListener("close", rejectPending, { once: true });
-    this.#socket.addEventListener("error", rejectPending, { once: true });
-  }
+    }
+    events.clear();
+  };
+  socket.addEventListener("close", rejectPending, { once: true });
+  socket.addEventListener("error", rejectPending, { once: true });
 
-  open(): Promise<void> {
-    if (this.#socket.readyState === WebSocket.OPEN) {
+  function open(): Promise<void> {
+    if (socket.readyState === WebSocket.OPEN) {
       return Promise.resolve();
     }
     return new Promise((resolve, reject) => {
-      this.#socket.addEventListener(
-        "open",
-        () => {
-          resolve();
-        },
-        { once: true },
-      );
-      this.#socket.addEventListener(
+      const opened = (): void => {
+        resolve();
+      };
+      socket.addEventListener("open", opened, { once: true });
+      socket.addEventListener(
         "error",
         () => {
           reject(new Error("Could not connect to Chromium DevTools"));
@@ -117,22 +111,22 @@ export class DevtoolsConnection {
     });
   }
 
-  close(): void {
-    this.#socket.close();
+  function close(): void {
+    socket.close();
   }
 
-  command(
+  function command(
     method: string,
     params: Readonly<Record<string, unknown>> = {},
   ): Promise<unknown> {
-    const id = (this.#nextId += 1);
+    const id = (nextId += 1);
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, { reject, resolve });
-      this.#socket.send(JSON.stringify({ id, method, params }));
+      pending.set(id, { reject, resolve });
+      socket.send(JSON.stringify({ id, method, params }));
     });
   }
 
-  subscribe(methods: readonly string[]): DevtoolsSubscription {
+  function subscribe(methods: readonly string[]): DevtoolsSubscription {
     const values: DevtoolsEvent[] = [];
     const waiters: ((value: DevtoolsEvent | undefined) => void)[] = [];
     const registered: {
@@ -164,12 +158,12 @@ export class DevtoolsConnection {
     };
 
     for (const method of methods) {
-      const listeners = this.#events.get(method) ?? new Set();
+      const listeners = events.get(method) ?? new Set();
       const listener = (params: unknown): void => {
         emit(params === undefined ? undefined : { method, params });
       };
       listeners.add(listener);
-      this.#events.set(method, listeners);
+      events.set(method, listeners);
       registered.push({ listener, method });
     }
 
@@ -180,10 +174,10 @@ export class DevtoolsConnection {
           endWaiters();
         }
         for (const { listener, method } of registered) {
-          const listeners = this.#events.get(method);
+          const listeners = events.get(method);
           listeners?.delete(listener);
           if (listeners?.size === 0) {
-            this.#events.delete(method);
+            events.delete(method);
           }
         }
       },
@@ -199,7 +193,11 @@ export class DevtoolsConnection {
       },
     };
   }
+
+  return { close, command, open, subscribe };
 }
+
+export type DevtoolsConnection = ReturnType<typeof createDevtoolsConnection>;
 
 function pageDevtoolsUrl(browserUrl: string, targetId: string): string {
   const url = new URL(browserUrl);
@@ -225,11 +223,11 @@ function pageTargetId(value: unknown): string {
 export async function connectToPage(
   browserUrl: string,
 ): Promise<DevtoolsConnection> {
-  const browser = new DevtoolsConnection(browserUrl);
+  const browser = createDevtoolsConnection(browserUrl);
   try {
     await browser.open();
     const targetId = pageTargetId(await browser.command("Target.getTargets"));
-    return new DevtoolsConnection(pageDevtoolsUrl(browserUrl, targetId));
+    return createDevtoolsConnection(pageDevtoolsUrl(browserUrl, targetId));
   } finally {
     browser.close();
   }

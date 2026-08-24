@@ -2,7 +2,7 @@ import { createRoot } from "solid-js";
 import { expect, test, vi } from "vitest";
 import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { summaryFromDetail } from "../session-summary-codec.ts";
 import type { SessionCommandTransport } from "../session-transport.ts";
 import { restoreFetchAfterEach } from "./controller-test-helpers.ts";
@@ -24,8 +24,8 @@ test("aggregate refresh does not replace a newer selected snapshot", async () =>
       return Promise.reject(new Error("Unexpected command"));
     },
   };
-  const controller = createRoot(
-    () => new SessionController(undefined, undefined, null, transport),
+  const controller = createRoot(() =>
+    createSessionController(undefined, undefined, null, transport),
   );
   const initialLoad = controller.load();
   list.resolve({ sessions: [summaryFromDetail(TEST_SESSION_DETAIL)] });

@@ -1,38 +1,40 @@
-export class SessionRestartTestClock {
-  #now: number;
-  readonly #timers = new Map<
+export interface SessionRestartTestClock {
+  readonly advance: (milliseconds: number) => void;
+  readonly clearTimeout: (id: number | ReturnType<typeof setTimeout>) => void;
+  readonly now: () => number;
+  readonly setTimeout: (callback: () => void, delay: number) => number;
+}
+
+export function createSessionRestartTestClock(
+  initialNow = 1_000,
+): SessionRestartTestClock {
+  let clockNow = initialNow;
+  const timers = new Map<
     number,
     { readonly at: number; readonly callback: () => void }
   >();
-  #nextId = 1;
+  let nextId = 1;
 
-  constructor(now = 1_000) {
-    this.#now = now;
-  }
-
-  readonly clearTimeout = (
-    id: number | ReturnType<typeof setTimeout>,
-  ): void => {
-    if (typeof id === "number") {
-      this.#timers.delete(id);
-    }
-  };
-
-  readonly now = (): number => this.#now;
-
-  readonly setTimeout = (callback: () => void, delay: number): number => {
-    const id = this.#nextId++;
-    this.#timers.set(id, { at: this.#now + delay, callback });
-    return id;
-  };
-
-  advance(milliseconds: number): void {
-    this.#now += milliseconds;
-    for (const [id, timer] of [...this.#timers]) {
-      if (timer.at <= this.#now) {
-        this.#timers.delete(id);
-        timer.callback();
+  return {
+    advance(milliseconds): void {
+      clockNow += milliseconds;
+      for (const [id, timer] of [...timers]) {
+        if (timer.at <= clockNow) {
+          timers.delete(id);
+          timer.callback();
+        }
       }
-    }
-  }
+    },
+    clearTimeout(id): void {
+      if (typeof id === "number") {
+        timers.delete(id);
+      }
+    },
+    now: () => clockNow,
+    setTimeout(callback, delay): number {
+      const id = nextId++;
+      timers.set(id, { at: clockNow + delay, callback });
+      return id;
+    },
+  };
 }

@@ -1,11 +1,11 @@
 import { type JSX } from "solid-js";
 import { expect, test } from "vitest";
 import {
+  createRenderDebugView,
   renderDebugBoundary,
   RenderDebugLegend,
   RenderDebugProvider,
   RenderDebugToggle,
-  RenderDebugView,
 } from "../../solid/render-debug.tsx";
 import { renderSolidToString } from "./render-solid.tsx";
 
@@ -14,7 +14,7 @@ function TestBoundary(): JSX.Element {
 }
 
 test("moves repeated boundary renders from green to red and resets", () => {
-  const view = new RenderDebugView();
+  const view = createRenderDebugView();
 
   expect(view.enabled).toBe(false);
   const firstMeasurement = view.record("sessions");
@@ -38,7 +38,7 @@ test("moves repeated boundary renders from green to red and resets", () => {
 });
 
 test("renders reactive boundary attributes through context", () => {
-  const view = new RenderDebugView();
+  const view = createRenderDebugView();
   view.toggle();
 
   const rendered = renderSolidToString(() => (
@@ -55,8 +55,8 @@ test("renders reactive boundary attributes through context", () => {
 });
 
 test("renders a debug toggle and a green-to-red legend", () => {
-  const disabledView = new RenderDebugView();
-  const enabledView = new RenderDebugView();
+  const disabledView = createRenderDebugView();
+  const enabledView = createRenderDebugView();
   enabledView.toggle();
   const disabled = renderSolidToString(() => (
     <RenderDebugToggle view={disabledView} />

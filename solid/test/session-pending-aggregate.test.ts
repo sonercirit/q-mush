@@ -1,6 +1,7 @@
 import { expect, test } from "vitest";
 import {
-  PendingCommandCapacity,
+  createPendingCommandCapacity,
+  type PendingCommandCapacity,
   pendingCommandPayloadBytes,
   withPendingCommandCapacity,
 } from "../../solid/session-pending.ts";
@@ -26,7 +27,7 @@ function expectReserve(
 }
 
 test("enforces the aggregate pending-command byte cap across users", () => {
-  const capacity = new PendingCommandCapacity(25);
+  const capacity = createPendingCommandCapacity(25);
   const first = pendingBytes(8);
   const second = pendingBytes(7);
   const reserve = (userId: string, bytes: number, defined: boolean) =>
@@ -43,7 +44,7 @@ test.each(["settle", "reject", "throw", "replay"] as const)(
     const first = pendingBytes(8);
     const second = pendingBytes(7);
 
-    const capacity = new PendingCommandCapacity(first + second - 1);
+    const capacity = createPendingCommandCapacity(first + second - 1);
 
     const firstReservation = expectReserve(capacity, "user-1", first, true);
     expectReserve(capacity, "user-2", second, false);
@@ -56,7 +57,7 @@ test.each(["settle", "reject", "throw", "replay"] as const)(
 
 test("does not double-release replayed payload capacity", () => {
   const bytes = pendingCommandPayloadBytes(payload(8));
-  const capacity = new PendingCommandCapacity(bytes);
+  const capacity = createPendingCommandCapacity(bytes);
 
   const reservation = capacity.reserve("user-1", bytes);
   expect(reservation).toBeDefined();

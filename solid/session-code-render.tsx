@@ -1,4 +1,5 @@
 import { type JSX } from "solid-js";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import {
   findJsonTextSegment,
   type JsonStreamStringToken,
@@ -148,21 +149,36 @@ function parseJson(value: string): JsonValue | undefined {
   }
 }
 
+type JsonPrimitiveType =
+  | "bigint"
+  | "boolean"
+  | "function"
+  | "number"
+  | "object"
+  | "string"
+  | "symbol"
+  | "undefined";
+
+const JSON_PRIMITIVE_KINDS: Readonly<
+  Record<JsonPrimitiveType, SyntaxTokenKind>
+> = {
+  bigint: "literal",
+  boolean: "literal",
+  function: "literal",
+  number: "number",
+  object: "literal",
+  string: "string",
+  symbol: "literal",
+  undefined: "literal",
+};
+
+function isJsonPrimitiveType(value: string): value is JsonPrimitiveType {
+  return isDispatchKey(JSON_PRIMITIVE_KINDS, value);
+}
+
 function jsonPrimitiveKind(value: JsonPrimitive): SyntaxTokenKind {
-  switch (typeof value) {
-    case "boolean":
-    case "object":
-      return "literal";
-    case "number":
-      return "number";
-    case "string":
-      return "string";
-    case "bigint":
-    case "function":
-    case "symbol":
-    case "undefined":
-      return "literal";
-  }
+  const type = typeof value;
+  return isJsonPrimitiveType(type) ? JSON_PRIMITIVE_KINDS[type] : "literal";
 }
 
 function renderSyntaxToken(token: SyntaxToken): JSX.Element {

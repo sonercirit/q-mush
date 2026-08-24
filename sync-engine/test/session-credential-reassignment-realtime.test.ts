@@ -1,13 +1,13 @@
 import { expect, test } from "vitest";
-import { RealtimeHub } from "../realtime-hub.ts";
+import { createRealtimeHub } from "../realtime-hub.ts";
 import { createSessionsChangedPublisher } from "../session-credential-reassignment-realtime.ts";
-import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
+import { createRecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 
 test("credential reassignment publishes one non-sensitive aggregate event", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const [socket, other] = [
-    new RecordingRealtimeSocket(),
-    new RecordingRealtimeSocket(),
+    createRecordingRealtimeSocket(),
+    createRecordingRealtimeSocket(),
   ];
   hub.setUser("user-1", socket, true);
   hub.setUser("user-2", other, true);

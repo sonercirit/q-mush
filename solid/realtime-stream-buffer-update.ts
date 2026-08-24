@@ -95,16 +95,13 @@ function appendChannel(
 ): ToolStreamEntry {
   if (chunks.length === 0) return entry;
   const appended = [entry[channel], ...chunks].join("");
-  switch (channel) {
-    case "arguments":
-      return { ...entry, arguments: appended };
-    case "name":
-      return { ...entry, name: appended };
-    case "stderr":
-      return { ...entry, stderr: appended };
-    case "stdout":
-      return { ...entry, stdout: appended };
-  }
+  const appenders = {
+    arguments: (): ToolStreamEntry => ({ ...entry, arguments: appended }),
+    name: (): ToolStreamEntry => ({ ...entry, name: appended }),
+    stderr: (): ToolStreamEntry => ({ ...entry, stderr: appended }),
+    stdout: (): ToolStreamEntry => ({ ...entry, stdout: appended }),
+  } satisfies Record<ToolStreamChannel, () => ToolStreamEntry>;
+  return appenders[channel]();
 }
 
 export function materializeToolUpdate(

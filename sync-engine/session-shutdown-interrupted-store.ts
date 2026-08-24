@@ -41,24 +41,39 @@ function shutdownHandoff(
   };
 }
 
-export class ShutdownInterruptedSessionStore {
-  readonly #options: ShutdownInterruptedSessionStoreOptions;
-  #recoveryEnabled = true;
+type ShutdownMarkArguments = [
+  string,
+  number,
+  string,
+  RestartHandoffOperation,
+  number,
+];
 
-  constructor(options: ShutdownInterruptedSessionStoreOptions) {
-    this.#options = options;
-  }
-
-  mark(
+export interface ShutdownInterruptedSessionStore {
+  readonly beginLiveDrain: () => void;
+  readonly clear: (
     sessionId: string,
     generation: number,
-    restartId: string,
-    operation: RestartHandoffOperation,
     now: number,
-  ): boolean {
+  ) => boolean;
+  readonly enableRecovery: () => void;
+  readonly failInvalid: (now: number) => void;
+  readonly mark: (...arguments_: ShutdownMarkArguments) => boolean;
+  readonly recover: (now: () => number) => void;
+  readonly recoveryEnabled: () => boolean;
+  readonly restore: (now: number) => void;
+}
+
+export function ShutdownInterruptedSessionStore(
+  options: ShutdownInterruptedSessionStoreOptions,
+): ShutdownInterruptedSessionStore {
+  let recoveryEnabled = true;
+
+  function mark(...arguments_: ShutdownMarkArguments): boolean {
+    const [sessionId, generation, restartId, operation, now] = arguments_;
     const marker = shutdownHandoff(generation, restartId, operation);
     return updateStoredSessions(
-      this.#options.database,
+      options.database,
       and(
         activeSessionCondition({ id: sessionId, status: "running" }),
         eq(agentSessions.executionGeneration, generation),
@@ -72,9 +87,9 @@ export class ShutdownInterruptedSessionStore {
     );
   }
 
-  clear(sessionId: string, generation: number, now: number): boolean {
+  function clear(sessionId: string, generation: number, now: number): boolean {
     return updateStoredSessions(
-      this.#options.database,
+      options.database,
       and(
         activeSessionCondition({ id: sessionId }),
         eq(agentSessions.executionGeneration, generation),
@@ -87,21 +102,21 @@ export class ShutdownInterruptedSessionStore {
     );
   }
 
-  beginLiveDrain(): void {
-    this.#recoveryEnabled = false;
+  function beginLiveDrain(): void {
+    recoveryEnabled = false;
   }
 
-  enableRecovery(): void {
-    this.#recoveryEnabled = true;
+  function enableRecovery(): void {
+    recoveryEnabled = true;
   }
 
-  recoveryEnabled(): boolean {
-    return this.#recoveryEnabled;
+  function isRecoveryEnabled(): boolean {
+    return recoveryEnabled;
   }
 
-  #markedSessions(): readonly StoredSessionSnapshot[] {
+  function markedSessions(): readonly StoredSessionSnapshot[] {
     return readStoredSessionSnapshots(
-      this.#options.database,
+      options.database,
       and(
         activeSessionCondition({ status: "running" }),
         isNull(agentSessions.restartHandoff),
@@ -110,7 +125,7 @@ export class ShutdownInterruptedSessionStore {
     );
   }
 
-  #exactCondition(session: StoredSessionSnapshot, raw: string) {
+  function exactCondition(session: StoredSessionSnapshot, raw: string) {
     return and(
       activeSessionCondition({
         id: session.id,
@@ -123,7 +138,7 @@ export class ShutdownInterruptedSessionStore {
     );
   }
 
-  #marker(session: StoredSessionSnapshot): RestartHandoff | undefined {
+  function marker(session: StoredSessionSnapshot): RestartHandoff | undefined {
     const value = session.interruptedHandoff ?? "";
     const marker = parseRestartHandoff(value);
     return marker?.executionGeneration === session.executionGeneration
@@ -131,29 +146,29 @@ export class ShutdownInterruptedSessionStore {
       : undefined;
   }
 
-  #sessionMarker(
+  function sessionMarker(
     session: StoredSessionSnapshot,
   ): { readonly marker: RestartHandoff; readonly raw: string } | undefined {
-    const marker = this.#marker(session);
-    return marker === undefined || session.interruptedHandoff === null
+    const parsedMarker = marker(session);
+    return parsedMarker === undefined || session.interruptedHandoff === null
       ? undefined
-      : { marker, raw: session.interruptedHandoff };
+      : { marker: parsedMarker, raw: session.interruptedHandoff };
   }
 
-  recover(now: () => number): void {
-    if (!this.#recoveryEnabled || this.#markedSessions().length === 0) {
+  function recover(now: () => number): void {
+    if (!recoveryEnabled || markedSessions().length === 0) {
       return;
     }
     const recoveredAt = now();
-    this.failInvalid(recoveredAt);
-    this.restore(recoveredAt);
+    failInvalid(recoveredAt);
+    restore(recoveredAt);
   }
 
-  failInvalid(now: number): void {
-    if (!this.#recoveryEnabled) return;
-    const invalid = this.#markedSessions().filter((session) => {
+  function failInvalid(now: number): void {
+    if (!recoveryEnabled) return;
+    const invalid = markedSessions().filter((session) => {
       try {
-        return this.#marker(session) === undefined;
+        return marker(session) === undefined;
       } catch {
         return true;
       }
@@ -163,33 +178,29 @@ export class ShutdownInterruptedSessionStore {
       if (raw === null) {
         continue;
       }
-      updateStoredSessions(
-        this.#options.database,
-        this.#exactCondition(session, raw),
-        {
-          status: "paused",
-          interruptedHandoff: null,
-          restartHandoff: raw,
-          ...sessionTimingUpdate(session, now),
-          ...updatedAuditFields(SYSTEM_ID, now),
-        },
-      );
+      updateStoredSessions(options.database, exactCondition(session, raw), {
+        status: "paused",
+        interruptedHandoff: null,
+        restartHandoff: raw,
+        ...sessionTimingUpdate(session, now),
+        ...updatedAuditFields(SYSTEM_ID, now),
+      });
     }
   }
 
-  restore(now: number): void {
-    if (!this.#recoveryEnabled) return;
-    for (const session of this.#markedSessions()) {
-      const marked = this.#sessionMarker(session);
+  function restore(now: number): void {
+    if (!recoveryEnabled) return;
+    for (const session of markedSessions()) {
+      const marked = sessionMarker(session);
       if (marked === undefined) {
         continue;
       }
       const { marker, raw } = marked;
-      this.#options.database.transaction((transaction) => {
+      options.database.transaction((transaction) => {
         const advanced = advanceStoredSessionGeneration({
-          condition: this.#exactCondition(session, raw),
+          condition: exactCondition(session, raw),
           database: transaction,
-          generateId: this.#options.generateId,
+          generateId: options.generateId,
           mode: "attempt",
           now,
           sessionId: session.id,
@@ -223,11 +234,22 @@ export class ShutdownInterruptedSessionStore {
         );
         appendUnknownRestartToolResults({
           database: transaction,
-          generateId: this.#options.generateId,
+          generateId: options.generateId,
           now,
           sessionId: session.id,
         });
       });
     }
   }
+
+  return {
+    beginLiveDrain,
+    clear,
+    enableRecovery,
+    failInvalid,
+    mark,
+    recover,
+    recoveryEnabled: isRecoveryEnabled,
+    restore,
+  };
 }

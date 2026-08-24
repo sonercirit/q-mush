@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { RealtimeCommandError } from "../../shared/user-realtime-protocol.ts";
+import { isRealtimeCommandError } from "../../shared/user-realtime-protocol.ts";
 import { createSessionContextTokenCapAction } from "../session-context-limit-action.ts";
 import type { SessionLifecycleDependencies } from "../session-lifecycle-types.ts";
 import type { SessionStore } from "../session-store.ts";
@@ -42,7 +42,7 @@ test("does not mislabel unexpected store failures as cap validation", () => {
     caught = error;
   }
   expect(caught).toBe(failure);
-  expect(caught).not.toBeInstanceOf(RealtimeCommandError);
+  expect(isRealtimeCommandError(caught)).toBe(false);
   setContextTokenCap.mockRestore();
   fixture.database.$client.close();
 });

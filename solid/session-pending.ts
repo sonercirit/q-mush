@@ -26,67 +26,59 @@ interface PendingCommandReservation {
 }
 
 /** @public Aggregate command-capacity ledger. */
-export class PendingCommandCapacity {
-  #bytes = 0;
-  readonly #maximumBytes: number;
-  readonly #users = new Map<string, number>();
+export interface PendingCommandCapacity {
+  readonly bytes: number;
+  reserve(userId: string, bytes: number): PendingCommandReservation | undefined;
+}
 
-  constructor(maximumBytes = MAXIMUM_AGGREGATE_PENDING_COMMAND_BYTES) {
-    if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
-      throw new RangeError("Pending command byte capacity must be positive");
-    }
-    this.#maximumBytes = maximumBytes;
+/** @public Creates an aggregate command-capacity ledger. */
+export function createPendingCommandCapacity(
+  maximumBytes = MAXIMUM_AGGREGATE_PENDING_COMMAND_BYTES,
+): PendingCommandCapacity {
+  if (!Number.isSafeInteger(maximumBytes) || maximumBytes < 1) {
+    throw new RangeError("Pending command byte capacity must be positive");
   }
-
-  get bytes(): number {
-    return this.#bytes;
-  }
-
-  reserve(
-    userId: string,
-    bytes: number,
-  ): PendingCommandReservation | undefined {
-    if (
-      userId.length === 0 ||
-      !Number.isSafeInteger(bytes) ||
-      bytes < 0 ||
-      bytes > this.#maximumBytes - this.#bytes
-    ) {
-      return undefined;
-    }
-    this.#users.set(userId, (this.#users.get(userId) ?? 0) + bytes);
-    this.#bytes += bytes;
-    let released = false;
-    return {
-      bytes,
-      release: () => {
-        if (released) {
-          return;
-        }
-        released = true;
-        this.#release(userId, bytes);
-      },
-      userId,
-    };
-  }
-
-  #release(userId: string, bytes: number): void {
-    const reserved = this.#users.get(userId);
-    if (reserved === undefined || reserved < bytes || this.#bytes < bytes) {
+  let reservedBytes = 0;
+  const users = new Map<string, number>();
+  const release = (userId: string, bytes: number): void => {
+    const reserved = users.get(userId);
+    if (reserved === undefined || reserved < bytes || reservedBytes < bytes) {
       throw new Error("Pending command byte accounting was inconsistent");
     }
     const remaining = reserved - bytes;
-
-    if (remaining === 0) {
-      this.#users.delete(userId);
-    } else {
-      this.#users.set(userId, remaining);
-    }
-    this.#bytes -= bytes;
-  }
+    if (remaining === 0) users.delete(userId);
+    else users.set(userId, remaining);
+    reservedBytes -= bytes;
+  };
+  return {
+    get bytes() {
+      return reservedBytes;
+    },
+    reserve(userId, bytes) {
+      if (
+        userId.length === 0 ||
+        !Number.isSafeInteger(bytes) ||
+        bytes < 0 ||
+        bytes > maximumBytes - reservedBytes
+      )
+        return undefined;
+      users.set(userId, (users.get(userId) ?? 0) + bytes);
+      reservedBytes += bytes;
+      let released = false;
+      return {
+        bytes,
+        release: () => {
+          if (released) return;
+          released = true;
+          release(userId, bytes);
+        },
+        userId,
+      };
+    },
+  };
 }
 
-const SESSION_COMMAND_CAPACITY = new PendingCommandCapacity();
+const SESSION_COMMAND_CAPACITY = createPendingCommandCapacity();
 
 export async function withPendingCommandCapacity<Value>(
   userId: string,

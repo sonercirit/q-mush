@@ -5,7 +5,10 @@ import {
   connectionScopesPath,
 } from "../../shared/routes.ts";
 import { GENERIC_PANEL, OPENAI_PANEL } from "../../solid/provider-client.tsx";
-import { ProviderController } from "../../solid/provider-controller.ts";
+import {
+  createProviderController,
+  type ProviderController,
+} from "../../solid/provider-controller.ts";
 import type { ProviderPanelConfiguration } from "../../solid/provider-panel-configuration.ts";
 import {
   installRecordedFetch,
@@ -40,17 +43,16 @@ function recordedProvider(
 } {
   const requests: RecordedRequests = [];
   installRecordedFetch(requests, (init) => {
-    switch (init?.method) {
-      case "POST":
-        return Response.json(credential, { status: 201 });
-      case "PUT":
-        return new Response(null, { status: 204 });
-      case undefined:
-      default:
-        return Response.json({ credentials: [] });
-    }
+    const responses = {
+      POST: (): Response => Response.json(credential, { status: 201 }),
+      PUT: (): Response => new Response(null, { status: 204 }),
+    } satisfies Record<string, () => Response>;
+    const method = init?.method;
+    if (method === "POST") return responses.POST();
+    if (method === "PUT") return responses.PUT();
+    return Response.json({ credentials: [] });
   });
-  return { controller: new ProviderController(configuration), requests };
+  return { controller: createProviderController(configuration), requests };
 }
 
 async function expectSubmittedGenericCredential(

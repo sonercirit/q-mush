@@ -1,5 +1,8 @@
 import type { AppDatabase } from "../../shared/database.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import {
+  createSessionAgentActions,
+  type SessionAgentActions,
+} from "../../sync-engine/session-agent-actions.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { TEST_NOW } from "./authenticated-integration-test-helpers.ts";
 import { inactiveSessionAgentActionDefaults } from "./session-race-test-helpers.ts";
@@ -19,7 +22,7 @@ export function orchestrationActions(
   store: SessionStore,
 ): SessionAgentActions {
   const defaults = inactiveSessionAgentActionDefaults();
-  return new SessionAgentActions({
+  return createSessionAgentActions({
     ...defaults,
     database,
     discoverSessionMetadata: () =>

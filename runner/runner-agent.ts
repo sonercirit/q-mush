@@ -9,26 +9,37 @@ import {
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
-import { RunnerCommandExecutions } from "./runner-command-executions.ts";
-import { readRunnerCommand, RunnerCommandExecutor } from "./runner-command.ts";
 import {
+  createRunnerCommandExecutions,
+  type RunnerCommandExecutions,
+} from "./runner-command-executions.ts";
+import {
+  createRunnerCommandExecutor,
+  readRunnerCommand,
+  type RunnerCommandExecutor,
+} from "./runner-command.ts";
+import {
+  createRunnerConnectionError,
   createRunnerConnectionSettlement,
-  RunnerConnectionError,
 } from "./runner-connection.ts";
-import { RunnerContainerManager } from "./runner-container.ts";
+import {
+  createRunnerContainerManager,
+  type RunnerContainerManager,
+} from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
-import { RunnerRestartCoordinator } from "./runner-restart.ts";
+import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
   addRunnerSocketFailureListeners,
+  isRunnerRegistrationRejectedError,
+  isRunnerSupersededError,
   observeOperationalRunnerSocket,
   parseSocketJsonRecord,
-  RunnerRegistrationRejectedError,
-  RunnerSupersededError,
 } from "./runner-socket.ts";
-import { RunnerUpdateTrigger } from "./runner-update-trigger.ts";
+import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
-  RunnerStartupRestart,
+  createRunnerStartupRestart,
+  type RunnerStartupRestart,
   updateRunnerIfAvailable,
 } from "./runner-update.ts";
 
@@ -40,8 +51,8 @@ const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const RUNNER_PROCESS_NONCE = randomBytes(32).toString("base64url");
-const runnerUpdateTrigger = new RunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
-const runnerRestart = new RunnerRestartCoordinator({
+const runnerUpdateTrigger = createRunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
+const runnerRestart = createRunnerRestartCoordinator({
   restartId: () => randomBytes(32).toString("base64url"),
 });
 
@@ -321,7 +332,7 @@ async function connectRunner(
           }),
         );
       } catch {
-        throw new RunnerConnectionError(
+        throw createRunnerConnectionError(
           "The WebSocket connection message could not be sent",
         );
       }
@@ -350,8 +361,8 @@ async function connectRunner(
     } catch (error) {
       socket.close();
       if (
-        error instanceof RunnerRegistrationRejectedError ||
-        error instanceof RunnerSupersededError
+        isRunnerRegistrationRejectedError(error) ||
+        isRunnerSupersededError(error)
       ) {
         throw error;
       }
@@ -461,7 +472,7 @@ async function pendingSupersession(
   milliseconds: number,
 ): Promise<void> {
   const pending = await pendingSocketFailure(failure, milliseconds);
-  if (pending instanceof RunnerSupersededError) {
+  if (isRunnerSupersededError(pending)) {
     await throwSocketFailure(socket, active, pending);
   }
 }
@@ -471,7 +482,7 @@ async function throwSocketFailure(
   active: RunnerCommandExecutions,
   failure: Error,
 ): Promise<never> {
-  if (failure instanceof RunnerSupersededError) {
+  if (isRunnerSupersededError(failure)) {
     socket.close(1000, "Superseded");
     active.abortAll();
     await activeRunnerExecution().containers.cleanupAll();
@@ -484,7 +495,9 @@ async function maintainConnection(
   configurationPath: string,
   startupRestart: RunnerStartupRestart,
 ): Promise<void> {
-  const active = new RunnerCommandExecutions(activeRunnerExecution().commands);
+  const active = createRunnerCommandExecutions(
+    activeRunnerExecution().commands,
+  );
   const installOperationalHandlers = (connected: WebSocket): void => {
     bindOperationalSocket(connected, active);
   };
@@ -506,7 +519,7 @@ async function maintainConnection(
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
       const failure = await socketFailure;
-      if (failure instanceof RunnerSupersededError) {
+      if (isRunnerSupersededError(failure)) {
         await throwSocketFailure(socket, active, failure);
       }
       socket = await establishConnection();
@@ -561,7 +574,7 @@ async function run(): Promise<void> {
 
   const configurationPath = readConfigurationPath();
   const runnerRestartId = readRestartId();
-  const startupRestart = new RunnerStartupRestart(runnerRestartId);
+  const startupRestart = createRunnerStartupRestart(runnerRestartId);
   if (runnerRestartId !== undefined) {
     runnerRestart.restore(runnerRestartId);
   }
@@ -579,11 +592,11 @@ async function run(): Promise<void> {
     );
   }
   const configuration = readConfiguration(configurationPath);
-  const containers = new RunnerContainerManager({
+  const containers = createRunnerContainerManager({
     trackingPath: join(dirname(configurationPath), "owned-containers.json"),
   });
   runnerExecution = {
-    commands: new RunnerCommandExecutor(containers),
+    commands: createRunnerCommandExecutor(containers),
     containers,
   };
   writeFileSync(

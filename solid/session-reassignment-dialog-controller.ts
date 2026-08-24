@@ -1,68 +1,64 @@
-import { createSignal, type Accessor, type Setter } from "solid-js";
+import { createSignal } from "solid-js";
 import type { ProviderCredential } from "./provider-credential-model.ts";
 
-export interface SessionReassignmentDialogState {
+interface SessionReassignmentDialogState {
   readonly credential: ProviderCredential;
   readonly error: string | undefined;
   readonly pending: boolean;
 }
 
-export class SessionReassignmentDialogController {
-  readonly #readState: Accessor<SessionReassignmentDialogState | undefined>;
-  readonly #writeState: Setter<SessionReassignmentDialogState | undefined>;
+export interface SessionReassignmentDialogController {
+  readonly state: SessionReassignmentDialogState | undefined;
+  open(credential: ProviderCredential): void;
+  close(): void;
+  pending(): void;
+  failed(error: string): void;
+  succeeded(): void;
+  reset(): void;
+}
 
-  constructor() {
-    const [readState, writeState] = createSignal<
-      SessionReassignmentDialogState | undefined
-    >();
-    this.#readState = readState;
-    this.#writeState = writeState;
-  }
-
-  get state(): SessionReassignmentDialogState | undefined {
-    return this.#readState();
-  }
-
-  open(credential: ProviderCredential): void {
-    if (this.state?.pending !== true) {
-      this.#replace({ credential, error: undefined, pending: false });
-    }
-  }
-
-  close(): void {
-    if (this.state?.pending !== true) {
-      this.#replace(undefined);
-    }
-  }
-
-  pending(): void {
-    this.#update((state) => ({ ...state, error: undefined, pending: true }));
-  }
-
-  failed(error: string): void {
-    this.#update((state) => ({ ...state, error, pending: false }));
-  }
-
-  succeeded(): void {
-    this.#replace(undefined);
-  }
-
-  reset(): void {
-    this.#replace(undefined);
-  }
-
-  #update(
-    update: (
+export function createSessionReassignmentDialogController(): SessionReassignmentDialogController {
+  const [readState, writeState] = createSignal<
+    SessionReassignmentDialogState | undefined
+  >();
+  const replace = (state: SessionReassignmentDialogState | undefined): void => {
+    writeState(() => state);
+  };
+  const update = (
+    operation: (
       state: SessionReassignmentDialogState,
     ) => SessionReassignmentDialogState,
-  ): void {
-    const state = this.state;
+  ): void => {
+    const state = readState();
     if (state !== undefined) {
-      this.#replace(update(state));
+      replace(operation(state));
     }
-  }
-
-  #replace(state: SessionReassignmentDialogState | undefined): void {
-    this.#writeState(() => state);
-  }
+  };
+  return {
+    get state() {
+      return readState();
+    },
+    open: (credential) => {
+      if (readState()?.pending !== true) {
+        replace({ credential, error: undefined, pending: false });
+      }
+    },
+    close: () => {
+      if (readState()?.pending !== true) {
+        replace(undefined);
+      }
+    },
+    pending: () => {
+      update((state) => ({ ...state, error: undefined, pending: true }));
+    },
+    failed: (error) => {
+      update((state) => ({ ...state, error, pending: false }));
+    },
+    succeeded: () => {
+      replace(undefined);
+    },
+    reset: () => {
+      replace(undefined);
+    },
+  };
 }

@@ -71,12 +71,23 @@ function isCredentialFingerprintCollision(error: unknown): boolean {
   );
 }
 
-export class DuplicateProviderCredentialError extends Error {
-  constructor() {
-    super("This provider credential is already stored");
-    this.name = "DuplicateProviderCredentialError";
-  }
+const DUPLICATE_PROVIDER_CREDENTIAL_ERROR =
+  "DuplicateProviderCredentialError" as const;
+
+export interface DuplicateProviderCredentialError extends Error {
+  readonly name: typeof DUPLICATE_PROVIDER_CREDENTIAL_ERROR;
 }
+
+const createDuplicateProviderCredentialError =
+  (): DuplicateProviderCredentialError =>
+    Object.assign(new Error("This provider credential is already stored"), {
+      name: DUPLICATE_PROVIDER_CREDENTIAL_ERROR,
+    });
+
+export const isDuplicateProviderCredentialError = (
+  value: unknown,
+): value is DuplicateProviderCredentialError =>
+  value instanceof Error && value.name === DUPLICATE_PROVIDER_CREDENTIAL_ERROR;
 
 function ownedDefaultCondition(
   userId: string,
@@ -131,43 +142,115 @@ function legacyCredentialSummary(
   };
 }
 
-export class ProviderCredentialStore {
-  readonly #cipher: CredentialCipher;
-  readonly #database: AppDatabase;
-  readonly #generateId: IdGenerator;
-  readonly #provider: CredentialProviderId;
-  readonly #scopeConfiguration: ConnectionScopeConfiguration;
-  constructor(
-    database: AppDatabase,
-    cipher: CredentialCipher,
-    provider: CredentialProviderId,
-    generateId: IdGenerator = createUuidV7,
-  ) {
-    this.#cipher = cipher;
-    this.#database = database;
-    this.#generateId = generateId;
-    this.#provider = provider;
-    this.#scopeConfiguration = {
-      associationTable: providerCredentialWorkspaces,
-      generateId,
-      ownerIdColumn: providerCredentialWorkspaces.providerCredentialId,
-      ownerTable: providerCredentials,
-    };
-  }
+export const listActiveModelCredentials = queryActiveModelCredentials;
+export const hasActiveModelCredential = modelCredentialIsActive;
+export function listModelCredentials(
+  database: AppDatabase,
+  userId: string,
+  ...[offset, limit, search, workspaceId]: [
+    offset: number,
+    limit: number,
+    search?: string,
+    workspaceId?: string,
+  ]
+): ProviderCredentialPage {
+  const options: ModelCredentialQueryOptions = {
+    pageSize: limit,
+    skip: offset,
+    ...(search === undefined ? {} : { search }),
+    ...(workspaceId === undefined ? {} : { workspaceId }),
+  };
+  return queryModelCredentials(database, userId, options);
+}
+
+export type ReadProviderCredential = (
+  userId: string,
+  credentialId: string,
+  workspaceId?: string,
+) => ProviderCredentialAccess | undefined;
+
+type AddCredentialArguments = [
+  userId: string,
+  credential: string,
+  details: ProviderCredentialDetails,
+  source: ProviderCredentialSource,
+  now: number,
+  workspaceIds?: readonly string[],
+];
+type SetScopesArguments = [
+  userId: string,
+  credentialId: string,
+  workspaceIds: readonly string[],
+  now: number,
+];
+type UpdateSecretArguments = [
+  userId: string,
+  credentialId: string,
+  secret: string,
+  now: number,
+  requireReauthentication?: boolean,
+  accountId?: string,
+  label?: string,
+];
+
+type ReadSecret = (
+  userId: string,
+  credentialId: string,
+  workspaceId?: string,
+) => string | undefined;
+
+export interface ProviderCredentialStore {
   validateScopes(
     userId: string,
     workspaceIds: readonly string[],
-  ): readonly string[] {
-    return validateConnectionScopes(this.#database, userId, workspaceIds);
-  }
-  add(
+  ): readonly string[];
+  add(...parameters: AddCredentialArguments): ProviderCredentialSummary;
+  list(
     userId: string,
-    credential: string,
-    details: ProviderCredentialDetails,
-    source: ProviderCredentialSource,
+    workspaceId?: string,
+  ): readonly ProviderCredentialSummary[];
+  read: ReadProviderCredential;
+  readSecret: ReadSecret;
+  setScopes(...parameters: SetScopesArguments): boolean;
+  setDefault(userId: string, credentialId: string, now: number): boolean;
+  markRequiresReauthentication(
+    userId: string,
+    credentialId: string,
     now: number,
-    workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
+  ): boolean;
+  updateSecret(...parameters: UpdateSecretArguments): boolean;
+  remove(userId: string, credentialId: string, now: number): boolean;
+}
+
+export function createProviderCredentialStore(
+  database: AppDatabase,
+  cipher: CredentialCipher,
+  provider: CredentialProviderId,
+  generateId: IdGenerator = createUuidV7,
+): ProviderCredentialStore {
+  const scopeConfiguration: ConnectionScopeConfiguration = {
+    associationTable: providerCredentialWorkspaces,
+    generateId,
+    ownerIdColumn: providerCredentialWorkspaces.providerCredentialId,
+    ownerTable: providerCredentials,
+  };
+  function validateScopes(
+    userId: string,
+    workspaceIds: readonly string[],
+  ): readonly string[] {
+    return validateConnectionScopes(database, userId, workspaceIds);
+  }
+  function add(
+    ...parameters: AddCredentialArguments
   ): ProviderCredentialSummary {
+    const [
+      userId,
+      credential,
+      details,
+      source,
+      now,
+      workspaceIds = [GLOBAL_WORKSPACE_ID],
+    ] = parameters;
     const fingerprint = storedCredentialFingerprint({
       ...(details.apiFormat === undefined
         ? {}
@@ -176,22 +259,22 @@ export class ProviderCredentialStore {
       credential,
     });
 
-    const existing = this.#database
+    const existing = database
       .select({
         id: providerCredentials.id,
         isDeleted: providerCredentials.isDeleted,
       })
       .from(providerCredentials)
-      .where(fingerprintCondition(this.#provider, userId, fingerprint))
+      .where(fingerprintCondition(provider, userId, fingerprint))
       .get();
     if (existing !== undefined && !existing.isDeleted) {
-      throw new DuplicateProviderCredentialError();
+      throw createDuplicateProviderCredentialError();
     }
-    const id = existing?.id ?? this.#generateId(now);
-    const normalizedScopes = this.validateScopes(userId, workspaceIds);
+    const id = existing?.id ?? generateId(now);
+    const normalizedScopes = validateScopes(userId, workspaceIds);
     const isGlobal = normalizedScopes.includes(GLOBAL_WORKSPACE_ID);
     const encryptedCredential = encryptedCredentialValue({
-      cipher: this.#cipher,
+      cipher: cipher,
       credential,
       credentialId: id,
       userId,
@@ -211,7 +294,7 @@ export class ProviderCredentialStore {
       updatedAt: timestamp,
       updatedById: userId,
     };
-    return this.#database.transaction((transaction) => {
+    return database.transaction((transaction) => {
       if (existing === undefined) {
         transaction
           .insert(providerCredentials)
@@ -221,7 +304,7 @@ export class ProviderCredentialStore {
             createdById: userId,
             credentialFingerprint: fingerprint,
             id,
-            provider: this.#provider,
+            provider: provider,
             userId,
           })
           .run();
@@ -234,7 +317,7 @@ export class ProviderCredentialStore {
       }
       replaceConnectionScopes(
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         id,
         normalizedScopes,
@@ -253,66 +336,33 @@ export class ProviderCredentialStore {
       };
     });
   }
-  list(
+  function list(
     userId: string,
     workspaceId?: string,
   ): readonly ProviderCredentialSummary[] {
     return activeCredentialSummaries(
-      this.#database,
-      this.#provider,
+      database,
+      provider,
       userId,
       workspaceId,
     ).map((credential) => ({
       ...credential,
-      workspaceIds: this.#workspaceIds(userId, credential.id),
+      workspaceIds: workspaceIdsForCredential(userId, credential.id),
     }));
   }
-  #workspaceIds(userId: string, credentialId: string): readonly string[] {
+  function workspaceIdsForCredential(
+    userId: string,
+    credentialId: string,
+  ): readonly string[] {
     return readConnectionScopes(
-      this.#database,
-      this.#scopeConfiguration,
+      database,
+      scopeConfiguration,
       userId,
       credentialId,
     );
   }
-  static listActiveModelCredentials(
-    database: AppDatabase,
-    userId: string,
-    ...selection: [provider: ProviderId, workspaceId?: string]
-  ): readonly ProviderCredentialSummary[] {
-    return queryActiveModelCredentials(database, userId, ...selection);
-  }
-  static hasActiveModelCredential(
-    database: AppDatabase,
-    userId: string,
-    ...selection: [
-      provider: ProviderId,
-      credentialId: string,
-      workspaceId?: string,
-    ]
-  ): boolean {
-    return modelCredentialIsActive(database, userId, ...selection);
-  }
-  static listModelCredentials(
-    database: AppDatabase,
-    userId: string,
-    ...[offset, limit, search, workspaceId]: [
-      offset: number,
-      limit: number,
-      search?: string,
-      workspaceId?: string,
-    ]
-  ): ProviderCredentialPage {
-    const options: ModelCredentialQueryOptions = {
-      pageSize: limit,
-      skip: offset,
-      ...(search === undefined ? {} : { search }),
-      ...(workspaceId === undefined ? {} : { workspaceId }),
-    };
-    return queryModelCredentials(database, userId, options);
-  }
-  #readStored(userId: string, credentialId: string) {
-    return this.#database.query.providerCredentials
+  function readStored(userId: string, credentialId: string) {
+    return database.query.providerCredentials
       .findFirst({
         columns: {
           apiFormat: true,
@@ -326,23 +376,23 @@ export class ProviderCredentialStore {
           requiresReauthentication: true,
           source: true,
         },
-        where: this.#activeCredentialCondition(userId, credentialId),
+        where: activeCredentialCondition(userId, credentialId),
       })
       .sync();
   }
-  read(
+  function read(
     userId: string,
     ...[credentialId, workspaceId]: [credentialId: string, workspaceId?: string]
   ): ProviderCredentialAccess | undefined {
-    const stored = this.#readStored(userId, credentialId);
+    const stored = readStored(userId, credentialId);
     if (
       stored === undefined ||
       (workspaceId !== undefined &&
-        !connectionWorkspaceIsAvailable(this.#database, userId, workspaceId)) ||
+        !connectionWorkspaceIsAvailable(database, userId, workspaceId)) ||
       !connectionIsAccessible(
         {
           isGlobal: stored.isGlobal,
-          workspaceIds: this.#workspaceIds(userId, credentialId),
+          workspaceIds: workspaceIdsForCredential(userId, credentialId),
         },
         workspaceId,
       )
@@ -358,47 +408,43 @@ export class ProviderCredentialStore {
       label: stored.label,
       requiresReauthentication: stored.requiresReauthentication,
       secret: decryptedCredentialValue({
-        cipher: this.#cipher,
+        cipher: cipher,
         credentialId,
         encryptedCredential: stored.encryptedCredential,
         userId,
       }),
       source: stored.source,
-      workspaceIds: this.#workspaceIds(userId, credentialId),
+      workspaceIds: workspaceIdsForCredential(userId, credentialId),
     };
     return workspaceId === undefined
       ? { ...legacyCredentialSummary(summary), secret: summary.secret }
       : summary;
   }
-  readSecret(
+  function readSecret(
     userId: string,
     credentialId: string,
     workspaceId?: string,
   ): string | undefined {
-    return this.read(userId, credentialId, workspaceId)?.secret;
+    return read(userId, credentialId, workspaceId)?.secret;
   }
 
-  #activeCredentialCondition(userId: string, credentialId: string) {
+  function activeCredentialCondition(userId: string, credentialId: string) {
     return ownedActiveCredentialCondition({
       credentialId,
-      provider: this.#provider,
+      provider: provider,
       userId,
     });
   }
 
-  setScopes(
-    userId: string,
-    credentialId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ): boolean {
+  function setScopes(...parameters: SetScopesArguments): boolean {
+    const [userId, credentialId, workspaceIds, now] = parameters;
     const storedId = matchingCredentialId(
-      this.#database,
-      this.#activeCredentialCondition(userId, credentialId),
+      database,
+      activeCredentialCondition(userId, credentialId),
     );
     if (storedId === undefined) return false;
-    const normalizedScopes = this.validateScopes(userId, workspaceIds);
-    return this.#database.transaction((transaction) => {
+    const normalizedScopes = validateScopes(userId, workspaceIds);
+    return database.transaction((transaction) => {
       transaction
         .update(providerCredentials)
         .set({
@@ -409,7 +455,7 @@ export class ProviderCredentialStore {
         .run();
       replaceConnectionScopes(
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         credentialId,
         normalizedScopes,
@@ -418,12 +464,16 @@ export class ProviderCredentialStore {
       return true;
     });
   }
-  setDefault(userId: string, credentialId: string, now: number): boolean {
+  function setDefault(
+    userId: string,
+    credentialId: string,
+    now: number,
+  ): boolean {
     let changed = false;
-    this.#database.transaction((transaction) => {
+    database.transaction((transaction) => {
       const activeId = matchingCredentialId(
         transaction,
-        this.#activeCredentialCondition(userId, credentialId),
+        activeCredentialCondition(userId, credentialId),
       );
       if (activeId === undefined) return;
       transaction
@@ -432,7 +482,7 @@ export class ProviderCredentialStore {
         .where(
           ownedDefaultCondition(
             userId,
-            this.#provider === "brave_search" ? "brave_search" : undefined,
+            provider === "brave_search" ? "brave_search" : undefined,
           ),
         )
         .run();
@@ -446,27 +496,17 @@ export class ProviderCredentialStore {
     return changed;
   }
 
-  markRequiresReauthentication(
+  function markRequiresReauthentication(
     userId: string,
     credentialId: string,
     now: number,
   ): boolean {
     return markCredentialRequiresReauthentication(
-      this.#credentialState(userId, credentialId, now),
+      credentialState(userId, credentialId, now),
     );
   }
 
-  updateSecret(
-    ...parameters: [
-      userId: string,
-      credentialId: string,
-      secret: string,
-      now: number,
-      requireReauthentication?: boolean,
-      accountId?: string,
-      label?: string,
-    ]
-  ): boolean {
+  function updateSecret(...parameters: UpdateSecretArguments): boolean {
     const [
       userId,
       credentialId,
@@ -478,8 +518,8 @@ export class ProviderCredentialStore {
     ] = parameters;
     try {
       return updateCredentialSecret({
-        ...this.#credentialState(userId, credentialId, now),
-        cipher: this.#cipher,
+        ...credentialState(userId, credentialId, now),
+        cipher: cipher,
         secret,
         ...(requireReauthentication === undefined
           ? {}
@@ -489,29 +529,29 @@ export class ProviderCredentialStore {
       });
     } catch (error) {
       if (isCredentialFingerprintCollision(error)) {
-        throw new DuplicateProviderCredentialError();
+        throw createDuplicateProviderCredentialError();
       }
       throw error;
     }
   }
 
-  #credentialState(userId: string, credentialId: string, now: number) {
+  function credentialState(userId: string, credentialId: string, now: number) {
     return {
       credentialId,
-      database: this.#database,
+      database: database,
       now,
-      provider: this.#provider,
+      provider: provider,
       userId,
     };
   }
-  remove(userId: string, credentialId: string, now: number): boolean {
-    const condition = this.#activeCredentialCondition(userId, credentialId);
-    const storedId = matchingCredentialId(this.#database, condition);
+  function remove(userId: string, credentialId: string, now: number): boolean {
+    const condition = activeCredentialCondition(userId, credentialId);
+    const storedId = matchingCredentialId(database, condition);
     if (storedId === undefined) return false;
-    this.#database.transaction((transaction) => {
+    database.transaction((transaction) => {
       const scopeArguments = [
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         credentialId,
         now,
@@ -530,4 +570,16 @@ export class ProviderCredentialStore {
     });
     return true;
   }
+  return {
+    validateScopes,
+    add,
+    list,
+    read,
+    readSecret,
+    setScopes,
+    setDefault,
+    markRequiresReauthentication,
+    updateSecret,
+    remove,
+  };
 }

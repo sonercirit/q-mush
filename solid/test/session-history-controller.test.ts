@@ -1,7 +1,10 @@
 import { expect, test, vi } from "vitest";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import type { ToolStreamEntry } from "../../shared/tool-stream.ts";
-import { SessionController } from "../../solid/session-controller.ts";
+import {
+  createSessionController,
+  type SessionController,
+} from "../../solid/session-controller.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { RealtimeStreamBatch } from "../realtime-stream-buffer.ts";
 import type { SessionViewState } from "../session-client.tsx";
@@ -69,7 +72,7 @@ function selectedController(
     detail,
     selectedId: detail.id,
   };
-  return new SessionController(
+  return createSessionController(
     createReactiveState(state),
     undefined,
     undefined,
@@ -97,7 +100,7 @@ function controlledController(
   reactive.setState({ ...initial, detail, selectedId: detail.id });
   let count = 0;
   return {
-    controller: new SessionController(
+    controller: createSessionController(
       {
         setState(updater) {
           count += 1;
@@ -156,7 +159,7 @@ function historicalController(): {
     return Promise.resolve(result);
   });
   return {
-    controller: new SessionController(undefined, undefined, undefined, {
+    controller: createSessionController(undefined, undefined, undefined, {
       command,
     }),
     detail,
@@ -216,7 +219,7 @@ test("rebases retained model output when a real mutation settles without a block
   const commandResult = Promise.withResolvers<unknown>();
   const reactive = createReactiveState<SessionViewState>(state);
   reactive.setState({ ...state, detail, selectedId: detail.id });
-  const controller = new SessionController(reactive, undefined, undefined, {
+  const controller = createSessionController(reactive, undefined, undefined, {
     command: vi.fn(() => commandResult.promise),
   });
   await expectMutationRebasesModelOutput(
@@ -239,7 +242,7 @@ test("rebases retained output when a pending-input mutation settles", async () =
     selectedId,
     detail,
   };
-  const controller = new SessionController(
+  const controller = createSessionController(
     createReactiveState(state),
     undefined,
     undefined,

@@ -1,20 +1,21 @@
 import { expect, test } from "vitest";
 import {
+  createRunnerRegistrationRejectedError,
   observeOperationalRunnerSocket,
-  RunnerRegistrationRejectedError,
-  RunnerSupersededError,
 } from "../../runner/runner-socket.ts";
 import { RUNNER_SUPERSEDED_CLOSE_CODE } from "../../shared/runner-realtime-protocol.ts";
-import { RecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
+import { createRecordingTestSocket } from "../../shared/test/websocket-fixtures.ts";
 
 function expectSuperseded(failure: Promise<Error>): Promise<void> {
-  return expect(failure).resolves.toEqual(new RunnerSupersededError());
+  return expect(failure).resolves.toMatchObject({
+    kind: "runner_superseded",
+  });
 }
 
 function observedSocketFailure(
   message: Readonly<Record<string, unknown>>,
 ): Promise<Error> {
-  const socket = new RecordingTestSocket();
+  const socket = createRecordingTestSocket();
   const failure = observeOperationalRunnerSocket(socket);
   socket.receive(message);
   return failure;
@@ -23,7 +24,7 @@ function observedSocketFailure(
 test("reports an explicit registration rejection distinctly", () => {
   return expect(
     observedSocketFailure({ type: "registration_rejected" }),
-  ).resolves.toEqual(new RunnerRegistrationRejectedError());
+  ).resolves.toEqual(createRunnerRegistrationRejectedError());
 });
 
 test("reports an explicit supersession frame distinctly", () => {
@@ -31,10 +32,9 @@ test("reports an explicit supersession frame distinctly", () => {
 });
 
 test("reports a supersession close distinctly when its frame is lost", () => {
-  const socket = new RecordingTestSocket({
-    closeEvent: () =>
-      new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE }),
-  });
+  const supersededClose = (): Event =>
+    new CloseEvent("close", { code: RUNNER_SUPERSEDED_CLOSE_CODE });
+  const socket = createRecordingTestSocket({ closeEvent: supersededClose });
   const failure = observeOperationalRunnerSocket(socket);
 
   socket.close();

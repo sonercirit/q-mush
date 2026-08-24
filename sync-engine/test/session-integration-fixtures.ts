@@ -10,8 +10,9 @@ import type { ProviderCredentialAccess } from "../../shared/provider-credential-
 import type { ProviderModelPricing } from "../../shared/provider-model-pricing.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
+  createRunnerCommandBroker,
   RUNNER_EXECUTION_CLEANUP_COMMAND,
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
@@ -27,7 +28,7 @@ import type { AgentModelFactory } from "../../sync-engine/session-agent-models.t
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { readUserSpawnSession } from "../../sync-engine/session-input.ts";
 import { createSessionIntegration } from "../../sync-engine/sessions.ts";
-import { WorkspaceStore } from "../../sync-engine/workspace-store.ts";
+import { createWorkspaceStore } from "../../sync-engine/workspace-store.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -237,7 +238,7 @@ export function connectedSessionSetup(
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker =
     options.broker ??
-    new RunnerCommandBroker({
+    createRunnerCommandBroker({
       commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
       deliver: (runnerId, command) => {
         if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {
@@ -331,7 +332,7 @@ export function connectedSessionSetup(
   // creation and spawn.
   const stubbedDiscovery = (): Promise<never> =>
     Promise.reject(
-      new AgentModelDiscoveryError("Discovery is stubbed in tests", 503),
+      AgentModelDiscoveryError("Discovery is stubbed in tests", 503),
     );
   const configuredDiscoverModels =
     options.modelDiscovery ?? discoverModels ?? stubbedDiscovery;
@@ -400,7 +401,7 @@ export function connectedSessionSetup(
       ...(options.toolSettings === undefined
         ? {}
         : { toolSettings: options.toolSettings }),
-      workspaces: new WorkspaceStore(database),
+      workspaces: createWorkspaceStore(database),
     },
   );
   sessions.runnerOperational(RUNNER_ID);

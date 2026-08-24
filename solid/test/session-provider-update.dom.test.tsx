@@ -9,7 +9,7 @@ import { SESSION_PROVIDER_CACHE_WARNING } from "../../shared/session-provider-up
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import { createReactiveState } from "../reactive-state.ts";
 import type { SessionViewState } from "../session-client.tsx";
-import { SessionController } from "../session-controller.ts";
+import { createSessionController } from "../session-controller.ts";
 import { SessionDetail } from "../session-detail-client.tsx";
 import { SessionProviderUpdateEditor } from "../session-provider-update-client.tsx";
 import { initialSessionViewState } from "../session-state.ts";
@@ -27,11 +27,27 @@ import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 const RETAINED_CAP_ERROR =
   "Lower or clear the context token cap before changing models.";
 
-function invalidContextCapError(): Error & { readonly code: string } {
-  class InvalidContextCapError extends Error {
-    readonly code = "invalid_context_token_cap";
+interface InvalidContextCapError extends Error {
+  readonly code: "invalid_context_token_cap";
+}
+
+function isInvalidContextCapError(
+  error: unknown,
+): error is InvalidContextCapError {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "invalid_context_token_cap"
+  );
+}
+
+function invalidContextCapError(): InvalidContextCapError {
+  const error = new Error(RETAINED_CAP_ERROR);
+  Object.assign(error, { code: "invalid_context_token_cap" as const });
+  if (!isInvalidContextCapError(error)) {
+    throw new TypeError("Failed to create invalid context cap error");
   }
-  return new InvalidContextCapError(RETAINED_CAP_ERROR);
+  return error;
 }
 
 function modelCredential(
@@ -393,7 +409,7 @@ test("clears the cap and retries a blocked model change", async () => {
     sessions: [detail],
     transcriptFilters: { ...initial.transcriptFilters },
   });
-  const controller = new SessionController(
+  const controller = createSessionController(
     ...([reactive, undefined, null, { command }] as const),
   );
   const credentials = [
@@ -471,7 +487,7 @@ test("warns and requires explicit confirmation before changing providers", async
     transcriptFilters: Object.assign({}, initial.transcriptFilters),
   });
   const transport: { command: typeof command } = { command };
-  const controller = new SessionController(
+  const controller = createSessionController(
     reactive,
     undefined,
     null,

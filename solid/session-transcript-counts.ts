@@ -45,35 +45,54 @@ function addTranscriptMessage(
   }
 }
 
+type MessageCountHandler = (
+  filterCounts: Record<SessionTranscriptFilterName, number>,
+  message: AgentSessionMessage,
+) => AgentSessionMessage["toolCalls"] | undefined;
+
+const MESSAGE_COUNT_HANDLERS: Readonly<
+  Record<AgentSessionMessage["role"], MessageCountHandler>
+> = {
+  assistant: (filterCounts, message) => {
+    if (message.role !== "assistant") return undefined;
+    const toolCalls = message.toolCalls;
+    filterCounts.toolActivity += toolCalls.length;
+    if (message.content.length > 0 || message.images.length > 0) {
+      filterCounts.assistantMessages += 1;
+    }
+    return toolCalls;
+  },
+  compaction_request: (filterCounts) => {
+    filterCounts.notices += 1;
+    return undefined;
+  },
+  error: (filterCounts) => {
+    filterCounts.notices += 1;
+    return undefined;
+  },
+  system: (filterCounts) => {
+    filterCounts.notices += 1;
+    return undefined;
+  },
+  thinking: (filterCounts) => {
+    filterCounts.thinking += 1;
+    return undefined;
+  },
+  tool: (filterCounts) => {
+    filterCounts.toolActivity += 1;
+    return undefined;
+  },
+  user: (filterCounts) => {
+    filterCounts.userMessages += 1;
+    return undefined;
+  },
+};
+
 function addTranscriptMessageCounts(
   filterCounts: Record<SessionTranscriptFilterName, number>,
   message: AgentSessionMessage,
 ): AgentSessionMessage["toolCalls"] | undefined {
-  switch (message.role) {
-    case "compaction_request":
-    case "error":
-    case "system":
-      filterCounts.notices += 1;
-      break;
-    case "thinking":
-      filterCounts.thinking += 1;
-      break;
-    case "tool":
-      filterCounts.toolActivity += 1;
-      break;
-    case "user":
-      filterCounts.userMessages += 1;
-      break;
-    case "assistant": {
-      const toolCalls = message.toolCalls;
-      filterCounts.toolActivity += toolCalls.length;
-      if (message.content.length > 0 || message.images.length > 0) {
-        filterCounts.assistantMessages += 1;
-      }
-      return toolCalls;
-    }
-  }
-  return undefined;
+  return MESSAGE_COUNT_HANDLERS[message.role](filterCounts, message);
 }
 
 export function createSessionTranscriptCounts(

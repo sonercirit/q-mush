@@ -6,6 +6,7 @@ import {
   type AgentReasoningEffort,
 } from "../shared/agent-configuration.ts";
 import { isRecord } from "../shared/auth-model.ts";
+import { isDispatchKey } from "../shared/dispatch.ts";
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import { utf8Prefix } from "../shared/utf8.ts";
 import { isNullOrPositiveSafeInteger } from "../shared/validation.ts";
@@ -60,9 +61,9 @@ function directOrNestedValue(
   key: string,
   parentKey: string,
 ): unknown {
-  if (key in value) return value[key];
+  if (isDispatchKey(value, key)) return value[key];
   const parent = value[parentKey];
-  if (!isRecord(parent)) return undefined;
+  if (!isRecord(parent) || !isDispatchKey(parent, key)) return undefined;
   return parent[key];
 }
 

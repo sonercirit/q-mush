@@ -65,63 +65,75 @@ export interface ProviderQuotaDependencies {
   readonly resetQuota: ProviderQuotaResetter;
 }
 
-export class ProviderQuotaEndpoints {
-  readonly #authenticate: Authenticator;
-  readonly #dependencies: ProviderQuotaDependencies;
+export interface ProviderQuotaEndpoints {
+  readonly consume: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response>;
+  readonly read: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response> | Response;
+  readonly setThreshold: (
+    request: Request,
+    credentialId: string,
+  ) => Promise<Response>;
+}
 
-  constructor(auth: GoogleAuth, dependencies: ProviderQuotaDependencies) {
-    this.#authenticate = createConfiguredAuthenticator(
-      auth,
-      () => dependencies.quotaStore !== undefined,
-    );
-    this.#dependencies = dependencies;
-  }
+export function createProviderQuotaEndpoints(
+  auth: GoogleAuth,
+  dependencies: ProviderQuotaDependencies,
+): ProviderQuotaEndpoints {
+  const authenticate: Authenticator = createConfiguredAuthenticator(
+    auth,
+    () => dependencies.quotaStore !== undefined,
+  );
 
-  #authenticated<T extends Promise<Response> | Response>(options: {
+  function authenticated<T extends Promise<Response> | Response>(options: {
     readonly action: AuthenticatedAction<T>;
     readonly request: Request;
   }): Response | T {
-    return this.#authenticate.authenticate(options.request, options.action);
+    return authenticate.authenticate(options.request, options.action);
   }
 
-  #credential(
+  function readCredential(
     userId: string,
     credentialId: string,
   ): Promise<ProviderCredentialAccess | undefined> {
-    return this.#dependencies.readCredential(userId, credentialId);
+    return dependencies.readCredential(userId, credentialId);
   }
 
-  async #requiredCredential(
+  async function requiredCredential(
     userId: string,
     credentialId: string,
   ): Promise<ProviderCredentialAccess> {
-    const credential = await this.#credential(userId, credentialId);
+    const credential = await readCredential(userId, credentialId);
     if (credential === undefined)
       throw new Error("Provider credential is unavailable");
     return credential;
   }
 
-  read(request: Request, credentialId: string): Promise<Response> | Response {
+  function read(
+    request: Request,
+    credentialId: string,
+  ): Promise<Response> | Response {
     const methodError = requireRequestMethod(request, "GET");
     if (methodError !== undefined) return methodError;
-    return this.#authenticated({
+    return authenticated({
       request,
       action: async (user) => {
         let credential: ProviderCredentialAccess;
         try {
-          credential = await this.#requiredCredential(user.id, credentialId);
+          credential = await requiredCredential(user.id, credentialId);
         } catch {
           return createApiError("not_found", 404);
         }
-        const setting = this.#dependencies.quotaStore?.read(
-          user.id,
-          credentialId,
-        );
+        const setting = dependencies.quotaStore?.read(user.id, credentialId);
         const threshold =
           setting?.autoResetThresholdPercent ??
           DEFAULT_AUTO_RESET_THRESHOLD_PERCENT;
         try {
-          let quota = await this.#dependencies.readQuota(credential, threshold);
+          let quota = await dependencies.readQuota(credential, threshold);
           if (
             quota.resetSupported &&
             quota.bankedResetCount !== null &&
@@ -131,8 +143,8 @@ export class ProviderQuotaEndpoints {
           ) {
             const window = quota.resetsAt ?? "unknown-window";
             const requestId = `auto-${credentialId}-${String(window)}`;
-            await this.#consume(user, credentialId, requestId);
-            quota = await this.#dependencies.readQuota(credential, threshold);
+            await consumeReset(user, credentialId, requestId);
+            quota = await dependencies.readQuota(credential, threshold);
           }
           return createJsonResponse(quota);
         } catch {
@@ -142,7 +154,7 @@ export class ProviderQuotaEndpoints {
     });
   }
 
-  async setThreshold(
+  async function setThreshold(
     request: Request,
     credentialId: string,
   ): Promise<Response> {
@@ -157,24 +169,27 @@ export class ProviderQuotaEndpoints {
     });
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined) return createApiError("invalid_request", 400);
-    return this.#authenticated({
+    return authenticated({
       request,
       action: async (user) => {
-        if ((await this.#credential(user.id, credentialId)) === undefined) {
+        if ((await readCredential(user.id, credentialId)) === undefined) {
           return createApiError("not_found", 404);
         }
-        this.#dependencies.quotaStore?.setThreshold(
+        dependencies.quotaStore?.setThreshold(
           user.id,
           credentialId,
           parsed,
-          this.#dependencies.now(),
+          dependencies.now(),
         );
         return createNoContentResponse();
       },
     });
   }
 
-  async consume(request: Request, credentialId: string): Promise<Response> {
+  async function consume(
+    request: Request,
+    credentialId: string,
+  ): Promise<Response> {
     const requestId = await parseRecordJsonForMethod(
       request,
       "POST",
@@ -188,19 +203,19 @@ export class ProviderQuotaEndpoints {
     );
     if (requestId instanceof Response) return requestId;
     if (requestId === undefined) return createApiError("invalid_request", 400);
-    return this.#authenticated({
-      action: (user) => this.#consumeResponse(user, credentialId, requestId),
+    return authenticated({
+      action: (user) => consumeResponse(user, credentialId, requestId),
       request,
     });
   }
 
-  async #consumeResponse(
+  async function consumeResponse(
     user: AuthenticatedUser,
     credentialId: string,
     requestId: string,
   ): Promise<Response> {
     try {
-      const result = await this.#consume(user, credentialId, requestId);
+      const result = await consumeReset(user, credentialId, requestId);
       return result === undefined
         ? createApiError("reset_in_progress", 409)
         : createJsonResponse(result);
@@ -209,24 +224,24 @@ export class ProviderQuotaEndpoints {
     }
   }
 
-  #resetResult(
+  function resetResult(
     credential: ProviderCredentialAccess,
     threshold: number,
     outcome: ProviderQuotaResetOutcome,
     replayed: boolean,
   ): Promise<ProviderQuotaResetResult> {
-    return this.#dependencies
+    return dependencies
       .readQuota(credential, threshold)
       .then((quota) => ({ outcome, quota, replayed }));
   }
 
-  async #consume(
+  async function consumeReset(
     user: AuthenticatedUser,
     credentialId: string,
     requestId: string,
   ): Promise<ProviderQuotaResetResult | undefined> {
-    const credential = await this.#requiredCredential(user.id, credentialId);
-    const quotaStore = this.#dependencies.quotaStore;
+    const credential = await requiredCredential(user.id, credentialId);
+    const quotaStore = dependencies.quotaStore;
     if (quotaStore === undefined) {
       throw new Error("Quota settings are unavailable");
     }
@@ -235,13 +250,13 @@ export class ProviderQuotaEndpoints {
       user.id,
       credentialId,
       requestId,
-      this.#dependencies.now(),
+      dependencies.now(),
     );
     if (reservation.replayedResult !== undefined) {
       if (!isResetOutcome(reservation.replayedResult)) {
         throw new Error("The stored reset result is invalid");
       }
-      return this.#resetResult(
+      return resetResult(
         credential,
         setting.autoResetThresholdPercent,
         reservation.replayedResult,
@@ -251,11 +266,11 @@ export class ProviderQuotaEndpoints {
     if (!reservation.reserved) {
       return undefined;
     }
-    const outcome = await this.#dependencies.resetQuota(
+    const outcome = await dependencies.resetQuota(
       credential,
       reservation.providerRequestId,
     );
-    const completedAt = this.#dependencies.now();
+    const completedAt = dependencies.now();
     if (isDefinitiveNonSpendOutcome(outcome)) {
       quotaStore.releaseReset(
         user.id,
@@ -275,11 +290,13 @@ export class ProviderQuotaEndpoints {
         reservation.leaseAcquiredAt,
       );
     }
-    return await this.#resetResult(
+    return await resetResult(
       credential,
       setting.autoResetThresholdPercent,
       outcome,
       false,
     );
   }
+
+  return { consume, read, setThreshold };
 }

@@ -1,9 +1,12 @@
 import { Buffer } from "node:buffer";
 import { afterEach, describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  type ProviderCredentialStore,
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
-import { ProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
+import { isProviderCredentialReauthenticationRequiredError } from "../provider-error.ts";
 import {
   addTestProviderCredential,
   addTestUser,
@@ -48,7 +51,7 @@ function setupRefresh(
   response: Response | Promise<Response> | (() => Response | Promise<Response>),
 ) {
   const { auth, database } = openAiRefreshTestContext();
-  const store = new ProviderCredentialStore(
+  const store = createProviderCredentialStore(
     database,
     createCredentialCipher(CREDENTIAL_KEY),
     "openai",
@@ -93,12 +96,10 @@ function expectReauthenticationState(
   store: ProviderCredentialStore,
   required: boolean,
 ): void {
-  expect(store.list(TEST_USER_ID)).toContainEqual(
-    expect.objectContaining({
-      id: CREDENTIAL_ID,
-      requiresReauthentication: required,
-    }),
-  );
+  const credential = store
+    .list(TEST_USER_ID)
+    .find(({ id }) => id === CREDENTIAL_ID);
+  expect(credential?.requiresReauthentication).toBe(required);
 }
 
 function gatedRefreshSetup() {
@@ -256,7 +257,7 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
     addTestProviderCredential(database, "openrouter-credential", "openrouter", {
       source: "oauth",
     });
-    const openAiStore = new ProviderCredentialStore(
+    const openAiStore = createProviderCredentialStore(
       database,
       createCredentialCipher(CREDENTIAL_KEY),
       "openai",
@@ -291,8 +292,8 @@ describe("OpenAI terminal OAuth refresh rejection", () => {
       const setup = setupRefresh(Response.json({ error: code }, { status }));
 
       const failure = forceRefresh(setup);
-      await expect(failure).rejects.toBeInstanceOf(
-        ProviderCredentialReauthenticationRequiredError,
+      await expect(failure).rejects.toSatisfy(
+        isProviderCredentialReauthenticationRequiredError,
       );
       expectReauthenticationState(setup.store, true);
       const summaries = await setup.integration.credentials(

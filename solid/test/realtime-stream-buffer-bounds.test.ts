@@ -4,8 +4,9 @@ import {
   MAXIMUM_TOOL_STREAMS_PER_USER,
 } from "../../shared/tool-stream.ts";
 import {
-  RealtimeStreamBuffer,
+  createRealtimeStreamBuffer,
   type RealtimeStreamBatch,
+  type RealtimeStreamBuffer,
 } from "../realtime-stream-buffer.ts";
 import {
   activeToolDelta,
@@ -18,7 +19,7 @@ import {
 import { streamingRealtimeFixture } from "./realtime-stream-test-fixture.ts";
 
 test("bounds pending keys before materialization", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const total = MAXIMUM_TOOL_STREAMS_PER_USER + 1;
   for (let index = 0; index < total; index += 1) {
     buffer.queue(
@@ -77,7 +78,7 @@ function queueModelFillers(
 }
 
 test("compacts the oldest model stream instead of evicting it at the fragment cap", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const oldestParts = ["oldest-first", "-oldest-second"];
   queueModelParts(buffer, oldestParts);
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "filler");
@@ -87,7 +88,7 @@ test("compacts the oldest model stream instead of evicting it at the fragment ca
 });
 
 test("compacts a protected model stream at the fragment cap", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const parts = ["protected-first", "-protected-middle"];
   queueModelParts(buffer, parts);
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "protected");
@@ -112,7 +113,7 @@ function queueRunningToolOutput(
 }
 
 test("preserves a protected tool stream when compacting it at the fragment cap", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   queueRunningToolOutput(buffer, "tool-first");
   buffer.queue(orderedToolDelta(3, { content: "-tool-middle" }));
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER - 2, "tool-filler");
@@ -125,7 +126,7 @@ test("preserves a protected tool stream when compacting it at the fragment cap",
 });
 
 test("retains compact terminal identity independent of rendered payload", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const output = "x".repeat(64 * 1_024);
   deliverTerminalStream(
     buffer.queue.bind(buffer),
@@ -168,7 +169,7 @@ function floodTerminalStreams(
 }
 
 test("active tool state survives a terminal tombstone flood", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const activeStreamId = "active-stream";
   buffer.queue(activeToolDelta(activeStreamId));
   buffer.takeNext();
@@ -250,7 +251,7 @@ function expectOrderedToolResync(buffer: RealtimeStreamBuffer): void {
 }
 
 test("requests resync when an evicted terminal update leaves delivered running state", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   queueRunningToolOutput(buffer, "delivered-output");
   const delivered = drainUpdates(buffer).find(
     (update) =>
@@ -265,7 +266,7 @@ test("requests resync when an evicted terminal update leaves delivered running s
 });
 
 test("requests resync when pending tool output is evicted", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   queueRunningToolOutput(buffer, "evicted-output");
   queueModelFillers(buffer, MAXIMUM_TOOL_STREAMS_PER_USER, "tool-eviction");
 
@@ -291,7 +292,7 @@ function takePendingBarrierUpdates(
 }
 
 test("keeps an epoch monotonic when eviction replaces its last update", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   queueEvictableEpoch(buffer, "epoch-filler");
 
   buffer.queue(
@@ -304,7 +305,7 @@ test("keeps an epoch monotonic when eviction replaces its last update", () => {
 });
 
 test("refreshes a tool update epoch after making room reclaims it", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   queueEvictableEpoch(buffer, "tool-epoch-filler");
 
   buffer.queue(activeToolDelta("replacement-tool"));
@@ -317,7 +318,7 @@ test("refreshes a tool update epoch after making room reclaims it", () => {
 });
 
 test("retains an epoch while an overlapping barrier remains", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const barriers = Array.from({ length: 2 }, () =>
     buffer.markBarrier(SESSION_ID),
   );
@@ -333,7 +334,7 @@ test("retains an epoch while an overlapping barrier remains", () => {
 });
 
 test("reclaims an epoch only after its barriers and updates are gone", () => {
-  const buffer = new RealtimeStreamBuffer();
+  const buffer = createRealtimeStreamBuffer();
   const first = buffer.markBarrier(SESSION_ID);
   buffer.queue(identifiedModelDelta(SESSION_ID, STREAM_ID));
   buffer.releaseBarrier(first);

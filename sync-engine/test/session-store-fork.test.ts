@@ -3,8 +3,8 @@ import { describe, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionStore } from "../../sync-engine/session-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
+import { createSessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
   createAuthenticatedTestDatabase,
@@ -195,7 +195,7 @@ function replacementFork() {
 describe("session store forks", () => {
   test("copies conversation context through the inclusive fork point", () => {
     const { database, source, store } = prepareForkSource();
-    new RunnerStore(database).setOnline(
+    createRunnerStore(database).setOnline(
       STORE_RUNNER_ID,
       TEST_USER_ID,
       TEST_NOW + 6,
@@ -265,7 +265,7 @@ describe("session store forks", () => {
       "018bcfe5-6800-7000-8000-000000000044",
       "018bcfe5-6800-7000-8000-000000000045",
     ];
-    const store = new SessionStore(
+    const store = createSessionStore(
       database,
       () => {
         const replayId = ids.shift();
@@ -292,7 +292,7 @@ describe("session store forks", () => {
     const reopened = createDatabase(path);
     expect(
       replayConversation(
-        new SessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
+        createSessionStore(reopened, undefined, () => DEFAULT_TOOL_SETTINGS, {
           pending: () => undefined,
         }),
         STORE_SESSION_ID,
@@ -374,7 +374,7 @@ describe("session store forks", () => {
   test("preserves a source runner reassignment requirement", () => {
     const { database, store } = prepareForkSource();
     expect(
-      new RunnerStore(database).remove(
+      createRunnerStore(database).remove(
         TEST_USER_ID,
         STORE_RUNNER_ID,
         TEST_NOW + 6,

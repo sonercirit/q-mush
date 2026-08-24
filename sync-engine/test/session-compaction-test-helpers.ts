@@ -140,7 +140,7 @@ export function runningRestartStore(): RestartStoreSetup {
   const setup = runningCompactionStore();
   return {
     ...setup,
-    restart: new RestartHandoffStore({
+    restart: RestartHandoffStore({
       database: setup.database,
       generateId: () => "restart-error-message",
       read: (userId, sessionId) => setup.store.get(userId, sessionId),

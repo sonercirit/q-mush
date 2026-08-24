@@ -11,7 +11,7 @@ import type {
   ProviderId,
 } from "../shared/provider-credential-store.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
-import { RealtimeCommandError } from "../shared/user-realtime-protocol.ts";
+import { createRealtimeCommandError } from "../shared/user-realtime-protocol.ts";
 import { optionalSignal } from "../shared/validation.ts";
 import { isCredentialRejectionError } from "./agent-model-discovery-fetch.ts";
 import {
@@ -237,7 +237,7 @@ function requireSessionMetadata(
   metadata: SessionMetadataResult,
 ): Exclude<SessionMetadataResult, { readonly error: string }> {
   if ("error" in metadata) {
-    throw new RealtimeCommandError(
+    throw createRealtimeCommandError(
       metadata.error === "provider_unavailable"
         ? "openrouter_provider_unavailable"
         : "openrouter_provider_validation_failed",
@@ -307,7 +307,7 @@ function credentialFailure(
   }
   if (options.rejectCredentialErrors === true) {
     if (isCredentialRejectionError(error)) throw error;
-    throw new RealtimeCommandError("provider_unavailable");
+    throw createRealtimeCommandError("provider_unavailable");
   }
   return fallback;
 }

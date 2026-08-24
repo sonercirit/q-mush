@@ -16,7 +16,7 @@ import type { RestartHandoffIdentity } from "./session-restart-store.ts";
 import { runPersistedSession } from "./session-run.ts";
 import type { SessionRuntimes } from "./session-runtime.ts";
 import type { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
-import type { SessionStore } from "./session-store.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 
 export type FinishSession = (
   detail: AgentSessionDetail,
@@ -25,7 +25,7 @@ export type FinishSession = (
   recovered?: RestartHandoffIdentity,
 ) => void;
 
-interface SessionLauncherDependencies {
+export interface SessionLauncherDependencies {
   readonly activeTools: ActiveSessionTools;
   readonly actions: SessionAgentActions;
   readonly attachmentFallbacks?: SessionModelRuntimeResources["attachmentFallbacks"];
@@ -53,27 +53,32 @@ interface SessionLauncherDependencies {
   readonly store: SessionStore;
 }
 
-export class SessionLauncher {
-  readonly #dependencies: SessionLauncherDependencies;
-
-  constructor(dependencies: SessionLauncherDependencies) {
-    this.#dependencies = dependencies;
-  }
-
+export interface SessionLauncher {
   launch(
+    detail: AgentSessionDetail,
+    credential: ProviderCredentialAccess,
+    userId: string,
+    operation?: RestartHandoffOperation,
+  ): boolean;
+}
+
+export function createSessionLauncher(
+  launcherDependencies: SessionLauncherDependencies,
+): SessionLauncher {
+  function launch(
     detail: AgentSessionDetail,
     credential: ProviderCredentialAccess,
     userId: string,
     operation: RestartHandoffOperation = "agent",
   ): boolean {
     const clearShutdownMarker = () => {
-      this.#dependencies.shutdownInterrupted.clear(
+      launcherDependencies.shutdownInterrupted.clear(
         detail.id,
         detail.generation,
-        this.#dependencies.now(),
+        launcherDependencies.now(),
       );
     };
-    return this.#dependencies.runtimes.launch(
+    return launcherDependencies.runtimes.launch(
       detail.id,
       detail.runnerId,
       detail.generation,
@@ -89,13 +94,13 @@ export class SessionLauncher {
           }
           try {
             if (
-              this.#dependencies.store.executionIsCurrent(
+              launcherDependencies.store.executionIsCurrent(
                 userId,
                 detail.id,
                 detail.generation,
               )
             ) {
-              this.#dependencies.notify(userId, detail.id);
+              launcherDependencies.notify(userId, detail.id);
             }
           } catch (error) {
             // Diagnostic publication must not interrupt the model request, but
@@ -109,7 +114,7 @@ export class SessionLauncher {
         const restartPersistence: DurableRestartPersistence = {
           clear: clearShutdownMarker,
           operation: () =>
-            this.#dependencies.store.manualCompactionPending(
+            launcherDependencies.store.manualCompactionPending(
               detail.id,
               detail.generation,
             )
@@ -119,62 +124,63 @@ export class SessionLauncher {
             if (
               durable &&
               (forcePark ||
-                (this.#dependencies.shouldPersistRestartMarker?.(request) ??
+                (launcherDependencies.shouldPersistRestartMarker?.(request) ??
                   request.requestedBy === "server"))
             ) {
-              this.#dependencies.shutdownInterrupted.mark(
+              launcherDependencies.shutdownInterrupted.mark(
                 detail.id,
                 detail.generation,
                 request.restartId,
                 restartPersistence.operation(),
-                this.#dependencies.now(),
+                launcherDependencies.now(),
               );
             }
           },
         };
         restartRequest(restartPersistence.persist);
         settled(restartPersistence.clear);
-        await this.#dependencies.beforeLaunch?.(detail);
+        await launcherDependencies.beforeLaunch?.(detail);
         await runPersistedSession({
           controller,
           credential,
           detail,
-          finish: this.#dependencies.finish,
-          notify: this.#dependencies.notify,
-          now: this.#dependencies.now,
+          finish: launcherDependencies.finish,
+          notify: launcherDependencies.notify,
+          now: launcherDependencies.now,
           operation,
           pendingComponent: reportPending,
           resources: {
-            activeTools: this.#dependencies.activeTools,
-            actions: this.#dependencies.actions,
-            ...(this.#dependencies.attachmentFallbacks === undefined
+            activeTools: launcherDependencies.activeTools,
+            actions: launcherDependencies.actions,
+            ...(launcherDependencies.attachmentFallbacks === undefined
               ? {}
               : {
-                  attachmentFallbacks: this.#dependencies.attachmentFallbacks,
+                  attachmentFallbacks: launcherDependencies.attachmentFallbacks,
                 }),
-            braveSearch: this.#dependencies.braveSearch,
-            broker: this.#dependencies.broker,
-            ...(this.#dependencies.discoverModels === undefined
+            braveSearch: launcherDependencies.braveSearch,
+            broker: launcherDependencies.broker,
+            ...(launcherDependencies.discoverModels === undefined
               ? {}
-              : { discoverModels: this.#dependencies.discoverModels }),
-            modelFactory: this.#dependencies.modelFactory,
-            ...(this.#dependencies.modelFetch === undefined
+              : { discoverModels: launcherDependencies.discoverModels }),
+            modelFactory: launcherDependencies.modelFactory,
+            ...(launcherDependencies.modelFetch === undefined
               ? {}
-              : { modelFetch: this.#dependencies.modelFetch }),
-            now: this.#dependencies.now,
-            notify: this.#dependencies.notify,
-            realtime: this.#dependencies.realtime,
-            ...(this.#dependencies.readCredential === undefined
+              : { modelFetch: launcherDependencies.modelFetch }),
+            now: launcherDependencies.now,
+            notify: launcherDependencies.notify,
+            realtime: launcherDependencies.realtime,
+            ...(launcherDependencies.readCredential === undefined
               ? {}
-              : { readCredential: this.#dependencies.readCredential }),
-            store: this.#dependencies.store,
+              : { readCredential: launcherDependencies.readCredential }),
+            store: launcherDependencies.store,
           },
           restartRequest,
           restartPersistence,
-          store: this.#dependencies.store,
+          store: launcherDependencies.store,
           userId,
         });
       },
     );
   }
+  return { launch };
 }

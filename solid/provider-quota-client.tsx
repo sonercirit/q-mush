@@ -103,17 +103,18 @@ function quotaTimeField(
   );
 }
 
+const RESET_OUTCOME_NOTICES: Readonly<
+  Record<ProviderQuotaResetOutcome, string>
+> = {
+  already_redeemed:
+    "That reset request was already applied; no second reset was spent.",
+  no_credit: "No banked reset is available.",
+  nothing_to_reset: "The provider reports that no quota window can be reset.",
+  reset: "One banked reset was consumed and eligible quota windows were reset.",
+};
+
 function resetOutcomeNotice(outcome: ProviderQuotaResetOutcome): string {
-  switch (outcome) {
-    case "already_redeemed":
-      return "That reset request was already applied; no second reset was spent.";
-    case "no_credit":
-      return "No banked reset is available.";
-    case "nothing_to_reset":
-      return "The provider reports that no quota window can be reset.";
-    case "reset":
-      return "One banked reset was consumed and eligible quota windows were reset.";
-  }
+  return RESET_OUTCOME_NOTICES[outcome];
 }
 
 export function ProviderQuota(props: {

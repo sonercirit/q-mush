@@ -4,9 +4,9 @@ import {
   type AgentModel,
   type AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
+import { createModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import {
   compactSessionConversation,
   type SessionAgentRuntimeDependencies,
@@ -17,7 +17,7 @@ import {
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
-import { ScriptedAgentModel } from "./scripted-agent-model.ts";
+import { createScriptedAgentModel } from "./scripted-agent-model.ts";
 import { STEP_TOKEN_USAGE } from "./session-agent-loop-test-helpers.ts";
 import { IDLE_RUNTIME_SIGNALS } from "./session-agent-runtime-test-helpers.ts";
 import { unusedSessionToolActions } from "./session-agent-tool-test-helpers.ts";
@@ -75,7 +75,7 @@ function runtimeDependencies(
   let now = TEST_NOW + 2;
   return {
     braveSearch: { execute: () => Promise.resolve("unused search") },
-    broker: new RunnerCommandBroker(),
+    broker: createRunnerCommandBroker(),
     pendingComponent: () => undefined,
     credential: {
       accountId: null,
@@ -192,7 +192,7 @@ async function runGatedManualCompaction(options: {
 
 describe("manual session compaction", () => {
   test("marks a stored terminal truncation in standalone compaction", async () => {
-    const model = new ScriptedAgentModel([
+    const model = createScriptedAgentModel([
       { content: "The partial answer must be continued.", toolCalls: [] },
     ]);
     const setup = manualRuntime(model);
@@ -274,7 +274,7 @@ describe("manual session compaction", () => {
 
   test("rejects invalid summary usage without charging untrusted output", async () => {
     const setup = manualRuntime(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         {
           content: "",
           costUsd: 0.4,
@@ -300,10 +300,10 @@ describe("manual session compaction", () => {
   });
 
   test("surfaces invalid summary usage as explicitly unbillable", async () => {
-    const compactorModel = new ScriptedAgentModel([
+    const compactorModel = createScriptedAgentModel([
       { content: "", costUsd: 0.4, toolCalls: [] },
     ]);
-    const compactor = new ModelConversationCompactor(compactorModel);
+    const compactor = createModelConversationCompactor(compactorModel);
 
     await expect(
       compactor.compact([{ content: "Original", role: "user" }]),
@@ -332,7 +332,7 @@ describe("manual session compaction", () => {
       ...runtimeDependencies({
         ...running,
         controller: new AbortController(),
-        model: new ScriptedAgentModel([
+        model: createScriptedAgentModel([
           {
             content: "Durable restart-race handoff",
             costUsd: 0.4,
@@ -357,7 +357,7 @@ describe("manual session compaction", () => {
 
   test("reports compaction call context before resetting handoff context", async () => {
     const setup = manualRuntime(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         {
           content: "Context-accounted handoff",
           contextTokens: 98_000,
@@ -388,7 +388,7 @@ describe("manual session compaction", () => {
 
   test("persists reported compaction usage exactly once with the handoff", async () => {
     const setup = manualRuntime(
-      new ScriptedAgentModel([
+      createScriptedAgentModel([
         {
           content: "Manual handoff",
           costUsd: 0.4,

@@ -1,8 +1,6 @@
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
-import {
-  ToolStreamHubState,
-  type ToolStreamDeltaFrame,
-} from "../shared/tool-stream.ts";
+import { createToolStreamHubState } from "../shared/tool-stream-hub.ts";
+import { type ToolStreamDeltaFrame } from "../shared/tool-stream.ts";
 
 export interface RealtimeSocket {
   close(code?: number, reason?: string): void;
@@ -11,219 +9,168 @@ export interface RealtimeSocket {
 
 type RealtimePayload = Readonly<Record<string, unknown>>;
 
-function updateSockets<Key>(
-  sockets: Map<Key, Set<RealtimeSocket>>,
-  key: Key,
-  socket: RealtimeSocket,
-  add: boolean,
-): void {
-  const existing = sockets.get(key) ?? new Set<RealtimeSocket>();
-
-  if (add) {
-    existing.add(socket);
-    sockets.set(key, existing);
-  } else {
-    existing.delete(socket);
-    if (existing.size === 0) {
-      sockets.delete(key);
-    }
-  }
+export interface RealtimeHub {
+  currentRunner(runnerId: string): RealtimeSocket | undefined;
+  runnerIsCurrent(runnerId: string, socket: RealtimeSocket): boolean;
+  setRunner(
+    runnerId: string,
+    socket: RealtimeSocket,
+    connected: boolean,
+  ): RealtimeSocket | undefined;
+  setUser(
+    userId: string,
+    socket: RealtimeSocket,
+    connected: boolean,
+    workspaceId?: string,
+  ): void;
+  userWorkspaces(userId: string): readonly string[];
+  userIds(): readonly string[];
+  publishRunnerCancellation(runnerId: string, commandId: string): void;
+  publishRunnerCommand(runnerId: string, command: RunnerToolCommand): boolean;
+  publishToolStream(
+    userId: string,
+    frame: ToolStreamDeltaFrame,
+    workspaceId?: string,
+  ): void;
+  syncToolStreams(
+    userId: string,
+    sessionId: string,
+    streamId: string,
+    socket: RealtimeSocket,
+  ): void;
+  clearToolStreams(userId: string, sessionId: string): void;
+  publishUser(
+    userId: string,
+    payload: RealtimePayload,
+    workspaceId?: string,
+  ): void;
+  publishUserAllWorkspaces(userId: string, payload: RealtimePayload): void;
 }
 
 function publish(
   sockets: ReadonlySet<RealtimeSocket> | undefined,
   payload: RealtimePayload,
 ): boolean {
-  if (sockets === undefined || sockets.size === 0) {
-    return false;
-  }
-
+  if (sockets === undefined || sockets.size === 0) return false;
   const message = JSON.stringify(payload);
   let delivered = false;
-
   for (const socket of sockets) {
     try {
       delivered = socket.send(message) !== 0 || delivered;
     } catch {
-      // A closing socket must not prevent delivery to its peers.
+      /* A closing socket must not prevent peer delivery. */
     }
   }
-
   return delivered;
 }
 
-export class RealtimeHub {
-  readonly #connections: Readonly<
+export function createRealtimeHub(): RealtimeHub {
+  const connections: Readonly<
     Record<"runner" | "user", Map<string, Set<RealtimeSocket>>>
   > = {
     runner: new Map(),
     user: new Map(),
   };
-  readonly #toolStreams = new ToolStreamHubState();
-
-  #update(
-    kind: "runner" | "user",
-    id: string,
-    socket: RealtimeSocket,
-    add: boolean,
-  ): void {
-    updateSockets(this.#connections[kind], id, socket, add);
-  }
-
-  #removeSocket(socket: RealtimeSocket): void {
-    for (const connections of Object.values(this.#connections)) {
-      for (const [key, sockets] of connections) {
-        if (sockets.delete(socket) && sockets.size === 0) {
-          connections.delete(key);
-        }
-      }
-    }
-  }
-
-  #sockets(kind: "runner" | "user", id: string) {
-    const key = kind === "runner" ? `runner:${id}` : id;
-    return this.#connections[kind].get(key);
-  }
-
-  #userKey(userId: string, workspaceId?: string): string {
-    return `user:${userId}:${workspaceId ?? "*"}`;
-  }
-
-  #parseUserKey(
+  const toolStreams = createToolStreamHubState();
+  const userKey = (userId: string, workspaceId?: string): string =>
+    `user:${userId}:${workspaceId ?? "*"}`;
+  const parseUserKey = (
     key: string,
-  ): { userId: string; workspaceId: string } | undefined {
+  ): { userId: string; workspaceId: string } | undefined => {
     const match = /^user:([^:]+):(.+)$/u.exec(key);
     return match === null
       ? undefined
       : { userId: match[1] ?? "", workspaceId: match[2] ?? "" };
-  }
-
-  #parsedUserKeys(): readonly { userId: string; workspaceId: string }[] {
-    return [...this.#connections.user.keys()].flatMap((key) => {
-      const parsed = this.#parseUserKey(key);
-      return parsed === undefined ? [] : [parsed];
-    });
-  }
-
-  #updateUser(
-    userId: string,
-    workspaceId: string | undefined,
-    socket: RealtimeSocket,
-    add: boolean,
-  ): void {
-    this.#update("user", this.#userKey(userId, workspaceId), socket, add);
-  }
-
-  currentRunner(runnerId: string): RealtimeSocket | undefined {
-    return [...(this.#sockets("runner", runnerId) ?? [])].at(-1);
-  }
-
-  runnerIsCurrent(runnerId: string, socket: RealtimeSocket): boolean {
-    return this.#sockets("runner", runnerId)?.has(socket) === true;
-  }
-
-  setRunner(
-    runnerId: string,
-    socket: RealtimeSocket,
-    connected: boolean,
-  ): RealtimeSocket | undefined {
-    const key = `runner:${runnerId}`;
-    const runners = this.#connections.runner;
-    const current = runners.get(key);
-
-    if (connected) {
-      this.#removeSocket(socket);
-      runners.set(key, new Set([socket]));
-      const previous = current === undefined ? undefined : [...current].at(-1);
-      return previous === socket ? undefined : previous;
-    }
-
-    if (current?.has(socket) === true) {
-      runners.delete(key);
-      return socket;
-    }
-
-    return undefined;
-  }
-
-  setUser(
-    userId: string,
-    socket: RealtimeSocket,
-    connected: boolean,
-    workspaceId?: string,
-  ): void {
-    if (connected) {
-      this.#removeSocket(socket);
-    }
-    this.#updateUser(userId, workspaceId, socket, connected);
-  }
-
-  userWorkspaces(userId: string): readonly string[] {
-    return this.#parsedUserKeys().flatMap((parsed) =>
-      parsed.userId === userId && parsed.workspaceId !== "*"
-        ? [parsed.workspaceId]
-        : [],
-    );
-  }
-
-  userIds(): readonly string[] {
-    return [...new Set(this.#parsedUserKeys().map(({ userId }) => userId))];
-  }
-
-  publishRunnerCancellation(runnerId: string, commandId: string): void {
-    publish(this.#sockets("runner", runnerId), { commandId, type: "cancel" });
-  }
-
-  publishRunnerCommand(runnerId: string, command: RunnerToolCommand): boolean {
-    return publish(this.#sockets("runner", runnerId), {
-      command,
-      type: "command",
-    });
-  }
-
-  publishToolStream(
-    userId: string,
-    frame: ToolStreamDeltaFrame,
-    workspaceId?: string,
-  ): void {
-    if (workspaceId === undefined || !this.#toolStreams.apply(userId, frame)) {
-      return;
-    }
-    publish(this.#sockets("user", this.#userKey(userId, workspaceId)), {
-      ...frame,
-    });
-  }
-
-  syncToolStreams(
-    userId: string,
-    sessionId: string,
-    streamId: string,
-    socket: RealtimeSocket,
-  ): void {
-    publish(new Set([socket]), {
-      ...this.#toolStreams.snapshot(userId, sessionId, streamId),
-    });
-  }
-
-  clearToolStreams(userId: string, sessionId: string): void {
-    this.#toolStreams.clearSession(userId, sessionId);
-  }
-
-  publishUser(
-    userId: string,
-    payload: RealtimePayload,
-    workspaceId?: string,
-  ): void {
-    publish(this.#sockets("user", this.#userKey(userId, workspaceId)), payload);
-  }
-
-  publishUserAllWorkspaces(userId: string, payload: RealtimePayload): void {
-    const sockets = new Set<RealtimeSocket>();
-    for (const [key, connected] of this.#connections.user) {
-      if (this.#parseUserKey(key)?.userId === userId) {
-        for (const socket of connected) sockets.add(socket);
+  };
+  const sockets = (
+    kind: "runner" | "user",
+    id: string,
+  ): Set<RealtimeSocket> | undefined =>
+    connections[kind].get(kind === "runner" ? `runner:${id}` : id);
+  const removeSocket = (socket: RealtimeSocket): void => {
+    for (const connectionMap of Object.values(connections)) {
+      for (const [key, connected] of connectionMap) {
+        if (connected.delete(socket) && connected.size === 0)
+          connectionMap.delete(key);
       }
     }
-    publish(sockets, payload);
-  }
+  };
+  const parsedUserKeys = (): readonly {
+    userId: string;
+    workspaceId: string;
+  }[] =>
+    [...connections.user.keys()].flatMap((key) => {
+      const parsed = parseUserKey(key);
+      return parsed === undefined ? [] : [parsed];
+    });
+
+  return {
+    currentRunner: (runnerId) =>
+      [...(sockets("runner", runnerId) ?? [])].at(-1),
+    runnerIsCurrent: (runnerId, socket) =>
+      sockets("runner", runnerId)?.has(socket) === true,
+    setRunner: (runnerId, socket, connected) => {
+      const key = `runner:${runnerId}`;
+      const current = connections.runner.get(key);
+      if (connected) {
+        removeSocket(socket);
+        connections.runner.set(key, new Set([socket]));
+        const previous =
+          current === undefined ? undefined : [...current].at(-1);
+        return previous === socket ? undefined : previous;
+      }
+      if (current?.has(socket) === true) {
+        connections.runner.delete(key);
+        return socket;
+      }
+      return undefined;
+    },
+    setUser: (userId, socket, connected, workspaceId) => {
+      if (connected) removeSocket(socket);
+      const key = userKey(userId, workspaceId);
+      const connectedSockets =
+        connections.user.get(key) ?? new Set<RealtimeSocket>();
+      if (connected) {
+        connectedSockets.add(socket);
+        connections.user.set(key, connectedSockets);
+      } else {
+        connectedSockets.delete(socket);
+        if (connectedSockets.size === 0) connections.user.delete(key);
+      }
+    },
+    userWorkspaces: (userId) =>
+      parsedUserKeys().flatMap((parsed) =>
+        parsed.userId === userId && parsed.workspaceId !== "*"
+          ? [parsed.workspaceId]
+          : [],
+      ),
+    userIds: () => [...new Set(parsedUserKeys().map(({ userId }) => userId))],
+    publishRunnerCancellation: (runnerId, commandId) => {
+      publish(sockets("runner", runnerId), { commandId, type: "cancel" });
+    },
+    publishRunnerCommand: (runnerId, command) =>
+      publish(sockets("runner", runnerId), { command, type: "command" }),
+    publishToolStream: (userId, frame, workspaceId) => {
+      if (workspaceId !== undefined && toolStreams.apply(userId, frame))
+        publish(sockets("user", userKey(userId, workspaceId)), { ...frame });
+    },
+    syncToolStreams: (userId, sessionId, streamId, socket) => {
+      publish(new Set([socket]), {
+        ...toolStreams.snapshot(userId, sessionId, streamId),
+      });
+    },
+    clearToolStreams: (userId, sessionId) => {
+      toolStreams.clearSession(userId, sessionId);
+    },
+    publishUser: (userId, payload, workspaceId) => {
+      publish(sockets("user", userKey(userId, workspaceId)), payload);
+    },
+    publishUserAllWorkspaces: (userId, payload) => {
+      const recipients = new Set<RealtimeSocket>();
+      for (const [key, connected] of connections.user)
+        if (parseUserKey(key)?.userId === userId)
+          for (const socket of connected) recipients.add(socket);
+      publish(recipients, payload);
+    },
+  };
 }

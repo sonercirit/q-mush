@@ -1,18 +1,27 @@
 import { expect, vi } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import {
+  createRunnerCommandBroker,
+  type RunnerCommandBroker,
+} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import {
   installDatabaseWriteResilience,
   type DatabaseWriteResilience,
 } from "../../sync-engine/database-write-resilience.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
-import { SessionFinisher } from "../../sync-engine/session-finisher.ts";
+import {
+  createSessionFinisher,
+  type SessionFinisher,
+} from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import {
+  createSessionRuntimes,
+  type SessionRuntimes,
+} from "../../sync-engine/session-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import type { CompactionStoreSetup } from "./session-compaction-test-helpers.ts";
-import { createSessionLauncher } from "./session-launcher-fixtures.ts";
+import { createTestSessionLauncher } from "./session-launcher-fixtures.ts";
 import {
   CREDENTIAL,
   orchestrationActions,
@@ -42,12 +51,12 @@ export function launchFailureSetup(
   const notify = vi.fn();
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const finished = vi.spyOn(actions, "finished");
-  const runtimes = new SessionRuntimes();
-  const broker = new RunnerCommandBroker({
+  const runtimes = createSessionRuntimes();
+  const broker = createRunnerCommandBroker({
     commandId: () => "recovered-launch-agent-file",
   });
   const pending = new Map<string, Parameters<SessionFinisher["finish"]>>();
-  const finisher = new SessionFinisher({
+  const finisher = createSessionFinisher({
     actions,
     notify,
     now: () => now + 2,
@@ -66,7 +75,7 @@ export function launchFailureSetup(
     },
     store: storeSetup.store,
   });
-  const launcher = createSessionLauncher({
+  const launcher = createTestSessionLauncher({
     actions,
     broker,
     finish: finisher.finish.bind(finisher),

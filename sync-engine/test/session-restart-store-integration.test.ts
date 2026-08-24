@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import type { RestartHandoffOperation } from "../../shared/session-model.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import {
   TEST_NOW,
@@ -54,7 +54,7 @@ function expectInterruptedRestored(
 }
 
 function interruptedStore(setup: RestartStoreSetup) {
-  return new ShutdownInterruptedSessionStore({
+  return ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: () => `shutdown-interrupted-${crypto.randomUUID()}`,
   });
@@ -124,7 +124,7 @@ test("retains the run settings across shutdown recovery", () => {
     "The shutdown settings session is unavailable",
   );
   const snapshot = setup.store.toolSettings(running.id, running.generation);
-  const interrupted = new ShutdownInterruptedSessionStore({
+  const interrupted = ShutdownInterruptedSessionStore({
     database: setup.database,
     generateId: () => `shutdown-settings-${crypto.randomUUID()}`,
   });
@@ -313,7 +313,7 @@ test.each(["paused", "queued", "running"] as const)(
     });
 
     const removalNow = TEST_NOW + 6;
-    const runnerStore = new RunnerStore(setup.database);
+    const runnerStore = createRunnerStore(setup.database);
     expect(runnerStore.remove(TEST_USER_ID, STORE_RUNNER_ID, removalNow)).toBe(
       true,
     );

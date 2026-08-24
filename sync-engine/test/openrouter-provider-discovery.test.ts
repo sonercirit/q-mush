@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 import { discoverOpenRouterProviders } from "../../sync-engine/openrouter-provider-discovery.ts";
-import { ProviderCredentialRejectionError } from "../../sync-engine/provider-error.ts";
 import {
   abortAndObserveCanceledReader,
   neverReadingResponse,
@@ -106,7 +105,7 @@ describe("OpenRouter serving-provider discovery", () => {
         invoke(discoverWithResponse(new Response(null, { status }))),
       ).rejects.toEqual(
         expect.objectContaining({
-          name: ProviderCredentialRejectionError.name,
+          kind: "provider_credential_rejection",
           status,
         }),
       );

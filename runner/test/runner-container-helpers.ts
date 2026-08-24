@@ -1,8 +1,11 @@
 import {
-  RunnerContainerManager,
-  type RunnerContainerRun,
+  createRunnerContainerManager,
+  type RunnerContainerManager,
 } from "../runner-container.ts";
-import type { RunnerProcessResult } from "../runner-process.ts";
+import type {
+  RunnerProcessOptions,
+  RunnerProcessResult,
+} from "../runner-process.ts";
 
 export interface FakeContainerCall {
   readonly arguments: readonly string[];
@@ -48,7 +51,15 @@ function pendingResult(
   });
 }
 
-type ContainerRunOptions = Parameters<RunnerContainerRun>[2];
+type ContainerRunOptions = Pick<
+  RunnerProcessOptions,
+  "onOutput" | "outputLimitCharacters" | "signal" | "timeoutSeconds"
+>;
+type RunnerContainerRun = (
+  executable: string,
+  arguments_: readonly string[],
+  options: ContainerRunOptions,
+) => Promise<RunnerProcessResult>;
 type ContainerOperationHandler = (
   arguments_: readonly string[],
   options: ContainerRunOptions,
@@ -133,7 +144,7 @@ export async function executeContainerShell(options: {
   readonly workspace: string;
 }): Promise<string> {
   const run = containerOperationRun(options.calls ?? [], options.handlers);
-  const manager = new RunnerContainerManager({ run });
+  const manager = createRunnerContainerManager({ run });
   return await executeFakeShell(
     manager,
     options.workspace,

@@ -6,13 +6,13 @@ import {
   runnerRegistrationReceivedMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import {
+  createRunnerConnectionError,
   createRunnerConnectionSettlement,
-  RunnerConnectionError,
 } from "./runner-connection.ts";
 import {
   addRunnerSocketFailureListeners,
+  createRunnerRegistrationRejectedError,
   parseSocketJsonRecord,
-  RunnerRegistrationRejectedError,
 } from "./runner-socket.ts";
 import type { RunnerStartupConnection } from "./runner-update.ts";
 
@@ -78,32 +78,31 @@ interface RegistrationContext {
     ((restartId: string | undefined) => boolean) | undefined;
   readonly onVersion: ((version: string) => void) | undefined;
   readonly send: (message: string) => boolean;
-  readonly settle: (error?: RunnerConnectionError) => void;
+  readonly settle: (error?: Error) => void;
   readonly startupConnection: RunnerStartupConnection;
   readonly state: RegistrationState;
 }
 
 function invalidRegistration(context: RegistrationContext): void {
   context.settle(
-    new RunnerConnectionError("The server returned invalid setup data"),
+    createRunnerConnectionError("The server returned invalid setup data"),
   );
 }
+
+const registrationStages: Readonly<
+  Record<RegistrationServerType, RegistrationStage>
+> = {
+  registration_active: "active",
+  registration_committed: "committed",
+  registration_finalized: "finalized",
+  registration_operational: "operational",
+  registration_ready: "ready",
+};
 
 function expectedRegistrationStage(
   type: RegistrationServerType,
 ): RegistrationStage {
-  switch (type) {
-    case "registration_active":
-      return "active";
-    case "registration_committed":
-      return "committed";
-    case "registration_finalized":
-      return "finalized";
-    case "registration_operational":
-      return "operational";
-    case "registration_ready":
-      return "ready";
-  }
+  return registrationStages[type];
 }
 
 function registrationTransition(
@@ -168,120 +167,148 @@ function validReadyMessage(
   );
 }
 
+type RegistrationHandler = (
+  context: RegistrationContext,
+  message: Readonly<Record<string, unknown>>,
+  registrationId: string,
+) => void;
+
+function isActivationReceipt(value: unknown): value is string {
+  return typeof value === "string";
+}
+
+function isPendingActivationReceipt(
+  context: RegistrationContext,
+  value: unknown,
+): value is string {
+  return (
+    typeof value === "string" &&
+    value === context.state.pendingReceipt &&
+    context.startupConnection.finalizeActivation(value)
+  );
+}
+
+const registrationHandlers: Readonly<
+  Record<RegistrationServerType, RegistrationHandler>
+> = {
+  registration_ready: (context, message, registrationId) => {
+    if (!validReadyMessage(message)) {
+      invalidRegistration(context);
+      return;
+    }
+    if (
+      acknowledgeRegistration(
+        context,
+        registrationId,
+        runnerRegistrationAcceptMessage(registrationId),
+        "committed",
+      )
+    ) {
+      context.onVersion?.(message.version);
+    }
+    return;
+  },
+  registration_committed: (context, _message, registrationId) => {
+    acknowledgeRegistration(
+      context,
+      registrationId,
+      runnerRegistrationReceivedMessage(registrationId),
+      "active",
+    );
+    return;
+  },
+  registration_active: (context, message, registrationId) => {
+    const activationReceipt = message["activationReceipt"];
+    if (
+      !isActivationReceipt(activationReceipt) ||
+      !context.startupConnection.prepareActivation(activationReceipt)
+    ) {
+      invalidRegistration(context);
+      return;
+    }
+    context.state.pendingReceipt = activationReceipt;
+    acknowledgeRegistration(
+      context,
+      registrationId,
+      runnerRegistrationActiveReceivedMessage(registrationId),
+      "finalized",
+    );
+    return;
+  },
+  registration_finalized: (context, message, registrationId) => {
+    const activationReceipt = message["activationReceipt"];
+    const receiptMatches = isPendingActivationReceipt(
+      context,
+      activationReceipt,
+    );
+    if (!receiptMatches) {
+      invalidRegistration(context);
+      return;
+    }
+    acknowledgeRegistration(
+      context,
+      registrationId,
+      runnerRegistrationFinalizedReceivedMessage(registrationId),
+      "operational",
+    );
+    return;
+  },
+  registration_operational: (context, _message, registrationId) => {
+    const activationReceipt = context.state.pendingReceipt;
+    if (
+      activationReceipt === undefined ||
+      !context.startupConnection.canOperate(activationReceipt)
+    ) {
+      invalidRegistration(context);
+      return;
+    }
+    try {
+      context.installOperationalHandlers();
+    } catch {
+      context.settle(
+        createRunnerConnectionError(
+          "The runner command handlers could not be installed",
+        ),
+      );
+      return;
+    }
+    if (
+      !context.send(
+        runnerRegistrationOperationalReceivedMessage(registrationId),
+      )
+    ) {
+      return;
+    }
+    context.state.pendingReceipt = undefined;
+    if (!context.startupConnection.operational(activationReceipt)) {
+      invalidRegistration(context);
+      return;
+    }
+    if (
+      context.onOperational?.(context.startupConnection.restartId) === false
+    ) {
+      context.settle(
+        createRunnerConnectionError(
+          "The runner restart settlement was invalid",
+        ),
+      );
+      return;
+    }
+    context.settle();
+  },
+};
+
 function receiveRegistrationMessage(
   context: RegistrationContext,
   message: Readonly<Record<string, unknown>>,
 ): void {
   const transition = registrationTransition(context, message);
-  if (transition === undefined) {
-    return;
-  }
-
-  const { registrationId, type } = transition;
-  switch (type) {
-    case "registration_ready":
-      if (!validReadyMessage(message)) {
-        invalidRegistration(context);
-        return;
-      }
-      if (
-        acknowledgeRegistration(
-          context,
-          registrationId,
-          runnerRegistrationAcceptMessage(registrationId),
-          "committed",
-        )
-      ) {
-        context.onVersion?.(message.version);
-      }
-      return;
-    case "registration_committed":
-      acknowledgeRegistration(
-        context,
-        registrationId,
-        runnerRegistrationReceivedMessage(registrationId),
-        "active",
-      );
-      return;
-    case "registration_active": {
-      const activationReceipt = message["activationReceipt"];
-      if (
-        typeof activationReceipt !== "string" ||
-        !context.startupConnection.prepareActivation(activationReceipt)
-      ) {
-        invalidRegistration(context);
-        return;
-      }
-      context.state.pendingReceipt = activationReceipt;
-      acknowledgeRegistration(
-        context,
-        registrationId,
-        runnerRegistrationActiveReceivedMessage(registrationId),
-        "finalized",
-      );
-      return;
-    }
-    case "registration_finalized": {
-      const activationReceipt = message["activationReceipt"];
-      if (
-        typeof activationReceipt !== "string" ||
-        activationReceipt !== context.state.pendingReceipt ||
-        !context.startupConnection.finalizeActivation(activationReceipt)
-      ) {
-        invalidRegistration(context);
-        return;
-      }
-      acknowledgeRegistration(
-        context,
-        registrationId,
-        runnerRegistrationFinalizedReceivedMessage(registrationId),
-        "operational",
-      );
-      return;
-    }
-    case "registration_operational": {
-      const activationReceipt = context.state.pendingReceipt;
-      if (
-        activationReceipt === undefined ||
-        !context.startupConnection.canOperate(activationReceipt)
-      ) {
-        invalidRegistration(context);
-        return;
-      }
-      try {
-        context.installOperationalHandlers();
-      } catch {
-        context.settle(
-          new RunnerConnectionError(
-            "The runner command handlers could not be installed",
-          ),
-        );
-        return;
-      }
-      if (
-        !context.send(
-          runnerRegistrationOperationalReceivedMessage(registrationId),
-        )
-      ) {
-        return;
-      }
-      context.state.pendingReceipt = undefined;
-      if (!context.startupConnection.operational(activationReceipt)) {
-        invalidRegistration(context);
-        return;
-      }
-      if (
-        context.onOperational?.(context.startupConnection.restartId) === false
-      ) {
-        context.settle(
-          new RunnerConnectionError(
-            "The runner restart settlement was invalid",
-          ),
-        );
-        return;
-      }
-      context.settle();
-    }
+  if (transition !== undefined) {
+    registrationHandlers[transition.type](
+      context,
+      message,
+      transition.registrationId,
+    );
   }
 }
 
@@ -304,7 +331,7 @@ export function completeRunnerRegistration(
     };
     const settlement = createRunnerConnectionSettlement(resolve, reject);
     let settled = false;
-    const settle = (error?: RunnerConnectionError): void => {
+    const settle = (error?: Error): void => {
       settlement.settle(error);
       settled = settlement.settled;
     };
@@ -317,7 +344,7 @@ export function completeRunnerRegistration(
         return true;
       } catch {
         settle(
-          new RunnerConnectionError(
+          createRunnerConnectionError(
             "The WebSocket registration acknowledgement failed",
           ),
         );
@@ -341,7 +368,7 @@ export function completeRunnerRegistration(
       ) {
         const message = parseRunnerRegistrationMessage(event.data);
         if (message?.["type"] === "registration_rejected") {
-          settle(new RunnerRegistrationRejectedError());
+          settle(createRunnerRegistrationRejectedError());
           return;
         }
         if (message === undefined) {
@@ -353,7 +380,7 @@ export function completeRunnerRegistration(
       }
       if (!settled) {
         settle(
-          new RunnerConnectionError("The server returned binary setup data"),
+          createRunnerConnectionError("The server returned binary setup data"),
         );
       }
     });
