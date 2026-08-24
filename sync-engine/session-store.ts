@@ -65,6 +65,7 @@ import {
   type SessionStoreForkParameters,
   type SessionStoreForkResult,
 } from "./session-store-fork.ts";
+import type { SessionStore } from "./session-store-interface.ts";
 import { activeSessionCondition } from "./session-store-persistence.ts";
 import {
   listStoredSessions,
@@ -100,6 +101,11 @@ import {
   type SessionContextTokenCapParameters,
 } from "./session-store-settings.ts";
 import {
+  generatedSessionId,
+  sessionSpawnIdentity,
+  sessionSpawnReservationOptions,
+} from "./session-store-spawn-options.ts";
+import {
   activeSpawnedSessionChildren,
   appendSpawnedSessionReport,
   pendingSpawnedSessions,
@@ -124,7 +130,7 @@ export function createSessionStore(
   readToolSettings: (userId: string) => ToolSettings,
   runtimes: Pick<SessionRuntimes, "pending">,
   reportParent?: SessionStoreWriteResources["reportParent"],
-) {
+): SessionStore {
   const writeResourcesInternal = (workspaceId?: string) => {
     const read = (userId: string, sessionId: string) =>
       store.get(userId, sessionId, workspaceId);
@@ -153,24 +159,7 @@ export function createSessionStore(
     toolSettings: (_userId, sessionId, executionGeneration) =>
       activeSessionToolSettings(database, sessionId, executionGeneration),
   });
-  const generateSessionId = (now: number) => generateId(now);
-  const spawnIdentity = (
-    userId: string,
-    sessionId: string,
-    generation: number,
-  ) => ({
-    generation,
-    sessionId,
-    userId,
-  });
-  const reservationOptions = (
-    userId: string,
-    sessionId: string,
-    generation: number,
-  ) => ({
-    database,
-    identity: spawnIdentity(userId, sessionId, generation),
-  });
+  const generateSessionId = generatedSessionId(generateId);
   const readPendingQuestions = (userId: string, sessionId: string) =>
     questionsStore.pending(userId, sessionId);
   const readSession = (
@@ -221,8 +210,8 @@ export function createSessionStore(
       return recoverSpawnedSessionReservations({
         content:
           "Session failed: the server restarted during child preparation",
-        database: database,
-        generateId: generateId,
+        database,
+        generateId,
         now,
       });
     },
@@ -239,7 +228,7 @@ export function createSessionStore(
       metadata: SpawnedSessionMetadata,
       now: number,
     ) {
-      const reservation = spawnIdentity(
+      const reservation = sessionSpawnIdentity(
         userId,
         identity.sessionId,
         identity.generation,
@@ -260,7 +249,7 @@ export function createSessionStore(
       const options = {
         authority,
         database: database,
-        identity: spawnIdentity(
+        identity: sessionSpawnIdentity(
           userId,
           identity.sessionId,
           identity.generation,
@@ -275,7 +264,12 @@ export function createSessionStore(
       now: number,
     ): boolean {
       return discardSpawnedSessionReservation({
-        ...reservationOptions(userId, sessionId, generation),
+        ...sessionSpawnReservationOptions(
+          database,
+          userId,
+          sessionId,
+          generation,
+        ),
         now,
       });
     },
@@ -289,7 +283,12 @@ export function createSessionStore(
       return failSpawnedSessionReservation({
         allowClaimed: true,
         content,
-        ...reservationOptions(userId, sessionId, generation),
+        ...sessionSpawnReservationOptions(
+          database,
+          userId,
+          sessionId,
+          generation,
+        ),
         generateId: generateId,
         now,
       });

@@ -135,7 +135,7 @@ function compactRuntime(
   }
 }
 
-interface RuntimeModelMetadata {
+export interface RuntimeModelMetadata {
   readonly adaptiveThinking: boolean | null;
   readonly maxOutputTokens: number | null;
 }

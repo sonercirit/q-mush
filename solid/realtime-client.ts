@@ -1,4 +1,3 @@
-import { REALTIME_PATH } from "../shared/routes.ts";
 import { USER_REALTIME_MAX_PAYLOAD_LENGTH } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
@@ -15,6 +14,16 @@ import {
   type PendingCommand,
   type QueuedCommand,
 } from "./realtime-client-command.ts";
+import {
+  deferredStateEventKey,
+  noSelectedSession,
+  realtimeUrl,
+  RECONNECT_DELAYS,
+  STREAM_PREP_BUDGET_MS,
+  STREAM_UPDATES_PER_FRAME,
+  type DeferredStateEvent,
+  type RealtimeLocation,
+} from "./realtime-client-configuration.ts";
 import type {
   BrowserWebSocket,
   BrowserWebSocketFactory,
@@ -35,49 +44,6 @@ import {
   type RealtimeStreamBuffer,
 } from "./realtime-stream-buffer.ts";
 import { sessionIsActive } from "./session-controller-guards.ts";
-type DeferredStateEvent = Extract<
-  RealtimeServerEvent,
-  {
-    readonly type:
-      | "runners"
-      | "session"
-      | "session_compaction_request"
-      | "session_compaction_settled"
-      | "session_questions"
-      | "sessions"
-      | "sessions_changed"
-      | "tool_stream_snapshot";
-  }
->;
-const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
-const STREAM_UPDATES_PER_FRAME = 4;
-const STREAM_PREP_BUDGET_MS = 8;
-function deferredStateEventKey<Type extends DeferredStateEvent["type"]>(
-  event: Extract<DeferredStateEvent, { readonly type: Type }>,
-  expectedType: Type,
-  keys: {
-    [Kind in DeferredStateEvent["type"]]: (
-      matched: Extract<DeferredStateEvent, { readonly type: Kind }>,
-    ) => string;
-  },
-): string {
-  return keys[expectedType](event);
-}
-function noSelectedSession(): undefined {
-  return undefined;
-}
-interface RealtimeLocation {
-  readonly href: string;
-  readonly protocol: string;
-}
-function realtimeUrl(location: RealtimeLocation, workspaceId: string): string {
-  const url = new URL(REALTIME_PATH, location.href);
-  if (workspaceId !== GLOBAL_WORKSPACE_ID) {
-    url.searchParams.set("workspaceId", workspaceId);
-  }
-  url.protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return url.toString();
-}
 export interface RealtimeConnection {
   command(
     operation: SessionRealtimeOperation,
