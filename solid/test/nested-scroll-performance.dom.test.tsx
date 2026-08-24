@@ -42,20 +42,36 @@ interface MutationObserverHarness {
   readonly observer: () => MutationObserver;
 }
 
+interface MutationObserverStub {
+  disconnect(): void;
+  observe(target: Node, options?: MutationObserverInit): void;
+  takeRecords(): MutationRecord[];
+}
+
+function createMutationObserverStub(
+  callback: MutationCallback,
+  callbacks: MutationCallback[],
+): MutationObserverStub {
+  callbacks.push(callback);
+  return {
+    disconnect: vi.fn<MutationObserver["disconnect"]>(),
+    observe: vi.fn<MutationObserver["observe"]>(),
+    takeRecords: vi.fn<MutationObserver["takeRecords"]>(() => []),
+  };
+}
+
 function installMutationObserverHarness(): MutationObserverHarness {
   const callbacks: MutationCallback[] = [];
-  class MutationObserverStub implements MutationObserver {
-    constructor(callback: MutationCallback) {
-      callbacks.push(callback);
-    }
-    disconnect = vi.fn<MutationObserver["disconnect"]>();
-    observe = vi.fn<MutationObserver["observe"]>();
-    takeRecords = vi.fn<MutationObserver["takeRecords"]>(() => []);
-  }
+  const MutationObserverStub = function (
+    this: MutationObserverStub,
+    callback: MutationCallback,
+  ): MutationObserverStub {
+    return createMutationObserverStub(callback, callbacks);
+  };
   vi.stubGlobal("MutationObserver", MutationObserverStub);
   return {
     callbacks,
-    observer: () => new MutationObserverStub(() => undefined),
+    observer: () => createMutationObserverStub(() => undefined, callbacks),
   };
 }
 
