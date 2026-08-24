@@ -46,18 +46,58 @@ function runnerUnavailableOutput(): string {
   return sessionToolOutput({ error: "runner_unavailable" });
 }
 
-export class SessionAgentActions {
-  readonly #dependencies: SessionAgentActionsDependencies;
+export interface SessionAgentActions {
+  readonly actions: (
+    parentSessionId: string,
+    userId: string,
+    parentGeneration: number,
+    toolSettings: ToolSettings,
+  ) => SessionAgentToolActions;
+  readonly finished: (detail: AgentSessionDetail, userId: string) => void;
+  readonly isDraining: () => boolean;
+  readonly reportAll: (pending: readonly PendingSpawnedSession[]) => void;
+  readonly reportOne: (detail: AgentSessionDetail, userId: string) => void;
+  readonly reportedParent: (
+    report: SpawnedSessionCompletion,
+    userId: string,
+  ) => void;
+  readonly stopChildren: (parent: AgentSessionDetail, userId: string) => void;
+  readonly stopSession: (
+    sessionId: string,
+    detail?: AgentSessionDetail,
+  ) => void;
+}
 
-  constructor(dependencies: SessionAgentActionsDependencies) {
-    this.#dependencies = dependencies;
+interface SessionAgentActionsError extends Error {
+  readonly tag: "session_agent_actions";
+}
+
+function createSessionAgentActionsError(
+  message: string,
+): SessionAgentActionsError {
+  return Object.assign(new Error(message), {
+    tag: "session_agent_actions" as const,
+  });
+}
+
+export function isSessionAgentActionsError(
+  error: unknown,
+): error is SessionAgentActionsError {
+  return (
+    error instanceof Error &&
+    "tag" in error &&
+    error.tag === "session_agent_actions"
+  );
+}
+
+export function createSessionAgentActions(
+  dependencies: SessionAgentActionsDependencies,
+): SessionAgentActions {
+  function isDraining(): boolean {
+    return dependencies.draining?.() === true;
   }
 
-  isDraining(): boolean {
-    return this.#dependencies.draining?.() === true;
-  }
-
-  actions(
+  function actions(
     parentSessionId: string,
     userId: string,
     parentGeneration: number,
@@ -68,7 +108,7 @@ export class SessionAgentActions {
       sessionId: parentSessionId,
     };
     const currentParentTool = (tool: SessionAgentToolName): boolean =>
-      this.#dependencies.store.executionIsCurrent(
+      dependencies.store.executionIsCurrent(
         userId,
         parentSessionId,
         parentGeneration,
@@ -86,18 +126,20 @@ export class SessionAgentActions {
         return action(...arguments_);
       };
     const parentWorkspaceId = (): string => {
-      const workspaceId = this.#dependencies.store.get(
+      const workspaceId = dependencies.store.get(
         userId,
         parentSessionId,
       )?.workspaceId;
       if (workspaceId === undefined) {
-        throw new Error("The parent session is unavailable");
+        throw createSessionAgentActionsError(
+          "The parent session is unavailable",
+        );
       }
       return workspaceId;
     };
     const anotherSession = (sessionId: string): string => {
       if (sessionId === parentSessionId) {
-        throw new Error(
+        throw createSessionAgentActionsError(
           "Choose another session; this session is already running",
         );
       }
@@ -105,7 +147,7 @@ export class SessionAgentActions {
     };
     return {
       compactSession: guardParent("compact_session", (sessionId, callSignal) =>
-        this.#compact({
+        compact({
           authority: { ...authority, tool: "compact_session" },
           sessionId,
           signal: callSignal,
@@ -116,7 +158,7 @@ export class SessionAgentActions {
       continueSession: guardParent(
         "continue_session",
         (sessionId, callSignal) =>
-          this.#queue(
+          queue(
             userId,
             anotherSession(sessionId),
             authority,
@@ -126,7 +168,7 @@ export class SessionAgentActions {
           ),
       ),
       browseRunnerDirectories: (runnerId, path, callSignal) =>
-        this.#browseDirectories(
+        browseDirectories(
           userId,
           runnerId,
           path,
@@ -140,26 +182,26 @@ export class SessionAgentActions {
       getSessionOptions: guardParent(
         "get_session_options",
         (input, callSignal) =>
-          this.#options(userId, input, parentWorkspaceId(), callSignal),
+          options(userId, input, parentWorkspaceId(), callSignal),
       ),
       listRunners: guardParent("list_runners", () =>
         sessionToolOutput(
-          this.#dependencies.listOnlineRunners(userId, parentWorkspaceId()),
+          dependencies.listOnlineRunners(userId, parentWorkspaceId()),
         ),
       ),
       listSessions: guardParent("list_sessions", (input) =>
         listSessionsOutput(
           input,
-          this.#dependencies.store.list(userId, parentWorkspaceId()),
+          dependencies.store.list(userId, parentWorkspaceId()),
         ),
       ),
       readSession: guardParent("read_session", (input) =>
-        this.#read(userId, input, parentWorkspaceId(), toolSettings),
+        read(userId, input, parentWorkspaceId(), toolSettings),
       ),
       reassignSession: guardParent(
         "reassign_session",
         (sessionId, runnerId, workingDirectory, callSignal) =>
-          this.#reassign(
+          reassign(
             parentSessionId,
             userId,
             sessionId,
@@ -172,7 +214,7 @@ export class SessionAgentActions {
       sendToSession: guardParent(
         "send_to_session",
         (sessionId, message, callSignal) =>
-          this.#queue(
+          queue(
             userId,
             anotherSession(sessionId),
             authority,
@@ -182,23 +224,17 @@ export class SessionAgentActions {
           ),
       ),
       spawnSession: guardParent("spawn_session", (input, callSignal) =>
-        this.#spawn(authority, userId, input, callSignal),
+        spawn(authority, userId, input, callSignal),
       ),
       steerSession: guardParent(
         "steer_session",
         (sessionId, message, callSignal) =>
-          this.#steer(
-            userId,
-            sessionId,
-            message,
-            parentWorkspaceId(),
-            callSignal,
-          ),
+          steer(userId, sessionId, message, parentWorkspaceId(), callSignal),
       ),
       stopSession: guardParent(
         "stop_session",
         (sessionId, cascade, callSignal) =>
-          this.#stop(
+          stop(
             parentSessionId,
             userId,
             sessionId,
@@ -210,17 +246,17 @@ export class SessionAgentActions {
     };
   }
 
-  #reportAndNotify(
+  function reportAndNotify(
     detail: AgentSessionDetail,
     userId: string,
   ): SpawnedSessionCompletion | undefined {
     const reported = reportSpawnedSessionCompletion(
-      this.#dependencies,
+      dependencies,
       detail,
       userId,
     );
     if (reported !== undefined) {
-      this.#dependencies.notify(
+      dependencies.notify(
         userId,
         reported.disposition === "terminal" ? detail.id : reported.parentId,
       );
@@ -228,19 +264,19 @@ export class SessionAgentActions {
     return reported;
   }
 
-  #wakeReport(
+  function wakeReport(
     report: SpawnedSessionCompletion | undefined,
     userId: string,
   ): void {
     if (reportCanWakeParent(report)) {
-      this.#wakeReportedParent(report.parentId, userId);
+      wakeReportedParent(report.parentId, userId);
     }
   }
 
-  reportAll(pending: readonly PendingSpawnedSession[]): void {
+  function reportAll(pending: readonly PendingSpawnedSession[]): void {
     const parentsByUser = new Map<string, string[]>();
     for (const { detail, userId } of pending) {
-      const report = this.#reportAndNotify(detail, userId);
+      const report = reportAndNotify(detail, userId);
       if (reportCanWakeParent(report)) {
         const parents = parentsByUser.get(userId) ?? [];
         parents.push(report.parentId);
@@ -249,69 +285,75 @@ export class SessionAgentActions {
     }
     for (const [userId, parents] of parentsByUser) {
       for (const parentId of new Set(parents)) {
-        this.#wakeReport({ disposition: "delivered", parentId }, userId);
+        wakeReport({ disposition: "delivered", parentId }, userId);
       }
     }
   }
 
-  reportOne(detail: AgentSessionDetail, userId: string): void {
-    this.#wakeReport(this.#reportAndNotify(detail, userId), userId);
+  function reportOne(detail: AgentSessionDetail, userId: string): void {
+    wakeReport(reportAndNotify(detail, userId), userId);
   }
 
-  reportedParent(report: SpawnedSessionCompletion, userId: string): void {
-    this.#dependencies.notify(userId, report.parentId);
-    this.#wakeReport(report, userId);
+  function reportedParent(
+    report: SpawnedSessionCompletion,
+    userId: string,
+  ): void {
+    dependencies.notify(userId, report.parentId);
+    wakeReport(report, userId);
   }
 
-  stopSession(sessionId: string, detail?: AgentSessionDetail): void {
-    this.#cancel(sessionId);
+  function stopSession(sessionId: string, detail?: AgentSessionDetail): void {
+    cancel(sessionId);
     if (detail !== undefined) {
-      this.#dependencies.cleanupSession(detail);
+      dependencies.cleanupSession(detail);
     }
   }
 
-  stopChildren(parent: AgentSessionDetail, userId: string): void {
+  function stopChildren(parent: AgentSessionDetail, userId: string): void {
     stopSpawnedSessionChildren(
-      this.#dependencies,
+      dependencies,
       parent,
       userId,
       (child) => {
-        this.stopSession(child.id, child);
+        stopSession(child.id, child);
       },
       (report) => {
-        this.#wakeReport(report, userId);
+        wakeReport(report, userId);
       },
     );
   }
 
-  #cancel = (sessionId: string): void => {
-    this.#dependencies.abortSession(sessionId);
-    this.#dependencies.broker.cancelSessionCommands(sessionId);
+  const cancel = (sessionId: string): void => {
+    dependencies.abortSession(sessionId);
+    dependencies.broker.cancelSessionCommands(sessionId);
   };
 
-  #wakeReportedParent(parentId: string | undefined, userId: string): void {
+  function wakeReportedParent(
+    parentId: string | undefined,
+    userId: string,
+  ): void {
     if (parentId !== undefined) {
-      void this.#wake(parentId, userId);
+      void wake(parentId, userId);
     }
   }
 
-  finished(detail: AgentSessionDetail, userId: string): void {
-    const current = this.#dependencies.store.get(userId, detail.id);
+  function finished(detail: AgentSessionDetail, userId: string): void {
+    const current = dependencies.store.get(userId, detail.id);
     if (current !== undefined && sessionCanResume(current)) {
-      this.reportOne(current, userId);
+      reportOne(current, userId);
     }
   }
 
-  #onlineRunnerExists(
+  function onlineRunnerExists(
     ...parameters: Parameters<SessionRunnerAvailability>
   ): boolean {
     const [userId, runnerId, workspaceId] = parameters;
-    return this.#dependencies
+    return dependencies
       .listOnlineRunners(userId, workspaceId)
       .some((runner) => runner.id === runnerId);
   }
 
-  async #browseDirectories(
+  async function browseDirectories(
     userId: string,
     runnerId: string,
     path: string,
@@ -320,13 +362,13 @@ export class SessionAgentActions {
     signal: AbortSignal,
     workspaceId: string,
   ): Promise<string> {
-    const online = this.#onlineRunnerExists(userId, runnerId, workspaceId);
+    const online = onlineRunnerExists(userId, runnerId, workspaceId);
     throwIfSignalAborted(signal, "Directory browsing was canceled");
     if (!online || !authorize()) {
       return runnerUnavailableOutput();
     }
     try {
-      const result = await this.#dependencies.browseDirectories(
+      const result = await dependencies.browseDirectories(
         {
           authorize,
           path,
@@ -347,47 +389,43 @@ export class SessionAgentActions {
     }
   }
 
-  async #wake(parentSessionId: string, userId: string): Promise<void> {
-    await this.#dependencies.settled?.(parentSessionId);
-    const parent = this.#dependencies.store.get(userId, parentSessionId);
+  async function wake(parentSessionId: string, userId: string): Promise<void> {
+    await dependencies.settled?.(parentSessionId);
+    const parent = dependencies.store.get(userId, parentSessionId);
     if (
       parent?.status === "idle" &&
       parent.pendingQuestions === null &&
       parent.restartHandoff === null &&
       sessionCanResume(parent) &&
-      !this.#dependencies.activeSession(parent.id) &&
-      this.#dependencies.runnerIsAvailable(
+      !dependencies.activeSession(parent.id) &&
+      dependencies.runnerIsAvailable(
         userId,
         parent.runnerId,
         parent.workspaceId,
       )
     ) {
-      void this.#queue(
-        userId,
-        parent.id,
-        undefined,
-        undefined,
-        parent.workspaceId,
-      );
+      void queue(userId, parent.id, undefined, undefined, parent.workspaceId);
     }
   }
 
-  #detail(...parameters: Parameters<SessionDetailLookup>): AgentSessionDetail {
-    const detail = this.#dependencies.store.get(...parameters);
+  function detail(
+    ...parameters: Parameters<SessionDetailLookup>
+  ): AgentSessionDetail {
+    const detail = dependencies.store.get(...parameters);
     if (detail === undefined) {
-      throw new Error("Session not found");
+      throw createSessionAgentActionsError("Session not found");
     }
     return detail;
   }
 
-  #read(
+  function read(
     userId: string,
     input: ReadSessionToolInput,
     workspaceId: string,
     toolSettings: ToolSettings,
   ): string {
     const selected = new Set(input.categories);
-    const detail = readSessionSnapshot(this.#dependencies.database, {
+    const detail = readSessionSnapshot(dependencies.database, {
       includeSystem: selected.has("system"),
       limit: input.limit,
       roles: (
@@ -398,7 +436,7 @@ export class SessionAgentActions {
       workspaceId,
     });
     if (detail === undefined) {
-      throw new Error("Session not found");
+      throw createSessionAgentActionsError("Session not found");
     }
     return readSessionOutput({
       input,
@@ -416,14 +454,14 @@ export class SessionAgentActions {
     });
   }
 
-  async #options(
+  async function options(
     userId: string,
     input: GetSessionOptionsToolInput,
     workspaceId: string,
     signal: AbortSignal,
   ): Promise<string> {
     return sessionAgentOptions({
-      dependencies: this.#dependencies,
+      dependencies: dependencies,
       input,
       signal,
       userId,
@@ -431,12 +469,12 @@ export class SessionAgentActions {
     });
   }
 
-  #queuedResponse(userId: string, sessionId: string): Response {
-    this.#dependencies.notify(userId, sessionId);
+  function queuedResponse(userId: string, sessionId: string): Response {
+    dependencies.notify(userId, sessionId);
     return createJsonResponse({ sessionId, status: "queued" });
   }
 
-  async #queue(
+  async function queue(
     userId: string,
     sessionId: string,
     authority?: SessionExecutionAuthority,
@@ -444,32 +482,32 @@ export class SessionAgentActions {
     workspaceId?: string,
     signal?: AbortSignal,
   ): Promise<string> {
-    const target = this.#detail(userId, sessionId, workspaceId);
+    const target = detail(userId, sessionId, workspaceId);
     const unavailable = unavailableSessionResponse(target);
     if (unavailable !== undefined) {
       return responseToolOutput(unavailable);
     }
     if (
-      !this.#dependencies.runnerIsAvailable(
+      !dependencies.runnerIsAvailable(
         userId,
         target.runnerId,
         target.workspaceId,
       ) &&
-      this.#dependencies.pendingRestart(target.runnerId) === undefined
+      dependencies.pendingRestart(target.runnerId) === undefined
     ) {
       return runnerUnavailableOutput();
     }
-    const response = await this.#dependencies.withCredential(
+    const response = await dependencies.withCredential(
       userId,
       target,
       (credential) => {
         // Credential access can outlive the tool deadline; never queue or
         // launch after the caller already reported timed-out.
         throwIfSignalAborted(signal, "The queue request was canceled");
-        const queued = this.#dependencies.store.queue(
+        const queued = dependencies.store.queue(
           userId,
           sessionId,
-          this.#dependencies.now(),
+          dependencies.now(),
           message === undefined ? undefined : { content: message, images: [] },
           {
             ...(authority === undefined ? {} : { parent: authority }),
@@ -479,40 +517,34 @@ export class SessionAgentActions {
         if (queued.status !== "queued") {
           return createJsonResponse({ error: queued.status }, 409);
         }
-        if (this.#dependencies.pendingRestart(target.runnerId) !== undefined) {
-          return this.#queuedResponse(userId, sessionId);
+        if (dependencies.pendingRestart(target.runnerId) !== undefined) {
+          return queuedResponse(userId, sessionId);
         }
-        if (
-          !this.#dependencies.launchSession(credential, queued.detail, userId)
-        ) {
+        if (!dependencies.launchSession(credential, queued.detail, userId)) {
           if (
-            pauseQueuedSessionForRestart(
-              this.#dependencies,
-              queued.detail,
-              userId,
-            )
+            pauseQueuedSessionForRestart(dependencies, queued.detail, userId)
           ) {
             return createJsonResponse({ error: "server_restarting" }, 503);
           }
-          this.#dependencies.store.settleRuntimeFailure(
+          dependencies.store.settleRuntimeFailure(
             queued.detail.id,
             "Session failed: the child session could not be launched",
-            this.#dependencies.now(),
+            dependencies.now(),
             queued.detail.generation,
           );
           const failed =
-            this.#dependencies.store.get(userId, sessionId) ?? queued.detail;
-          this.#dependencies.notify(userId, sessionId);
-          this.reportOne(failed, userId);
+            dependencies.store.get(userId, sessionId) ?? queued.detail;
+          dependencies.notify(userId, sessionId);
+          reportOne(failed, userId);
           return createJsonResponse({ error: "session_launch_failed" }, 500);
         }
-        return this.#queuedResponse(userId, sessionId);
+        return queuedResponse(userId, sessionId);
       },
     );
     return responseToolOutput(response);
   }
 
-  #reassign(
+  function reassign(
     parentSessionId: string,
     userId: string,
     sessionId: string,
@@ -522,27 +554,27 @@ export class SessionAgentActions {
     signal: AbortSignal,
   ): string {
     if (sessionId === parentSessionId) {
-      throw new Error(
+      throw createSessionAgentActionsError(
         "Choose another session; this session is already running",
       );
     }
-    if (this.#detail(userId, sessionId, workspaceId).id !== sessionId) {
-      throw new Error("Session not found");
+    if (detail(userId, sessionId, workspaceId).id !== sessionId) {
+      throw createSessionAgentActionsError("Session not found");
     }
     throwIfSignalAborted(signal, "The reassignment was canceled");
-    const result = this.#dependencies.store.reassign(
+    const result = dependencies.store.reassign(
       userId,
       sessionId,
       runnerId,
       workingDirectory,
-      this.#dependencies.now(),
+      dependencies.now(),
     );
     if (result.status !== "reassigned") {
       return result.status === "runner_unavailable"
         ? runnerUnavailableOutput()
         : sessionToolOutput({ error: `session_${result.status}` });
     }
-    this.#dependencies.notify(userId, sessionId);
+    dependencies.notify(userId, sessionId);
     return sessionToolOutput({
       runnerId,
       sessionId,
@@ -551,13 +583,13 @@ export class SessionAgentActions {
     });
   }
 
-  #spawn(
+  function spawn(
     authority: SessionExecutionAuthority,
     userId: string,
     input: SpawnSessionToolInput,
     signal: AbortSignal,
   ): Promise<string> {
-    const parentWorkspaceId = this.#dependencies.store.get(
+    const parentWorkspaceId = dependencies.store.get(
       userId,
       authority.sessionId,
     )?.workspaceId;
@@ -567,11 +599,7 @@ export class SessionAgentActions {
       );
     }
     if (
-      !this.#dependencies.runnerIsAvailable(
-        userId,
-        input.runnerId,
-        parentWorkspaceId,
-      )
+      !dependencies.runnerIsAvailable(userId, input.runnerId, parentWorkspaceId)
     ) {
       return Promise.resolve(
         sessionToolOutput({ error: "runner_unavailable" }),
@@ -579,28 +607,28 @@ export class SessionAgentActions {
     }
     return spawnAgentSession({
       authority,
-      dependencies: this.#dependencies,
+      dependencies: dependencies,
       input,
       signal,
       terminal: (detail) => {
-        this.reportOne(detail, userId);
+        reportOne(detail, userId);
       },
       userId,
     });
   }
 
-  #compact(input: CompactionSelection): Promise<string> {
-    return compactSessionForAgent(this.#dependencies, input);
+  function compact(input: CompactionSelection): Promise<string> {
+    return compactSessionForAgent(dependencies, input);
   }
 
-  #steer(
+  function steer(
     userId: string,
     sessionId: string,
     message: string,
     workspaceId: string,
     signal: AbortSignal,
   ): Promise<string> {
-    return steerSessionForAgent(this.#dependencies, {
+    return steerSessionForAgent(dependencies, {
       message,
       sessionId,
       signal,
@@ -609,7 +637,7 @@ export class SessionAgentActions {
     });
   }
 
-  #stop(
+  function stop(
     parentSessionId: string,
     userId: string,
     sessionId: string,
@@ -617,28 +645,34 @@ export class SessionAgentActions {
     workspaceId: string,
     signal: AbortSignal,
   ): string {
-    const target = this.#detail(userId, sessionId, workspaceId);
+    const target = detail(userId, sessionId, workspaceId);
     throwIfSignalAborted(signal, "The stop was canceled");
     if (target.status !== "stopped") {
-      this.#dependencies.store.stop(
-        userId,
-        sessionId,
-        this.#dependencies.now(),
-      );
-      if (cascade) this.stopChildren(target, userId);
+      dependencies.store.stop(userId, sessionId, dependencies.now());
+      if (cascade) stopChildren(target, userId);
     }
-    const cancel = this.#cancel;
+    const cancelAfterResponse = cancel;
     if (sessionId === parentSessionId) {
       queueMicrotask(() => {
-        cancel(sessionId);
-        this.#dependencies.cleanupSession(target);
+        cancelAfterResponse(sessionId);
+        dependencies.cleanupSession(target);
       });
     } else {
       cancel(sessionId);
-      this.#dependencies.cleanupSession(target);
+      dependencies.cleanupSession(target);
     }
-    this.#dependencies.notify(userId, sessionId);
-    this.finished(target, userId);
+    dependencies.notify(userId, sessionId);
+    finished(target, userId);
     return sessionToolOutput({ sessionId, status: "stopped" });
   }
+  return {
+    actions,
+    finished,
+    isDraining,
+    reportAll,
+    reportOne,
+    reportedParent,
+    stopChildren,
+    stopSession,
+  };
 }

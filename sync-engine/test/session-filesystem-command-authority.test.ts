@@ -8,7 +8,7 @@ import {
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import { createSessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { loadSessionAgentFile } from "../../sync-engine/session-agent-file.ts";
 import {
   createSessionRequestHelpers,
@@ -259,7 +259,7 @@ test("agent directory browsing passes parent identity, authorization, and signal
     emptyRuntimes,
   );
   const session = testSession();
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...actionDefaults(),
     browseDirectories: browse,
     database,

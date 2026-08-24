@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { SessionAgentActions } from "../session-agent-actions.ts";
+import { createSessionAgentActions } from "../session-agent-actions.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -43,7 +43,7 @@ function expectLaunchFailureReport(
 function actionsForFailedLaunch(setup: ReturnType<typeof spawnedChildSetup>) {
   const notify = vi.fn();
   const dependencies = terminalEventActionSetup(setup, () => false, notify);
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...dependencies,
     now: () => TEST_NOW + 6,
   }).actions(

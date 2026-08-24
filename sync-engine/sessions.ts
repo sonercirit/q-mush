@@ -22,7 +22,7 @@ import {
 } from "./openrouter-provider-discovery.ts";
 import type { RealtimeHub } from "./realtime-hub.ts";
 import type { RunnerIntegration } from "./runners.ts";
-import { createSessionAgentActions } from "./session-agent-actions-factory.ts";
+import { createConfiguredSessionAgentActions } from "./session-agent-actions-factory.ts";
 import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type { AgentModelFactory } from "./session-agent-models.ts";
 import {
@@ -244,7 +244,7 @@ class DrizzleSessionIntegration
         ...dependencies.restartTiming,
       },
     );
-    this.#actions = createSessionAgentActions({
+    this.#actions = createConfiguredSessionAgentActions({
       broker: this.#broker,
       cleanup: this.#cleanup,
       database,

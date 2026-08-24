@@ -1,5 +1,6 @@
 import { expect, vi } from "vitest";
-import { SessionAgentActions } from "../session-agent-actions.ts";
+import type { SessionAgentActionsDependencies } from "../session-agent-actions-dependencies.ts";
+import { createSessionAgentActions } from "../session-agent-actions.ts";
 import { type SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
@@ -100,7 +101,7 @@ export function terminalEventActions(
   store: SessionStore,
   database: ConstructorParameters<typeof SessionStore>[0],
   cleanupSession = vi.fn(),
-  overrides: Partial<ConstructorParameters<typeof SessionAgentActions>[0]> = {},
+  overrides: Partial<SessionAgentActionsDependencies> = {},
 ) {
   const launchSession = vi.fn(() => true);
   const notify = vi.fn();
@@ -114,7 +115,7 @@ export function terminalEventActions(
     dependencies.broker,
     "cancelSessionCommands",
   );
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...dependencies,
     abortSession,
     cleanupSession,

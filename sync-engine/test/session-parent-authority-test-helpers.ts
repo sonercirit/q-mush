@@ -6,7 +6,10 @@ import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
 import { RunnerStore } from "../../sync-engine/runner-store.ts";
-import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
+import {
+  createSessionAgentActions,
+  type SessionAgentActions,
+} from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
@@ -183,7 +186,7 @@ export function authoritySetup(options: {
       return detail;
     });
   }
-  const actions = new SessionAgentActions({
+  const actions = createSessionAgentActions({
     ...inactiveSessionAgentActionDefaults(),
     compactSession: startManualSessionCompactionForUserId,
     database,
