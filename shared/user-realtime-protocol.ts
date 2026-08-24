@@ -62,7 +62,7 @@ export interface UserRealtimeProtocolError extends Error {
   readonly name: typeof USER_REALTIME_PROTOCOL_ERROR;
 }
 
-export const createUserRealtimeProtocolError = (
+const createUserRealtimeProtocolError = (
   message: string,
   commandId?: string,
 ): UserRealtimeProtocolError =>

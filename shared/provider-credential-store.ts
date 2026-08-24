@@ -78,7 +78,7 @@ export interface DuplicateProviderCredentialError extends Error {
   readonly name: typeof DUPLICATE_PROVIDER_CREDENTIAL_ERROR;
 }
 
-export const createDuplicateProviderCredentialError =
+const createDuplicateProviderCredentialError =
   (): DuplicateProviderCredentialError =>
     Object.assign(new Error("This provider credential is already stored"), {
       name: DUPLICATE_PROVIDER_CREDENTIAL_ERROR,
