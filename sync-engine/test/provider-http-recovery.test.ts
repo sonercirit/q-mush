@@ -81,34 +81,33 @@ function eventStream(
   });
 }
 
-class ProviderResponses {
-  readonly delays: number[] = [];
-  readonly requests: Request[] = [];
-  readonly #responses: Response[];
+interface ProviderResponses {
+  readonly delays: number[];
+  readonly fetch: (request: Request) => Promise<Response>;
+  readonly requests: Request[];
+  sleep: (milliseconds: number) => Promise<void>;
+}
 
-  constructor(
-    responses: Response[],
-    readonly beforeFetch?: () => Promise<void>,
-  ) {
-    this.#responses = responses;
-  }
-
-  readonly fetch = async (request: Request): Promise<Response> => {
-    await this.beforeFetch?.();
-    const response = this.#responses.shift();
-    this.requests.push(request);
+function createProviderResponses(
+  queuedResponses: Response[],
+  beforeFetch?: () => Promise<void>,
+): ProviderResponses {
+  const delays: number[] = [];
+  const requests: Request[] = [];
+  const fetch = async (request: Request): Promise<Response> => {
+    await beforeFetch?.();
+    const response = queuedResponses.shift();
+    requests.push(request);
     if (response === undefined) {
-      return Promise.reject(
-        new RangeError("Missing queued test provider response"),
-      );
+      throw new RangeError("Missing queued test provider response");
     }
     return response;
   };
-
-  sleep = (milliseconds: number): Promise<void> => {
-    this.delays.push(milliseconds);
+  const sleep = (milliseconds: number): Promise<void> => {
+    delays.push(milliseconds);
     return Promise.resolve();
   };
+  return { delays, fetch, requests, sleep };
 }
 
 function openRouterModel(
@@ -215,7 +214,7 @@ describe("provider HTTP step recovery", () => {
     const retryResponse = eventStream([
       errorEvent({ code: 502, message: "Retry" }),
     ]);
-    const provider = new ProviderResponses(
+    const provider = createProviderResponses(
       [retryResponse, eventStream([textEvent("Done.")])],
       async () => {
         attempts += 1;
@@ -235,7 +234,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("resets a partial step and persists only the recovered tool call", async () => {
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([
         textEvent("Discarded partial output."),
         toolEvent("discarded-call"),
@@ -347,7 +346,7 @@ describe("provider HTTP step recovery", () => {
     readonly refreshes: readonly string[];
     readonly sockets: FakeProviderSockets;
   } {
-    const provider = new ProviderResponses([...responses]);
+    const provider = createProviderResponses([...responses]);
     const refreshes: string[] = [];
     const sockets = new FakeProviderSockets();
     const model = oauthHttpRecoveryModel(provider, refreshes);
@@ -412,7 +411,7 @@ describe("provider HTTP step recovery", () => {
     ];
 
     for (const { expectedDelay, first } of cases) {
-      const provider = new ProviderResponses([first, recoveredResponse()]);
+      const provider = createProviderResponses([first, recoveredResponse()]);
       const deltas: ProviderTextDelta[] = [];
 
       expect(
@@ -431,7 +430,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("repairs malformed replayed tool calls before sending", async () => {
-    const provider = new ProviderResponses([recoveredResponse()]);
+    const provider = createProviderResponses([recoveredResponse()]);
 
     await openRouterModel(provider).complete([
       ...USER_MESSAGE,
@@ -485,7 +484,7 @@ describe("provider HTTP step recovery", () => {
         type: "invalid_request_error",
       },
     });
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       Response.json(
         {
           error: {
@@ -509,7 +508,7 @@ describe("provider HTTP step recovery", () => {
 
   test("bounds transient retries and preserves sanitized request detail", async () => {
     const leakedKey = "sk-proj-secret123456789";
-    const provider = new ProviderResponses(
+    const provider = createProviderResponses(
       Array.from({ length: 4 }, () =>
         eventStream([
           textEvent("Partial."),
@@ -535,7 +534,7 @@ describe("provider HTTP step recovery", () => {
   });
 
   test("does not retry permanent errors", async () => {
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([
         errorEvent({
           code: 401,
@@ -556,7 +555,7 @@ describe("provider HTTP step recovery", () => {
 
   test("aborts during stream retry backoff", async () => {
     const controller = new AbortController();
-    const provider = new ProviderResponses([
+    const provider = createProviderResponses([
       eventStream([errorEvent({ code: 502, message: "Unavailable" })]),
     ]);
     provider.sleep = async (milliseconds: number): Promise<void> => {
