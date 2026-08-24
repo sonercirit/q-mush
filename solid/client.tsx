@@ -37,7 +37,8 @@ import {
   RenderDebugLegend,
   RenderDebugProvider,
   RenderDebugToggle,
-  RenderDebugView,
+  createRenderDebugView,
+  type RenderDebugView,
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
 import { RunnerController } from "./runner-controller.ts";
@@ -295,7 +296,7 @@ function App(): JSX.Element {
     createSignal<EngineHealthSnapshot>();
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
-  const debug = new RenderDebugView();
+  const debug = createRenderDebugView();
   const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
   const generic = new ProviderController(GENERIC_PANEL);
   const openAi = new ProviderController(OPENAI_PANEL);

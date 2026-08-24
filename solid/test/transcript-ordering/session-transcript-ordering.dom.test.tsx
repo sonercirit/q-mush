@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import type { AgentSessionDetail } from "../../../shared/session-model.ts";
-import { RenderDebugView } from "../../render-debug.tsx";
+import { createRenderDebugView, type RenderDebugView } from "../../render-debug.tsx";
 import type { SessionController } from "../../session-controller.ts";
 import { disposeTestViews } from "../dom-test-helpers.ts";
 import {
@@ -433,7 +433,7 @@ test("reconciles a persisted thinking snapshot before its assistant", () => {
       3,
     ),
   ];
-  const debug = new RenderDebugView();
+  const debug = createRenderDebugView();
   const { container, controller, detail } = mountedTranscript(messages, debug);
   const stableUser = messageBoundary(container, "user-stable");
   const stableAssistant = messageBoundary(container, "assistant-stable");
