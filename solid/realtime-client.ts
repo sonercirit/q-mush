@@ -54,6 +54,17 @@ type DeferredStateEvent = Extract<
 const RECONNECT_DELAYS = [250, 500, 1_000, 2_000, 5_000] as const;
 const STREAM_UPDATES_PER_FRAME = 4;
 const STREAM_PREP_BUDGET_MS = 8;
+function stateEventKey<Type extends DeferredStateEvent["type"]>(
+  event: Extract<DeferredStateEvent, { readonly type: Type }>,
+  expectedType: Type,
+  keys: {
+    [Kind in DeferredStateEvent["type"]]: (
+      matched: Extract<DeferredStateEvent, { readonly type: Kind }>,
+    ) => string;
+  },
+): string {
+  return keys[expectedType](event);
+}
 function noSelectedSession(): undefined {
   return undefined;
 }
@@ -304,21 +315,25 @@ export class RealtimeConnection {
     });
   }
   #stateEventKey(event: DeferredStateEvent): string {
-    switch (event.type) {
-      case "session":
-        return `session:${event.session.id}`;
-      case "session_questions":
-        return `session_questions:${event.sessionId}`;
-      case "session_compaction_request":
-      case "session_compaction_settled":
-        return `${event.type}:${event.sessionId}`;
-      case "tool_stream_snapshot":
-        return `${event.type}:${event.sessionId}:${event.streamId}`;
-      case "runners":
-      case "sessions":
-      case "sessions_changed":
-        return event.type;
-    }
+    const keys: {
+      [Type in DeferredStateEvent["type"]]: (
+        matched: Extract<DeferredStateEvent, { readonly type: Type }>,
+      ) => string;
+    } = {
+      runners: (matched) => matched.type,
+      session: (matched) => `session:${matched.session.id}`,
+      session_compaction_request: (matched) =>
+        `${matched.type}:${matched.sessionId}`,
+      session_compaction_settled: (matched) =>
+        `${matched.type}:${matched.sessionId}`,
+      session_questions: (matched) =>
+        `session_questions:${matched.sessionId}`,
+      sessions: (matched) => matched.type,
+      sessions_changed: (matched) => matched.type,
+      tool_stream_snapshot: (matched) =>
+        `${matched.type}:${matched.sessionId}:${matched.streamId}`,
+    };
+    return stateEventKey(event, event.type, keys);
   }
   #discardStateEvents(): void {
     this.#stateEventGeneration += 1;
