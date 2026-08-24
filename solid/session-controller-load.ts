@@ -98,22 +98,33 @@ export interface SessionLoadController {
   readonly hydrateAfterReconnect: () => void;
   readonly load: () => Promise<void>;
   readonly noteMutationStarted: () => void;
-  readonly reconcileDetail: (sessionId: string) => Promise<AgentSessionDetail | undefined>;
-  readonly reconcileSessions: (previousIds: ReadonlySet<string>, kind?: SessionCreationKind) => Promise<SessionCreationReconciliation | undefined>;
+  readonly reconcileDetail: (
+    sessionId: string,
+  ) => Promise<AgentSessionDetail | undefined>;
+  readonly reconcileSessions: (
+    previousIds: ReadonlySet<string>,
+    kind?: SessionCreationKind,
+  ) => Promise<SessionCreationReconciliation | undefined>;
   readonly refresh: () => Promise<void>;
   readonly reset: () => void;
   readonly select: (sessionId: string) => Promise<void>;
 }
 
 export function createSessionLoadController(
-  view: RevisionState<SessionViewState>, realtime: SessionRealtimeState,
+  view: RevisionState<SessionViewState>,
+  realtime: SessionRealtimeState,
   transport?: SessionCommandTransport,
 ): SessionLoadController {
-  const state = { generation: 0, hydrating: false, hydrationPending: false, loadRevision: 0 };
+  const state = {
+    generation: 0,
+    hydrating: false,
+    hydrationPending: false,
+    loadRevision: 0,
+  };
   const hydrateAfterReconnect = (): void => {
     state.hydrationPending = true;
     continueHydration();
-  }
+  };
 
   const continueHydration = (): void => {
     if (
@@ -125,7 +136,7 @@ export function createSessionLoadController(
       return;
     }
     startHydration();
-  }
+  };
 
   const startHydration = (): void => {
     state.generation += 1;
@@ -135,21 +146,21 @@ export function createSessionLoadController(
       state.hydrating = false;
       continueHydration();
     });
-  }
+  };
 
   const noteMutationStarted = (): void => {
     if (state.hydrating) {
       state.generation += 1;
       state.hydrationPending = true;
     }
-  }
+  };
 
   const reset = (): void => {
     state.generation += 1;
     state.hydrating = false;
     state.hydrationPending = false;
     state.loadRevision += 1;
-  }
+  };
 
   const reconcileDetail = async (
     sessionId: string,
@@ -173,7 +184,7 @@ export function createSessionLoadController(
     } catch {
       return undefined;
     }
-  }
+  };
 
   const reconcileSessions = async (
     previousIds: ReadonlySet<string>,
@@ -214,7 +225,7 @@ export function createSessionLoadController(
     } catch {
       return undefined;
     }
-  }
+  };
 
   const loadRealtimeSummaries = async (): Promise<
     readonly AgentSessionSummary[] | undefined
@@ -228,7 +239,7 @@ export function createSessionLoadController(
     } catch {
       return undefined;
     }
-  }
+  };
 
   const hydrate = async (): Promise<void> => {
     const generation = state.generation;
@@ -272,14 +283,14 @@ export function createSessionLoadController(
       // A reconnect or mutation race that arrived during this request remains
       // queued; ordinary transport failures add no retry of their own.
     }
-  }
+  };
 
   const beginView = (patch: Partial<SessionViewState>): number => {
     state.generation += 1;
     state.loadRevision += 1;
     view.begin(patch);
     return state.loadRevision;
-  }
+  };
 
   const load = async (): Promise<void> => {
     const revision = beginView({
@@ -296,7 +307,7 @@ export function createSessionLoadController(
       return;
     }
     await loadSessions(revision, true);
-  }
+  };
 
   const refresh = async (): Promise<void> => {
     const revision = state.loadRevision;
@@ -315,7 +326,7 @@ export function createSessionLoadController(
     ) {
       applyDetail(detail, revision, false);
     }
-  }
+  };
 
   const select = async (sessionId: string): Promise<void> => {
     return runUnlessSessionMutation(
@@ -323,7 +334,7 @@ export function createSessionLoadController(
       () => selectInternal(sessionId),
       Promise.resolve(),
     );
-  }
+  };
 
   const selectInternal = async (sessionId: string): Promise<void> => {
     if (
@@ -343,9 +354,11 @@ export function createSessionLoadController(
       toolStreams: [],
     });
     await readDetail(sessionId, revision, true);
-  }
+  };
 
-  const patchRecentDirectory = (sessions: readonly AgentSessionSummary[]): void => {
+  const patchRecentDirectory = (
+    sessions: readonly AgentSessionSummary[],
+  ): void => {
     if (view.value.creating) {
       return;
     }
@@ -355,7 +368,7 @@ export function createSessionLoadController(
         workingDirectory: mostRecentSessionDirectory(sessions),
       },
     });
-  }
+  };
 
   const applySessions = (
     sessions: readonly AgentSessionSummary[],
@@ -363,7 +376,7 @@ export function createSessionLoadController(
   ): void => {
     patchRecentDirectory(sessions);
     view.patch({ selectedId, sessions });
-  }
+  };
 
   const reportInitialLoadFailure = (revision: number): void => {
     if (revision === state.loadRevision) {
@@ -371,7 +384,7 @@ export function createSessionLoadController(
         error: "We could not load your agent sessions. Please try again.",
       });
     }
-  }
+  };
 
   const loadRealtimeSessions = async (revision: number): Promise<void> => {
     const sessions = await loadRealtimeSummaries();
@@ -391,9 +404,12 @@ export function createSessionLoadController(
     } catch {
       reportInitialLoadFailure(revision);
     }
-  }
+  };
 
-  const loadSessions = async (revision: number, initial: boolean): Promise<void> => {
+  const loadSessions = async (
+    revision: number,
+    initial: boolean,
+  ): Promise<void> => {
     try {
       const sessions = await loadSessionSummaries();
       if (revision !== state.loadRevision) {
@@ -427,7 +443,7 @@ export function createSessionLoadController(
         reportInitialLoadFailure(revision);
       }
     }
-  }
+  };
 
   const applyDetail = (
     detail: AgentSessionDetail,
@@ -450,7 +466,7 @@ export function createSessionLoadController(
     }
     view.patch(detailState);
     realtime.applyDetail(detail);
-  }
+  };
 
   const readDetail = async (
     sessionId: string,
@@ -473,7 +489,16 @@ export function createSessionLoadController(
         });
       }
     }
-  }
-  return { continueHydration, hydrateAfterReconnect, load, noteMutationStarted,
-    reconcileDetail, reconcileSessions, refresh, reset, select };
+  };
+  return {
+    continueHydration,
+    hydrateAfterReconnect,
+    load,
+    noteMutationStarted,
+    reconcileDetail,
+    reconcileSessions,
+    refresh,
+    reset,
+    select,
+  };
 }

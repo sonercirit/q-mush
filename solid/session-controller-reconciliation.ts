@@ -318,22 +318,44 @@ function reconciliationSettled(
 }
 
 export interface SessionReconciliationController {
-  readonly creation: (revision: number, error: unknown, baseline: ReadonlySet<string>, descriptor: SessionCreationDescriptor) => Promise<void>;
-  readonly detail: (revision: number, error: unknown, options: DetailMutationOptions, baseline: AgentSessionDetail) => Promise<void>;
-  readonly fork: (revision: number, error: unknown, baseline: ReadonlySet<string>) => Promise<void>;
+  readonly creation: (
+    revision: number,
+    error: unknown,
+    baseline: ReadonlySet<string>,
+    descriptor: SessionCreationDescriptor,
+  ) => Promise<void>;
+  readonly detail: (
+    revision: number,
+    error: unknown,
+    options: DetailMutationOptions,
+    baseline: AgentSessionDetail,
+  ) => Promise<void>;
+  readonly fork: (
+    revision: number,
+    error: unknown,
+    baseline: ReadonlySet<string>,
+  ) => Promise<void>;
   readonly reconnect: () => void;
   readonly reset: () => void;
 }
 
 export function createSessionReconciliationController(
-  view: RevisionState<SessionViewState>, loader: SessionLoadController,
+  view: RevisionState<SessionViewState>,
+  loader: SessionLoadController,
 ): SessionReconciliationController {
   const state: {
-    activeGeneration: number | undefined; generation: number;
+    activeGeneration: number | undefined;
+    generation: number;
     pending: UnknownMutationReconciliation | undefined;
-    reconnectGeneration: number; retryPending: boolean;
-  } = { activeGeneration: undefined, generation: 0, pending: undefined,
-    reconnectGeneration: 0, retryPending: false };
+    reconnectGeneration: number;
+    retryPending: boolean;
+  } = {
+    activeGeneration: undefined,
+    generation: 0,
+    pending: undefined,
+    reconnectGeneration: 0,
+    retryPending: false,
+  };
   const creation = async (
     revision: number,
     error: unknown,
@@ -348,7 +370,7 @@ export function createSessionReconciliationController(
       kind: "creation",
       revision,
     });
-  }
+  };
 
   const fork = async (
     revision: number,
@@ -361,7 +383,7 @@ export function createSessionReconciliationController(
       kind: "fork",
       revision,
     });
-  }
+  };
 
   const detail = async (
     revision: number,
@@ -376,12 +398,14 @@ export function createSessionReconciliationController(
       options,
       revision,
     });
-  }
+  };
 
-  const start = async (reconciliation: UnknownMutationReconciliation): Promise<void> => {
+  const start = async (
+    reconciliation: UnknownMutationReconciliation,
+  ): Promise<void> => {
     state.pending = reconciliation;
     await run(reconciliation);
-  }
+  };
 
   const reconnect = (): void => {
     loader.hydrateAfterReconnect();
@@ -394,7 +418,7 @@ export function createSessionReconciliationController(
         void run(pending);
       }
     }
-  }
+  };
 
   const reset = (): void => {
     state.generation += 1;
@@ -402,9 +426,11 @@ export function createSessionReconciliationController(
     state.pending = undefined;
     state.reconnectGeneration = 0;
     state.retryPending = false;
-  }
+  };
 
-  const run = async (reconciliation: UnknownMutationReconciliation): Promise<void> => {
+  const run = async (
+    reconciliation: UnknownMutationReconciliation,
+  ): Promise<void> => {
     const generation = state.generation;
     const reconnectGeneration = state.reconnectGeneration;
     if (state.activeGeneration === generation) {
@@ -451,7 +477,7 @@ export function createSessionReconciliationController(
         finish(generation);
       }
     }
-  }
+  };
 
   const finish = (generation: number): void => {
     if (state.activeGeneration !== generation) {
@@ -468,7 +494,7 @@ export function createSessionReconciliationController(
     } else {
       state.retryPending = false;
     }
-  }
+  };
 
   const settleCurrent = (
     generation: number,
@@ -482,7 +508,7 @@ export function createSessionReconciliationController(
     ) {
       settle(reconciliation, patch);
     }
-  }
+  };
 
   const settle = (
     reconciliation: UnknownMutationReconciliation,
@@ -496,6 +522,6 @@ export function createSessionReconciliationController(
     if (settled && patched) {
       state.pending = undefined;
     }
-  }
+  };
   return { creation, detail, fork, reconnect, reset };
 }
