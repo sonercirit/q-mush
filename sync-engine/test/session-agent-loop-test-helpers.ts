@@ -3,10 +3,7 @@ import type {
   AgentMessageRecorder,
   AgentRecordedMessage,
 } from "../../shared/agent-loop.ts";
-import type {
-  AgentConversationCompactor,
-  CompactedConversation,
-} from "../../sync-engine/agent-compaction.ts";
+import type { AgentConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import type { PromiseGate } from "./session-race-test-helpers.ts";
@@ -29,7 +26,7 @@ export type LoopOptions = Parameters<typeof runCompactingAgentLoop>[0];
 export function compacted(
   summary: string,
   costUsd: number | null = null,
-): CompactedConversation {
+): Awaited<ReturnType<AgentConversationCompactor["compact"]>> {
   return {
     contextTokens: null,
     costUsd,
@@ -53,7 +50,9 @@ export function countedCompactor(
 
 export function recordingCompactor(
   conversations: unknown[],
-  result: (count: number) => CompactedConversation,
+  result: (
+    count: number,
+  ) => Awaited<ReturnType<AgentConversationCompactor["compact"]>>,
 ): () => AgentConversationCompactor {
   return () => ({
     compact: (messages) => {

@@ -25,7 +25,7 @@ type CompactionArguments = readonly [
   signal?: AbortSignal,
 ];
 
-export interface CompactedConversation {
+interface CompactedConversation {
   readonly contextTokens: AgentModelStep["contextTokens"];
   readonly costUsd: number | null;
   readonly messages: readonly AgentConversationMessage[];

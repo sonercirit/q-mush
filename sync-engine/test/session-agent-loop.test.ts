@@ -1,8 +1,5 @@
 import { describe, expect, test } from "vitest";
-import type {
-  AgentConversationCompactor,
-  CompactedConversation,
-} from "../../sync-engine/agent-compaction.ts";
+import type { AgentConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import { runCompactingAgentLoop } from "../../sync-engine/session-agent-loop.ts";
 import { ScriptedAgentModel } from "./scripted-agent-model.ts";
 import {
@@ -442,7 +439,8 @@ describe("compacting agent session loop", () => {
   });
 
   test("completes when restart becomes pending during terminal compaction", async () => {
-    const compactor = promiseGate<CompactedConversation>();
+    const compactor =
+      promiseGate<Awaited<ReturnType<AgentConversationCompactor["compact"]>>>();
     const compactionPersistence = promiseGate();
     const model = new ScriptedAgentModel([
       highStep("Durable terminal response."),
