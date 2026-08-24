@@ -4,7 +4,7 @@ import {
   apiKeyModel,
   complete,
   completeProviderSocket,
-  FakeProviderSockets,
+  createFakeProviderSockets,
   replaceProviderSocket,
   requireProviderSocket,
   retryingSocket,
@@ -12,7 +12,7 @@ import {
 import { expectDoneStep } from "./provider-step-fixtures.ts";
 
 test("does not adopt a retained ID after unidentified admission", async () => {
-  const setup = new FakeProviderSockets();
+  const setup = createFakeProviderSockets();
   const model = apiKeyModel({ webSocket: setup.create });
   const first = complete(model);
   const socket = requireProviderSocket(setup, 0);
@@ -40,7 +40,7 @@ test("does not adopt a retained ID after unidentified admission", async () => {
 });
 
 test("retries a late prior-response error on a reused socket", async () => {
-  const setup = new FakeProviderSockets();
+  const setup = createFakeProviderSockets();
   const createSocket = setup.create;
   const model = apiKeyModel({ webSocket: createSocket });
   const first = complete(model);

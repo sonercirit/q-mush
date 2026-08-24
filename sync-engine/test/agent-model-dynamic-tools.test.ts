@@ -6,11 +6,11 @@ import { codexOAuthCredential } from "./prompt-cache-fixtures.ts";
 import {
   acknowledgeProviderSocket,
   COMPLETED_EVENT,
-  FakeProviderSockets,
+  createFakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 
 test("OpenAI dynamic allowed_tools keeps the full cached catalog stable", async () => {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const model = new ChatCompletionsAgentModel({
     credential: codexOAuthCredential(),
     credentialFingerprint: TEST_CREDENTIAL_FINGERPRINT,

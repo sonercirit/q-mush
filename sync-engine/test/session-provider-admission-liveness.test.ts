@@ -25,8 +25,8 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { DeferredAgentModel } from "./deferred-agent-model.ts";
 import {
+  createFakeProviderSockets,
   expectProviderSocketReleased,
-  FakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 import { configuredRealtimeTestIntegration } from "./realtime-test-helpers.ts";
@@ -63,7 +63,7 @@ const temporaryDirectory = useSynchronousTemporaryDirectories(
 class StalledReusedSocketModel implements AgentModel {
   readonly #model: ChatCompletionsAgentModel;
   readonly requests: AgentConversationMessage[][] = [];
-  readonly sockets = new FakeProviderSockets();
+  readonly sockets = createFakeProviderSockets();
 
   constructor(
     onDelta: AgentModelRequestOptions["onDelta"],

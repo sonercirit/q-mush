@@ -6,35 +6,39 @@ import {
   complete,
   COMPLETED_EVENT,
   completeProviderSocket,
-  FakeProviderSockets,
+  createFakeProviderSockets,
   requireProviderSocket,
 } from "./provider-recovery-fixtures.ts";
 
-export class InstrumentedAbortController extends AbortController {
-  abortListenerCount = 0;
-  constructor() {
-    super();
-    const signal = this.signal;
-    const add = signal.addEventListener.bind(signal);
-    const remove = signal.removeEventListener.bind(signal);
-    signal.addEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: AddEventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount += 1;
-      add(type, listener, options);
-    };
-    signal.removeEventListener = (
-      type: string,
-      listener: EventListenerOrEventListenerObject,
-      options?: EventListenerOptions | boolean,
-    ) => {
-      if (type === "abort") this.abortListenerCount -= 1;
-      remove(type, listener, options);
-    };
-  }
+export interface InstrumentedAbortController extends AbortController {
+  abortListenerCount: number;
 }
+
+export function createInstrumentedAbortController(): InstrumentedAbortController {
+  const controller = new AbortController();
+  const signal = controller.signal;
+  const add = signal.addEventListener.bind(signal);
+  const remove = signal.removeEventListener.bind(signal);
+  const instrumented = Object.assign(controller, { abortListenerCount: 0 });
+  signal.addEventListener = (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: AddEventListenerOptions | boolean,
+  ) => {
+    if (type === "abort") instrumented.abortListenerCount += 1;
+    add(type, listener, options);
+  };
+  signal.removeEventListener = (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: EventListenerOptions | boolean,
+  ) => {
+    if (type === "abort") instrumented.abortListenerCount -= 1;
+    remove(type, listener, options);
+  };
+  return instrumented;
+}
+
 export function completeWithSignal(
   model: ChatCompletionsAgentModel,
   signal: AbortSignal,
@@ -42,8 +46,8 @@ export function completeWithSignal(
   return model.complete([{ content: "Hello", role: "user" }], signal);
 }
 export function instrumentedProviderRequest() {
-  const controller = new InstrumentedAbortController();
-  const sockets = new FakeProviderSockets();
+  const controller = createInstrumentedAbortController();
+  const sockets = createFakeProviderSockets();
   const model = apiKeyModel({ webSocket: sockets.create });
   const pending = completeWithSignal(model, controller.signal);
   const socket = requireProviderSocket(sockets, 0);
@@ -51,7 +55,7 @@ export function instrumentedProviderRequest() {
   return { controller, pending, socket };
 }
 export function lifecycleModel(states: ("active" | "admission")[]) {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   return {
     model: apiKeyModel({
       onRequestState: (state) => states.push(state),

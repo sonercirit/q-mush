@@ -9,8 +9,8 @@ import {
 } from "./prompt-cache-fixtures.ts";
 import {
   completedEventResponse,
+  createFakeProviderSockets,
   failWebSocketAttempts,
-  FakeProviderSockets,
 } from "./provider-recovery-fixtures.ts";
 
 type ModelOptions = ConstructorParameters<typeof ChatCompletionsAgentModel>[0];
@@ -98,7 +98,7 @@ describe("prompt cache request state", () => {
   });
 
   test("routes Codex requests with the session_id header and body key", async () => {
-    const sockets = new FakeProviderSockets();
+    const sockets = createFakeProviderSockets();
     let captured: Request | undefined;
     const model = new ChatCompletionsAgentModel({
       toolSettings: DEFAULT_TOOL_SETTINGS,

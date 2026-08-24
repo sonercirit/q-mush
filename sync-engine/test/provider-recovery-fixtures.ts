@@ -37,76 +37,80 @@ export const COMPLETED_EVENT = {
 
 const USER_MESSAGE = [{ content: "Hello", role: "user" as const }];
 
-export class FakeProviderSocket extends RecordingTestSocket {
+export interface FakeProviderSocket extends RecordingTestSocket {
   closeCode: number | undefined;
-  closeCount = 0;
+  closeCount: number;
   closeReason: string | undefined;
   readonly headers: Readonly<Record<string, string>>;
-  readonly #listeners = new Map<
-    string,
-    Set<EventListenerOrEventListenerObject>
-  >();
+  close: (code?: number, reason?: string) => void;
+  readonly listenerCount: (type: string) => number;
+  readonly fail: () => void;
+  readonly open: () => void;
+}
 
-  constructor(headers: Readonly<Record<string, string>> = {}) {
-    super({
-      closeEvent: () => new CloseEvent("close", { code: 1000 }),
-      readyState: WebSocket.CONNECTING,
-    });
-    this.headers = headers;
-  }
-
-  #changeListener(
+export function createFakeProviderSocket(
+  headers: Readonly<Record<string, string>> = {},
+): FakeProviderSocket {
+  const socket = new RecordingTestSocket({
+    closeEvent: () => new CloseEvent("close", { code: 1000 }),
+    readyState: WebSocket.CONNECTING,
+  });
+  const listeners = new Map<string, Set<EventListenerOrEventListenerObject>>();
+  const add = socket.addEventListener.bind(socket);
+  const remove = socket.removeEventListener.bind(socket);
+  const close = socket.close.bind(socket);
+  const changeListener = (
     action: "add" | "remove",
     type: string,
     callback: EventListenerOrEventListenerObject,
-  ): void {
-    const listeners = this.#listeners.get(type) ?? new Set();
+  ): void => {
+    const entries = listeners.get(type) ?? new Set();
     if (action === "add") {
-      listeners.add(callback);
-      this.#listeners.set(type, listeners);
+      entries.add(callback);
+      listeners.set(type, entries);
       return;
     }
-    listeners.delete(callback);
-    if (listeners.size === 0) this.#listeners.delete(type);
-  }
-
-  override addEventListener(
-    type: string,
-    callback: EventListenerOrEventListenerObject | null,
-    options?: AddEventListenerOptions | boolean,
-  ): void {
-    super.addEventListener(type, callback, options);
-    if (callback !== null) this.#changeListener("add", type, callback);
-  }
-
-  override close(code?: number, reason?: string): void {
-    this.closeCode = code;
-    this.closeCount += 1;
-    this.closeReason = reason;
-    super.close();
-  }
-
-  override removeEventListener(
-    type: string,
-    callback: EventListenerOrEventListenerObject | null,
-    options?: EventListenerOptions | boolean,
-  ): void {
-    super.removeEventListener(type, callback, options);
-    if (callback !== null) this.#changeListener("remove", type, callback);
-  }
-
-  listenerCount(type: string): number {
-    return this.#listeners.get(type)?.size ?? 0;
-  }
-
-  fail(): void {
-    this.dispatchEvent(new Event("error"));
-  }
-
-  open(): void {
-    this.readyState = WebSocket.OPEN;
-    this.dispatchEvent(new Event("open"));
-  }
+    entries.delete(callback);
+    if (entries.size === 0) listeners.delete(type);
+  };
+  const state: {
+    closeCode: number | undefined;
+    closeCount: number;
+    closeReason: string | undefined;
+  } = { closeCode: undefined, closeCount: 0, closeReason: undefined };
+  return Object.assign(socket, state, {
+    addEventListener(
+      type: string,
+      callback: EventListenerOrEventListenerObject | null,
+      options?: AddEventListenerOptions | boolean,
+    ): void {
+      add(type, callback, options);
+      if (callback !== null) changeListener("add", type, callback);
+    },
+    close(code?: number, reason?: string): void {
+      state.closeCode = code;
+      state.closeCount += 1;
+      state.closeReason = reason;
+      close();
+    },
+    fail(): void {
+      socket.dispatchEvent(new Event("error"));
+    },
+    headers,
+    listenerCount: (type: string) => listeners.get(type)?.size ?? 0,
+    open(): void {
+      socket.readyState = WebSocket.OPEN;
+      socket.dispatchEvent(new Event("open"));
+    },
+    removeEventListener(
+      type: string,
+      callback: EventListenerOrEventListenerObject | null,
+      options?: EventListenerOptions | boolean,
+    ): void {
+      remove(type, callback, options);
+      if (callback !== null) changeListener("remove", type, callback);
+    },
+  });
 }
 
 type WebSocketFactory = NonNullable<
@@ -147,20 +151,27 @@ export function recordDelay(delays: number[]): ModelRequestSleep {
   };
 }
 
-export class FakeProviderSockets {
-  readonly created: FakeProviderSocket[] = [];
+export interface FakeProviderSockets {
+  readonly created: FakeProviderSocket[];
+  readonly create: WebSocketFactory;
+  readonly waitForAttempt: (index: number) => Promise<void>;
+}
 
-  readonly create: WebSocketFactory = (_url, options) => {
-    const socket = new FakeProviderSocket(options.headers);
-    this.created.push(socket);
-    return socket;
+export function createFakeProviderSockets(): FakeProviderSockets {
+  const created: FakeProviderSocket[] = [];
+  return {
+    created,
+    create: (_url, options) => {
+      const socket = createFakeProviderSocket(options.headers);
+      created.push(socket);
+      return socket;
+    },
+    async waitForAttempt(index) {
+      await vi.waitFor(() => {
+        expect(created).toHaveLength(index + 1);
+      });
+    },
   };
-
-  async waitForAttempt(index: number): Promise<void> {
-    await vi.waitFor(() => {
-      expect(this.created).toHaveLength(index + 1);
-    });
-  }
 }
 
 interface RetryingSocketSetup {
@@ -243,7 +254,7 @@ export async function replaceProviderSocket(
 export function retryingSocket(): RetryingSocketSetup {
   const deltas: ProviderTextDelta[] = [];
   const delays: number[] = [];
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const collectDelta = (delta: ProviderTextDelta): void => {
     deltas.push(delta);
   };
@@ -335,7 +346,7 @@ export async function failWebSocketAttempts(
 export async function expectBoundedHttpFallback(options: {
   readonly failAttempt: (socket: FakeProviderSocket, index: number) => void;
 }): Promise<void> {
-  const sockets = new FakeProviderSockets();
+  const sockets = createFakeProviderSockets();
   const delays: number[] = [];
   let fetchCount = 0;
   const states: ("active" | "admission")[] = [];
