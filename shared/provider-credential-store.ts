@@ -142,36 +142,17 @@ function legacyCredentialSummary(
   };
 }
 
-export function listActiveModelCredentials(
-  database: AppDatabase,
-  userId: string,
-  provider: ProviderId,
-  workspaceId?: string,
-): readonly ProviderCredentialSummary[] {
-  return queryActiveModelCredentials(database, userId, provider, workspaceId);
-}
-export function hasActiveModelCredential(
-  database: AppDatabase,
-  userId: string,
-  provider: ProviderId,
-  credentialId: string,
-  workspaceId?: string,
-): boolean {
-  return modelCredentialIsActive(
-    database,
-    userId,
-    provider,
-    credentialId,
-    workspaceId,
-  );
-}
+export const listActiveModelCredentials = queryActiveModelCredentials;
+export const hasActiveModelCredential = modelCredentialIsActive;
 export function listModelCredentials(
   database: AppDatabase,
   userId: string,
-  offset: number,
-  limit: number,
-  search?: string,
-  workspaceId?: string,
+  ...[offset, limit, search, workspaceId]: [
+    offset: number,
+    limit: number,
+    search?: string,
+    workspaceId?: string,
+  ]
 ): ProviderCredentialPage {
   const options: ModelCredentialQueryOptions = {
     pageSize: limit,
@@ -182,54 +163,62 @@ export function listModelCredentials(
   return queryModelCredentials(database, userId, options);
 }
 
+type ReadCredential = (
+  userId: string,
+  credentialId: string,
+  workspaceId?: string,
+) => ProviderCredentialAccess | undefined;
+
+type AddCredentialArguments = [
+  userId: string,
+  credential: string,
+  details: ProviderCredentialDetails,
+  source: ProviderCredentialSource,
+  now: number,
+  workspaceIds?: readonly string[],
+];
+type SetScopesArguments = [
+  userId: string,
+  credentialId: string,
+  workspaceIds: readonly string[],
+  now: number,
+];
+type UpdateSecretArguments = [
+  userId: string,
+  credentialId: string,
+  secret: string,
+  now: number,
+  requireReauthentication?: boolean,
+  accountId?: string,
+  label?: string,
+];
+
+type ReadSecret = (
+  userId: string,
+  credentialId: string,
+  workspaceId?: string,
+) => string | undefined;
+
 export interface ProviderCredentialStore {
   validateScopes(
     userId: string,
     workspaceIds: readonly string[],
   ): readonly string[];
-  add(
-    userId: string,
-    credential: string,
-    details: ProviderCredentialDetails,
-    source: ProviderCredentialSource,
-    now: number,
-    workspaceIds?: readonly string[],
-  ): ProviderCredentialSummary;
+  add(...parameters: AddCredentialArguments): ProviderCredentialSummary;
   list(
     userId: string,
     workspaceId?: string,
   ): readonly ProviderCredentialSummary[];
-  read(
-    userId: string,
-    credentialId: string,
-    workspaceId?: string,
-  ): ProviderCredentialAccess | undefined;
-  readSecret(
-    userId: string,
-    credentialId: string,
-    workspaceId?: string,
-  ): string | undefined;
-  setScopes(
-    userId: string,
-    credentialId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ): boolean;
+  read: ReadCredential;
+  readSecret: ReadSecret;
+  setScopes(...parameters: SetScopesArguments): boolean;
   setDefault(userId: string, credentialId: string, now: number): boolean;
   markRequiresReauthentication(
     userId: string,
     credentialId: string,
     now: number,
   ): boolean;
-  updateSecret(
-    userId: string,
-    credentialId: string,
-    secret: string,
-    now: number,
-    requireReauthentication?: boolean,
-    accountId?: string,
-    label?: string,
-  ): boolean;
+  updateSecret(...parameters: UpdateSecretArguments): boolean;
   remove(userId: string, credentialId: string, now: number): boolean;
 }
 
@@ -252,13 +241,16 @@ export function createProviderCredentialStore(
     return validateConnectionScopes(database, userId, workspaceIds);
   }
   function add(
-    userId: string,
-    credential: string,
-    details: ProviderCredentialDetails,
-    source: ProviderCredentialSource,
-    now: number,
-    workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
+    ...parameters: AddCredentialArguments
   ): ProviderCredentialSummary {
+    const [
+      userId,
+      credential,
+      details,
+      source,
+      now,
+      workspaceIds = [GLOBAL_WORKSPACE_ID],
+    ] = parameters;
     const fingerprint = storedCredentialFingerprint({
       ...(details.apiFormat === undefined
         ? {}
@@ -444,12 +436,8 @@ export function createProviderCredentialStore(
     });
   }
 
-  function setScopes(
-    userId: string,
-    credentialId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ): boolean {
+  function setScopes(...parameters: SetScopesArguments): boolean {
+    const [userId, credentialId, workspaceIds, now] = parameters;
     const storedId = matchingCredentialId(
       database,
       activeCredentialCondition(userId, credentialId),
@@ -518,17 +506,7 @@ export function createProviderCredentialStore(
     );
   }
 
-  function updateSecret(
-    ...parameters: [
-      userId: string,
-      credentialId: string,
-      secret: string,
-      now: number,
-      requireReauthentication?: boolean,
-      accountId?: string,
-      label?: string,
-    ]
-  ): boolean {
+  function updateSecret(...parameters: UpdateSecretArguments): boolean {
     const [
       userId,
       credentialId,

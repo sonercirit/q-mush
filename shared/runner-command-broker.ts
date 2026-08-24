@@ -47,12 +47,22 @@ interface RejectedCommand {
   readonly error: Error;
 }
 
+type DispatchCommand = (
+  input: DispatchRunnerToolCommand,
+  signal?: AbortSignal,
+  stream?: RunnerCommandStream,
+) => Promise<RunnerCommandResult>;
+type DeliverCommandArguments = [
+  runnerId: string,
+  processNonce: string | undefined,
+  deliver: (command: RunnerToolCommand) => boolean,
+  deliverCancellation: (commandId: string) => boolean,
+  connectionGeneration?: number,
+];
+type DeliverCommands = (...parameters: DeliverCommandArguments) => boolean;
+
 export interface RunnerCommandBroker {
-  dispatch(
-    input: DispatchRunnerToolCommand,
-    signal?: AbortSignal,
-    stream?: RunnerCommandStream,
-  ): Promise<RunnerCommandResult>;
+  dispatch: DispatchCommand;
   take(runnerId: string): RunnerToolCommand | undefined;
   deliverCancellationTombstones(
     runnerId: string,
@@ -61,13 +71,7 @@ export interface RunnerCommandBroker {
   acknowledgeCancellation(runnerId: string, commandId: string): boolean;
   registerRunnerProcess(runnerId: string, processNonce?: string): boolean;
   commitRunnerProcess(runnerId: string, processNonce?: string): void;
-  deliverRunnerCommands(
-    runnerId: string,
-    processNonce: string | undefined,
-    deliver: (command: RunnerToolCommand) => boolean,
-    deliverCancellation: (commandId: string) => boolean,
-    connectionGeneration?: number,
-  ): boolean;
+  deliverRunnerCommands: DeliverCommands;
   deliverQueued(
     runnerId: string,
     deliver: (command: RunnerToolCommand) => boolean,
@@ -377,12 +381,15 @@ export function createRunnerCommandBroker(
   }
 
   function deliverRunnerCommands(
-    runnerId: string,
-    processNonce: string | undefined,
-    deliver: (command: RunnerToolCommand) => boolean,
-    deliverCancellation: (commandId: string) => boolean,
-    connectionGeneration?: number,
+    ...parameters: DeliverCommandArguments
   ): boolean {
+    const [
+      runnerId,
+      processNonce,
+      deliver,
+      deliverCancellation,
+      connectionGeneration,
+    ] = parameters;
     const sameProcess = runnerProcessMatches(runnerId, processNonce);
     const lostIds = sameProcess
       ? new Set<string>()
