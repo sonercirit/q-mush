@@ -10,7 +10,6 @@ import { SYSTEM_ID } from "../ids.ts";
 import {
   createProviderQuotaStore,
   type ProviderQuotaStore,
-  type ResetReservation,
 } from "../provider-quota-store.ts";
 import { hasTestDatabaseTable } from "./database-fixtures.ts";
 
@@ -109,7 +108,7 @@ function setup() {
 function expectReservation(
   store: ProviderQuotaStore,
   requestId: string,
-  expected: ResetReservation,
+  expected: ReturnType<ProviderQuotaStore["reserveReset"]>,
   now = TEST_NOW,
 ): void {
   expect(
