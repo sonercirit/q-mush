@@ -23,7 +23,7 @@ export interface CredentialCipher {
   readonly seal: (value: string, context: string) => string;
 }
 
-export function createCredentialCipherFromKey(
+function createCredentialCipherFromKey(
   keyValue: Uint8Array,
   nonceGenerator: NonceGenerator = randomBytes,
   keyName = "Credential encryption key",
@@ -93,6 +93,7 @@ export function createCredentialCipherFromKey(
 export function createCredentialCipher(
   encodedKey: string,
   keyName = "Credential encryption key",
+  nonceGenerator: NonceGenerator = randomBytes,
 ): CredentialCipher {
   if (!BASE64URL_PATTERN.test(encodedKey)) {
     throw new Error(`${keyName} must be a 32-byte base64url value`);
@@ -100,7 +101,7 @@ export function createCredentialCipher(
 
   return createCredentialCipherFromKey(
     Buffer.from(encodedKey, "base64url"),
-    randomBytes,
+    nonceGenerator,
     keyName,
   );
 }

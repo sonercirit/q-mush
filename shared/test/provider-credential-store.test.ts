@@ -1,7 +1,7 @@
 import { describe, expect, expectTypeOf, test } from "vitest";
 import { createdAuditFields } from "../../shared/audit.ts";
 import {
-  createCredentialCipherFromKey,
+  createCredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { createDatabase } from "../../shared/database.ts";
@@ -93,8 +93,9 @@ function createProviderStore(options?: { readonly legacySchema?: boolean }): {
     name: "Mush Room",
   };
   database.insert(users).values(user).run();
-  const cipher = createCredentialCipherFromKey(
-    new Uint8Array(32),
+  const cipher = createCredentialCipher(
+    Buffer.from(new Uint8Array(32)).toString("base64url"),
+    "Credential encryption key",
     () => new Uint8Array(12),
   );
   const ids = [CREDENTIAL_ID, SECOND_CREDENTIAL_ID];
