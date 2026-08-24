@@ -189,18 +189,21 @@ export function createRealtimeSessionCommandsIntegration(
         sessionId,
         userId: user.id,
       });
-    switch (result.status) {
-      case "already_cancelled":
-      case "cancelled": {
-        const updatedDetail = detail(user.id, existing.id, workspaceId);
-        dependencies.notify(user.id, sessionId);
-        return { detail: updatedDetail, input: result.input };
-      }
-      case "consumed":
-      case "invalid_state":
-      case "not_found":
-        throw cancellationError(result.status);
+    type Status = CancelPendingInputResult["status"];
+    const handlers: Record<Status, () => CancelPendingInputResult> = {
+      already_cancelled: () => result,
+      cancelled: () => result,
+      consumed: () => result,
+      invalid_state: () => result,
+      not_found: () => result,
+    };
+    const handled = handlers[result.status]();
+    if (handled.status === "already_cancelled" || handled.status === "cancelled") {
+      const updatedDetail = detail(user.id, existing.id, workspaceId);
+      dependencies.notify(user.id, sessionId);
+      return { detail: updatedDetail, input: handled.input };
     }
+    throw cancellationError(handled.status);
   };
 
   function compactForUser(
@@ -345,19 +348,24 @@ export function createRealtimeSessionCommandsIntegration(
       },
       dependencies.now(),
     );
-    switch (result.status) {
-      case "accepted":
+    const currentDetail = () => detail(user.id, input.sessionId, workspaceId);
+    const handlers: Record<typeof result.status, () => AgentSessionDetail> = {
+      accepted: () => {
         dependencies.notify(user.id, input.sessionId);
-        return detail(user.id, input.sessionId, workspaceId);
-      case "duplicate":
-        return detail(user.id, input.sessionId, workspaceId);
-      case "conflict":
+        return currentDetail();
+      },
+      duplicate: currentDetail,
+      conflict: () => {
         throw new RealtimeCommandError("pending_input_id_conflict");
-      case "invalid_state":
+      },
+      invalid_state: () => {
         throw new RealtimeCommandError("invalid_session_state");
-      case "not_found":
+      },
+      not_found: () => {
         throw new RealtimeCommandError("not_found");
-    }
+      },
+    };
+    return handlers[result.status]();
   }
 
   async function modelsForUser(selection: {
