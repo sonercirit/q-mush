@@ -9,25 +9,15 @@ export const MAXIMUM_TOOL_STREAMS_PER_SESSION = 100;
 export const MAXIMUM_TOOL_STREAMS_PER_USER = 1_000;
 export const TOOL_STREAM_TRUNCATED_MARKER = "\n[stream truncated]";
 
-export type ToolStreamTerminalState =
-  "completed" | "failed" | "canceled" | "timed-out";
+export type ToolStreamTerminalState = "completed" | "failed" | "canceled" | "timed-out";
 
-const TOOL_STREAM_TERMINAL_STATES: readonly ToolStreamTerminalState[] = [
-  "canceled",
-  "completed",
-  "failed",
-  "timed-out",
-];
+const TOOL_STREAM_TERMINAL_STATES: readonly ToolStreamTerminalState[] = ["canceled", "completed", "failed", "timed-out"];
 
-function isToolStreamTerminalState(
-  value: unknown,
-): value is ToolStreamTerminalState {
+function isToolStreamTerminalState(value: unknown): value is ToolStreamTerminalState {
   return TOOL_STREAM_TERMINAL_STATES.some((state) => state === value);
 }
 
-export function aggregateToolStreamState(
-  states: ReadonlySet<ToolStreamTerminalState>,
-): ToolStreamTerminalState {
+export function aggregateToolStreamState(states: ReadonlySet<ToolStreamTerminalState>): ToolStreamTerminalState {
   for (const candidate of ["timed-out", "canceled", "failed"] as const) {
     if (states.has(candidate)) {
       return candidate;
@@ -94,15 +84,7 @@ export interface ToolStreamSnapshotFrame {
   readonly type: "tool_stream_snapshot";
 }
 
-type ToolStreamDeltaRejection =
-  | "bounds"
-  | "gap"
-  | "identity"
-  | "initial"
-  | "invalid"
-  | "late"
-  | "terminal"
-  | "transition";
+type ToolStreamDeltaRejection = "bounds" | "gap" | "identity" | "initial" | "invalid" | "late" | "terminal" | "transition";
 
 export type ApplyToolStreamDeltaResult =
   | {
@@ -129,34 +111,20 @@ function isSequence(value: unknown): value is number {
 }
 
 function isToolStreamState(value: unknown): value is ToolStreamState {
-  return (
-    value === "preparing" ||
-    value === "running" ||
-    isToolStreamTerminalState(value)
-  );
+  return value === "preparing" || value === "running" || isToolStreamTerminalState(value);
 }
 
 function isToolStreamChannel(value: unknown): value is ToolStreamChannel {
-  return (
-    value === "arguments" ||
-    value === "name" ||
-    value === "stderr" ||
-    value === "stdout"
-  );
+  return value === "arguments" || value === "name" || value === "stderr" || value === "stdout";
 }
 
 /** @public Validates provider tool-call stream deltas. */
 export function validToolCallField(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    utf8ByteLength(value) <= MAXIMUM_TOOL_STREAM_FIELD_BYTES
-  );
+  return typeof value === "string" && utf8ByteLength(value) <= MAXIMUM_TOOL_STREAM_FIELD_BYTES;
 }
 
 /** @public Validates provider tool-call stream deltas. */
-export function isProviderToolCallDelta(
-  value: unknown,
-): value is ProviderToolCallDelta {
+export function isProviderToolCallDelta(value: unknown): value is ProviderToolCallDelta {
   if (!isRecord(value)) {
     return false;
   }
@@ -169,9 +137,7 @@ export function isProviderToolCallDelta(
   );
 }
 
-export function isRunnerCommandOutputDelta(
-  value: unknown,
-): value is RunnerCommandOutputDelta {
+export function isRunnerCommandOutputDelta(value: unknown): value is RunnerCommandOutputDelta {
   if (!isRecord(value)) {
     return false;
   }
@@ -183,14 +149,8 @@ export function isRunnerCommandOutputDelta(
   );
 }
 
-export function isRunnerCommandResult(
-  value: unknown,
-): value is RunnerCommandResult {
-  return (
-    isRecord(value) &&
-    typeof value["output"] === "string" &&
-    isToolStreamTerminalState(value["state"])
-  );
+export function isRunnerCommandResult(value: unknown): value is RunnerCommandResult {
+  return isRecord(value) && typeof value["output"] === "string" && isToolStreamTerminalState(value["state"]);
 }
 
 function isToolStreamDelta(value: unknown): value is ToolStreamDelta {
@@ -220,31 +180,19 @@ function isToolStreamDelta(value: unknown): value is ToolStreamDelta {
   ) {
     return false;
   }
-  if (
-    value["previousCallId"] !== undefined &&
-    !isBoundedIdentifier(value["previousCallId"])
-  ) {
+  if (value["previousCallId"] !== undefined && !isBoundedIdentifier(value["previousCallId"])) {
     return false;
   }
   if (value["state"] !== undefined && !isToolStreamState(value["state"])) {
     return false;
   }
 
-  const changes =
-    Number(hasChannel) +
-    Number(value["previousCallId"] !== undefined) +
-    Number(value["state"] !== undefined);
+  const changes = Number(hasChannel) + Number(value["previousCallId"] !== undefined) + Number(value["state"] !== undefined);
   return changes === 1;
 }
 
-export function isToolStreamDeltaFrame(
-  value: unknown,
-): value is ToolStreamDeltaFrame {
-  return (
-    isRecord(value) &&
-    value["type"] === "tool_stream" &&
-    isToolStreamDelta(value)
-  );
+export function isToolStreamDeltaFrame(value: unknown): value is ToolStreamDeltaFrame {
+  return isRecord(value) && value["type"] === "tool_stream" && isToolStreamDelta(value);
 }
 
 function isToolStreamEntry(value: unknown): value is ToolStreamEntry {
@@ -265,9 +213,7 @@ function isToolStreamEntry(value: unknown): value is ToolStreamEntry {
   );
 }
 
-function hasUniqueToolStreamEntries(
-  values: readonly ToolStreamEntry[],
-): boolean {
+function hasUniqueToolStreamEntries(values: readonly ToolStreamEntry[]): boolean {
   const callIds = new Set<string>();
   const indexes = new Set<number>();
   for (const value of values) {
@@ -280,9 +226,7 @@ function hasUniqueToolStreamEntries(
   return true;
 }
 
-export function isToolStreamSnapshotFrame(
-  value: unknown,
-): value is ToolStreamSnapshotFrame {
+export function isToolStreamSnapshotFrame(value: unknown): value is ToolStreamSnapshotFrame {
   if (
     !isRecord(value) ||
     value["type"] !== "tool_stream_snapshot" ||
@@ -320,10 +264,7 @@ function initialEntry(delta: ToolStreamDelta): ToolStreamEntry {
   };
 }
 
-const channelAppenders: Record<
-  ToolStreamChannel,
-  (entry: ToolStreamEntry, content: string) => ToolStreamEntry
-> = {
+const channelAppenders: Record<ToolStreamChannel, (entry: ToolStreamEntry, content: string) => ToolStreamEntry> = {
   arguments: (entry, content) => ({
     ...entry,
     arguments: entry.arguments + content,
@@ -333,22 +274,13 @@ const channelAppenders: Record<
   stdout: (entry, content) => ({ ...entry, stdout: entry.stdout + content }),
 };
 
-function applyChannel(
-  entry: ToolStreamEntry,
-  channel: ToolStreamChannel,
-  content: string,
-): ToolStreamEntry | undefined {
+function applyChannel(entry: ToolStreamEntry, channel: ToolStreamChannel, content: string): ToolStreamEntry | undefined {
   const next = channelAppenders[channel](entry, content);
   const field = next[channel];
-  return utf8ByteLength(field) <= MAXIMUM_TOOL_STREAM_FIELD_BYTES
-    ? next
-    : undefined;
+  return utf8ByteLength(field) <= MAXIMUM_TOOL_STREAM_FIELD_BYTES ? next : undefined;
 }
 
-export function canTransitionToolStreamState(
-  current: ToolStreamState | undefined,
-  next: ToolStreamState,
-): boolean {
+export function canTransitionToolStreamState(current: ToolStreamState | undefined, next: ToolStreamState): boolean {
   if (current === undefined) {
     return next === "preparing";
   }
@@ -358,19 +290,13 @@ export function canTransitionToolStreamState(
   return current === "running" && isToolStreamTerminalState(next);
 }
 
-function isChannelTransition(
-  current: ToolStreamState,
-  channel: ToolStreamChannel,
-): boolean {
+function isChannelTransition(current: ToolStreamState, channel: ToolStreamChannel): boolean {
   return current === "preparing"
     ? channel === "arguments" || channel === "name"
     : current === "running" && (channel === "stderr" || channel === "stdout");
 }
 
-export function applyToolStreamDelta(
-  current: ToolStreamEntry | undefined,
-  delta: ToolStreamDelta,
-): ApplyToolStreamDeltaResult {
+export function applyToolStreamDelta(current: ToolStreamEntry | undefined, delta: ToolStreamDelta): ApplyToolStreamDeltaResult {
   if (!isToolStreamDelta(delta)) {
     return { accepted: false, reason: "invalid" };
   }
@@ -390,9 +316,7 @@ export function applyToolStreamDelta(
     current.streamId !== delta.streamId ||
     current.index !== delta.index ||
     (isRename
-      ? delta.previousCallId !== current.callId ||
-        delta.callId === current.callId ||
-        current.state !== "preparing"
+      ? delta.previousCallId !== current.callId || delta.callId === current.callId || current.state !== "preparing"
       : delta.callId !== current.callId)
   ) {
     return { accepted: false, reason: "identity" };
@@ -407,10 +331,8 @@ export function applyToolStreamDelta(
     return { accepted: false, reason: "gap" };
   }
   if (
-    (delta.channel !== undefined &&
-      !isChannelTransition(current.state, delta.channel)) ||
-    (delta.state !== undefined &&
-      !canTransitionToolStreamState(current.state, delta.state))
+    (delta.channel !== undefined && !isChannelTransition(current.state, delta.channel)) ||
+    (delta.state !== undefined && !canTransitionToolStreamState(current.state, delta.state))
   ) {
     return { accepted: false, reason: "transition" };
   }
@@ -433,18 +355,12 @@ export function applyToolStreamDelta(
   return {
     accepted: true,
     entry,
-    ...(delta.previousCallId === undefined
-      ? {}
-      : { previousCallId: delta.previousCallId }),
+    ...(delta.previousCallId === undefined ? {} : { previousCallId: delta.previousCallId }),
     terminal: isToolStreamTerminalState(entry.state),
   };
 }
 
-function createToolStreamSnapshotFrame(
-  sessionId: string,
-  streamId: string,
-  streams: readonly ToolStreamEntry[],
-): ToolStreamSnapshotFrame {
+function createToolStreamSnapshotFrame(sessionId: string, streamId: string, streams: readonly ToolStreamEntry[]): ToolStreamSnapshotFrame {
   return {
     sessionId,
     streamId,
@@ -458,14 +374,8 @@ interface ToolStreamSnapshotStoreOptions {
   readonly sessionId: string;
 }
 
-function boundedMaximum(
-  value: number | undefined,
-  fallback: number,
-  maximum: number,
-): number {
-  return value === undefined || !Number.isSafeInteger(value)
-    ? fallback
-    : Math.max(1, Math.min(value, maximum));
+function boundedMaximum(value: number | undefined, fallback: number, maximum: number): number {
+  return value === undefined || !Number.isSafeInteger(value) ? fallback : Math.max(1, Math.min(value, maximum));
 }
 
 interface ToolStreamSnapshotStore {
@@ -477,15 +387,9 @@ interface ToolStreamSnapshotStore {
   deleteOldest(): boolean;
 }
 
-function createToolStreamSnapshotStore(
-  options: ToolStreamSnapshotStoreOptions,
-): ToolStreamSnapshotStore {
+function createToolStreamSnapshotStore(options: ToolStreamSnapshotStoreOptions): ToolStreamSnapshotStore {
   const entries = new Map<string, ToolStreamEntry>();
-  const maximumStreams = boundedMaximum(
-    options.maximumStreams,
-    MAXIMUM_TOOL_STREAMS_PER_SESSION,
-    MAXIMUM_TOOL_STREAMS_PER_SESSION,
-  );
+  const maximumStreams = boundedMaximum(options.maximumStreams, MAXIMUM_TOOL_STREAMS_PER_SESSION, MAXIMUM_TOOL_STREAMS_PER_SESSION);
   const sessionId = options.sessionId;
 
   const deleteOldest = (): boolean => {
@@ -512,8 +416,7 @@ function createToolStreamSnapshotStore(
       }
       const key = entryKey(delta.streamId, delta.index);
       const currentKey = entries.has(key) ? key : undefined;
-      const current =
-        currentKey === undefined ? undefined : entries.get(currentKey);
+      const current = currentKey === undefined ? undefined : entries.get(currentKey);
       const result = applyToolStreamDelta(current, delta);
       if (!result.accepted) {
         return false;
@@ -522,10 +425,7 @@ function createToolStreamSnapshotStore(
         entries.delete(currentKey);
       }
       if (!result.terminal) {
-        entries.set(
-          entryKey(result.entry.streamId, result.entry.index),
-          result.entry,
-        );
+        entries.set(entryKey(result.entry.streamId, result.entry.index), result.entry);
         trim();
       }
       return true;
@@ -540,17 +440,12 @@ function createToolStreamSnapshotStore(
     },
 
     replace(snapshot): boolean {
-      if (
-        snapshot.sessionId !== sessionId ||
-        !isToolStreamSnapshotFrame(snapshot)
-      ) {
+      if (snapshot.sessionId !== sessionId || !isToolStreamSnapshotFrame(snapshot)) {
         return false;
       }
       const reconciled = snapshot.streams.map((entry) => {
         const current = entries.get(entryKey(entry.streamId, entry.index));
-        return current !== undefined && current.sequence > entry.sequence
-          ? current
-          : { ...entry };
+        return current !== undefined && current.sequence > entry.sequence ? current : { ...entry };
       });
       for (const [key, entry] of entries) {
         if (entry.streamId === snapshot.streamId) {
@@ -584,29 +479,19 @@ interface UserToolStreamState {
 
 export interface ToolStreamHubState {
   apply(userId: string, delta: ToolStreamDelta): boolean;
-  snapshot(
-    userId: string,
-    sessionId: string,
-    streamId: string,
-  ): ToolStreamSnapshotFrame;
+  snapshot(userId: string, sessionId: string, streamId: string): ToolStreamSnapshotFrame;
   replace(userId: string, snapshot: ToolStreamSnapshotFrame): boolean;
   clearSession(userId: string, sessionId: string): void;
   clearUser(userId: string): void;
 }
 
-export function createToolStreamHubState(
-  options: ToolStreamHubStateOptions = {},
-): ToolStreamHubState {
+export function createToolStreamHubState(options: ToolStreamHubStateOptions = {}): ToolStreamHubState {
   const maximumStreamsPerSession = boundedMaximum(
     options.maximumStreamsPerSession,
     MAXIMUM_TOOL_STREAMS_PER_SESSION,
     MAXIMUM_TOOL_STREAMS_PER_SESSION,
   );
-  const maximumStreamsPerUser = boundedMaximum(
-    options.maximumStreamsPerUser,
-    MAXIMUM_TOOL_STREAMS_PER_USER,
-    MAXIMUM_TOOL_STREAMS_PER_USER,
-  );
+  const maximumStreamsPerUser = boundedMaximum(options.maximumStreamsPerUser, MAXIMUM_TOOL_STREAMS_PER_USER, MAXIMUM_TOOL_STREAMS_PER_USER);
   const users = new Map<string, UserToolStreamState>();
 
   const getUser = (userId: string): UserToolStreamState | undefined => {
@@ -621,10 +506,7 @@ export function createToolStreamHubState(
     );
   };
 
-  const getStore = (
-    user: UserToolStreamState,
-    sessionId: string,
-  ): ToolStreamSnapshotStore =>
+  const getStore = (user: UserToolStreamState, sessionId: string): ToolStreamSnapshotStore =>
     user.sessions.get(sessionId) ??
     createToolStreamSnapshotStore({
       maximumStreams: maximumStreamsPerSession,
@@ -691,10 +573,7 @@ export function createToolStreamHubState(
     },
 
     snapshot(userId, sessionId, streamId): ToolStreamSnapshotFrame {
-      return (
-        users.get(userId)?.sessions.get(sessionId)?.snapshot(streamId) ??
-        createToolStreamSnapshotFrame(sessionId, streamId, [])
-      );
+      return users.get(userId)?.sessions.get(sessionId)?.snapshot(streamId) ?? createToolStreamSnapshotFrame(sessionId, streamId, []);
     },
 
     replace(userId, snapshot): boolean {

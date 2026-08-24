@@ -279,8 +279,8 @@ describe("provider credential agent access", () => {
     const { close, database, store } = createProviderStore();
     createFirstCredential(store);
     const storageFailure = new Error("credential storage unavailable");
-    const originalUpdate = database.update.bind(database);
-    database.update = () => {
+    const originalTransaction = database.transaction.bind(database);
+    database.transaction = () => {
       throw storageFailure;
     };
 
@@ -293,7 +293,7 @@ describe("provider credential agent access", () => {
       ),
     ).toThrow(storageFailure);
 
-    database.update = originalUpdate;
+    database.transaction = originalTransaction;
     close();
   });
 

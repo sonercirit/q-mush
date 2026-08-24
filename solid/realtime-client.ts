@@ -1,14 +1,8 @@
 import { REALTIME_PATH } from "../shared/routes.ts";
-import {
-  USER_REALTIME_MAX_PAYLOAD_LENGTH,
-  type SESSION_REALTIME_OPERATIONS,
-} from "../shared/user-realtime-protocol.ts";
+import { USER_REALTIME_MAX_PAYLOAD_LENGTH, type SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import {
-  readRealtimeServerEvent,
-  type RealtimeServerEvent,
-} from "./realtime-client-codec.ts";
+import { readRealtimeServerEvent, type RealtimeServerEvent } from "./realtime-client-codec.ts";
 import {
   commandFailure,
   MAXIMUM_PENDING_COMMAND_BYTES,
@@ -18,11 +12,7 @@ import {
   type PendingCommand,
   type QueuedCommand,
 } from "./realtime-client-command.ts";
-import {
-  createToolSyncTracker,
-  type ToolSyncRequest,
-  type ToolSyncTracker,
-} from "./realtime-client-tool-sync.ts";
+import { createToolSyncTracker, type ToolSyncRequest, type ToolSyncTracker } from "./realtime-client-tool-sync.ts";
 import {
   createRealtimeStreamBuffer,
   type RealtimeClientEvent,
@@ -39,8 +29,7 @@ interface BrowserWebSocket extends EventTarget {
 type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
 type FrameCallback = (callback: () => void) => number;
 type RealtimeListener = (event: RealtimeClientEvent) => void;
-type SessionRealtimeOperation =
-  (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS];
+type SessionRealtimeOperation = (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS];
 type DeferredStateEvent = Extract<
   RealtimeServerEvent,
   {
@@ -62,9 +51,7 @@ function deferredStateEventKey<Type extends DeferredStateEvent["type"]>(
   event: Extract<DeferredStateEvent, { readonly type: Type }>,
   expectedType: Type,
   keys: {
-    [Kind in DeferredStateEvent["type"]]: (
-      matched: Extract<DeferredStateEvent, { readonly type: Kind }>,
-    ) => string;
+    [Kind in DeferredStateEvent["type"]]: (matched: Extract<DeferredStateEvent, { readonly type: Kind }>) => string;
   },
 ): string {
   return keys[expectedType](event);
@@ -85,11 +72,7 @@ function realtimeUrl(location: RealtimeLocation, workspaceId: string): string {
   return url.toString();
 }
 export interface RealtimeConnection {
-  command(
-    operation: SessionRealtimeOperation,
-    payload: Readonly<Record<string, unknown>>,
-    idempotencyKey?: string,
-  ): Promise<unknown>;
+  command(operation: SessionRealtimeOperation, payload: Readonly<Record<string, unknown>>, idempotencyKey?: string): Promise<unknown>;
   readonly onReconnect: (listener: () => void) => () => void;
   readonly start: (workspaceId?: string) => void;
   readonly stop: () => void;
@@ -109,17 +92,12 @@ interface RealtimeConnectionOptions {
   readonly toolSync?: ToolSyncTracker;
 }
 
-export function createRealtimeConnection(
-  listener: RealtimeListener,
-  options: RealtimeConnectionOptions = {},
-): RealtimeConnection {
+export function createRealtimeConnection(listener: RealtimeListener, options: RealtimeConnectionOptions = {}): RealtimeConnection {
   const buffer = options.streamBuffer ?? createRealtimeStreamBuffer();
   const createSocket = options.createSocket ?? ((url) => new WebSocket(url));
   const location = options.location ?? window.location;
   const now = options.now ?? (() => performance.now());
-  const requestFrame =
-    options.requestFrame ??
-    ((callback) => window.requestAnimationFrame(callback));
+  const requestFrame = options.requestFrame ?? ((callback) => window.requestAnimationFrame(callback));
   const clearTimeout = options.clearTimeout ?? window.clearTimeout;
   const setTimeout = options.setTimeout ?? window.setTimeout;
   const selected = options.selectedSession ?? noSelectedSession;
@@ -220,11 +198,7 @@ export function createRealtimeConnection(
       return Promise.reject(new Error("command_too_large"));
     }
     const activeSocket = socket;
-    if (
-      queuedCommands.length + pendingCommands.size >=
-        MAXIMUM_PENDING_COMMANDS ||
-      bytes > MAXIMUM_PENDING_COMMAND_BYTES - commandBytes
-    ) {
+    if (queuedCommands.length + pendingCommands.size >= MAXIMUM_PENDING_COMMANDS || bytes > MAXIMUM_PENDING_COMMAND_BYTES - commandBytes) {
       return Promise.reject(new Error("command_capacity_exceeded"));
     }
     return new Promise((resolve, reject) => {
@@ -236,10 +210,7 @@ export function createRealtimeConnection(
         sentInstanceId: undefined,
       };
       commandBytes += bytes;
-      if (
-        activeSocket?.readyState !== WebSocket.OPEN ||
-        instanceId === undefined
-      ) {
+      if (activeSocket?.readyState !== WebSocket.OPEN || instanceId === undefined) {
         queuedCommands.push({ commandId, pending });
         return;
       }
@@ -273,11 +244,7 @@ export function createRealtimeConnection(
     }
     socket = connectedSocket;
     connectedSocket.addEventListener("open", () => {
-      if (
-        socket !== connectedSocket ||
-        stopped ||
-        connectedSocket.readyState !== WebSocket.OPEN
-      ) {
+      if (socket !== connectedSocket || stopped || connectedSocket.readyState !== WebSocket.OPEN) {
         connectedSocket.close();
         return;
       }
@@ -325,21 +292,16 @@ export function createRealtimeConnection(
   }
   function stateEventKey(event: DeferredStateEvent): string {
     const keys: {
-      [Type in DeferredStateEvent["type"]]: (
-        matched: Extract<DeferredStateEvent, { readonly type: Type }>,
-      ) => string;
+      [Type in DeferredStateEvent["type"]]: (matched: Extract<DeferredStateEvent, { readonly type: Type }>) => string;
     } = {
       runners: (matched) => matched.type,
       session: (matched) => `session:${matched.session.id}`,
-      session_compaction_request: (matched) =>
-        `${matched.type}:${matched.sessionId}`,
-      session_compaction_settled: (matched) =>
-        `${matched.type}:${matched.sessionId}`,
+      session_compaction_request: (matched) => `${matched.type}:${matched.sessionId}`,
+      session_compaction_settled: (matched) => `${matched.type}:${matched.sessionId}`,
       session_questions: (matched) => `session_questions:${matched.sessionId}`,
       sessions: (matched) => matched.type,
       sessions_changed: (matched) => matched.type,
-      tool_stream_snapshot: (matched) =>
-        `${matched.type}:${matched.sessionId}:${matched.streamId}`,
+      tool_stream_snapshot: (matched) => `${matched.type}:${matched.sessionId}:${matched.streamId}`,
     };
     return deferredStateEventKey(event, event.type, keys);
   }
@@ -357,12 +319,7 @@ export function createRealtimeConnection(
     const key = stateEventKey(event);
     stateEvents.delete(key);
     stateEvents.set(key, event);
-    const sessionId =
-      event.type === "session"
-        ? event.session.id
-        : "sessionId" in event
-          ? event.sessionId
-          : undefined;
+    const sessionId = event.type === "session" ? event.session.id : "sessionId" in event ? event.sessionId : undefined;
     if (sessionId !== undefined) {
       const previousBarrier = stateBarriers.get(key);
       if (previousBarrier !== undefined) {
@@ -374,10 +331,7 @@ export function createRealtimeConnection(
     scheduleStateEvent();
   }
   function scheduleStateEvent(): void {
-    if (
-      stateEventFrame !== undefined ||
-      (stateEvents.size === 0 && stateWaiters.length === 0)
-    ) {
+    if (stateEventFrame !== undefined || (stateEvents.size === 0 && stateWaiters.length === 0)) {
       return;
     }
     const generation = stateEventGeneration;
@@ -387,8 +341,7 @@ export function createRealtimeConnection(
         return;
       }
       const frameStartedAt = now();
-      const withinBudget = (): boolean =>
-        now() - frameStartedAt < STREAM_PREP_BUDGET_MS;
+      const withinBudget = (): boolean => now() - frameStartedAt < STREAM_PREP_BUDGET_MS;
       while (withinBudget()) {
         const next = stateEvents.entries().next();
         if (next.done) {
@@ -401,17 +354,10 @@ export function createRealtimeConnection(
       scheduleFrame();
     });
   }
-  function applyDeferredStateEntry(
-    [key, queued]: readonly [string, DeferredStateEvent],
-    withinBudget: () => boolean,
-  ): boolean {
+  function applyDeferredStateEntry([key, queued]: readonly [string, DeferredStateEvent], withinBudget: () => boolean): boolean {
     const barrier = stateBarriers.get(key);
     if (barrier !== undefined) {
-      const batch = buffer.takeBarrier(
-        barrier,
-        STREAM_UPDATES_PER_FRAME,
-        withinBudget,
-      );
+      const batch = buffer.takeBarrier(barrier, STREAM_UPDATES_PER_FRAME, withinBudget);
       deliverStreamBatch(batch);
       if (batch !== undefined || buffer.barrierPending(barrier)) {
         return false;
@@ -431,10 +377,7 @@ export function createRealtimeConnection(
       return;
     }
     if (event.type === "session") {
-      if (
-        !sessionIsActive(event.session.status) &&
-        event.session.status !== "paused"
-      ) {
+      if (!sessionIsActive(event.session.status) && event.session.status !== "paused") {
         buffer.clearToolSession(event.session.id);
         toolSync.resolveSession(event.session.id);
       } else {
@@ -453,13 +396,7 @@ export function createRealtimeConnection(
     streamFrame = undefined;
     if (!stopped) {
       const frameStartedAt = now();
-      deliverStreamBatch(
-        buffer.takeNext(
-          STREAM_UPDATES_PER_FRAME,
-          selected(),
-          () => now() - frameStartedAt < STREAM_PREP_BUDGET_MS,
-        ),
-      );
+      deliverStreamBatch(buffer.takeNext(STREAM_UPDATES_PER_FRAME, selected(), () => now() - frameStartedAt < STREAM_PREP_BUDGET_MS));
       scheduleFrame();
     }
   }
@@ -478,12 +415,7 @@ export function createRealtimeConnection(
       }
     });
   }
-  function queueStreamDelta(
-    event: Extract<
-      RealtimeServerEvent,
-      { readonly type: "session_delta" | "tool_stream" }
-    >,
-  ): void {
+  function queueStreamDelta(event: Extract<RealtimeServerEvent, { readonly type: "session_delta" | "tool_stream" }>): void {
     buffer.queue(event);
     const requests = buffer.takeToolResyncRequests();
     syncToolRequests(requests);
@@ -516,12 +448,7 @@ export function createRealtimeConnection(
     }
     queuedCommands = [];
   }
-  function settleCommand(
-    event: Extract<
-      RealtimeServerEvent,
-      { readonly type: "command_error" | "command_success" }
-    >,
-  ): void {
+  function settleCommand(event: Extract<RealtimeServerEvent, { readonly type: "command_error" | "command_success" }>): void {
     const pending = pendingCommands.get(event.commandId);
     if (pending === undefined) {
       return;
@@ -552,11 +479,7 @@ export function createRealtimeConnection(
         }
         const remembered = toolSync.pending();
         toolSync.clear();
-        syncToolRequests([
-          ...remembered,
-          ...buffer.activeToolStreams(),
-          ...buffer.takeToolResyncRequests(),
-        ]);
+        syncToolRequests([...remembered, ...buffer.activeToolStreams(), ...buffer.takeToolResyncRequests()]);
       }
       const pendingCommandIds = [...pendingCommands.keys()];
       for (const commandId of pendingCommandIds) {
@@ -597,11 +520,7 @@ export function createRealtimeConnection(
       deliver(event);
       return;
     }
-    if (
-      event.type === "health" ||
-      event.type === "tool_settings" ||
-      event.type === "development_restart_progress"
-    ) {
+    if (event.type === "health" || event.type === "tool_settings" || event.type === "development_restart_progress") {
       deliver(event);
       return;
     }
@@ -611,18 +530,8 @@ export function createRealtimeConnection(
     }
     queueStateEvent(event);
   }
-  function queueStreamEvent(
-    event: Extract<
-      RealtimeServerEvent,
-      { type: "session_delta" | "tool_stream" }
-    >,
-  ): void {
-    if (
-      event.type === "tool_stream" &&
-      event.state !== undefined &&
-      event.state !== "preparing" &&
-      event.state !== "running"
-    ) {
+  function queueStreamEvent(event: Extract<RealtimeServerEvent, { type: "session_delta" | "tool_stream" }>): void {
+    if (event.type === "tool_stream" && event.state !== undefined && event.state !== "preparing" && event.state !== "running") {
       toolSync.resolve(event);
     }
     queueStreamDelta(event);
@@ -631,10 +540,7 @@ export function createRealtimeConnection(
     if (stopped || reconnectTimer !== undefined) {
       return;
     }
-    const delay =
-      RECONNECT_DELAYS[
-        Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)
-      ] ?? 5_000;
+    const delay = RECONNECT_DELAYS[Math.min(reconnectAttempt, RECONNECT_DELAYS.length - 1)] ?? 5_000;
     reconnectAttempt += 1;
     reconnectTimer = setTimeout(() => {
       reconnectTimer = undefined;
