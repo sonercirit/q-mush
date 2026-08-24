@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
+  createUserRealtimeProtocolError,
   isUserRealtimeProtocolError,
   readUserRealtimeCommand,
   SESSION_REALTIME_OPERATIONS,
@@ -27,6 +28,13 @@ function emptyDataPayloadCapacity(): number {
 }
 
 describe("authenticated user realtime protocol", () => {
+  test("identifies tagged protocol errors", () => {
+    const error = createUserRealtimeProtocolError("invalid", "command-1");
+
+    expect(isUserRealtimeProtocolError(error)).toBe(true);
+    expect(error.commandId).toBe("command-1");
+  });
+
   test("parses a correlated generic command envelope", () => {
     expect(
       readUserRealtimeCommand(

@@ -8,6 +8,7 @@ import { createDatabase } from "../../shared/database.ts";
 import { providerCredentials, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import {
+  createDuplicateProviderCredentialError,
   isDuplicateProviderCredentialError,
   ProviderCredentialStore,
   type ProviderCredentialAccess,
@@ -193,6 +194,14 @@ function rotateSecret(store: ProviderCredentialStore, secret: string): void {
 }
 
 describe("provider credential agent access", () => {
+  test("identifies tagged duplicate credential errors", () => {
+    expect(
+      isDuplicateProviderCredentialError(
+        createDuplicateProviderCredentialError(),
+      ),
+    ).toBe(true);
+  });
+
   test("keeps the storage fingerprint off the broad secret-bearing type", () => {
     type HasFingerprint =
       "credentialFingerprint" extends keyof ProviderCredentialAccess
