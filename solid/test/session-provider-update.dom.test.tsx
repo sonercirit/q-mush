@@ -27,11 +27,25 @@ import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
 const RETAINED_CAP_ERROR =
   "Lower or clear the context token cap before changing models.";
 
-function invalidContextCapError(): Error & { readonly code: string } {
-  class InvalidContextCapError extends Error {
-    readonly code = "invalid_context_token_cap";
+interface InvalidContextCapError extends Error {
+  readonly code: "invalid_context_token_cap";
+}
+
+function isInvalidContextCapError(error: unknown): error is InvalidContextCapError {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    error.code === "invalid_context_token_cap"
+  );
+}
+
+function invalidContextCapError(): InvalidContextCapError {
+  const error = new Error(RETAINED_CAP_ERROR);
+  Object.assign(error, { code: "invalid_context_token_cap" as const });
+  if (!isInvalidContextCapError(error)) {
+    throw new TypeError("Failed to create invalid context cap error");
   }
-  return new InvalidContextCapError(RETAINED_CAP_ERROR);
+  return error;
 }
 
 function modelCredential(
