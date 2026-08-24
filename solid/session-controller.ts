@@ -52,7 +52,10 @@ import {
   SessionReconciliationController,
   type DetailMutationOptions,
 } from "./session-controller-reconciliation.ts";
-import { SessionRealtimeState } from "./session-controller-state.ts";
+import {
+  createSessionRealtimeState,
+  type SessionRealtimeState,
+} from "./session-controller-state.ts";
 import { updateSessionTools } from "./session-controller-tool-update.ts";
 import {
   browserTranscriptFilterStorage,
@@ -115,7 +118,7 @@ export class SessionController {
         transcriptFilterStorage,
       ),
     });
-    this.#live = new SessionRealtimeState(this.#view);
+    this.#live = createSessionRealtimeState(this.#view);
     this.#loader = new SessionLoadController(this.#view, this.#live, transport);
     this.#reconciliation = new SessionReconciliationController(
       this.#view,
