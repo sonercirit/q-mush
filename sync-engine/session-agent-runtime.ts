@@ -77,7 +77,10 @@ import { executeSessionSleepTool } from "./session-sleep-tool.ts";
 import { waitForSessionSteeringInput } from "./session-steering-wakeup.ts";
 import type { SessionStore } from "./session-store.ts";
 import { boundSessionToolOutput } from "./session-tool-output.ts";
-import { ToolStreamPublisher } from "./tool-stream-publisher.ts";
+import {
+  createToolStreamPublisher,
+  type ToolStreamPublisher,
+} from "./tool-stream-publisher.ts";
 
 export interface SessionAgentRuntimeDependencies extends AttachmentFallbackRuntimeResources {
   readonly activeTools: ActiveSessionTools;
@@ -315,7 +318,7 @@ export async function runSessionAgent(
 ): Promise<"complete" | "handoff"> {
   const settings = runtime.toolSettings;
   const streamId = createUuidV7();
-  const toolStream = new ToolStreamPublisher({
+  const toolStream = createToolStreamPublisher({
     sessionId: runtime.detail.id,
     streamId,
     ...(runtime.realtime === undefined ? {} : { transport: runtime.realtime }),

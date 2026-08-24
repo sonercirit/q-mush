@@ -14,7 +14,8 @@ import {
   type ToolStreamTerminalState,
 } from "../../shared/tool-stream.ts";
 import {
-  ToolStreamPublisher,
+  createToolStreamPublisher,
+  type ToolStreamPublisher,
   type ToolStreamTransport,
 } from "../tool-stream-publisher.ts";
 
@@ -38,7 +39,7 @@ class RecordingTransport implements ToolStreamTransport {
 function createPublisher(streamId = "step-1") {
   const transport = new RecordingTransport();
   return {
-    publisher: new ToolStreamPublisher({
+    publisher: createToolStreamPublisher({
       sessionId: SESSION_ID,
       streamId,
       transport,
@@ -599,7 +600,7 @@ test("validates the provider, broker, and realtime integration contracts", () =>
 });
 
 test("transport failures never interrupt canonical tool execution", () => {
-  const publisher = new ToolStreamPublisher({
+  const publisher = createToolStreamPublisher({
     sessionId: SESSION_ID,
     streamId: "step-throwing-transport",
     transport: {

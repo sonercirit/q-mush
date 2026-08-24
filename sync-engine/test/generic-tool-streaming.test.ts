@@ -9,7 +9,7 @@ import {
   type AgentModelFactory,
 } from "../../sync-engine/session-agent-models.ts";
 import {
-  ToolStreamPublisher,
+  createToolStreamPublisher,
   type ToolStreamTransport,
 } from "../../sync-engine/tool-stream-publisher.ts";
 
@@ -116,7 +116,7 @@ function genericSession(response: Response): {
   readonly run: () => ReturnType<ChatCompletionsAgentModel["complete"]>;
 } {
   const transport = createRecordingToolStreamTransport();
-  const toolStream = new ToolStreamPublisher({
+  const toolStream = createToolStreamPublisher({
     sessionId: TEST_SESSION_DETAIL.id,
     streamId: "initial-step",
     transport,
