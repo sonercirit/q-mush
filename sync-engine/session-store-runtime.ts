@@ -67,6 +67,42 @@ function writeAgentMessages(
   });
 }
 
+function appendMessages(
+  resources: SessionStoreRuntimeResources,
+  parameters: RuntimeAppendMessageParameters,
+): void {
+  const [sessionId, messages, now, generation, usage] = parameters;
+  const appendParameters: RuntimeMessageParameters = [
+    sessionId,
+    messages,
+    now,
+    generation,
+  ];
+  writeAgentMessages(resources, appendParameters, {
+    kind: "append",
+    ...runtimeUsageOption(usage),
+  });
+}
+
+function commitTerminal(
+  resources: SessionStoreRuntimeResources,
+  parameters: RuntimeTerminalMessageParameters,
+): void {
+  const [sessionId, messages, now, generation, restartHandoff, usage] =
+    parameters;
+  const terminalParameters: RuntimeMessageParameters = [
+    sessionId,
+    messages,
+    now,
+    generation,
+  ];
+  writeAgentMessages(resources, terminalParameters, {
+    kind: "terminal",
+    restartHandoff,
+    ...runtimeUsageOption(usage),
+  });
+}
+
 function compactRuntime(
   resources: SessionStoreRuntimeResources,
   parameters:
@@ -99,7 +135,7 @@ function compactRuntime(
   }
 }
 
-export interface RuntimeModelMetadata {
+interface RuntimeModelMetadata {
   readonly adaptiveThinking: boolean | null;
   readonly maxOutputTokens: number | null;
 }
@@ -108,12 +144,12 @@ export interface SessionStoreRuntime {
   readonly appendRuntimeAgentMessages: (
     ...parameters: RuntimeAppendMessageParameters
   ) => void;
-  readonly appendRuntimeErrorMessage: (
+  appendRuntimeErrorMessage(
     sessionId: string,
     content: string,
     now: number,
     generation: number,
-  ) => void;
+  ): void;
   readonly commitRuntimeTerminal: (
     ...parameters: RuntimeTerminalMessageParameters
   ) => void;
@@ -144,12 +180,12 @@ export interface SessionStoreRuntime {
     now: number,
     generation: number,
   ) => void;
-  readonly settleRuntimeFailure: (
+  settleRuntimeFailure(
     sessionId: string,
     content: string,
     now: number,
     generation: number,
-  ) => boolean;
+  ): boolean;
   readonly updateRuntimeUsage: (
     sessionId: string,
     input: AgentSessionUsageUpdate,
@@ -165,17 +201,8 @@ export function createSessionStoreRuntime(
   const target = (sessionId: string, now: number, generation: number) =>
     runtimeTarget(resources, sessionId, now, generation);
   return {
-    appendRuntimeAgentMessages: (
-      sessionId,
-      messages,
-      now,
-      generation,
-      usage,
-    ) => {
-      writeAgentMessages(resources, [sessionId, messages, now, generation], {
-        kind: "append",
-        ...runtimeUsageOption(usage),
-      });
+    appendRuntimeAgentMessages: (...parameters) => {
+      appendMessages(resources, parameters);
     },
     appendRuntimeErrorMessage: (sessionId, content, now, generation) => {
       appendRuntimeErrorMessage({
@@ -183,19 +210,8 @@ export function createSessionStoreRuntime(
         ...target(sessionId, now, generation),
       });
     },
-    commitRuntimeTerminal: (
-      sessionId,
-      messages,
-      now,
-      generation,
-      restartHandoff,
-      usage,
-    ) => {
-      writeAgentMessages(resources, [sessionId, messages, now, generation], {
-        kind: "terminal",
-        restartHandoff,
-        ...runtimeUsageOption(usage),
-      });
+    commitRuntimeTerminal: (...parameters) => {
+      commitTerminal(resources, parameters);
     },
     compactRuntimeConversation: (...parameters) => {
       compactRuntime(resources, parameters);

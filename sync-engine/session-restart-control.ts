@@ -92,7 +92,7 @@ export interface SessionRestartControl extends Pick<
     launchPending: (runnerId?: string) => void,
     runnerId?: string,
   ) => void;
-  readonly resumeRunner: (runnerId: string, restartId: string) => boolean;
+  resumeRunner(runnerId: string, restartId: string): boolean;
 }
 
 interface BoundedDrain {

@@ -22,13 +22,15 @@ interface SessionStoreRestartResources {
   ) => AgentSessionDetail | undefined;
 }
 
+type FailInvalidRestart = RestartHandoffStore["failInvalid"];
+
 export interface SessionStoreRestarts {
   readonly claimRestartHandoff: (
     userId: string,
     identity: RestartHandoffIdentity,
     now: number,
   ) => AgentSessionDetail | undefined;
-  readonly failInvalidRestartHandoff: RestartHandoffStore["failInvalid"];
+  readonly failInvalidRestartHandoff: FailInvalidRestart;
   readonly failRestartHandoff: RestartHandoffStore["failQueued"];
   readonly invalidRestartHandoffs: RestartHandoffStore["invalid"];
   readonly pauseQueuedForRestart: RestartHandoffStore["pauseQueued"];

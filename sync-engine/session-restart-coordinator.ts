@@ -113,7 +113,7 @@ export interface SessionRestartCoordinator {
     resetRetry?: boolean,
   ) => void;
   readonly restoreDurableRunnerGates: () => void;
-  readonly resumeRunner: (runnerId: string, restartId: string) => boolean;
+  resumeRunner(runnerId: string, restartId: string): boolean;
 }
 
 export function createSessionRestartCoordinator(
