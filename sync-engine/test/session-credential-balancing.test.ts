@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
@@ -10,6 +9,7 @@ import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
 import type { AgentModelFactory } from "../session-agent-models.ts";
 import type { CreateSessionInput } from "../session-input.ts";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import {
   TEST_AUTHENTICATED_USER,
   TEST_WORKSPACE_ID,

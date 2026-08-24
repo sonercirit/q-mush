@@ -1,11 +1,11 @@
 import { eq } from "drizzle-orm";
 import { expect, test } from "vitest";
-import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import type {
   AgentConversationMessage,
   AgentModel,
 } from "../../shared/agent-loop.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
+import { createAgentRequestRecorder } from "./assistant-prefill-test-helpers.ts";
 import { TEST_AUTHENTICATED_USER } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import {
@@ -73,35 +73,35 @@ function createRestartedSpawnModel(): RestartedSpawnModel {
   const recorder = createAgentRequestRecorder();
   const complete: AgentModel["complete"] = (messages) => {
     recorder.record(messages);
-      if (includesContent(messages, COMPLETION_REPORT)) {
-        return Promise.resolve(
-          providerStep("The parent received the true child completion."),
-        );
-      }
-      if (includesContent(messages, CHILD_PROMPT)) {
-        return Promise.resolve(
-          includesContent(messages, CHILD_TOOL_OUTPUT)
-            ? providerStep(CHILD_SUMMARY)
-            : providerStep("The child is using a tool.", {
-                toolCalls: [
-                  toolCall("bash", { command: "printf child", timeout: 30 }),
-                ],
-              }),
-        );
-      }
-      if (
-        messages.some(
-          (message) =>
-            message.role === "tool" && message.toolName === "spawn_session",
-        )
-      ) {
-        return Promise.resolve(providerStep("The parent is waiting."));
-      }
+    if (includesContent(messages, COMPLETION_REPORT)) {
       return Promise.resolve(
-        providerStep("The parent delegated the work.", {
-          toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
-        }),
+        providerStep("The parent received the true child completion."),
       );
+    }
+    if (includesContent(messages, CHILD_PROMPT)) {
+      return Promise.resolve(
+        includesContent(messages, CHILD_TOOL_OUTPUT)
+          ? providerStep(CHILD_SUMMARY)
+          : providerStep("The child is using a tool.", {
+              toolCalls: [
+                toolCall("bash", { command: "printf child", timeout: 30 }),
+              ],
+            }),
+      );
+    }
+    if (
+      messages.some(
+        (message) =>
+          message.role === "tool" && message.toolName === "spawn_session",
+      )
+    ) {
+      return Promise.resolve(providerStep("The parent is waiting."));
+    }
+    return Promise.resolve(
+      providerStep("The parent delegated the work.", {
+        toolCalls: [spawnCall(CHILD_PROMPT, undefined, ["bash"])],
+      }),
+    );
   };
   return { complete, requests: recorder.requests };
 }
