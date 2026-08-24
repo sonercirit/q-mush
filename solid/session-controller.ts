@@ -10,7 +10,7 @@ import { DirectoryPickerController } from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
-import { RevisionState } from "./revision-state.ts";
+import { createRevisionState, type RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import {
   addSessionImages,
@@ -98,7 +98,7 @@ export class SessionController {
     pendingInputTimer?: PendingInputTimer,
   ) {
     this.#reactiveView = reactiveView;
-    this.#view = new RevisionState(reactiveView.state, reactiveView.setState);
+    this.#view = createRevisionState(reactiveView.state, reactiveView.setState);
     this.#view.patch({
       transcriptFilters: initialTranscriptFilters(
         reactiveView.state(),
