@@ -57,7 +57,7 @@ import {
 } from "./session-controller-transcript.ts";
 import { selectedDraftOption } from "./session-form.ts";
 import { loadSessionHistoryPage } from "./session-history-controller.ts";
-import { SessionModelController } from "./session-model-controller.ts";
+import { createSessionModelController, type SessionModelController } from "./session-model-controller.ts";
 import {
   continueSessionMutation,
   sendSessionMutation,
@@ -111,7 +111,7 @@ export class SessionController {
       this.#view,
       this.#loader,
     );
-    this.#models = new SessionModelController(this.#view, transport);
+    this.#models = createSessionModelController(this.#view, transport);
     this.#providers = new SessionProviderController(this.#view);
     this.#pendingInputs = new SessionPendingInputController({
       loader: this.#loader,
