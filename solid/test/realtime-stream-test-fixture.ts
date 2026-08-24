@@ -1,7 +1,7 @@
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
-import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
+import type { RealtimeTestSetupOptions } from "./realtime-client-test-setup.ts";
 import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
 
 export function advancingClock(): () => number {
@@ -21,11 +21,10 @@ export interface StreamingRealtimeFixture {
   readonly stop: () => void;
 }
 
-export interface StreamingRealtimeFixtureOptions {
-  readonly now?: () => number;
-  readonly selectedSession?: () => string | undefined;
-  readonly toolSync?: ToolSyncTracker;
-}
+export type StreamingRealtimeFixtureOptions = Pick<
+  RealtimeTestSetupOptions,
+  "now" | "selectedSession" | "toolSync"
+>;
 
 export function streamingRealtimeFixture(
   instanceId: string,

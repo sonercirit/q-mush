@@ -8,7 +8,7 @@ const LOCATION = {
   protocol: "https:",
 };
 
-interface RealtimeTestSetupOptions {
+export interface RealtimeTestSetupOptions {
   readonly listener?: (event: RealtimeClientEvent) => void;
   readonly now?: () => number;
   readonly requestFrame?: (callback: () => void) => number;

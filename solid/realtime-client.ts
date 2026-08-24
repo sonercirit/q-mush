@@ -137,9 +137,10 @@ export class RealtimeConnection {
     this.#toolSync = options.toolSync ?? createToolSyncTracker();
   }
   onReconnect(listener: () => void): () => void {
-    this.#reconnects.add(listener);
+    const reconnects = this.#reconnects;
+    reconnects.add(listener);
     return () => {
-      this.#reconnects.delete(listener);
+      reconnects.delete(listener);
     };
   }
   yieldToStateApplication(): Promise<boolean> {
