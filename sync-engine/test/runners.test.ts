@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { rmSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { isRecord } from "../../shared/auth-model.ts";
-import { createDatabase } from "../../shared/database.ts";
+import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import { runners } from "../../shared/database/schema.ts";
 import { RUNNER_INSTALLER_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
 import {
@@ -40,14 +40,20 @@ const FIRST_TOKEN = "qmr_first-setup-token";
 const SECOND_TOKEN = "qmr_second-setup-token";
 const THIRD_TOKEN = "qmr_third-setup-token";
 
-class FailingRemovalRunnerStore extends RunnerStore {
-  override exists(): boolean {
-    return true;
-  }
-
-  override remove(): boolean {
-    throw new Error("injected removal failure");
-  }
+function createFailingRemovalRunnerStore(database: AppDatabase): RunnerStore {
+  const store = new RunnerStore(database);
+  return new Proxy(store, {
+    get(target, property, receiver) {
+      if (property === "exists") return () => true;
+      if (property === "remove") {
+        return () => {
+          throw new Error("injected removal failure");
+        };
+      }
+      const value: unknown = Reflect.get(target, property, receiver);
+      return value;
+    },
+  });
 }
 
 interface Setup {
@@ -573,7 +579,7 @@ describe("runner connections", () => {
     const integration = createRunnerIntegration(auth, {
       database,
       now: () => TEST_NOW,
-      store: new FailingRemovalRunnerStore(database),
+      store: createFailingRemovalRunnerStore(database),
     });
     integration.onRemoving(() => {
       removingCalls += 1;
