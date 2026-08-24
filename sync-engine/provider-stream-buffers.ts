@@ -8,7 +8,7 @@ import {
 } from "./provider-stream-helpers.ts";
 import type { ProviderTextDelta } from "./provider-stream.ts";
 
-export interface StreamBuffers {
+interface StreamBuffers {
   readonly onDelta: ((delta: ProviderTextDelta) => void) | undefined;
   readonly text: string[];
   readonly thinking: string[];
