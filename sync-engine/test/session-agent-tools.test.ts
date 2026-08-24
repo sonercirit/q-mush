@@ -366,7 +366,7 @@ describe("agent tools", () => {
         const preparedForParent =
           child?.parentSessionId === SESSION_ID && child.status === "queued";
         if (preparedForParent) {
-          setup.sessions.abortAgentActionsForRestart?.();
+          setup.sessions.abortAgentActionsForRestart();
         }
       },
     });
@@ -399,10 +399,10 @@ describe("agent tools", () => {
         if (
           child?.parentSessionId === SESSION_ID &&
           child.status === "queued" &&
-          !setup.sessions.agentActionsDraining?.()
+          !setup.sessions.agentActionsDraining()
         ) {
           draining = holder.setup?.sessions.drain();
-          expect(holder.setup?.sessions.agentActionsDraining?.()).toBe(true);
+          expect(holder.setup?.sessions.agentActionsDraining()).toBe(true);
         }
       },
     });
