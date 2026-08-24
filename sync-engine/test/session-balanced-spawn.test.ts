@@ -68,8 +68,10 @@ describe("balanced session agent spawn", () => {
         credentials: balancedCredentials(),
         modelFactory: ({ credential }) => ({
           complete: (messages, signal) => {
-            selectedCredentials.push(testCredentialId(credential));
-            return model.complete(messages, signal);
+            const selectedCredential = testCredentialId(credential);
+            selectedCredentials.push(selectedCredential);
+            const completion = model.complete(messages, signal);
+            return completion;
           },
         }),
       },
