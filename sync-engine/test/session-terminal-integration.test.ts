@@ -69,10 +69,8 @@ function createPrefillRejectingSleepWakeCallbackModel(): SleepWakeCallbackModel 
   const requests: AgentConversationMessage[][] = [];
   return {
     requests,
-    async complete(...parameters) {
-      const [messages] = parameters;
-      const copied = messages.map((message) => ({ ...message }));
-      requests.push(copied);
+    async complete(messages) {
+      requests.push(Array.from(messages, (message) => ({ ...message })));
       const initial = messages[0]?.content;
       if (initial === "Complete during the parent sleep") {
         await childCompletion.promise;
@@ -153,10 +151,8 @@ function createPrefillRejectingSteeringModel(): SteeringModel {
   const requests: AgentConversationMessage[][] = [];
   return {
     requests,
-    complete(...parameters) {
-      const [messages] = parameters;
-      const request = messages.slice();
-      requests.push(request);
+    complete(messages) {
+      requests.push([...messages]);
       if (requests.length === 1) {
         return firstStep.promise;
       }
