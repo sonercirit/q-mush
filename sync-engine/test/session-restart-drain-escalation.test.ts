@@ -8,8 +8,8 @@ import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import { waitForRestartDrainCount } from "./session-restart-progress-test-helpers.ts";
 import {
   completeRestartCommands,
-  createRestartSessions,
   createMultiSessionRestartModel,
+  createRestartSessions,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,

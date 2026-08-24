@@ -80,8 +80,12 @@ function createParentTerminalWithRunningChildModel(): ParentTerminalWithRunningC
   return {
     childStarted,
     parentWaitingPromise: parentWaiting.promise,
-    finishChild() { childCompletion.resolve(); },
-    finishParent(outcome) { parentCompletion.resolve(outcome); },
+    finishChild() {
+      childCompletion.resolve();
+    },
+    finishParent(outcome) {
+      parentCompletion.resolve(outcome);
+    },
     async complete(messages, signal) {
       if (includesChildPrompt(messages)) {
         childStarted.resolve();
@@ -97,7 +101,8 @@ function createParentTerminalWithRunningChildModel(): ParentTerminalWithRunningC
       }
       parentWaiting.resolve();
       const outcome = await abortable(parentCompletion.promise, signal);
-      if (outcome === "fail") throw new Error("Parent failed after spawning its child");
+      if (outcome === "fail")
+        throw new Error("Parent failed after spawning its child");
       return providerStep(
         parentRequests === 2
           ? "The parent completed normally."

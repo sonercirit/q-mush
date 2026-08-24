@@ -28,9 +28,9 @@ import {
 import { closeSessionTestDatabase } from "./session-launch-race-helpers.ts";
 import {
   completeRestartCommands,
+  createMultiSessionRestartModel,
   createRestartSessions,
   expectRestartPaused,
-  createMultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
@@ -226,7 +226,10 @@ test("a reported child event survives parent compaction and is consumed on resum
   await completeWokenParent(initial);
   expect(completionReports(initial)).toHaveLength(1);
 
-  const compacted = recreateSessionSetup(createReportCompactionModel(), initial);
+  const compacted = recreateSessionSetup(
+    createReportCompactionModel(),
+    initial,
+  );
   const response = await compacted.sessions.realtimeCommands.compactForUser(
     TEST_AUTHENTICATED_USER,
     SESSION_ID,

@@ -16,9 +16,9 @@ import { waitForRestartDrainCount } from "./session-restart-progress-test-helper
 import {
   completeRestartCommand,
   completeRestartCommands,
+  createMultiSessionRestartModel,
   createRestartSessions,
   expectRestartPaused,
-  createMultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   restartSessionDetail,

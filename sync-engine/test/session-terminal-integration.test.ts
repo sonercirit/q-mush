@@ -73,33 +73,33 @@ function createPrefillRejectingSleepWakeCallbackModel(): SleepWakeCallbackModel 
       const [messages] = parameters;
       const copied = messages.map((message) => ({ ...message }));
       requests.push(copied);
-    const initial = messages[0]?.content;
-    if (initial === "Complete during the parent sleep") {
-      await childCompletion.promise;
-      return terminalAgentStep(
-        messages.at(-1)?.content === "Continue."
-          ? "Continued child result."
-          : "Child callback result.",
-      );
-    }
+      const initial = messages[0]?.content;
+      if (initial === "Complete during the parent sleep") {
+        await childCompletion.promise;
+        return terminalAgentStep(
+          messages.at(-1)?.content === "Continue."
+            ? "Continued child result."
+            : "Child callback result.",
+        );
+      }
       const parentRequest = parentSessionRequests(requests).length;
-    if (parentRequest === 1) {
-      return providerStep("Delegating before sleeping.", {
-        toolCalls: [spawnCall("Complete during the parent sleep")],
-      });
-    }
-    if (parentRequest === 2) {
+      if (parentRequest === 1) {
+        return providerStep("Delegating before sleeping.", {
+          toolCalls: [spawnCall("Complete during the parent sleep")],
+        });
+      }
+      if (parentRequest === 2) {
         sleepStep.resolve();
-      return providerStep("Waiting for the child callback.", {
-        toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
-      });
-    }
-    if (messages.at(-1)?.role !== "user") {
-      throw new Error(
-        "This model does not support assistant message prefill. The conversation must end with a user message.",
-      );
-    }
-    return terminalAgentStep("Callback handled once.");
+        return providerStep("Waiting for the child callback.", {
+          toolCalls: [toolCall("sleep", { durationSeconds: 60 })],
+        });
+      }
+      if (messages.at(-1)?.role !== "user") {
+        throw new Error(
+          "This model does not support assistant message prefill. The conversation must end with a user message.",
+        );
+      }
+      return terminalAgentStep("Callback handled once.");
     },
     finishChild() {
       childCompletion.resolve();
@@ -159,15 +159,15 @@ function createPrefillRejectingSteeringModel(): SteeringModel {
       requests.push(request);
       if (requests.length === 1) {
         return firstStep.promise;
-    }
-    if (messages.at(-1)?.role !== "user") {
-      return Promise.reject(
-        new Error(
-          "This model does not support assistant message prefill. The conversation must end with a user message.",
-        ),
-      );
-    }
-    return Promise.resolve(terminalAgentStep("Steer handled safely."));
+      }
+      if (messages.at(-1)?.role !== "user") {
+        return Promise.reject(
+          new Error(
+            "This model does not support assistant message prefill. The conversation must end with a user message.",
+          ),
+        );
+      }
+      return Promise.resolve(terminalAgentStep("Steer handled safely."));
     },
     resolveFirstStep() {
       firstStep.resolve(terminalAgentStep("Answer completed before steering."));

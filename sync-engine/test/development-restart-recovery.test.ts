@@ -27,8 +27,8 @@ import { testLivenessClock } from "./session-liveness-test-helpers.ts";
 // Leaves the session inside a runner tool call that never completes, so the
 // drain cannot reach a handoff boundary and the interrupted marker survives.
 import {
-  createRestartSessions,
   createMultiSessionRestartModel,
+  createRestartSessions,
   nextCommandId,
 } from "./session-restart-step-resume-helpers.ts";
 
