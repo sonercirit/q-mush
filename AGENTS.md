@@ -191,9 +191,9 @@ Memory.
   Re-enable after an upstream fix.
 - `eslint.config.ts` uses type-aware strict/stylistic `typescript-eslint`
   presets, imports `.gitignore`, bans non-const assertions and all TypeScript
-  `switch` statements/classes (use conditionals/data dispatch and
-  functions/plain objects), enforces exhaustive switches and canonical named
-  imports (one declaration/module with inline `type` markers). Default imports:
+  `switch` statements and classes: use data-driven dispatch, closure factories,
+  and tagged error factories with type guards instead. It enforces canonical
+  named imports (one declaration/module with inline `type` markers). Default imports:
   only `@eslint/js`, `@tailwindcss/vite`, `vite-plugin-solid`; aliases,
   namespaces, dynamic imports, import attributes, import-equals, `import()`
   types, side-effect imports (except production/browser-test `solid/styles.css`)
