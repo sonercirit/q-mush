@@ -9,7 +9,10 @@ import type {
 import type { ProviderModelPricing } from "../shared/provider-model-pricing.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import type { ToolSettings } from "../shared/tool-limits.ts";
-import { ModelConversationCompactor } from "./agent-compaction.ts";
+import {
+  createModelConversationCompactor,
+  type AgentConversationCompactor,
+} from "./agent-compaction.ts";
 import {
   agentCredentialFingerprint,
   agentModelOpenRouterProviderRouting,
@@ -32,7 +35,7 @@ export type AgentModelFactory = (
 
 export interface SessionAgentModels {
   readonly agent: AgentModel;
-  readonly createCompactor: () => ModelConversationCompactor;
+  readonly createCompactor: () => AgentConversationCompactor;
   readonly publishCompactionSettled: () => void;
   readonly resolvedModel?: string | null;
 }
@@ -255,7 +258,7 @@ export function createSessionAgentModels(options: {
     agent: createConfiguredModel(options, systemPrompt, onDelta, startStep),
     createCompactor: () => {
       streamId = id();
-      return new ModelConversationCompactor(
+      return createModelConversationCompactor(
         createConfiguredModel(
           options,
           systemPrompt,

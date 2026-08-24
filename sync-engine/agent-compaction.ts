@@ -40,19 +40,22 @@ interface InvalidCompactionUsage {
   readonly tokenUsage: null;
 }
 
-class InvalidCompactionSummaryError extends Error {
+function invalidCompactionSummaryError(): Error & {
   readonly usage: InvalidCompactionUsage;
-
-  constructor() {
-    super("The model returned an invalid compaction summary");
-    this.name = "InvalidCompactionSummaryError";
-    this.usage = {
-      contextTokens: null,
-      costBasis: null,
-      costUsd: null,
-      tokenUsage: null,
-    };
-  }
+} {
+  const usage: InvalidCompactionUsage = {
+    contextTokens: null,
+    costBasis: null,
+    costUsd: null,
+    tokenUsage: null,
+  };
+  return Object.assign(
+    new Error("The model returned an invalid compaction summary"),
+    {
+      name: "InvalidCompactionSummaryError",
+      usage,
+    },
+  );
 }
 
 function toolCallsAreComplete(
@@ -115,49 +118,38 @@ function compactionProviderMessage(
     : message;
 }
 
-export class ModelConversationCompactor implements AgentConversationCompactor {
-  readonly #model: AgentModel;
-  readonly #onRequest: ((content: string) => void) | undefined;
-
-  constructor(model: AgentModel, onRequest?: (content: string) => void) {
-    this.#model = model;
-    this.#onRequest = onRequest;
-  }
-
-  async compact(
-    ...parameters: CompactionArguments
-  ): Promise<CompactedConversation> {
-    const [messages, signal] = parameters;
-    const input = compactionMessages(messages);
-    const providerInput = input.map(compactionProviderMessage);
-    this.#onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
-    let step: AgentModelStep;
-    try {
-      // Compaction is a model step: restart the visible step clock at its
-      // request instead of letting the previous step keep timing.
-      this.#model.startStep?.();
-      step = await this.#model.complete(providerInput, signal);
-    } finally {
-      this.#model.close?.();
-    }
-
-    // A truncated summary would replace the whole conversation with an
-    // incomplete handoff; reject it like any other invalid summary.
-    if (
-      step.toolCalls.length > 0 ||
-      step.content.trim().length === 0 ||
-      step.truncation !== undefined
-    ) {
-      throw new InvalidCompactionSummaryError();
-    }
-
-    const summary = step.content.trim();
-    return {
-      contextTokens: step.contextTokens,
-      costUsd: step.costUsd,
-      messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
-      summary,
-      tokenUsage: step.tokenUsage,
-    };
-  }
+export function createModelConversationCompactor(
+  model: AgentModel,
+  onRequest?: (content: string) => void,
+): AgentConversationCompactor {
+  return {
+    compact: async (...parameters: CompactionArguments) => {
+      const [messages, signal] = parameters;
+      const input = compactionMessages(messages);
+      const providerInput = input.map(compactionProviderMessage);
+      onRequest?.(AGENT_COMPACTION_REQUEST_MESSAGE);
+      let step: AgentModelStep;
+      try {
+        model.startStep?.();
+        step = await model.complete(providerInput, signal);
+      } finally {
+        model.close?.();
+      }
+      if (
+        step.toolCalls.length > 0 ||
+        step.content.trim().length === 0 ||
+        step.truncation !== undefined
+      ) {
+        throw invalidCompactionSummaryError();
+      }
+      const summary = step.content.trim();
+      return {
+        contextTokens: step.contextTokens,
+        costUsd: step.costUsd,
+        messages: [{ content: `${COMPACTION_PREFIX}${summary}`, role: "user" }],
+        summary,
+        tokenUsage: step.tokenUsage,
+      };
+    },
+  };
 }

@@ -4,7 +4,7 @@ import type {
   AgentToolCall,
 } from "../../shared/agent-loop.ts";
 import type { AnthropicAssistantReplay } from "../../shared/anthropic-replay.ts";
-import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
+import { createModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import { ChatCompletionsAgentModel } from "../../sync-engine/agent-model.ts";
 import {
   ANTHROPIC_READ_CALL,
@@ -181,7 +181,7 @@ describe("Anthropic historical replay degradation", () => {
 
   test("compacts legacy completed tool history without replay", async () => {
     const harness = anthropicHarness([doneAnthropicEvents()]);
-    const compactor = new ModelConversationCompactor({
+    const compactor = createModelConversationCompactor({
       complete: harness.complete,
     });
 

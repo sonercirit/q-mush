@@ -6,7 +6,7 @@ import {
 } from "../../shared/agent-loop.ts";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
+import { createModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import {
   compactSessionConversation,
   type SessionAgentRuntimeDependencies,
@@ -303,7 +303,7 @@ describe("manual session compaction", () => {
     const compactorModel = new ScriptedAgentModel([
       { content: "", costUsd: 0.4, toolCalls: [] },
     ]);
-    const compactor = new ModelConversationCompactor(compactorModel);
+    const compactor = createModelConversationCompactor(compactorModel);
 
     await expect(
       compactor.compact([{ content: "Original", role: "user" }]),
