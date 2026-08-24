@@ -93,7 +93,11 @@ import {
   type ReassignSessionResult,
 } from "./session-store-reassignment.ts";
 import type { SessionStoreWriteResources } from "./session-store-resources.ts";
-import { SessionStoreRestarts } from "./session-store-restarts.ts";
+import {
+  createSessionStoreRestarts,
+  type SessionStoreRestarts,
+} from "./session-store-restarts.ts";
+import { SessionStoreRuntime } from "./session-store-runtime.ts";
 import {
   setSessionCompactionFlag,
   setSessionContextTokenCap,
@@ -116,7 +120,8 @@ import {
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
 import { activeSessionToolSettings } from "./session-turn-store.ts";
-export class SessionStore extends SessionStoreRestarts {
+export class SessionStore extends SessionStoreRuntime {
+  readonly #restarts: SessionStoreRestarts;
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
   readonly #reportParent: SessionStoreWriteResources["reportParent"];
@@ -130,8 +135,16 @@ export class SessionStore extends SessionStoreRestarts {
     runtimes: Pick<SessionRuntimes, "pending">,
     reportParent?: SessionStoreWriteResources["reportParent"],
   ) {
-    super(database, generateId);
+    super();
     this.#resources = [database, generateId];
+    this.#restarts = createSessionStoreRestarts({
+      appendUnknownToolResults: (transaction, sessionId, now) => {
+        this.appendUnknownRestartToolResults(transaction, sessionId, now);
+      },
+      database,
+      generateId,
+      read: (userId, sessionId) => this.get(userId, sessionId),
+    });
     this.#reportParent = reportParent;
     this.#toolSettings = toolSettings;
     this.#manualCompactions = createManualCompactionStore(database, generateId);
@@ -344,9 +357,6 @@ export class SessionStore extends SessionStoreRestarts {
     return storedConversationTruncation(
       readStoredSessionMessages(this.#database, sessionId),
     );
-  }
-  protected readRestartSession(userId: string, sessionId: string) {
-    return this.get(userId, sessionId);
   }
   protected runtimeWriteResources() {
     return this.#writeResources();
@@ -611,6 +621,15 @@ export class SessionStore extends SessionStoreRestarts {
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
   }
+  claimRestartHandoff(...parameters: Parameters<SessionStoreRestarts["claimRestartHandoff"]>) { return this.#restarts.claimRestartHandoff(...parameters); }
+  failInvalidRestartHandoff(...parameters: Parameters<SessionStoreRestarts["failInvalidRestartHandoff"]>) { return this.#restarts.failInvalidRestartHandoff(...parameters); }
+  failRestartHandoff(...parameters: Parameters<SessionStoreRestarts["failRestartHandoff"]>) { return this.#restarts.failRestartHandoff(...parameters); }
+  invalidRestartHandoffs(...parameters: Parameters<SessionStoreRestarts["invalidRestartHandoffs"]>) { return this.#restarts.invalidRestartHandoffs(...parameters); }
+  pauseQueuedForRestart(...parameters: Parameters<SessionStoreRestarts["pauseQueuedForRestart"]>) { return this.#restarts.pauseQueuedForRestart(...parameters); }
+  pauseRunningForRestart(...parameters: Parameters<SessionStoreRestarts["pauseRunningForRestart"]>) { return this.#restarts.pauseRunningForRestart(...parameters); }
+  pendingRestartHandoffs(...parameters: Parameters<SessionStoreRestarts["pendingRestartHandoffs"]>) { return this.#restarts.pendingRestartHandoffs(...parameters); }
+  restoreRestartHandoff(...parameters: Parameters<SessionStoreRestarts["restoreRestartHandoff"]>) { return this.#restarts.restoreRestartHandoff(...parameters); }
+  settleRestartHandoff(...parameters: Parameters<SessionStoreRestarts["settleRestartHandoff"]>) { return this.#restarts.settleRestartHandoff(...parameters); }
   failInterrupted(
     now: number,
     active: (id: string, generation: number) => boolean = () => false,
@@ -620,7 +639,7 @@ export class SessionStore extends SessionStoreRestarts {
       if (active(session.id, session.executionGeneration)) {
         continue;
       }
-      if (this.restoreInterruptedRestart(session, now)) {
+      if (this.#restarts.restoreInterruptedRestart(session, now)) {
         continue;
       }
       failInterruptedStoredSession(

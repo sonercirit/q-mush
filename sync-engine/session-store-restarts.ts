@@ -5,95 +5,66 @@ import {
   RestartHandoffStore,
   type RestartHandoffIdentity,
 } from "./session-restart-store.ts";
-import { SessionStoreRuntime } from "./session-store-runtime.ts";
 
 type RestartToolDatabase = Pick<AppDatabase, "insert" | "select" | "update">;
 
-export abstract class SessionStoreRestarts extends SessionStoreRuntime {
-  readonly #restartHandoffs: RestartHandoffStore;
-
-  constructor(database: AppDatabase, generateId: IdGenerator) {
-    super();
-    this.#restartHandoffs = RestartHandoffStore({
-      database,
-      generateId,
-      interruptUnknownTools: (transaction, sessionId, now) => {
-        this.appendUnknownRestartToolResults(transaction, sessionId, now);
-      },
-      read: (userId, sessionId) => this.readRestartSession(userId, sessionId),
-    });
-  }
-
-  protected abstract appendUnknownRestartToolResults(
+interface SessionStoreRestartResources {
+  readonly appendUnknownToolResults: (
     database: RestartToolDatabase,
     sessionId: string,
     now: number,
-  ): void;
-
-  protected abstract readRestartSession(
+  ) => void;
+  readonly database: AppDatabase;
+  readonly generateId: IdGenerator;
+  readonly read: (
     userId: string,
     sessionId: string,
-  ): AgentSessionDetail | undefined;
+  ) => AgentSessionDetail | undefined;
+}
 
-  protected restoreInterruptedRestart(
-    ...parameters: Parameters<RestartHandoffStore["restoreInterrupted"]>
-  ): boolean {
-    return this.#restartHandoffs.restoreInterrupted(...parameters);
-  }
-
-  pauseQueuedForRestart(
-    ...arguments_: Parameters<RestartHandoffStore["pauseQueued"]>
-  ): boolean {
-    return this.#restartHandoffs.pauseQueued(...arguments_);
-  }
-
-  pauseRunningForRestart(
-    ...arguments_: Parameters<RestartHandoffStore["pauseRunning"]>
-  ): boolean {
-    return this.#restartHandoffs.pauseRunning(...arguments_);
-  }
-
-  failInvalidRestartHandoff(
-    ...arguments_: Parameters<RestartHandoffStore["failInvalid"]>
-  ): boolean {
-    return this.#restartHandoffs.failInvalid(...arguments_);
-  }
-
-  failRestartHandoff(
-    ...arguments_: Parameters<RestartHandoffStore["failQueued"]>
-  ): boolean {
-    return this.#restartHandoffs.failQueued(...arguments_);
-  }
-
-  invalidRestartHandoffs(runnerId?: string) {
-    return this.#restartHandoffs.invalid(runnerId);
-  }
-
-  pendingRestartHandoffs(runnerId?: string) {
-    return this.#restartHandoffs.pending(runnerId);
-  }
-
-  claimRestartHandoff(
+export interface SessionStoreRestarts {
+  readonly claimRestartHandoff: (
     userId: string,
     identity: RestartHandoffIdentity,
     now: number,
-  ): AgentSessionDetail | undefined {
-    return this.#restartHandoffs.claim(userId, identity, now);
-  }
+  ) => AgentSessionDetail | undefined;
+  readonly failInvalidRestartHandoff: RestartHandoffStore["failInvalid"];
+  readonly failRestartHandoff: RestartHandoffStore["failQueued"];
+  readonly invalidRestartHandoffs: RestartHandoffStore["invalid"];
+  readonly pauseQueuedForRestart: RestartHandoffStore["pauseQueued"];
+  readonly pauseRunningForRestart: RestartHandoffStore["pauseRunning"];
+  readonly pendingRestartHandoffs: RestartHandoffStore["pending"];
+  readonly restoreInterruptedRestart: RestartHandoffStore["restoreInterrupted"];
+  readonly restoreRestartHandoff: RestartHandoffStore["restore"];
+  readonly settleRestartHandoff: RestartHandoffStore["settle"];
+}
 
-  settleRestartHandoff(
-    userId: string,
-    identity: RestartHandoffIdentity,
-    settlement: Parameters<RestartHandoffStore["settle"]>[2],
-    now: number,
-  ): boolean {
-    return this.#restartHandoffs.settle(userId, identity, settlement, now);
-  }
-
-  restoreRestartHandoff(
-    identity: RestartHandoffIdentity,
-    now: number,
-  ): boolean {
-    return this.#restartHandoffs.restore(identity, now);
-  }
+export function createSessionStoreRestarts(
+  resources: SessionStoreRestartResources,
+): SessionStoreRestarts {
+  const restartHandoffs = RestartHandoffStore({
+    database: resources.database,
+    generateId: resources.generateId,
+    interruptUnknownTools: (transaction, sessionId, now) => {
+      resources.appendUnknownToolResults(transaction, sessionId, now);
+    },
+    read: resources.read,
+  });
+  return {
+    claimRestartHandoff: (userId, identity, now) =>
+      restartHandoffs.claim(userId, identity, now),
+    failInvalidRestartHandoff: (...parameters) =>
+      restartHandoffs.failInvalid(...parameters),
+    failRestartHandoff: (...parameters) => restartHandoffs.failQueued(...parameters),
+    invalidRestartHandoffs: (runnerId) => restartHandoffs.invalid(runnerId),
+    pauseQueuedForRestart: (...parameters) =>
+      restartHandoffs.pauseQueued(...parameters),
+    pauseRunningForRestart: (...parameters) =>
+      restartHandoffs.pauseRunning(...parameters),
+    pendingRestartHandoffs: (runnerId) => restartHandoffs.pending(runnerId),
+    restoreInterruptedRestart: (...parameters) =>
+      restartHandoffs.restoreInterrupted(...parameters),
+    restoreRestartHandoff: (...parameters) => restartHandoffs.restore(...parameters),
+    settleRestartHandoff: (...parameters) => restartHandoffs.settle(...parameters),
+  };
 }
