@@ -55,7 +55,8 @@ export function createSessionStoreRestarts(
       restartHandoffs.claim(userId, identity, now),
     failInvalidRestartHandoff: (...parameters) =>
       restartHandoffs.failInvalid(...parameters),
-    failRestartHandoff: (...parameters) => restartHandoffs.failQueued(...parameters),
+    failRestartHandoff: (...parameters) =>
+      restartHandoffs.failQueued(...parameters),
     invalidRestartHandoffs: (runnerId) => restartHandoffs.invalid(runnerId),
     pauseQueuedForRestart: (...parameters) =>
       restartHandoffs.pauseQueued(...parameters),
@@ -64,7 +65,9 @@ export function createSessionStoreRestarts(
     pendingRestartHandoffs: (runnerId) => restartHandoffs.pending(runnerId),
     restoreInterruptedRestart: (...parameters) =>
       restartHandoffs.restoreInterrupted(...parameters),
-    restoreRestartHandoff: (...parameters) => restartHandoffs.restore(...parameters),
-    settleRestartHandoff: (...parameters) => restartHandoffs.settle(...parameters),
+    restoreRestartHandoff: (...parameters) =>
+      restartHandoffs.restore(...parameters),
+    settleRestartHandoff: (...parameters) =>
+      restartHandoffs.settle(...parameters),
   };
 }
