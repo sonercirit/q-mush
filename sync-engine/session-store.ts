@@ -97,7 +97,10 @@ import {
   createSessionStoreRestarts,
   type SessionStoreRestarts,
 } from "./session-store-restarts.ts";
-import { SessionStoreRuntime } from "./session-store-runtime.ts";
+import {
+  createSessionStoreRuntime,
+  type SessionStoreRuntime,
+} from "./session-store-runtime.ts";
 import {
   setSessionCompactionFlag,
   setSessionContextTokenCap,
@@ -120,7 +123,8 @@ import {
 } from "./session-store-transitions.ts";
 import { appendSessionUserMessage } from "./session-store-values.ts";
 import { activeSessionToolSettings } from "./session-turn-store.ts";
-export class SessionStore extends SessionStoreRuntime {
+export class SessionStore {
+  readonly #runtime: SessionStoreRuntime;
   readonly #restarts: SessionStoreRestarts;
   readonly #manualCompactions: ManualCompactionStore;
   readonly #questions: AskQuestionsStore;
@@ -135,8 +139,8 @@ export class SessionStore extends SessionStoreRuntime {
     runtimes: Pick<SessionRuntimes, "pending">,
     reportParent?: SessionStoreWriteResources["reportParent"],
   ) {
-    super();
     this.#resources = [database, generateId];
+    this.#runtime = createSessionStoreRuntime(() => this.#writeResources());
     this.#restarts = createSessionStoreRestarts({
       appendUnknownToolResults: (transaction, sessionId, now) => {
         this.appendUnknownRestartToolResults(transaction, sessionId, now);
@@ -357,9 +361,6 @@ export class SessionStore extends SessionStoreRuntime {
     return storedConversationTruncation(
       readStoredSessionMessages(this.#database, sessionId),
     );
-  }
-  protected runtimeWriteResources() {
-    return this.#writeResources();
   }
   reassign(
     userId: string,
@@ -621,15 +622,101 @@ export class SessionStore extends SessionStoreRuntime {
       ...(workspaceId === undefined ? {} : { workspaceId }),
     });
   }
-  claimRestartHandoff(...parameters: Parameters<SessionStoreRestarts["claimRestartHandoff"]>) { return this.#restarts.claimRestartHandoff(...parameters); }
-  failInvalidRestartHandoff(...parameters: Parameters<SessionStoreRestarts["failInvalidRestartHandoff"]>) { return this.#restarts.failInvalidRestartHandoff(...parameters); }
-  failRestartHandoff(...parameters: Parameters<SessionStoreRestarts["failRestartHandoff"]>) { return this.#restarts.failRestartHandoff(...parameters); }
-  invalidRestartHandoffs(...parameters: Parameters<SessionStoreRestarts["invalidRestartHandoffs"]>) { return this.#restarts.invalidRestartHandoffs(...parameters); }
-  pauseQueuedForRestart(...parameters: Parameters<SessionStoreRestarts["pauseQueuedForRestart"]>) { return this.#restarts.pauseQueuedForRestart(...parameters); }
-  pauseRunningForRestart(...parameters: Parameters<SessionStoreRestarts["pauseRunningForRestart"]>) { return this.#restarts.pauseRunningForRestart(...parameters); }
-  pendingRestartHandoffs(...parameters: Parameters<SessionStoreRestarts["pendingRestartHandoffs"]>) { return this.#restarts.pendingRestartHandoffs(...parameters); }
-  restoreRestartHandoff(...parameters: Parameters<SessionStoreRestarts["restoreRestartHandoff"]>) { return this.#restarts.restoreRestartHandoff(...parameters); }
-  settleRestartHandoff(...parameters: Parameters<SessionStoreRestarts["settleRestartHandoff"]>) { return this.#restarts.settleRestartHandoff(...parameters); }
+  appendRuntimeAgentMessages(
+    ...parameters: Parameters<SessionStoreRuntime["appendRuntimeAgentMessages"]>
+  ) {
+    this.#runtime.appendRuntimeAgentMessages(...parameters);
+  }
+  appendRuntimeErrorMessage(
+    ...parameters: Parameters<SessionStoreRuntime["appendRuntimeErrorMessage"]>
+  ) {
+    this.#runtime.appendRuntimeErrorMessage(...parameters);
+  }
+  commitRuntimeTerminal(
+    ...parameters: Parameters<SessionStoreRuntime["commitRuntimeTerminal"]>
+  ) {
+    this.#runtime.commitRuntimeTerminal(...parameters);
+  }
+  compactRuntimeConversation(
+    ...parameters: Parameters<SessionStoreRuntime["compactRuntimeConversation"]>
+  ) {
+    this.#runtime.compactRuntimeConversation(...parameters);
+  }
+  compactRuntimeTerminal(
+    ...parameters: Parameters<SessionStoreRuntime["compactRuntimeTerminal"]>
+  ) {
+    this.#runtime.compactRuntimeTerminal(...parameters);
+  }
+  markRuntimeStepStart(
+    ...parameters: Parameters<SessionStoreRuntime["markRuntimeStepStart"]>
+  ) {
+    this.#runtime.markRuntimeStepStart(...parameters);
+  }
+  setRuntimeAgentFile(
+    ...parameters: Parameters<SessionStoreRuntime["setRuntimeAgentFile"]>
+  ) {
+    this.#runtime.setRuntimeAgentFile(...parameters);
+  }
+  setRuntimeModelMetadata(
+    ...parameters: Parameters<SessionStoreRuntime["setRuntimeModelMetadata"]>
+  ) {
+    this.#runtime.setRuntimeModelMetadata(...parameters);
+  }
+  settleRuntimeFailure(
+    ...parameters: Parameters<SessionStoreRuntime["settleRuntimeFailure"]>
+  ) {
+    return this.#runtime.settleRuntimeFailure(...parameters);
+  }
+  updateRuntimeUsage(
+    ...parameters: Parameters<SessionStoreRuntime["updateRuntimeUsage"]>
+  ) {
+    this.#runtime.updateRuntimeUsage(...parameters);
+  }
+  claimRestartHandoff(
+    ...parameters: Parameters<SessionStoreRestarts["claimRestartHandoff"]>
+  ) {
+    return this.#restarts.claimRestartHandoff(...parameters);
+  }
+  failInvalidRestartHandoff(
+    ...parameters: Parameters<SessionStoreRestarts["failInvalidRestartHandoff"]>
+  ) {
+    return this.#restarts.failInvalidRestartHandoff(...parameters);
+  }
+  failRestartHandoff(
+    ...parameters: Parameters<SessionStoreRestarts["failRestartHandoff"]>
+  ) {
+    return this.#restarts.failRestartHandoff(...parameters);
+  }
+  invalidRestartHandoffs(
+    ...parameters: Parameters<SessionStoreRestarts["invalidRestartHandoffs"]>
+  ) {
+    return this.#restarts.invalidRestartHandoffs(...parameters);
+  }
+  pauseQueuedForRestart(
+    ...parameters: Parameters<SessionStoreRestarts["pauseQueuedForRestart"]>
+  ) {
+    return this.#restarts.pauseQueuedForRestart(...parameters);
+  }
+  pauseRunningForRestart(
+    ...parameters: Parameters<SessionStoreRestarts["pauseRunningForRestart"]>
+  ) {
+    return this.#restarts.pauseRunningForRestart(...parameters);
+  }
+  pendingRestartHandoffs(
+    ...parameters: Parameters<SessionStoreRestarts["pendingRestartHandoffs"]>
+  ) {
+    return this.#restarts.pendingRestartHandoffs(...parameters);
+  }
+  restoreRestartHandoff(
+    ...parameters: Parameters<SessionStoreRestarts["restoreRestartHandoff"]>
+  ) {
+    return this.#restarts.restoreRestartHandoff(...parameters);
+  }
+  settleRestartHandoff(
+    ...parameters: Parameters<SessionStoreRestarts["settleRestartHandoff"]>
+  ) {
+    return this.#restarts.settleRestartHandoff(...parameters);
+  }
   failInterrupted(
     now: number,
     active: (id: string, generation: number) => boolean = () => false,
