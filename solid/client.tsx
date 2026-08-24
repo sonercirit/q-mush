@@ -29,7 +29,7 @@ import {
   OPENAI_PANEL,
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
-import { ProviderController } from "./provider-controller.ts";
+import { createProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
 import type { RealtimeClientEvent } from "./realtime-stream-buffer.ts";
 import {
@@ -297,10 +297,10 @@ function App(): JSX.Element {
   const [session, setSession] = createSignal<AuthSession>();
   const notices = readNotices();
   const debug = createRenderDebugView();
-  const braveSearch = new ProviderController(BRAVE_SEARCH_PANEL);
-  const generic = new ProviderController(GENERIC_PANEL);
-  const openAi = new ProviderController(OPENAI_PANEL);
-  const openRouter = new ProviderController(OPENROUTER_PANEL);
+  const braveSearch = createProviderController(BRAVE_SEARCH_PANEL);
+  const generic = createProviderController(GENERIC_PANEL);
+  const openAi = createProviderController(OPENAI_PANEL);
+  const openRouter = createProviderController(OPENROUTER_PANEL);
   const prompts = createPromptController();
   const runners = createRunnerController();
   const toolSettings = createToolSettingsController();

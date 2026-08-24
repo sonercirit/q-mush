@@ -11,7 +11,10 @@ import {
   OPENAI_PANEL,
   OPENROUTER_PANEL,
 } from "../solid/provider-client.tsx";
-import { ProviderController } from "../solid/provider-controller.ts";
+import {
+  createProviderController,
+  type ProviderController,
+} from "../solid/provider-controller.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -48,7 +51,7 @@ const OPENROUTER_CREDENTIAL: ProviderCredential = {
 function providerController(
   configuration: ProviderPanelConfiguration,
 ): ProviderController {
-  return new ProviderController(
+  return createProviderController(
     configuration,
     createReactiveState(createProviderViewState([])),
   );
@@ -112,11 +115,11 @@ test("discovers global fallbacks through the mounted workspace", async () => {
         logout={() => Promise.resolve()}
         logoutPending={false}
         openAi={providerController(OPENAI_PANEL)}
-        openRouter={new ProviderController(OPENROUTER_PANEL, openRouterState)}
+        openRouter={createProviderController(OPENROUTER_PANEL, openRouterState)}
         prompts={prompts}
-        runners={
-          createRunnerController(createReactiveState(createRunnerViewState([])))
-        }
+        runners={createRunnerController(
+          createReactiveState(createRunnerViewState([])),
+        )}
         toolSettings={createToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}
         workspaces={createWorkspaceController(

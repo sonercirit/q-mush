@@ -14,7 +14,6 @@ import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
 import {
   createControllerState,
   jsonRequestInit,
-  type ControllerState,
 } from "./controller-mutation.ts";
 import {
   createProviderViewState,
@@ -37,61 +36,77 @@ function initialProviderState(): ProviderViewState {
   return createProviderViewState(undefined);
 }
 
-export class ProviderController {
-  readonly #configuration: ProviderPanelConfiguration;
-  readonly #quotaResetRequestIds = new Map<string, string>();
-  readonly #state: ControllerState<ProviderViewState>;
-  #pendingSessionReassignment:
+export interface ProviderController {
+  readonly state: ProviderViewState;
+  readonly view: Accessor<ProviderViewState>;
+  add(...input: ProviderCredentialAddInput): Promise<void>;
+  confirmSessionReassignment(
+    dialog: SessionReassignmentDialogController,
+  ): Promise<void>;
+  consumeQuotaReset(
+    credentialId: string,
+  ): Promise<ProviderQuotaResetOutcome | undefined>;
+  load(): Promise<void>;
+  loadQuota(credentialId: string): Promise<void>;
+  remove(credentialId: string): Promise<void>;
+  reset(): void;
+  setDefault(credentialId: string): Promise<void>;
+  setQuotaThreshold(
+    credentialId: string,
+    threshold: number | undefined,
+  ): Promise<void>;
+  setScopes(
+    credentialId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void>;
+  setWorkspace(workspaceId: string): void;
+}
+
+export function createProviderController(
+  configuration: ProviderPanelConfiguration,
+  view = createReactiveState(initialProviderState()),
+): ProviderController {
+  const quotaResetRequestIds = new Map<string, string>();
+  const stateController = createControllerState(view);
+  let pendingSessionReassignment:
     | {
         readonly dialog: SessionReassignmentDialogController;
         readonly revision: number;
       }
     | undefined;
-  #workspaceId = GLOBAL_WORKSPACE_ID;
+  let workspaceId = GLOBAL_WORKSPACE_ID;
 
-  constructor(
-    configuration: ProviderPanelConfiguration,
-    view = createReactiveState(initialProviderState()),
-  ) {
-    this.#configuration = configuration;
-    this.#state = createControllerState(view);
-  }
+  const state = (): ProviderViewState => stateController.value;
 
-  get state(): ProviderViewState {
-    return this.#state.value;
-  }
+  const viewAccessor = stateController.accessor;
 
-  get view(): Accessor<ProviderViewState> {
-    return this.#state.accessor;
-  }
-
-  async add(
+  async function add(
     ...[apiKey, label, baseUrl, apiFormat]: ProviderCredentialAddInput
   ): Promise<void> {
-    await this.#mutate(
-      this.#configuration.credentialsPath,
+    await mutate(
+      configuration.credentialsPath,
       jsonRequestInit(
         {
-          ...(this.#configuration.apiFormatSelectable === true &&
+          ...(configuration.apiFormatSelectable === true &&
           apiFormat !== undefined
             ? { apiFormat }
             : {}),
           apiKey,
-          ...(this.#configuration.baseUrlPlaceholder === undefined
+          ...(configuration.baseUrlPlaceholder === undefined
             ? {}
             : { baseUrl }),
-          ...(this.#configuration.keyRequiresLabel === true ? { label } : {}),
-          workspaceIds: [this.#workspaceId],
+          ...(configuration.keyRequiresLabel === true ? { label } : {}),
+          workspaceIds: [workspaceId],
         },
         "POST",
       ),
       { savePending: true },
       { savePending: false },
-      (status) => this.#saveError(status),
+      (status) => saveError(status),
     );
   }
 
-  async confirmSessionReassignment(
+  async function confirmSessionReassignment(
     dialog: SessionReassignmentDialogController,
   ): Promise<void> {
     const state = dialog.state;
@@ -99,22 +114,22 @@ export class ProviderController {
       return;
     }
 
-    const revision = this.#state.revision.value();
+    const revision = stateController.revision.value();
     const pending = { dialog, revision };
-    this.#pendingSessionReassignment = pending;
+    pendingSessionReassignment = pending;
     dialog.pending();
     try {
       const result = readSessionCredentialReassignmentResult(
         await requestJson(
           `${providerCredentialSessionReassignmentPath(
-            this.#configuration.credentialsPath,
+            configuration.credentialsPath,
             state.credential.id,
-          )}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          )}?workspaceId=${encodeURIComponent(workspaceId)}`,
           {
             body: JSON.stringify(
-              this.#workspaceId === GLOBAL_WORKSPACE_ID
+              workspaceId === GLOBAL_WORKSPACE_ID
                 ? {}
-                : { workspaceId: this.#workspaceId },
+                : { workspaceId: workspaceId },
             ),
             headers: { "content-type": "application/json" },
             method: "POST",
@@ -123,8 +138,8 @@ export class ProviderController {
       );
       const count = result.migratedSessionCount;
       dialog.succeeded();
-      if (this.#state.revision.isCurrent(revision)) {
-        this.#state.patch({
+      if (stateController.revision.isCurrent(revision)) {
+        stateController.patch({
           sessionReassignmentNotice:
             count === 0
               ? "No sessions needed switching; they already use this account."
@@ -132,70 +147,65 @@ export class ProviderController {
         });
       }
     } catch {
-      if (this.#state.revision.isCurrent(revision)) {
+      if (stateController.revision.isCurrent(revision)) {
         dialog.failed(
-          `We could not switch your ${this.#configuration.name} sessions. Please try again.`,
+          `We could not switch your ${configuration.name} sessions. Please try again.`,
         );
       } else {
         dialog.succeeded();
       }
     } finally {
       if (
-        this.#state.revision.isCurrent(revision) &&
-        this.#pendingSessionReassignment === pending
+        stateController.revision.isCurrent(revision) &&
+        pendingSessionReassignment === pending
       ) {
-        this.#pendingSessionReassignment = undefined;
+        pendingSessionReassignment = undefined;
       }
     }
   }
 
-  async load(): Promise<void> {
-    await this.#state.load({
+  async function load(): Promise<void> {
+    await stateController.load({
       failure: (error) => ({
         error: isHttpResponseError(error)
-          ? this.#loadError(error.status)
-          : this.#loadError(0),
+          ? loadError(error.status)
+          : loadError(0),
       }),
       pending: { credentials: undefined, error: undefined },
       request: () =>
         requestJson(
-          `${this.#configuration.credentialsPath}?workspaceId=${encodeURIComponent(this.#workspaceId)}`,
+          `${configuration.credentialsPath}?workspaceId=${encodeURIComponent(workspaceId)}`,
         ),
       success: (value) => {
-        const credentials = readProviderCredentials(
-          value,
-          this.#configuration.name,
-        );
+        const credentials = readProviderCredentials(value, configuration.name);
         return {
           credentials,
           error: undefined,
           quotaLoadingIds:
-            this.#configuration.id === "brave-search" ||
-            this.#configuration.quotaSupported === false
+            configuration.id === "brave-search" ||
+            configuration.quotaSupported === false
               ? []
               : credentials.map(({ id }) => id),
         };
       },
     });
     if (
-      this.#configuration.id !== "brave-search" &&
-      this.#configuration.quotaSupported !== false
+      configuration.id !== "brave-search" &&
+      configuration.quotaSupported !== false
     ) {
       await Promise.all(
-        this.state.quotaLoadingIds.map((credentialId) =>
-          this.loadQuota(credentialId),
-        ),
+        state().quotaLoadingIds.map((credentialId) => loadQuota(credentialId)),
       );
     }
   }
 
-  async loadQuota(credentialId: string): Promise<void> {
-    const loading = new Set(this.state.quotaLoadingIds);
+  async function loadQuota(credentialId: string): Promise<void> {
+    const loading = new Set(state().quotaLoadingIds);
     loading.add(credentialId);
-    this.#state.patch({ quotaLoadingIds: [...loading] });
+    stateController.patch({ quotaLoadingIds: [...loading] });
     const settle = (): void => {
-      this.#state.patch({
-        quotaLoadingIds: this.state.quotaLoadingIds.filter(
+      stateController.patch({
+        quotaLoadingIds: state().quotaLoadingIds.filter(
           (id) => id !== credentialId,
         ),
       });
@@ -204,162 +214,162 @@ export class ProviderController {
       const quota = readProviderQuota(
         await requestJson(
           providerCredentialQuotaPath(
-            this.#configuration.credentialsPath,
+            configuration.credentialsPath,
             credentialId,
           ),
         ),
       );
       settle();
-      this.#state.patch({
-        quotas: { ...this.state.quotas, [credentialId]: quota },
+      stateController.patch({
+        quotas: { ...state().quotas, [credentialId]: quota },
       });
     } catch {
       settle();
     }
   }
 
-  async consumeQuotaReset(
+  async function consumeQuotaReset(
     credentialId: string,
   ): Promise<ProviderQuotaResetOutcome | undefined> {
-    if (this.state.quotaPendingId !== undefined) {
+    if (state().quotaPendingId !== undefined) {
       return undefined;
     }
     const clientRequestId =
-      this.#quotaResetRequestIds.get(credentialId) ?? crypto.randomUUID();
-    this.#quotaResetRequestIds.set(credentialId, clientRequestId);
-    this.#state.patch({ error: undefined, quotaPendingId: credentialId });
+      quotaResetRequestIds.get(credentialId) ?? crypto.randomUUID();
+    quotaResetRequestIds.set(credentialId, clientRequestId);
+    stateController.patch({ error: undefined, quotaPendingId: credentialId });
     try {
       const result = readQuotaResetResult(
         await requestJson(
           providerCredentialQuotaResetPath(
-            this.#configuration.credentialsPath,
+            configuration.credentialsPath,
             credentialId,
           ),
           jsonRequestInit({ clientRequestId }, "POST"),
         ),
       );
-      this.#quotaResetRequestIds.delete(credentialId);
-      this.#state.patch({
+      quotaResetRequestIds.delete(credentialId);
+      stateController.patch({
         quotaNotice: { credentialId, outcome: result.outcome },
         quotaPendingId: undefined,
-        quotas: { ...this.state.quotas, [credentialId]: result.quota },
+        quotas: { ...state().quotas, [credentialId]: result.quota },
       });
       return result.outcome;
     } catch {
-      this.#state.patch({
-        error: `We could not consume that ${this.#configuration.name} quota reset.`,
+      stateController.patch({
+        error: `We could not consume that ${configuration.name} quota reset.`,
         quotaPendingId: undefined,
       });
       return undefined;
     }
   }
 
-  async setQuotaThreshold(
+  async function setQuotaThreshold(
     credentialId: string,
     threshold: number,
   ): Promise<void> {
     if (!Number.isFinite(threshold) || threshold < 0 || threshold > 100) {
-      this.#state.patch({
+      stateController.patch({
         error: "The quota threshold must be from 0 to 100%.",
       });
       return;
     }
-    this.#state.patch({ quotaThresholdPendingId: credentialId });
+    stateController.patch({ quotaThresholdPendingId: credentialId });
     try {
       await request(
         providerCredentialQuotaThresholdPath(
-          this.#configuration.credentialsPath,
+          configuration.credentialsPath,
           credentialId,
         ),
         jsonRequestInit({ autoResetThresholdPercent: threshold }, "PUT"),
       );
-      await this.loadQuota(credentialId);
-      this.#state.patch({ quotaThresholdPendingId: undefined });
+      await loadQuota(credentialId);
+      stateController.patch({ quotaThresholdPendingId: undefined });
     } catch {
-      this.#state.patch({
-        error: `We could not update that ${this.#configuration.name} quota threshold.`,
+      stateController.patch({
+        error: `We could not update that ${configuration.name} quota threshold.`,
         quotaThresholdPendingId: undefined,
       });
     }
   }
 
-  remove(credentialId: string): Promise<void> {
-    return this.#mutate(
-      `${this.#configuration.credentialsPath}/${encodeURIComponent(credentialId)}`,
+  function remove(credentialId: string): Promise<void> {
+    return mutate(
+      `${configuration.credentialsPath}/${encodeURIComponent(credentialId)}`,
       { method: "DELETE" },
       { removingId: credentialId },
       { removingId: undefined },
-      () => `We could not remove that ${this.#configuration.name} credential.`,
+      () => `We could not remove that ${configuration.name} credential.`,
     );
   }
 
-  reset(): void {
-    this.setWorkspace(GLOBAL_WORKSPACE_ID);
+  function reset(): void {
+    setWorkspace(GLOBAL_WORKSPACE_ID);
   }
 
-  setScopes(
+  function setScopes(
     credentialId: string,
     workspaceIds: readonly string[],
   ): Promise<void> {
-    return this.#mutate(
-      connectionScopesPath(this.#configuration.credentialsPath, credentialId),
+    return mutate(
+      connectionScopesPath(configuration.credentialsPath, credentialId),
       jsonRequestInit({ workspaceIds }, "PUT"),
       {},
       {},
-      () => `We could not update that ${this.#configuration.name} scope.`,
+      () => `We could not update that ${configuration.name} scope.`,
     );
   }
 
-  setWorkspace(workspaceId: string): void {
-    this.#resetForWorkspace(workspaceId);
+  function setWorkspace(nextWorkspaceId: string): void {
+    resetForWorkspace(nextWorkspaceId);
   }
 
-  #resetForWorkspace(workspaceId: string): void {
-    this.#quotaResetRequestIds.clear();
-    this.#state.revision.advance();
-    this.#pendingSessionReassignment?.dialog.reset();
-    this.#pendingSessionReassignment = undefined;
-    this.#workspaceId = workspaceId;
-    this.#replace(initialProviderState());
+  function resetForWorkspace(nextWorkspaceId: string): void {
+    quotaResetRequestIds.clear();
+    stateController.revision.advance();
+    pendingSessionReassignment?.dialog.reset();
+    pendingSessionReassignment = undefined;
+    workspaceId = nextWorkspaceId;
+    replace(initialProviderState());
   }
 
-  setDefault(credentialId: string): Promise<void> {
-    return this.#mutate(
+  function setDefault(credentialId: string): Promise<void> {
+    return mutate(
       providerCredentialDefaultPath(
-        this.#configuration.credentialsPath,
+        configuration.credentialsPath,
         credentialId,
       ),
       { method: "POST" },
       { settingDefaultId: credentialId },
       { settingDefaultId: undefined },
       () =>
-        `We could not make that ${this.#configuration.name} credential the default.`,
+        `We could not make that ${configuration.name} credential the default.`,
     );
   }
 
-  #configurationError(): string {
+  function configurationError(): string {
     const variable =
-      this.#configuration.id === "brave-search"
+      configuration.id === "brave-search"
         ? "BRAVE_SEARCH_CREDENTIAL_KEY"
-        : `${this.#configuration.id.toUpperCase()}_CREDENTIAL_KEY`;
-    return `${this.#configuration.name} storage is not configured. Set ${variable} on the local server and restart it.`;
+        : `${configuration.id.toUpperCase()}_CREDENTIAL_KEY`;
+    return `${configuration.name} storage is not configured. Set ${variable} on the local server and restart it.`;
   }
 
-  #loadError(status: number): string {
+  function loadError(status: number): string {
     return status === 503
-      ? this.#configurationError()
-      : `We could not load your ${this.#configuration.name} credentials. Please try again.`;
+      ? configurationError()
+      : `We could not load your ${configuration.name} credentials. Please try again.`;
   }
 
-  async #mutate(
+  async function mutate(
     input: RequestInfo | URL,
     init: RequestInit,
     pending: StatePatch,
     settled: StatePatch,
     errorMessage: ErrorMessage,
   ): Promise<void> {
-    const reload = () => this.load();
-    await this.#state.mutation(
+    const reload = () => load();
+    await stateController.mutation(
       input,
       init,
       request,
@@ -373,23 +383,41 @@ export class ProviderController {
     );
   }
 
-  #replace(state: ProviderViewState): void {
-    this.#state.replace(state);
+  function replace(state: ProviderViewState): void {
+    stateController.replace(state);
   }
 
-  #saveError(status: number): string {
+  function saveError(status: number): string {
     if (status === 400) {
-      return this.#configuration.id === "generic"
+      return configuration.id === "generic"
         ? "The generic provider rejected that API base URL or key. Check both and try again."
-        : `${this.#configuration.name} rejected that API key. Check it and try again.`;
+        : `${configuration.name} rejected that API key. Check it and try again.`;
     }
 
     if (status === 409) {
-      return `That ${this.#configuration.name} credential is already saved.`;
+      return `That ${configuration.name} credential is already saved.`;
     }
 
     return status === 503
-      ? this.#configurationError()
-      : `We could not add that ${this.#configuration.name} API key. Please try again.`;
+      ? configurationError()
+      : `We could not add that ${configuration.name} API key. Please try again.`;
   }
+
+  return {
+    add,
+    confirmSessionReassignment,
+    consumeQuotaReset,
+    load,
+    loadQuota,
+    remove,
+    reset,
+    get state() {
+      return state();
+    },
+    setDefault,
+    setQuotaThreshold,
+    setScopes,
+    setWorkspace,
+    view: viewAccessor,
+  };
 }

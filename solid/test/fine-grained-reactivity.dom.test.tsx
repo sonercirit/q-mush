@@ -6,7 +6,7 @@ import type {
   AgentSessionSummary,
 } from "../../shared/session-model.ts";
 import { OPENAI_PANEL } from "../provider-client.tsx";
-import { ProviderController } from "../provider-controller.ts";
+import { createProviderController } from "../provider-controller.ts";
 import {
   createProviderViewState,
   type ProviderCredential,
@@ -111,7 +111,7 @@ test("provider loading, error, retry, and list updates preserve the panel", asyn
   const reactive = createReactiveState<ProviderViewState>(
     createProviderViewState(undefined),
   );
-  const controller = new ProviderController(OPENAI_PANEL, reactive);
+  const controller = createProviderController(OPENAI_PANEL, reactive);
   const view = (): JSX.Element => openAiProviderPanel(controller);
   const container = mount(view);
   const panel = query(container, "[data-provider-panel='openai']");
