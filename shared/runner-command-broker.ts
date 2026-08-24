@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { countRestartProgressTools } from "./restart-progress-tools.ts";
 import type { RestartProgressTool } from "./restart-progress.ts";
-import { RunnerCommandDelivery } from "./runner-command-delivery.ts";
+import {
+  createRunnerCommandDelivery,
+  type RunnerCommandDelivery,
+} from "./runner-command-delivery.ts";
 import {
   abortRunnerCommand,
   ignoreRunnerCommandCleanupError,
@@ -66,7 +69,7 @@ export class RunnerCommandBroker {
     this.#cancel = options.cancel;
     this.#commandId = options.commandId ?? randomUUID;
     this.#deliver = options.deliver;
-    this.#delivery = new RunnerCommandDelivery((commandId) =>
+    this.#delivery = createRunnerCommandDelivery((commandId) =>
       this.#pending.get(commandId),
     );
     this.#survival = createRunnerCommandSurvivalState(options);
