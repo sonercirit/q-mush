@@ -12,8 +12,8 @@ import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
 } from "./provider-error.ts";
-import { AnthropicStreamAccumulator } from "./provider-stream-anthropic.ts";
-import { BufferedAccumulator } from "./provider-stream-buffers.ts";
+import { createAnthropicStreamAccumulator } from "./provider-stream-anthropic.ts";
+import { createBufferedAccumulator } from "./provider-stream-buffers.ts";
 import { providerEventIndex, providerStep } from "./provider-stream-helpers.ts";
 
 type ProviderStreamProtocol =
@@ -322,49 +322,49 @@ function stringDelta(
   return delta;
 }
 
-class ResponsesAccumulator
-  extends BufferedAccumulator
-  implements CompletedStreamAccumulator
-{
-  readonly protocol = "responses" as const;
-  #reasoningSummary:
+function createResponsesAccumulator(
+  onDelta?: ProviderTextDeltaHandler,
+): CompletedStreamAccumulator {
+  const accumulator = createBufferedAccumulator(onDelta);
+  let reasoningSummary:
     { readonly outputIndex: number; readonly summaryIndex: number } | undefined;
-  #completed: AgentModelStep | undefined;
+  let completedStep: AgentModelStep | undefined;
 
-  get completed(): boolean {
-    return this.#completed !== undefined;
-  }
+  const isCompleted = (): boolean => {
+    return completedStep !== undefined;
+  };
 
-  finish(): AgentModelStep {
-    if (this.#completed === undefined) {
+  const finish = (): AgentModelStep => {
+    if (completedStep === undefined) {
       throw new Error("The provider response ended before completion");
     }
 
     return providerStep(
-      this.#completed.content.length === 0 && this.buffers.text.length > 0
-        ? this.buffers.text.join("")
-        : this.#completed.content,
-      this.#completed.contextTokens,
-      this.#completed.thinking.length === 0 && this.buffers.thinking.length > 0
-        ? this.buffers.thinking.join("")
-        : this.#completed.thinking,
-      this.#completed.toolCalls.length === 0 && this.toolCalls.size > 0
-        ? this.recordedToolCalls()
-        : this.#completed.toolCalls,
-      this.#completed.costUsd,
-      this.#completed.tokenUsage,
+      completedStep.content.length === 0 && accumulator.buffers.text.length > 0
+        ? accumulator.buffers.text.join("")
+        : completedStep.content,
+      completedStep.contextTokens,
+      completedStep.thinking.length === 0 &&
+        accumulator.buffers.thinking.length > 0
+        ? accumulator.buffers.thinking.join("")
+        : completedStep.thinking,
+      completedStep.toolCalls.length === 0 && accumulator.toolCalls.size > 0
+        ? accumulator.recordedToolCalls()
+        : completedStep.toolCalls,
+      completedStep.costUsd,
+      completedStep.tokenUsage,
     );
-  }
+  };
 
-  push(event: unknown): void {
-    const value = this.readEvent(
+  const push = (event: unknown): void => {
+    const value = accumulator.readEvent(
       event,
       "The provider returned an invalid streaming event",
     );
     const type = value["type"];
 
     if (type === "response.completed") {
-      this.#completed = readResponsesStep(value["response"]);
+      completedStep = readResponsesStep(value["response"]);
       return;
     }
 
@@ -376,13 +376,16 @@ class ResponsesAccumulator
       const item = value["item"];
 
       if (isRecord(item) && item["type"] === "function_call") {
-        this.registerToolCall(outputIndex(value), readResponsesToolCall(item));
+        accumulator.registerToolCall(
+          outputIndex(value),
+          readResponsesToolCall(item),
+        );
       }
       return;
     }
 
     if (type === "response.function_call_arguments.delta") {
-      this.appendToolCallArguments(
+      accumulator.appendToolCallArguments(
         outputIndex(value),
         stringDelta(value, "tool-call"),
       );
@@ -402,23 +405,34 @@ class ResponsesAccumulator
         );
       }
       const separator =
-        this.#reasoningSummary !== undefined &&
-        (this.#reasoningSummary.outputIndex !== outputIndexValue ||
-          this.#reasoningSummary.summaryIndex !== summaryIndexValue)
+        reasoningSummary !== undefined &&
+        (reasoningSummary.outputIndex !== outputIndexValue ||
+          reasoningSummary.summaryIndex !== summaryIndexValue)
           ? "\n\n"
           : "";
-      this.#reasoningSummary = {
+      reasoningSummary = {
         outputIndex: outputIndexValue,
         summaryIndex: summaryIndexValue,
       };
-      this.pushThinking(separator + stringDelta(value, "reasoning"));
+      accumulator.pushThinking(separator + stringDelta(value, "reasoning"));
       return;
     }
 
     if (type === "response.output_text.delta") {
-      this.pushText(stringDelta(value, "text"));
+      accumulator.pushText(stringDelta(value, "text"));
     }
-  }
+  };
+  return {
+    get completed() {
+      return isCompleted();
+    },
+    finish,
+    protocol: "responses",
+    push,
+    get receivedEvent() {
+      return accumulator.receivedEvent();
+    },
+  };
 }
 
 function readChatDelta(value: unknown): Readonly<Record<string, unknown>> {
@@ -459,30 +473,27 @@ function optionalDeltaString(
   return "";
 }
 
-class ChatCompletionsAccumulator
-  extends BufferedAccumulator
-  implements ChatCompletionsStreamAccumulator
-{
-  #contextTokens: number | null = null;
-  #costUsd: number | null = null;
-  #tokenUsage: AgentTokenUsage | null = null;
+function createChatCompletionsAccumulator(
+  onDelta?: ProviderTextDeltaHandler,
+): ChatCompletionsStreamAccumulator {
+  const accumulator = createBufferedAccumulator(onDelta);
+  let contextTokens: number | null = null;
+  let costUsd: number | null = null;
+  let tokenUsage: AgentTokenUsage | null = null;
 
-  readonly completed = false;
-  readonly protocol = "chat_completions" as const;
-
-  finish(): AgentModelStep {
+  const finish = (): AgentModelStep => {
     return providerStep(
-      this.buffers.text.join(""),
-      this.#contextTokens,
-      this.buffers.thinking.join(""),
-      this.recordedToolCalls(),
-      this.#costUsd,
-      this.#tokenUsage,
+      accumulator.buffers.text.join(""),
+      contextTokens,
+      accumulator.buffers.thinking.join(""),
+      accumulator.recordedToolCalls(),
+      costUsd,
+      tokenUsage,
     );
-  }
+  };
 
-  push(value: unknown): void {
-    const event = this.readEvent(
+  const push = (value: unknown): void => {
+    const event = accumulator.readEvent(
       value,
       "The model returned an invalid completion chunk",
     );
@@ -498,10 +509,10 @@ class ChatCompletionsAccumulator
     ]);
 
     if (content.length > 0) {
-      this.pushText(content);
+      accumulator.pushText(content);
     }
     if (thinking.length > 0) {
-      this.pushThinking(thinking);
+      accumulator.pushThinking(thinking);
     }
 
     const rawToolCalls = delta["tool_calls"];
@@ -520,7 +531,7 @@ class ChatCompletionsAccumulator
         throw new Error("The model returned an invalid streaming tool index");
       }
 
-      const existing = this.toolCalls.get(index) ?? {
+      const existing = accumulator.toolCalls.get(index) ?? {
         arguments: "",
         id: "",
         name: "",
@@ -533,7 +544,7 @@ class ChatCompletionsAccumulator
         ? optionalDeltaString(function_, ["name"])
         : "";
       const idDelta = optionalDeltaString(rawCall, ["id"]);
-      this.toolCalls.set(index, {
+      accumulator.toolCalls.set(index, {
         arguments: existing.arguments + argumentsDelta,
         id: existing.id + idDelta,
         name: existing.name + nameDelta,
@@ -543,7 +554,7 @@ class ChatCompletionsAccumulator
         idDelta.length > 0 ||
         nameDelta.length > 0
       ) {
-        this.emitToolCallProgress(index, {
+        accumulator.emitToolCallProgress(index, {
           arguments: argumentsDelta,
           id: idDelta,
           name: nameDelta,
@@ -551,46 +562,65 @@ class ChatCompletionsAccumulator
       }
     }
 
-    const contextTokens = readContextTokens(value, "usage");
-    if (contextTokens !== null) {
-      this.#contextTokens = contextTokens;
+    const nextContextTokens = readContextTokens(value, "usage");
+    if (nextContextTokens !== null) {
+      contextTokens = nextContextTokens;
     }
-    const costUsd = readCostUsd(value, "usage");
-    if (costUsd !== null) {
-      this.#costUsd = costUsd;
+    const nextCostUsd = readCostUsd(value, "usage");
+    if (nextCostUsd !== null) {
+      costUsd = nextCostUsd;
     }
-    const tokenUsage = readTokenUsage(value, "usage");
-    if (tokenUsage !== null) {
-      this.#tokenUsage = tokenUsage;
+    const nextTokenUsage = readTokenUsage(value, "usage");
+    if (nextTokenUsage !== null) {
+      tokenUsage = nextTokenUsage;
     }
-  }
+  };
+  return {
+    completed: false,
+    finish,
+    protocol: "chat_completions",
+    push,
+    get receivedEvent() {
+      return accumulator.receivedEvent();
+    },
+  };
 }
 
-class JsonChatCompletionsAccumulator
-  extends BufferedAccumulator
-  implements CompletedStreamAccumulator
-{
-  #step: AgentModelStep | undefined;
-  readonly protocol = "chat_completions_json" as const;
+function createJsonChatCompletionsAccumulator(
+  onDelta?: ProviderTextDeltaHandler,
+): CompletedStreamAccumulator {
+  const accumulator = createBufferedAccumulator(onDelta);
+  let step: AgentModelStep | undefined;
 
-  get completed(): boolean {
-    return this.#step !== undefined;
-  }
+  const completed = (): boolean => {
+    return step !== undefined;
+  };
 
-  finish(): AgentModelStep {
-    if (this.#step === undefined) {
+  const finish = (): AgentModelStep => {
+    if (step === undefined) {
       throw new Error("The provider response ended before completion");
     }
-    return this.#step;
-  }
+    return step;
+  };
 
-  push(value: unknown): void {
-    this.receivedEvent = true;
-    this.#step = readChatStep(value);
-    for (const [index, toolCall] of this.#step.toolCalls.entries()) {
-      this.emitToolCallProgress(index, toolCall);
+  const push = (value: unknown): void => {
+    accumulator.setReceivedEvent();
+    step = readChatStep(value);
+    for (const [index, toolCall] of step.toolCalls.entries()) {
+      accumulator.emitToolCallProgress(index, toolCall);
     }
-  }
+  };
+  return {
+    get completed() {
+      return completed();
+    },
+    finish,
+    protocol: "chat_completions_json",
+    push,
+    get receivedEvent() {
+      return accumulator.receivedEvent();
+    },
+  };
 }
 
 type ProviderTextDeltaHandler = (delta: ProviderTextDelta) => void;
@@ -616,7 +646,7 @@ export function createProviderStreamAccumulator(
     if (typeof configuration === "function" || configuration === undefined) {
       unavailableAnthropicResponseIdentity();
     }
-    return new AnthropicStreamAccumulator(
+    return createAnthropicStreamAccumulator(
       configuration.identity.model,
       configuration.identity.provenance,
       configuration.onDelta,
@@ -625,9 +655,9 @@ export function createProviderStreamAccumulator(
   const onDelta =
     typeof configuration === "function" ? configuration : undefined;
   if (protocol === "chat_completions_json") {
-    return new JsonChatCompletionsAccumulator(onDelta);
+    return createJsonChatCompletionsAccumulator(onDelta);
   }
   return protocol === "responses"
-    ? new ResponsesAccumulator(onDelta)
-    : new ChatCompletionsAccumulator(onDelta);
+    ? createResponsesAccumulator(onDelta)
+    : createChatCompletionsAccumulator(onDelta);
 }
