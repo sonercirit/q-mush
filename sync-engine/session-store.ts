@@ -70,7 +70,6 @@ import {
   type SessionContextTokenCapParameters,
 } from "./session-store-settings.ts";
 import {
-  generatedSessionId,
   sessionSpawnIdentity,
   sessionSpawnReservationOptions,
 } from "./session-store-spawn-options.ts";
@@ -127,7 +126,7 @@ export function createSessionStore(
     toolSettings: (_userId, sessionId, executionGeneration) =>
       activeSessionToolSettings(database, sessionId, executionGeneration),
   });
-  const generateSessionId = generatedSessionId(generateId);
+  const generateSessionId = generateId;
   const readPendingQuestions = (userId: string, sessionId: string) =>
     questionsStore.pending(userId, sessionId);
   const readSession = (
