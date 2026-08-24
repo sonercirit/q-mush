@@ -31,6 +31,7 @@ import {
 } from "./provider-client.tsx";
 import { ProviderController } from "./provider-controller.ts";
 import { RealtimeConnection } from "./realtime-client.ts";
+import type { RealtimeClientEvent } from "./realtime-stream-buffer.ts";
 import {
   renderDebugBoundary,
   RenderDebugLegend,
@@ -273,6 +274,18 @@ function SignIn(props: {
   );
 }
 
+function dispatchRealtimeEvent<Type extends RealtimeClientEvent["type"]>(
+  event: Extract<RealtimeClientEvent, { readonly type: Type }>,
+  expectedType: Type,
+  handlers: {
+    [Kind in RealtimeClientEvent["type"]]: (
+      matched: Extract<RealtimeClientEvent, { readonly type: Kind }>,
+    ) => void;
+  },
+): void {
+  handlers[expectedType](event);
+}
+
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
@@ -292,46 +305,52 @@ function App(): JSX.Element {
   const toolSettings = new ToolSettingsController();
   const realtime: RealtimeConnection = new RealtimeConnection(
     (event) => {
-      switch (event.type) {
-        case "health":
-          setStorageHealth(event.health);
-          break;
-        case "development_restart_progress":
-          setRestartProgress(event.progress);
-          break;
-        case "runners":
-          runners.applyRealtime(event.runners);
-          break;
-        case "tool_settings":
-          toolSettings.apply(event.settings);
-          break;
-        case "sessions":
-          agentSessions.applyRealtime(event.sessions);
-          break;
-        case "session":
-          agentSessions.applyDetail(event.session);
-          break;
-        case "session_questions":
-          agentSessions.applyQuestions(event);
-          break;
-        case "sessions_changed":
+      const handlers: {
+        [Type in RealtimeClientEvent["type"]]: (
+          matched: Extract<RealtimeClientEvent, { readonly type: Type }>,
+        ) => void;
+      } = {
+        command_error: () => undefined,
+        command_success: () => undefined,
+        development_restart_progress: (matched) => {
+          setRestartProgress(matched.progress);
+        },
+        health: (matched) => {
+          setStorageHealth(matched.health);
+        },
+        ready: () => undefined,
+        runners: (matched) => {
+          runners.applyRealtime(matched.runners);
+        },
+        session: (matched) => {
+          agentSessions.applyDetail(matched.session);
+        },
+        session_compaction_request: (matched) => {
+          agentSessions.applyCompaction(matched);
+        },
+        session_compaction_settled: (matched) => {
+          agentSessions.applyCompaction(matched);
+        },
+        session_questions: (matched) => {
+          agentSessions.applyQuestions(matched);
+        },
+        sessions: (matched) => {
+          agentSessions.applyRealtime(matched.sessions);
+        },
+        sessions_changed: () => {
           void agentSessions.refresh();
-          break;
-        case "session_compaction_request":
-        case "session_compaction_settled":
-          agentSessions.applyCompaction(event);
-          break;
-        case "stream_batch":
-          agentSessions.applyStreamBatch(event);
-          break;
-        case "tool_stream_snapshot":
-          agentSessions.applyToolSnapshot(event);
-          break;
-        case "command_error":
-        case "command_success":
-        case "ready":
-          break;
-      }
+        },
+        stream_batch: (matched) => {
+          agentSessions.applyStreamBatch(matched);
+        },
+        tool_settings: (matched) => {
+          toolSettings.apply(matched.settings);
+        },
+        tool_stream_snapshot: (matched) => {
+          agentSessions.applyToolSnapshot(matched);
+        },
+      };
+      dispatchRealtimeEvent(event, event.type, handlers);
     },
     {
       selectedSession: (): string | undefined => agentSessions.state.selectedId,
