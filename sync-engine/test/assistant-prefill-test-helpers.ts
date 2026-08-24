@@ -21,7 +21,7 @@ export function createAgentRequestRecorder(
   };
 }
 
-export const ASSISTANT_PREFILL_ERROR =
+const ASSISTANT_PREFILL_ERROR =
   "This model does not support assistant message prefill. The conversation must end with a user message.";
 
 export function assistantPrefillError(
