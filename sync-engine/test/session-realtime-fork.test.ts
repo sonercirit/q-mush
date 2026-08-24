@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { AgentModelCatalog } from "../../shared/agent-configuration.ts";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import { createCredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { SessionForkInput } from "../../shared/session-fork.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
@@ -50,7 +50,7 @@ function forkSetup(discoverModels: Parameters<typeof forkDependencies>[0]) {
           credentials.find(({ id }) => id === selection.credentialId),
         ),
     },
-    new CredentialPoolBalancer({ now: () => TEST_NOW }),
+    createCredentialPoolBalancer({ now: () => TEST_NOW }),
   );
   return {
     database,

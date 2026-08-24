@@ -148,21 +148,16 @@ export function maximumAgentReasoningEffort(
   return undefined;
 }
 
+const REASONING_EFFORT_LABELS: Record<AgentReasoningEffort, string> = {
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra high",
+  max: "Maximum",
+};
+
 export function reasoningEffortLabel(effort: AgentReasoningEffort): string {
-  switch (effort) {
-    case "none":
-      return "None";
-    case "minimal":
-      return "Minimal";
-    case "low":
-      return "Low";
-    case "medium":
-      return "Medium";
-    case "high":
-      return "High";
-    case "xhigh":
-      return "Extra high";
-    case "max":
-      return "Maximum";
-  }
+  return REASONING_EFFORT_LABELS[effort];
 }

@@ -56,7 +56,7 @@ function normalizeWorkspaceName(name: string): string | undefined {
     : undefined;
 }
 
-export type WorkspaceRemovalResult =
+type WorkspaceRemovalResult =
   "last_workspace" | "not_found" | "removed" | "workspace_in_use";
 
 function normalizedWorkspaceName(
@@ -64,223 +64,245 @@ function normalizedWorkspaceName(
   action: (normalizedName: string) => WorkspaceSummary | undefined,
 ): WorkspaceSummary | undefined {
   const normalizedName = normalizeWorkspaceName(name);
-  return normalizedName === undefined ? undefined : action(normalizedName);
+  if (normalizedName === undefined) return undefined;
+  try {
+    return action(normalizedName);
+  } catch {
+    return undefined;
+  }
 }
 
-export class WorkspaceStore {
-  readonly #database: AppDatabase;
-  readonly #generateId: IdGenerator;
-
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
-    this.#database = database;
-    this.#generateId = generateId;
-  }
-
-  create(
+export interface WorkspaceStore {
+  create: (
     userId: string,
     name: string,
     now: number,
-  ): WorkspaceSummary | undefined {
-    return normalizedWorkspaceName(name, (normalizedName) => {
-      const id = this.#generateId(now);
-      try {
-        return insertWorkspace(this.#database, {
+  ) => WorkspaceSummary | undefined;
+  createDefault: (userId: string, now: number) => WorkspaceSummary;
+  defaultForUser: (userId: string) => WorkspaceSummary | undefined;
+  exists: (userId: string, workspaceId: string) => boolean;
+  list: (userId: string) => WorkspaceList;
+  rename: (
+    userId: string,
+    workspaceId: string,
+    name: string,
+    now: number,
+  ) => WorkspaceSummary | undefined;
+  remove: (
+    userId: string,
+    workspaceId: string,
+    now: number,
+  ) => WorkspaceRemovalResult;
+  setDefault: (userId: string, workspaceId: string, now: number) => boolean;
+}
+
+export function createWorkspaceStore(
+  database: AppDatabase,
+  generateId: IdGenerator = createUuidV7,
+): WorkspaceStore {
+  const store: WorkspaceStore = {
+    create(
+      userId: string,
+      name: string,
+      now: number,
+    ): WorkspaceSummary | undefined {
+      return normalizedWorkspaceName(name, (normalizedName) => {
+        const id = generateId(now);
+        return insertWorkspace(database, {
           id,
           name: normalizedName,
           now,
           userId,
         });
-      } catch {
+      });
+    },
+
+    createDefault(userId: string, now: number): WorkspaceSummary {
+      const existing = store.defaultForUser(userId);
+      if (existing !== undefined) {
+        return existing;
+      }
+
+      const id = generateId(now);
+
+      return insertWorkspace(database, {
+        id,
+        isDefault: true,
+        name: DEFAULT_WORKSPACE_NAME,
+        now,
+        userId,
+      });
+    },
+
+    defaultForUser(userId: string): WorkspaceSummary | undefined {
+      return database
+        .select(workspaceSelection())
+        .from(workspaces)
+        .where(defaultWorkspaceCondition(activeWorkspaceCondition(userId)))
+        .get();
+    },
+
+    exists(userId: string, workspaceId: string): boolean {
+      return (
+        workspaceId !== GLOBAL_WORKSPACE_ID &&
+        ownedWorkspaceExists(database, userId, workspaceId)
+      );
+    },
+
+    list(userId: string): WorkspaceList {
+      const entries = database
+        .select(workspaceSelection())
+        .from(workspaces)
+        .where(activeWorkspaceCondition(userId))
+        .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
+        .all();
+      const defaultWorkspace = entries.find(({ isDefault }) => isDefault);
+
+      if (defaultWorkspace === undefined) {
+        throw new Error("The user has no default workspace");
+      }
+
+      return { defaultWorkspaceId: defaultWorkspace.id, workspaces: entries };
+    },
+
+    rename(
+      userId: string,
+      workspaceId: string,
+      name: string,
+      now: number,
+    ): WorkspaceSummary | undefined {
+      if (workspaceId === GLOBAL_WORKSPACE_ID) {
         return undefined;
       }
-    });
-  }
-
-  createDefault(userId: string, now: number): WorkspaceSummary {
-    const existing = this.defaultForUser(userId);
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const id = this.#generateId(now);
-
-    return insertWorkspace(this.#database, {
-      id,
-      isDefault: true,
-      name: DEFAULT_WORKSPACE_NAME,
-      now,
-      userId,
-    });
-  }
-
-  defaultForUser(userId: string): WorkspaceSummary | undefined {
-    return this.#database
-      .select(workspaceSelection())
-      .from(workspaces)
-      .where(defaultWorkspaceCondition(activeWorkspaceCondition(userId)))
-      .get();
-  }
-
-  exists(userId: string, workspaceId: string): boolean {
-    return (
-      workspaceId !== GLOBAL_WORKSPACE_ID &&
-      ownedWorkspaceExists(this.#database, userId, workspaceId)
-    );
-  }
-
-  list(userId: string): WorkspaceList {
-    const entries = this.#database
-      .select(workspaceSelection())
-      .from(workspaces)
-      .where(activeWorkspaceCondition(userId))
-      .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
-      .all();
-    const defaultWorkspace = entries.find(({ isDefault }) => isDefault);
-
-    if (defaultWorkspace === undefined) {
-      throw new Error("The user has no default workspace");
-    }
-
-    return { defaultWorkspaceId: defaultWorkspace.id, workspaces: entries };
-  }
-
-  rename(
-    userId: string,
-    workspaceId: string,
-    name: string,
-    now: number,
-  ): WorkspaceSummary | undefined {
-    if (workspaceId === GLOBAL_WORKSPACE_ID) {
-      return undefined;
-    }
-    return normalizedWorkspaceName(name, (normalizedName) => {
-      try {
-        const [updated] = this.#database
+      return normalizedWorkspaceName(name, (normalizedName) => {
+        const [updated] = database
           .update(workspaces)
           .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
           .where(activeWorkspaceCondition(userId, workspaceId))
           .returning(workspaceSelection())
           .all();
         return updated;
-      } catch {
-        return undefined;
-      }
-    });
-  }
+      });
+    },
 
-  remove(
-    userId: string,
-    workspaceId: string,
-    now: number,
-  ): WorkspaceRemovalResult {
-    if (workspaceId === GLOBAL_WORKSPACE_ID) {
-      return "not_found";
-    }
-
-    return this.#database.transaction((transaction) => {
-      const workspace = transaction
-        .select({ id: workspaces.id, isDefault: workspaces.isDefault })
-        .from(workspaces)
-        .where(activeWorkspaceCondition(userId, workspaceId))
-        .get();
-      if (workspace === undefined) {
+    remove(
+      userId: string,
+      workspaceId: string,
+      now: number,
+    ): WorkspaceRemovalResult {
+      if (workspaceId === GLOBAL_WORKSPACE_ID) {
         return "not_found";
       }
 
-      const replacement = transaction
-        .select({ id: workspaces.id })
-        .from(workspaces)
-        .where(
-          and(activeWorkspaceCondition(userId), ne(workspaces.id, workspaceId)),
-        )
-        .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
-        .get();
-      if (replacement === undefined) {
-        return "last_workspace";
-      }
+      return database.transaction((transaction) => {
+        const workspace = transaction
+          .select({ id: workspaces.id, isDefault: workspaces.isDefault })
+          .from(workspaces)
+          .where(activeWorkspaceCondition(userId, workspaceId))
+          .get();
+        if (workspace === undefined) {
+          return "not_found";
+        }
 
-      const hasSession =
-        transaction
-          .select({ id: agentSessions.id })
-          .from(agentSessions)
+        const replacement = transaction
+          .select({ id: workspaces.id })
+          .from(workspaces)
           .where(
             and(
-              eq(agentSessions.userId, userId),
-              eq(agentSessions.workspaceId, workspaceId),
-              not(agentSessions.isDeleted),
+              activeWorkspaceCondition(userId),
+              ne(workspaces.id, workspaceId),
             ),
           )
-          .get() !== undefined;
-      const activeRunnerScope =
+          .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
+          .get();
+        if (replacement === undefined) {
+          return "last_workspace";
+        }
+
+        const hasSession =
+          transaction
+            .select({ id: agentSessions.id })
+            .from(agentSessions)
+            .where(
+              and(
+                eq(agentSessions.userId, userId),
+                eq(agentSessions.workspaceId, workspaceId),
+                not(agentSessions.isDeleted),
+              ),
+            )
+            .get() !== undefined;
+        const activeRunnerScope =
+          transaction
+            .select({ id: runnerWorkspaces.id })
+            .from(runnerWorkspaces)
+            .innerJoin(runners, eq(runnerWorkspaces.runnerId, runners.id))
+            .where(
+              and(
+                eq(runnerWorkspaces.userId, userId),
+                eq(runnerWorkspaces.workspaceId, workspaceId),
+                not(runnerWorkspaces.isDeleted),
+                not(runners.isDeleted),
+              ),
+            )
+            .get() !== undefined;
+        const activeCredentialScope =
+          transaction
+            .select({ id: providerCredentialWorkspaces.id })
+            .from(providerCredentialWorkspaces)
+            .innerJoin(
+              providerCredentials,
+              eq(
+                providerCredentialWorkspaces.providerCredentialId,
+                providerCredentials.id,
+              ),
+            )
+            .where(
+              and(
+                activeCredentialWorkspaceCondition(userId, workspaceId),
+                not(providerCredentials.isDeleted),
+              ),
+            )
+            .get() !== undefined;
+
+        if (hasSession || activeRunnerScope || activeCredentialScope) {
+          return "workspace_in_use";
+        }
+
         transaction
-          .select({ id: runnerWorkspaces.id })
-          .from(runnerWorkspaces)
-          .innerJoin(runners, eq(runnerWorkspaces.runnerId, runners.id))
-          .where(
-            and(
-              eq(runnerWorkspaces.userId, userId),
-              eq(runnerWorkspaces.workspaceId, workspaceId),
-              not(runnerWorkspaces.isDeleted),
-              not(runners.isDeleted),
-            ),
-          )
-          .get() !== undefined;
-      const activeCredentialScope =
-        transaction
-          .select({ id: providerCredentialWorkspaces.id })
-          .from(providerCredentialWorkspaces)
-          .innerJoin(
-            providerCredentials,
-            eq(
-              providerCredentialWorkspaces.providerCredentialId,
-              providerCredentials.id,
-            ),
-          )
-          .where(
-            and(
-              activeCredentialWorkspaceCondition(userId, workspaceId),
-              not(providerCredentials.isDeleted),
-            ),
-          )
-          .get() !== undefined;
+          .update(workspaces)
+          .set({
+            ...softDeletedAuditFields(userId, now),
+            isDefault: false,
+          })
+          .where(eq(workspaces.id, workspaceId))
+          .run();
 
-      if (hasSession || activeRunnerScope || activeCredentialScope) {
-        return "workspace_in_use";
-      }
+        if (workspace.isDefault) {
+          setWorkspaceDefault(transaction, replacement.id, userId, now);
+        }
+        return "removed";
+      });
+    },
 
-      transaction
-        .update(workspaces)
-        .set({
-          ...softDeletedAuditFields(userId, now),
-          isDefault: false,
-        })
-        .where(eq(workspaces.id, workspaceId))
-        .run();
-
-      if (workspace.isDefault) {
-        setWorkspaceDefault(transaction, replacement.id, userId, now);
-      }
-      return "removed";
-    });
-  }
-
-  setDefault(userId: string, workspaceId: string, now: number): boolean {
-    if (workspaceId === GLOBAL_WORKSPACE_ID) {
-      return false;
-    }
-
-    return this.#database.transaction((transaction) => {
-      if (!ownedWorkspaceExists(transaction, userId, workspaceId)) {
+    setDefault(userId: string, workspaceId: string, now: number): boolean {
+      if (workspaceId === GLOBAL_WORKSPACE_ID) {
         return false;
       }
-      transaction
-        .update(workspaces)
-        .set(defaultValues(userId, now, false))
-        .where(defaultWorkspaceCondition(activeWorkspaceCondition(userId)))
-        .run();
 
-      setWorkspaceDefault(transaction, workspaceId, userId, now);
-      return true;
-    });
-  }
+      return database.transaction((transaction) => {
+        if (!ownedWorkspaceExists(transaction, userId, workspaceId)) {
+          return false;
+        }
+        transaction
+          .update(workspaces)
+          .set(defaultValues(userId, now, false))
+          .where(defaultWorkspaceCondition(activeWorkspaceCondition(userId)))
+          .run();
+
+        setWorkspaceDefault(transaction, workspaceId, userId, now);
+        return true;
+      });
+    },
+  };
+  return store;
 }

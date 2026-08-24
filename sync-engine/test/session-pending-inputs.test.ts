@@ -7,7 +7,7 @@ import {
   SESSION_REALTIME_OPERATIONS,
   type UserRealtimeCommand,
 } from "../../shared/user-realtime-protocol.ts";
-import { RealtimeCommandLedger } from "../realtime-command-ledger.ts";
+import { createRealtimeCommandLedger } from "../realtime-command-ledger.ts";
 import { SessionFinisher } from "../session-finisher.ts";
 import {
   cancelPendingInput,
@@ -187,7 +187,7 @@ function expectQueuedBoundary(
 describe("durable pending session inputs", () => {
   test("retries a ledger-recorded send after its acknowledgement is lost", async () => {
     const setup = runningStore();
-    const ledger = new RealtimeCommandLedger();
+    const ledger = createRealtimeCommandLedger();
     const persist = vi.fn(() => {
       const result = enqueueInput(
         setup,

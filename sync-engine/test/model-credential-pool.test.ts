@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import {
+  createCredentialPoolBalancer,
+  type CredentialPoolBalancer,
+} from "../../shared/credential-pool-balancer.ts";
 import { providerCredentials } from "../../shared/database/schema.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import { AgentModelDiscoveryError } from "../agent-model-discovery-fetch.ts";
@@ -58,7 +61,7 @@ function createSetup() {
       createTestProviderCredential(id),
     ]),
   );
-  const balancer = new CredentialPoolBalancer();
+  const balancer = createCredentialPoolBalancer();
   const pool = modelPool(
     database,
     (_userId, selection) =>

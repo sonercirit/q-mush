@@ -6,10 +6,12 @@ import {
   createRealtimeCommandError,
   readUserRealtimeCommand,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
-  UserRealtimeProtocolError,
 } from "../shared/user-realtime-protocol.ts";
 import type { EngineHealth } from "./engine-health.ts";
-import { RealtimeCommandLedger } from "./realtime-command-ledger.ts";
+import {
+  createRealtimeCommandLedger,
+  type RealtimeCommandLedger,
+} from "./realtime-command-ledger.ts";
 import type { RealtimeSocket } from "./realtime-hub.ts";
 import { readRunnerClientMessage } from "./realtime-protocol.ts";
 import { handleRunnerRegistrationAcknowledgement } from "./realtime-runner-acknowledgement.ts";
@@ -163,7 +165,7 @@ export function createRealtimeIntegration(
   options: RealtimeIntegrationOptions,
 ): RealtimeIntegration {
   const instanceId = options.instanceId ?? createUuidV7();
-  const ledger = options.ledger ?? new RealtimeCommandLedger();
+  const ledger = options.ledger ?? createRealtimeCommandLedger();
   const authRevalidationIntervalMs =
     options.authRevalidationIntervalMs ?? DEFAULT_AUTH_REVALIDATION_INTERVAL_MS;
   const clearIntervalTimer = options.clearInterval ?? clearInterval;
@@ -405,7 +407,7 @@ export function createRealtimeIntegration(
           command = readUserRealtimeCommand(message);
         } catch (error) {
           if (
-            error instanceof UserRealtimeProtocolError &&
+            isUserRealtimeProtocolError(error) &&
             handleToolStreamSync({
               commandError: error,
               hub: options.hub,
@@ -419,7 +421,7 @@ export function createRealtimeIntegration(
             return;
           }
           if (
-            error instanceof UserRealtimeProtocolError &&
+            isUserRealtimeProtocolError(error) &&
             error.commandId !== undefined
           ) {
             sendCommandError(socket, error.commandId, "invalid_command");

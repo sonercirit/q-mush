@@ -13,7 +13,7 @@ const CRITICAL_RETRY_DELAYS_MS = [100, 400, 1_500] as const;
 const RECOVERY_PROBE_INTERVAL_MS = 30_000;
 const WRITE_STATEMENT_PATTERN = /^\s*(?:delete|insert|replace|update)\b/iu;
 
-export type DatabaseWritePriority = "critical" | "noncritical";
+type DatabaseWritePriority = "critical" | "noncritical";
 
 type DatabaseWriteAttemptRunner = <Result>(operation: () => Result) => Result;
 type RetrySleep = (delay: number) => void;
@@ -38,18 +38,22 @@ export interface DatabaseWriteResilienceOptions {
   readonly sleep?: RetrySleep;
 }
 
-export function isDiskFullFailure(error: unknown): boolean {
-  return error instanceof DiskFullError;
+const DISK_FULL_ERROR = Symbol("DiskFullError");
+
+interface DiskFullFailure extends Error {
+  readonly cause: unknown;
+  readonly [DISK_FULL_ERROR]: true;
 }
 
-class DiskFullError extends Error {
-  override readonly cause: unknown;
+export function isDiskFullFailure(error: unknown): error is DiskFullFailure {
+  return error instanceof Error && Reflect.get(error, DISK_FULL_ERROR) === true;
+}
 
-  constructor(cause: unknown) {
-    super("The database write failed because the disk is full");
-    this.name = "DiskFullError";
-    this.cause = cause;
-  }
+function createDiskFullFailure(cause: unknown): DiskFullFailure {
+  return Object.assign(
+    new Error("The database write failed because the disk is full", { cause }),
+    { [DISK_FULL_ERROR]: true as const, cause, name: "DiskFullError" },
+  );
 }
 
 function isDiskFullError(error: unknown): boolean {
@@ -80,78 +84,75 @@ function closedError(): Error {
   return new Error("Database write resilience has shut down");
 }
 
-export class DatabaseWriteResilience {
-  readonly #attempt: DatabaseWriteAttemptRunner;
-  readonly #health: StorageHealth;
-  readonly #sleep: RetrySleep;
-  #closed = false;
-
-  constructor(options: DatabaseWriteResilienceOptions) {
-    this.#attempt = options.attempt ?? ((operation) => operation());
-    this.#health = options.health;
-    this.#sleep = options.sleep ?? Bun.sleepSync;
-  }
-
-  close(): void {
-    this.#closed = true;
-  }
-
-  #throwIfClosed(): void {
-    if (this.#closed) {
-      throw closedError();
-    }
-  }
-
-  #perform<Result>(operation: () => Result): DatabaseWriteAttempt<Result> {
-    try {
-      return { result: this.#attempt(operation), status: "persisted" };
-    } catch (error) {
-      if (!isDiskFullError(error)) {
-        throw error;
-      }
-      return { error, status: "disk_full" };
-    }
-  }
-
+export interface DatabaseWriteResilience {
+  close(): void;
   run<Result>(
     priority: DatabaseWritePriority,
     operation: () => Result,
-  ): Result | undefined {
-    this.#throwIfClosed();
-    let attempted = this.#perform(operation);
-    if (attempted.status === "persisted") {
-      return attempted.result;
-    }
-    this.#health.degrade(
-      "disk_full",
-      priority === "critical"
-        ? "a critical database write ran out of space and is retrying briefly"
-        : "a non-critical database write was dropped because the disk is full",
-      attempted.error,
-    );
-    if (priority === "noncritical") {
-      return undefined;
-    }
+  ): Result | undefined;
+}
 
-    // Bun SQLite and Drizzle are synchronous. Keeping retries synchronous is
-    // the only way to return an honest result to their callers. This bounded
-    // two-second window may delay the event loop (and signal callbacks), but it
-    // cannot monopolize it indefinitely; callers then receive DiskFullError.
-    for (const delay of CRITICAL_RETRY_DELAYS_MS) {
-      this.#sleep(delay);
-      attempted = this.#perform(operation);
-      if (attempted.status === "persisted") {
-        this.#health.restore("disk_full");
-        return attempted.result;
-      }
+type ResilientRun = DatabaseWriteResilience["run"];
+
+function runDatabaseWrite<Result>(
+  perform: ResilientRun,
+  priority: DatabaseWritePriority,
+  operation: () => Result,
+): Result | undefined {
+  return perform(priority, operation);
+}
+
+export function createDatabaseWriteResilience(
+  options: DatabaseWriteResilienceOptions,
+): DatabaseWriteResilience {
+  const attempt = options.attempt ?? ((operation) => operation());
+  const health = options.health;
+  const sleep = options.sleep ?? Bun.sleepSync;
+  let closed = false;
+  const perform = <Result>(
+    operation: () => Result,
+  ): DatabaseWriteAttempt<Result> => {
+    try {
+      return { result: attempt(operation), status: "persisted" };
+    } catch (error) {
+      if (!isDiskFullError(error)) throw error;
+      return { error, status: "disk_full" };
     }
-    this.#health.degrade(
-      "disk_full",
-      "a critical database write still cannot persist after bounded retries",
-      attempted.error,
-    );
-    throw new DiskFullError(attempted.error);
-  }
+  };
+  return {
+    close() {
+      closed = true;
+    },
+    run: (priority, operation) => {
+      if (closed) throw closedError();
+      let attempted = perform(operation);
+      if (attempted.status === "persisted") return attempted.result;
+      health.degrade(
+        "disk_full",
+        priority === "critical"
+          ? "a critical database write ran out of space and is retrying briefly"
+          : "a non-critical database write was dropped because the disk is full",
+        attempted.error,
+      );
+      if (priority === "noncritical") return undefined;
+      // SQLite writes are synchronous, so bounded synchronous retries preserve
+      // an honest result for callers without monopolizing the loop indefinitely.
+      for (const delay of CRITICAL_RETRY_DELAYS_MS) {
+        sleep(delay);
+        attempted = perform(operation);
+        if (attempted.status === "persisted") {
+          health.restore("disk_full");
+          return attempted.result;
+        }
+      }
+      health.degrade(
+        "disk_full",
+        "a critical database write still cannot persist after bounded retries",
+        attempted.error,
+      );
+      throw createDiskFullFailure(attempted.error);
+    },
+  };
 }
 
 export function runNoncriticalDatabaseWrite(
@@ -169,16 +170,17 @@ function isStatementMethod(value: PropertyKey): value is StatementMethod {
   );
 }
 
+const DEFAULT_STATEMENT_RESULTS: Readonly<
+  Record<StatementMethod, () => unknown>
+> = {
+  all: () => [],
+  get: () => null,
+  run: droppedChanges,
+  values: () => [],
+};
+
 function defaultStatementResult(method: StatementMethod): unknown {
-  switch (method) {
-    case "get":
-      return null;
-    case "run":
-      return droppedChanges();
-    case "all":
-    case "values":
-      return [];
-  }
+  return DEFAULT_STATEMENT_RESULTS[method]();
 }
 
 function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
@@ -213,7 +215,11 @@ function resilientStatement<ReturnType, ParamsType extends SQLQueryBindings[]>(
         if (database.inTransaction || inResilientTransaction()) {
           return execute();
         }
-        const result = resilience.run(priorityValue, execute);
+        const result = runDatabaseWrite(
+          resilience.run.bind(resilience),
+          priorityValue,
+          execute,
+        );
         return priorityValue === "noncritical" && result === undefined
           ? defaultStatementResult(property)
           : result;
@@ -265,7 +271,11 @@ export function installDatabaseWriteResilience(
         resilientTransactionDepth -= 1;
       }
     };
-    return resilience.run(activePriority, execute);
+    return runDatabaseWrite(
+      resilience.run.bind(resilience),
+      activePriority,
+      execute,
+    );
   }
   Object.defineProperty(database, "transaction", {
     configurable: true,
@@ -283,6 +293,11 @@ export function installDatabaseWriteResilience(
       }
     },
   });
+}
+
+function closeRecoveryProbe(database: Database): void {
+  database.run("ROLLBACK TO q_mush_storage_recovery_probe");
+  database.run("RELEASE q_mush_storage_recovery_probe");
 }
 
 export function startDatabaseRecoveryWatcher(
@@ -312,8 +327,7 @@ export function startDatabaseRecoveryWatcher(
       database.run(
         `PRAGMA user_version = ${String(originalVersion === 0 ? 1 : 0)}`,
       );
-      database.run("ROLLBACK TO q_mush_storage_recovery_probe");
-      database.run("RELEASE q_mush_storage_recovery_probe");
+      closeRecoveryProbe(database);
       void Promise.resolve(recovered()).then(
         (reconciled) => {
           if (reconciled !== false) {
@@ -330,8 +344,7 @@ export function startDatabaseRecoveryWatcher(
       );
     } catch (error) {
       try {
-        database.run("ROLLBACK TO q_mush_storage_recovery_probe");
-        database.run("RELEASE q_mush_storage_recovery_probe");
+        closeRecoveryProbe(database);
       } catch {
         // The original probe error describes the storage condition.
       }

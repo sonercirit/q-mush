@@ -1,4 +1,7 @@
-import { CredentialPoolBalancer } from "../shared/credential-pool-balancer.ts";
+import {
+  createCredentialPoolBalancer,
+  type CredentialPoolBalancer,
+} from "../shared/credential-pool-balancer.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {

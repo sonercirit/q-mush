@@ -16,13 +16,13 @@ import {
 } from "./provider-quota.ts";
 import { createStoreResources } from "./store-resources.ts";
 
-export interface ProviderQuotaSetting {
+interface ProviderQuotaSetting {
   readonly autoResetThresholdPercent: number;
 }
 
 const PROVIDER_QUOTA_RESET_LEASE_MILLISECONDS = 60_000;
 
-export type ResetReservation =
+type ResetReservation =
   | {
       readonly leaseAcquiredAt: number;
       readonly providerRequestId: string;
@@ -125,19 +125,51 @@ function settingValues(
   };
 }
 
-export class ProviderQuotaStore {
-  readonly #database: AppDatabase;
-  readonly #idAt: (now: number) => string;
+type ProviderQuotaResetCompleter = (
+  userId: string,
+  credentialId: string,
+  requestId: string,
+  result: ProviderQuotaResetOutcome,
+  now: number,
+  replayRequestId?: string,
+  leaseAcquiredAt?: number,
+) => void;
 
-  constructor(database: AppDatabase, generateId: IdGenerator = createUuidV7) {
-    const resources = createStoreResources(database, generateId);
-    this.#database = resources.database;
-    this.#idAt = resources.generateId;
-  }
+export interface ProviderQuotaStore {
+  readonly read: (userId: string, credentialId: string) => ProviderQuotaSetting;
+  readonly setThreshold: (
+    userId: string,
+    credentialId: string,
+    threshold: number,
+    now: number,
+  ) => void;
+  readonly reserveReset: (
+    userId: string,
+    credentialId: string,
+    requestId: string,
+    now: number,
+  ) => ResetReservation;
+  readonly completeReset: ProviderQuotaResetCompleter;
+  readonly releaseReset: (
+    userId: string,
+    credentialId: string,
+    requestId: string,
+    now: number,
+    leaseAcquiredAt?: number,
+  ) => void;
+}
 
-  read(userId: string, credentialId: string): ProviderQuotaSetting {
+export function createProviderQuotaStore(
+  database: AppDatabase,
+  generateId: IdGenerator = createUuidV7,
+): ProviderQuotaStore {
+  const resources = createStoreResources(database, generateId);
+  const storeDatabase = resources.database;
+  const idAt = resources.generateId;
+
+  function read(userId: string, credentialId: string): ProviderQuotaSetting {
     return (
-      this.#database
+      storeDatabase
         .select({
           autoResetThresholdPercent:
             providerQuotaSettings.autoResetThresholdPercent,
@@ -150,13 +182,13 @@ export class ProviderQuotaStore {
     );
   }
 
-  setThreshold(
+  function setThreshold(
     userId: string,
     credentialId: string,
     threshold: number,
     now: number,
   ): void {
-    const updated = this.#database
+    const updated = storeDatabase
       .update(providerQuotaSettings)
       .set({
         ...updatedAuditFields(userId, now),
@@ -166,23 +198,23 @@ export class ProviderQuotaStore {
       .returning({ id: providerQuotaSettings.id })
       .all();
     if (updated.length === 0) {
-      this.#database
+      storeDatabase
         .insert(providerQuotaSettings)
         .values({
-          ...settingValues(this.#idAt(now), userId, threshold, new Date(now)),
+          ...settingValues(idAt(now), userId, threshold, new Date(now)),
           providerCredentialId: credentialId,
         })
         .run();
     }
   }
 
-  #reclaimReset(
+  function reclaimReset(
     userId: string,
     credentialId: string,
     providerRequestId: string,
     now: number,
   ): ResetReservation {
-    const reclaimed = this.#database
+    const reclaimed = storeDatabase
       .update(providerQuotaResetReceipts)
       .set(updatedAuditFields(userId, now))
       .where(
@@ -202,13 +234,13 @@ export class ProviderQuotaStore {
       : { leaseAcquiredAt: now, providerRequestId, reserved: true };
   }
 
-  reserveReset(
+  function reserveReset(
     userId: string,
     credentialId: string,
     requestId: string,
     now: number,
   ): ResetReservation {
-    const existing = this.#database
+    const existing = storeDatabase
       .select({
         clientRequestId: providerQuotaResetReceipts.clientRequestId,
         outcome: providerQuotaResetReceipts.outcome,
@@ -218,34 +250,24 @@ export class ProviderQuotaStore {
       .get();
     if (existing !== undefined) {
       return existing.outcome === null
-        ? this.#reclaimReset(
-            userId,
-            credentialId,
-            existing.clientRequestId,
-            now,
-          )
+        ? reclaimReset(userId, credentialId, existing.clientRequestId, now)
         : { replayedResult: existing.outcome, reserved: false };
     }
-    const pending = this.#database
+    const pending = storeDatabase
       .select({ clientRequestId: providerQuotaResetReceipts.clientRequestId })
       .from(providerQuotaResetReceipts)
       .where(pendingReceiptCondition(userId, credentialId))
       .get();
     if (pending !== undefined) {
-      return this.#reclaimReset(
-        userId,
-        credentialId,
-        pending.clientRequestId,
-        now,
-      );
+      return reclaimReset(userId, credentialId, pending.clientRequestId, now);
     }
     try {
-      this.#database
+      storeDatabase
         .insert(providerQuotaResetReceipts)
         .values({
           ...createdAuditFields(userId, now),
           clientRequestId: requestId,
-          id: this.#idAt(now),
+          id: idAt(now),
           providerCredentialId: credentialId,
           userId,
         })
@@ -260,17 +282,17 @@ export class ProviderQuotaStore {
     }
   }
 
-  completeReset(
-    userId: string,
-    credentialId: string,
-    requestId: string,
-    result: ProviderQuotaResetOutcome,
-    now: number,
+  const completeReset: ProviderQuotaResetCompleter = (
+    userId,
+    credentialId,
+    requestId,
+    result,
+    now,
     replayRequestId = requestId,
     leaseAcquiredAt = now,
-  ): void {
+  ) => {
     const timestamp = new Date(now);
-    this.#database.transaction((transaction) => {
+    storeDatabase.transaction((transaction) => {
       const completed = mutateLeasedReceipt(
         transaction,
         userId,
@@ -290,7 +312,7 @@ export class ProviderQuotaStore {
             ...createdAuditFields(userId, now),
             clientRequestId: replayRequestId,
             completedAt: timestamp,
-            id: this.#idAt(now),
+            id: idAt(now),
             outcome: result,
             providerCredentialId: credentialId,
             userId,
@@ -299,9 +321,9 @@ export class ProviderQuotaStore {
           .run();
       }
     });
-  }
+  };
 
-  releaseReset(
+  function releaseReset(
     userId: string,
     credentialId: string,
     requestId: string,
@@ -309,7 +331,7 @@ export class ProviderQuotaStore {
     leaseAcquiredAt = now,
   ): void {
     mutateLeasedReceipt(
-      this.#database,
+      storeDatabase,
       userId,
       credentialId,
       requestId,
@@ -317,4 +339,6 @@ export class ProviderQuotaStore {
       softDeletedAuditFields(userId, now),
     );
   }
+
+  return { completeReset, read, releaseReset, reserveReset, setThreshold };
 }

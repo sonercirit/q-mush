@@ -5,7 +5,6 @@ import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
   createApiError,
   createCookie,
-  createMethodNotAllowedResponse,
   createRedirect,
   readCookie,
   valuesMatch,
@@ -13,12 +12,14 @@ import {
 import {
   clearPkceCookies,
   createFlowCookie,
-  readOAuthCallback,
+  readReadyOAuthCallback,
   redirectToApp,
   resolveRedirectUri,
+  serveGetRequest,
   startPkceFlowForRedirect,
   usesSecureCookies,
   type FlowCookies,
+  type OAuthEndpoints,
   type OAuthRuntime,
 } from "./oauth.ts";
 import type { ProviderCredentialEndpoints } from "./provider-credentials.ts";
@@ -55,69 +56,59 @@ export interface ConnectedAccountOAuthConfiguration {
   readonly workspaceCookie: string;
 }
 
-export class ConnectedAccountOAuth {
-  readonly #configuration: ConnectedAccountOAuthConfiguration;
-  readonly #credentials: ProviderCredentialEndpoints;
-  readonly #runtime: OAuthRuntime;
+export type ConnectedAccountOAuth = OAuthEndpoints;
 
-  constructor(
-    configuration: ConnectedAccountOAuthConfiguration,
-    credentials: ProviderCredentialEndpoints,
-    runtime: OAuthRuntime,
-  ) {
-    this.#configuration = configuration;
-    this.#credentials = credentials;
-    this.#runtime = runtime;
-  }
+export function createConnectedAccountOAuth(
+  configuration: ConnectedAccountOAuthConfiguration,
+  credentials: ProviderCredentialEndpoints,
+  runtime: OAuthRuntime,
+): ConnectedAccountOAuth {
+  const begin: OAuthEndpoints["begin"] = (request) =>
+    serveGetRequest(request, () =>
+      credentials.authorize(request, (user) => beginAuthorized(request, user)),
+    );
 
-  begin(request: Request): Response {
-    if (["GET"].includes(request.method)) {
-      return this.#credentials.authorize(request, (user) =>
-        this.#beginAuthorized(request, user),
-      );
-    }
-
-    return createMethodNotAllowedResponse("GET");
-  }
-
-  #validWorkspaceScope(
+  const validWorkspaceScope = (
     workspaceId: string | undefined,
     userId: string,
-  ): workspaceId is string {
+  ): workspaceId is string => {
     return workspaceScopeIsValid(workspaceId, userId, (ownerId, workspaceIds) =>
-      this.#credentials.validateScopes(ownerId, workspaceIds),
+      credentials.validateScopes(ownerId, workspaceIds),
     );
-  }
+  };
 
-  #beginAuthorized(request: Request, user: AuthenticatedUser): Response {
-    const redirectUri = this.#redirectUri(request);
+  const beginAuthorized = (
+    request: Request,
+    user: AuthenticatedUser,
+  ): Response => {
+    const callbackUri = redirectUri(request);
     const { challenge, cookies, secure, state } = startPkceFlowForRedirect(
-      this.#runtime,
-      this.#configuration.flowCookies,
-      redirectUri,
+      runtime,
+      configuration.flowCookies,
+      callbackUri,
     );
-    const authorizationUrl = this.#configuration.createAuthorizationUrl({
-      callbackUri: redirectUri,
+    const authorizationUrl = configuration.createAuthorizationUrl({
+      callbackUri,
       challenge,
       state,
     });
     const userCookie = createFlowCookie(
-      this.#configuration.userCookie,
+      configuration.userCookie,
       user.id,
-      this.#configuration.flowCookies.path,
+      configuration.flowCookies.path,
       secure,
     );
 
     const requestUrl = new URL(request.url);
     const requestedWorkspaceId = requestUrl.searchParams.get("workspaceId");
     const workspaceId = requestedWorkspaceId ?? GLOBAL_WORKSPACE_ID;
-    if (!this.#validWorkspaceScope(workspaceId, user.id)) {
+    if (!validWorkspaceScope(workspaceId, user.id)) {
       return createApiError("invalid_workspace_scope", 409);
     }
     const requestedCredentialId = requestUrl.searchParams.get("credentialId");
     if (
       requestedCredentialId !== null &&
-      this.#credentials.readCredentialMetadata(
+      credentials.readCredentialMetadata(
         user.id,
         requestedCredentialId,
         workspaceId,
@@ -126,16 +117,16 @@ export class ConnectedAccountOAuth {
       return createApiError("invalid_credential", 409);
     }
     const credentialCookie = createFlowCookie(
-      this.#configuration.credentialCookie,
+      configuration.credentialCookie,
       requestedCredentialId ?? "",
-      this.#configuration.flowCookies.path,
+      configuration.flowCookies.path,
       secure,
     );
 
     const workspaceCookie = createFlowCookie(
-      this.#configuration.workspaceCookie,
+      configuration.workspaceCookie,
       workspaceId,
-      this.#configuration.flowCookies.path,
+      configuration.flowCookies.path,
       secure,
     );
 
@@ -145,84 +136,72 @@ export class ConnectedAccountOAuth {
       workspaceCookie,
       credentialCookie,
     ]);
-  }
+  };
 
-  async complete(request: Request): Promise<Response> {
-    if (!["GET"].includes(request.method)) {
-      return createMethodNotAllowedResponse("GET");
-    }
-
-    return await this.#credentials.authorize(request, (user) =>
-      this.#completeAuthorized(request, user),
+  const complete: OAuthEndpoints["complete"] = async (request) =>
+    await serveGetRequest(
+      request,
+      async () =>
+        await credentials.authorize(request, (user) =>
+          completeAuthorized(request, user),
+        ),
     );
-  }
 
-  async #completeAuthorized(
+  const completeAuthorized = async (
     request: Request,
     user: AuthenticatedUser,
-  ): Promise<Response> {
-    const redirectUri = this.#redirectUri(request);
-    const secure = usesSecureCookies(redirectUri);
+  ): Promise<Response> => {
+    const callbackUri = redirectUri(request);
+    const secure = usesSecureCookies(callbackUri);
     const clearedCookies = [
-      ...clearPkceCookies(this.#configuration.flowCookies, secure),
+      ...clearPkceCookies(configuration.flowCookies, secure),
       ...[
-        this.#configuration.userCookie,
-        this.#configuration.credentialCookie,
-        this.#configuration.workspaceCookie,
+        configuration.userCookie,
+        configuration.credentialCookie,
+        configuration.workspaceCookie,
       ].map((name) =>
-        createCookie(name, "", 0, this.#configuration.flowCookies.path, secure),
+        createCookie(name, "", 0, configuration.flowCookies.path, secure),
       ),
     ];
-    const callback = readOAuthCallback(
+    const callback = readReadyOAuthCallback(
       request,
-      this.#configuration.flowCookies,
+      configuration.flowCookies,
+      (status) => appRedirect(request, status, clearedCookies),
     );
-
-    switch (callback.status) {
-      case "ready":
-        break;
-      case "denied":
-      case "failed":
-      case "invalid_state":
-        return this.#appRedirect(request, callback.status, clearedCookies);
+    if (callback instanceof Response) {
+      return callback;
     }
 
     const invalidState = (): Response =>
-      this.#appRedirect(request, "invalid_state", clearedCookies);
-    const flowUserId = readCookie(request, this.#configuration.userCookie);
-    const workspaceId = readCookie(
-      request,
-      this.#configuration.workspaceCookie,
-    );
-    const credentialId = readCookie(
-      request,
-      this.#configuration.credentialCookie,
-    );
+      appRedirect(request, "invalid_state", clearedCookies);
+    const flowUserId = readCookie(request, configuration.userCookie);
+    const workspaceId = readCookie(request, configuration.workspaceCookie);
+    const credentialId = readCookie(request, configuration.credentialCookie);
     if (
       flowUserId === undefined ||
       !valuesMatch(flowUserId, user.id) ||
-      !this.#validWorkspaceScope(workspaceId, user.id)
+      !validWorkspaceScope(workspaceId, user.id)
     ) {
       return invalidState();
     }
 
     try {
-      const credential = await this.#configuration.exchangeCredential({
+      const credential = await configuration.exchangeCredential({
         code: callback.code,
-        redirectUri,
+        redirectUri: callbackUri,
         verifier: callback.verifier,
       });
       const isNewCredential =
         credentialId === undefined || credentialId.length === 0;
       const reconnecting = isNewCredential
         ? undefined
-        : this.#credentials.readCredentialMetadata(
+        : credentials.readCredentialMetadata(
             user.id,
             credentialId,
             workspaceId,
           );
       if (isNewCredential) {
-        this.#credentials.addConnectedAccount(
+        credentials.addConnectedAccount(
           user,
           credential.secret,
           credential.details,
@@ -231,19 +210,19 @@ export class ConnectedAccountOAuth {
       } else if (
         reconnecting?.requiresReauthentication !== true ||
         reconnecting.accountId !== credential.details.accountId ||
-        !this.#credentials.reconnectCredential(
+        !credentials.reconnectCredential(
           user.id,
           credentialId,
           credential.secret,
-          this.#runtime.now(),
+          runtime.now(),
           credential.details,
         )
       ) {
-        return this.#appRedirect(request, "wrong_account", clearedCookies);
+        return appRedirect(request, "wrong_account", clearedCookies);
       }
-      return this.#appRedirect(request, "connected", clearedCookies);
+      return appRedirect(request, "connected", clearedCookies);
     } catch (error) {
-      return this.#appRedirect(
+      return appRedirect(
         request,
         error instanceof Error &&
           error.message.includes("UNIQUE constraint failed")
@@ -252,9 +231,9 @@ export class ConnectedAccountOAuth {
         clearedCookies,
       );
     }
-  }
+  };
 
-  #appRedirect(
+  const appRedirect = (
     request: Request,
     result:
       | "connected"
@@ -264,21 +243,22 @@ export class ConnectedAccountOAuth {
       | "invalid_state"
       | "wrong_account",
     cookies: readonly string[],
-  ): Response {
+  ): Response => {
     return redirectToApp(
       APP_PATH,
-      this.#redirectUri(request),
-      this.#configuration.resultParameter,
+      redirectUri(request),
+      configuration.resultParameter,
       result,
       cookies,
     );
-  }
+  };
 
-  #redirectUri(request: Request): string {
+  const redirectUri = (request: Request): string => {
     return resolveRedirectUri(
-      this.#configuration.redirectUri,
-      this.#configuration.callbackPath,
+      configuration.redirectUri,
+      configuration.callbackPath,
       request,
     );
-  }
+  };
+  return { begin, complete };
 }

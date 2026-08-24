@@ -36,7 +36,7 @@ import {
   runnerRegistrationSelection,
   runnerTokenSelection,
 } from "./runner-registration-query.ts";
-import { RunnerRegistrationStore } from "./runner-registration-store.ts";
+import { createRunnerRegistrationStore } from "./runner-registration-store.ts";
 import type { RunnerConnection } from "./runner-registration-types.ts";
 import { orderedRunnerQuery } from "./runner-selection.ts";
 import {
@@ -181,51 +181,96 @@ function accessibleRunnerIds(
   return workspaceId === undefined ? undefined : read(workspaceId);
 }
 
-export class RunnerStore {
-  readonly #context: RunnerStoreContext;
+type SetRunnerScopes = (
+  userId: string,
+  runnerId: string,
+  workspaceIds: readonly string[],
+  now: number,
+) => boolean;
+type ListOnlineRunners = (
+  userId: string,
+  now: number,
+  offset: number,
+  limit: number,
+  search?: string,
+  workspaceId?: string,
+) => RunnerPage;
+
+export interface RunnerStore {
+  readonly database: AppDatabase;
   readonly registration: RunnerRegistrationOperations;
-  readonly #scopeConfiguration: ConnectionScopeConfiguration;
+  readonly workspaceScopesAreValid: (
+    userId: string,
+    workspaceIds: readonly string[],
+  ) => boolean;
+  readonly create: (
+    userId: string,
+    token: string,
+    now: number,
+    workspaceIds?: readonly string[],
+  ) => RunnerSummary;
+  readonly hasActiveToken: (token: string) => boolean;
+  readonly exists: (userId: string, runnerId: string) => boolean;
+  readonly authenticate: (token: string) => RunnerConnection | undefined;
+  readonly available: (parameters: RunnerAvailabilityParameters) => boolean;
+  readonly isAvailable: (
+    userId: string,
+    runnerId: string,
+    now: number,
+    workspaceId?: string,
+  ) => boolean;
+  readonly setScopes: SetRunnerScopes;
+  readonly setDefault: (
+    userId: string,
+    runnerId: string,
+    now: number,
+  ) => boolean;
+  readonly setOnline: (
+    id: string,
+    userId: string,
+    now: number,
+    online: boolean,
+  ) => void;
+  readonly list: (
+    userId: string,
+    now: number,
+    workspaceId?: string,
+  ) => readonly RunnerSummary[];
+  readonly listOnline: ListOnlineRunners;
+  readonly remove: (userId: string, runnerId: string, now: number) => boolean;
+}
 
-  constructor(
-    database: AppDatabase,
-    generateId: IdGenerator = createUuidV7,
-    generateActivationId: () => string = createUuidV7,
-    reportParent?: RunnerStoreContext["reportParent"],
-  ) {
-    this.#context = {
-      database,
-      generateId,
-      ...(reportParent === undefined ? {} : { reportParent }),
-    };
-    this.#scopeConfiguration = {
-      associationTable: runnerWorkspaces,
-      generateId,
-      ownerIdColumn: runnerWorkspaces.runnerId,
-      ownerTable: runners,
-    };
-    this.registration = new RunnerRegistrationStore(
-      database,
-      {
-        activeRunnerCondition,
-        activeTokenCondition,
-        runnerRegistrationSelection,
-        tokenHashMatches,
-      },
-      generateActivationId,
-    );
-  }
+export function createRunnerStore(
+  database: AppDatabase,
+  generateId: IdGenerator = createUuidV7,
+  generateActivationId: () => string = createUuidV7,
+  reportParent?: RunnerStoreContext["reportParent"],
+): RunnerStore {
+  const context: RunnerStoreContext = {
+    database,
+    generateId,
+    ...(reportParent === undefined ? {} : { reportParent }),
+  };
+  const scopeConfiguration: ConnectionScopeConfiguration = {
+    associationTable: runnerWorkspaces,
+    generateId,
+    ownerIdColumn: runnerWorkspaces.runnerId,
+    ownerTable: runners,
+  };
+  const registration = createRunnerRegistrationStore(
+    database,
+    {
+      activeRunnerCondition,
+      activeTokenCondition,
+      runnerRegistrationSelection,
+      tokenHashMatches,
+    },
+    generateActivationId,
+  );
 
-  get database(): AppDatabase {
-    return this.#context.database;
-  }
-
-  get #database(): AppDatabase {
-    return this.database;
-  }
-
-  #backfillLegacyToken(token: string, digest: string): boolean {
+  function backfillLegacyToken(token: string, digest: string): boolean {
     const legacy = runnerQuery(
-      this.#database,
+      database,
       { id: runners.id, tokenHash: runners.tokenHash },
       and(eq(runners.isDeleted, false), eq(runners.tokenDigest, "")),
     )
@@ -235,7 +280,7 @@ export class RunnerStore {
       return false;
     }
     try {
-      this.#database
+      database
         .update(runners)
         .set({ tokenDigest: digest })
         .where(
@@ -252,40 +297,36 @@ export class RunnerStore {
     return true;
   }
 
-  workspaceScopesAreValid(
+  function workspaceScopesAreValid(
     userId: string,
     workspaceIds: readonly string[],
   ): boolean {
     try {
-      validateConnectionScopes(this.#database, userId, workspaceIds);
+      validateConnectionScopes(database, userId, workspaceIds);
       return true;
     } catch {
       return false;
     }
   }
 
-  create(
+  function create(
     userId: string,
     token: string,
     now: number,
     workspaceIds: readonly string[] = [GLOBAL_WORKSPACE_ID],
   ): RunnerSummary {
-    const scopes = validateConnectionScopes(
-      this.#database,
-      userId,
-      workspaceIds,
-    );
+    const scopes = validateConnectionScopes(database, userId, workspaceIds);
     const isGlobal = scopes.includes(GLOBAL_WORKSPACE_ID);
-    const id = this.#context.generateId(now);
+    const id = context.generateId(now);
     const tokenDigest = createTokenDigest(token);
     if (
-      this.#backfillLegacyToken(token, tokenDigest) ||
-      this.#activeRunnerForToken(token) !== undefined
+      backfillLegacyToken(token, tokenDigest) ||
+      activeRunnerForToken(token) !== undefined
     ) {
       throw new Error("The runner token is already active");
     }
     const tokenHash = createStoredTokenHash(token);
-    this.#database.transaction((transaction) => {
+    database.transaction((transaction) => {
       transaction
         .insert(runners)
         .values({
@@ -300,14 +341,14 @@ export class RunnerStore {
         .run();
       replaceConnectionScopes(
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         id,
         scopes,
         now,
       );
     });
-    const inserted = this.#activeRunnerExists({ id });
+    const inserted = activeRunnerExists({ id });
     if (!inserted) {
       throw new Error("The runner token is already active");
     }
@@ -318,9 +359,9 @@ export class RunnerStore {
     });
   }
 
-  #activeRunnerExists(filter: ActiveRunnerFilter): boolean {
+  function activeRunnerExists(filter: ActiveRunnerFilter): boolean {
     return (
-      this.#database
+      database
         .select({ id: runners.id })
         .from(runners)
         .where(activeRunnerCondition(filter))
@@ -328,35 +369,35 @@ export class RunnerStore {
     );
   }
 
-  hasActiveToken(token: string): boolean {
-    return this.#activeRunnerForToken(token) !== undefined;
+  function hasActiveToken(token: string): boolean {
+    return activeRunnerForToken(token) !== undefined;
   }
 
-  exists(userId: string, runnerId: string): boolean {
-    return this.#activeRunnerExists({ id: runnerId, userId });
+  function exists(userId: string, runnerId: string): boolean {
+    return activeRunnerExists({ id: runnerId, userId });
   }
 
-  authenticate(token: string): RunnerConnection | undefined {
-    const stored = this.#activeRunnerForToken(token);
+  function authenticate(token: string): RunnerConnection | undefined {
+    const stored = activeRunnerForToken(token);
 
     return stored?.machineFingerprint == null
       ? undefined
       : { id: stored.id, userId: stored.userId };
   }
 
-  #workspaceAvailable(userId: string, workspaceId?: string): boolean {
+  function workspaceAvailable(userId: string, workspaceId?: string): boolean {
     return (
       workspaceId === undefined ||
-      connectionWorkspaceIsAvailable(this.#database, userId, workspaceId)
+      connectionWorkspaceIsAvailable(database, userId, workspaceId)
     );
   }
 
-  available(parameters: RunnerAvailabilityParameters): boolean {
+  function available(parameters: RunnerAvailabilityParameters): boolean {
     const [userId, runnerId, now, workspaceId] = parameters;
-    if (!this.#workspaceAvailable(userId, workspaceId)) {
+    if (!workspaceAvailable(userId, workspaceId)) {
       return false;
     }
-    const stored = this.#database
+    const stored = database
       .select({
         isGlobal: runners.isGlobal,
         lastSeenAt: runners.lastSeenAt,
@@ -373,7 +414,7 @@ export class RunnerStore {
       connectionIsAccessible(
         {
           isGlobal: stored.isGlobal,
-          workspaceIds: this.#workspaceIds(userId, runnerId),
+          workspaceIds: workspaceIds(userId, runnerId),
         },
         workspaceId,
       ) &&
@@ -383,30 +424,22 @@ export class RunnerStore {
     );
   }
 
-  isAvailable(
+  function isAvailable(
     userId: string,
     runnerId: string,
     now: number,
     workspaceId?: string,
   ): boolean {
-    return this.available([userId, runnerId, now, workspaceId]);
+    return available([userId, runnerId, now, workspaceId]);
   }
 
-  setScopes(
-    userId: string,
-    runnerId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ): boolean {
-    if (!this.exists(userId, runnerId)) {
+  const setScopes: SetRunnerScopes = (...scopeUpdate) => {
+    const [userId, runnerId, workspaceIds, now] = scopeUpdate;
+    if (!exists(userId, runnerId)) {
       return false;
     }
-    const scopes = validateConnectionScopes(
-      this.#database,
-      userId,
-      workspaceIds,
-    );
-    this.#database.transaction((transaction) => {
+    const scopes = validateConnectionScopes(database, userId, workspaceIds);
+    database.transaction((transaction) => {
       transaction
         .update(runners)
         .set({
@@ -417,7 +450,7 @@ export class RunnerStore {
         .run();
       replaceConnectionScopes(
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         runnerId,
         scopes,
@@ -425,10 +458,10 @@ export class RunnerStore {
       );
     });
     return true;
-  }
+  };
 
-  setDefault(userId: string, runnerId: string, now: number): boolean {
-    return this.#database.transaction((transaction) => {
+  function setDefault(userId: string, runnerId: string, now: number): boolean {
+    return database.transaction((transaction) => {
       const runner = transaction.query.runners
         .findFirst({
           columns: { id: true },
@@ -454,9 +487,14 @@ export class RunnerStore {
     });
   }
 
-  setOnline(id: string, userId: string, now: number, online: boolean): void {
+  function setOnline(
+    id: string,
+    userId: string,
+    now: number,
+    online: boolean,
+  ): void {
     const lastSeenAt = online ? now : 0;
-    this.#database
+    database
       .update(runners)
       .set({
         lastSeenAt: new Date(lastSeenAt),
@@ -466,72 +504,62 @@ export class RunnerStore {
       .run();
   }
 
-  #summaries(
+  function summaries(
     userId: string,
     now: number,
     query: Pick<ReturnType<typeof orderedRunnerQuery>, "all">,
   ): readonly RunnerSummary[] {
     return query.all().map((runner) => ({
       ...summarizeRunner(runner, now),
-      workspaceIds: this.#workspaceIds(userId, runner.id),
+      workspaceIds: workspaceIds(userId, runner.id),
     }));
   }
 
-  #withWorkspaceRunnerIds<Result>(
+  function withWorkspaceRunnerIds<Result>(
     userId: string,
     workspaceId: string | undefined,
     unavailable: Result,
     available: (runnerIds: readonly string[] | undefined) => Result,
   ): Result {
-    if (!this.#workspaceAvailable(userId, workspaceId)) {
+    if (!workspaceAvailable(userId, workspaceId)) {
       return unavailable;
     }
     return available(
       accessibleRunnerIds(workspaceId, (selected) =>
-        this.#accessibleIds(userId, selected),
+        accessibleIds(userId, selected),
       ),
     );
   }
 
-  list(
+  function list(
     userId: string,
     now: number,
     workspaceId?: string,
   ): readonly RunnerSummary[] {
-    return this.#withWorkspaceRunnerIds(
-      userId,
-      workspaceId,
-      [],
-      (accessibleIds) =>
-        this.#summaries(
-          userId,
-          now,
-          orderedRunnerQuery(
-            this.#database,
-            accessibleIds === undefined
-              ? activeRunnerCondition({ userId })
-              : and(
-                  activeRunnerCondition({ userId }),
-                  inArray(runners.id, accessibleIds),
-                ),
-          ),
+    return withWorkspaceRunnerIds(userId, workspaceId, [], (accessibleIds) =>
+      summaries(
+        userId,
+        now,
+        orderedRunnerQuery(
+          database,
+          accessibleIds === undefined
+            ? activeRunnerCondition({ userId })
+            : and(
+                activeRunnerCondition({ userId }),
+                inArray(runners.id, accessibleIds),
+              ),
         ),
+      ),
     );
   }
 
-  listOnline(
-    userId: string,
-    now: number,
-    offset: number,
-    limit: number,
-    search?: string,
-    workspaceId?: string,
-  ): RunnerPage {
+  const listOnline: ListOnlineRunners = (...pageSelection) => {
+    const [userId, now, offset, limit, search, workspaceId] = pageSelection;
     if (!validPageWindow(offset, limit)) {
       throw new Error("The runner page is invalid");
     }
 
-    return this.#withWorkspaceRunnerIds(
+    return withWorkspaceRunnerIds(
       userId,
       workspaceId,
       { items: [], totalItems: 0 },
@@ -541,29 +569,23 @@ export class RunnerStore {
           accessibleIds === undefined
             ? base
             : and(base, inArray(runners.id, accessibleIds));
-        const totalItems = countSelectedRows(
-          this.#database,
-          runners,
-          condition,
-        );
-        const items = this.#summaries(
+        const totalItems = countSelectedRows(database, runners, condition);
+        const items = summaries(
           userId,
           now,
-          orderedRunnerQuery(this.#database, condition)
-            .limit(limit)
-            .offset(offset),
+          orderedRunnerQuery(database, condition).limit(limit).offset(offset),
         );
 
         return { items, totalItems };
       },
     );
-  }
+  };
 
-  remove(userId: string, runnerId: string, now: number): boolean {
-    const removed = this.#database.transaction((transaction) => {
+  function remove(userId: string, runnerId: string, now: number): boolean {
+    const removed = database.transaction((transaction) => {
       removeConnectionScopes(
         transaction,
-        this.#scopeConfiguration,
+        scopeConfiguration,
         userId,
         runnerId,
         now,
@@ -588,21 +610,24 @@ export class RunnerStore {
         transaction,
         userId,
         runnerId,
-        this.#context.generateId,
+        context.generateId,
         now,
       );
       return { reports };
     });
     if (removed === false) return false;
     for (const { report, userId: ownerId } of removed.reports) {
-      emitReportedParent(this.#context, ownerId, report);
+      emitReportedParent(context, ownerId, report);
     }
     return true;
   }
 
-  #accessibleIds(userId: string, workspaceId: string): readonly string[] {
+  function accessibleIds(
+    userId: string,
+    workspaceId: string,
+  ): readonly string[] {
     return accessibleConnectionIds(
-      this.#database,
+      database,
       {
         associationOwnerId: runnerWorkspaces.runnerId,
         associationTable: runnerWorkspaces,
@@ -616,19 +641,14 @@ export class RunnerStore {
     );
   }
 
-  #workspaceIds(userId: string, runnerId: string): readonly string[] {
-    const resources = [
-      this.#database,
-      this.#scopeConfiguration,
-      userId,
-      runnerId,
-    ] as const;
+  function workspaceIds(userId: string, runnerId: string): readonly string[] {
+    const resources = [database, scopeConfiguration, userId, runnerId] as const;
     return readConnectionScopes(...resources);
   }
 
-  #activeRunnerForToken(token: string) {
+  function activeRunnerForToken(token: string) {
     const matching = runnerQuery(
-      this.#database,
+      database,
       runnerTokenSelection(),
       activeTokenCondition(token),
     ).all();
@@ -638,4 +658,22 @@ export class RunnerStore {
       ? matching[0]
       : undefined;
   }
+
+  return {
+    authenticate,
+    available,
+    create,
+    database,
+    exists,
+    hasActiveToken,
+    isAvailable,
+    list,
+    listOnline,
+    registration,
+    remove,
+    setDefault,
+    setOnline,
+    setScopes,
+    workspaceScopesAreValid,
+  };
 }

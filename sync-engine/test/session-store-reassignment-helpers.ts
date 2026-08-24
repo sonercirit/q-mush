@@ -3,7 +3,7 @@ import { expect } from "vitest";
 import type { AppDatabase } from "../../shared/database.ts";
 import { runners, users } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -69,7 +69,7 @@ export function removeTestRunner(
   runnerId: string,
   now = TEST_NOW + 2,
 ): boolean {
-  return new RunnerStore(setup.database).remove(TEST_USER_ID, runnerId, now);
+  return createRunnerStore(setup.database).remove(TEST_USER_ID, runnerId, now);
 }
 
 export function removeTestRunnerAndExpect(

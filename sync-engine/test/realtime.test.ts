@@ -5,12 +5,12 @@ import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { GLOBAL_WORKSPACE_ID } from "../../shared/workspace-model.ts";
 import type { GoogleAuth } from "../../sync-engine/auth.ts";
-import { RealtimeHub } from "../../sync-engine/realtime-hub.ts";
+import { createRealtimeHub } from "../../sync-engine/realtime-hub.ts";
 import type {
   createRealtimeIntegration,
   QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { TEST_PENDING_QUESTIONS } from "./ask-questions-test-fixtures.ts";
 import {
@@ -28,11 +28,11 @@ import {
   configuredRealtimeTestIntegration,
   connectedRunnerRealtimeTestIntegration,
   createRealtimeTestIntegration,
+  createRealtimeUpgradeServer,
   REALTIME_TEST_USER,
   realtimeRunnerConnection,
   realtimeTestAuth,
   realtimeTestSessions,
-  RealtimeUpgradeServer,
   type RealtimeRunnerOverrides,
   type RealtimeSessionOverrides,
 } from "./realtime-test-helpers.ts";
@@ -109,7 +109,7 @@ function openedSessionPublisher(
   let listener: ((userId: string, sessionId: string) => void) | undefined;
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth(USER),
-    hub: new RealtimeHub(),
+    hub: createRealtimeHub(),
     sessions: realtimeTestSessions({
       detailForUser: detail,
       listForUser: () => [detail()],
@@ -145,7 +145,7 @@ function expectUpgrade(
 }
 
 test("upgrades an authenticated browser request", () => {
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   expect(
     realtimeTestUpgrade(integration(USER), "/api/realtime", server),
   ).toBeUndefined();
@@ -160,7 +160,7 @@ test("rejects invalid browser scopes", () => {
       workspaceId !== GLOBAL_WORKSPACE_ID && workspaceId === "workspace-1",
   });
 
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
 
   for (const path of [
     "/api/realtime?",
@@ -180,7 +180,7 @@ test("rejects invalid browser scopes", () => {
 
 test("requires a same-origin browser request", () => {
   const realtime = integration(USER);
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   const request = (origin?: string) =>
     new Request("http://localhost/api/realtime?workspaceId=workspace-1", {
       headers: {
@@ -197,7 +197,7 @@ test("requires a same-origin browser request", () => {
 });
 
 test("rejects invalid realtime requests", () => {
-  const server = new RealtimeUpgradeServer();
+  const server = createRealtimeUpgradeServer();
   const unauthorized = realtimeTestUpgrade(
     integration(null),
     "/api/realtime",
@@ -218,7 +218,7 @@ test.each(["zero", "throw"] as const)(
   "closes when browser snapshot delivery returns %s",
   (failure) => {
     const realtime = integration(USER);
-    const server = new RealtimeUpgradeServer();
+    const server = createRealtimeUpgradeServer();
     expect(
       realtimeTestUpgrade(realtime, "/api/realtime", server),
     ).toBeUndefined();
@@ -373,7 +373,7 @@ test("does not replay a retained command result across workspaces", async () => 
 });
 
 test("restores owned active tool streams", () => {
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const reads: unknown[] = [];
   hub.publishToolStream(
     USER.id,
@@ -467,7 +467,7 @@ test("runner removal closes its socket, publishes the list, and responds before 
   const runners = createRunnerIntegration(auth, {
     now: () => TEST_NOW,
     randomToken: () => "runner-removal-token",
-    store: new RunnerStore(database, () => runnerId),
+    store: createRunnerStore(database, () => runnerId),
   });
   const created = runners.collection(
     createAuthenticatedRequest(RUNNERS_PATH, undefined, "POST"),
@@ -482,7 +482,7 @@ test("runner removal closes its socket, publishes the list, and responds before 
     throw new Error("The removal test runner did not connect");
   }
 
-  const hub = new RealtimeHub();
+  const hub = createRealtimeHub();
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth({ ...USER, id: TEST_USER_ID }),
     hub,

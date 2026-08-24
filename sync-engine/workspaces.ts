@@ -88,16 +88,13 @@ export function createWorkspaceIntegration(options: {
           return createMethodNotAllowedResponse("PATCH, DELETE");
         }
         const result = options.store.remove(user.id, workspaceId, now());
-        switch (result) {
-          case "last_workspace":
-            return createApiError("last_workspace", 409);
-          case "not_found":
-            return createApiError("not_found", 404);
-          case "workspace_in_use":
-            return createApiError("workspace_in_use", 409);
-          case "removed":
-            return createNoContentResponse();
-        }
+        const responses: Record<typeof result, () => Response> = {
+          last_workspace: () => createApiError("last_workspace", 409),
+          not_found: () => createApiError("not_found", 404),
+          workspace_in_use: () => createApiError("workspace_in_use", 409),
+          removed: createNoContentResponse,
+        };
+        return responses[result]();
       }),
     setDefault: (request, workspaceId) => {
       if (request.method !== "POST") {

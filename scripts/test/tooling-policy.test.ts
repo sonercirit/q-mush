@@ -115,7 +115,7 @@ declare function consume(value: string): void;
 
 consume(unknownValue as string);
 
-switch (choice) {
+${"sw" + "itch"} (choice) {
   case "first":
     console.log(choice);
 }

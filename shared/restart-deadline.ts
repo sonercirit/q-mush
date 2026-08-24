@@ -1,21 +1,14 @@
-export class RestartDeadline {
-  readonly #deadlineAt: number;
-  readonly #now: () => number;
-
-  constructor(deadlineAt: number, now: () => number = Date.now) {
-    this.#deadlineAt = deadlineAt;
-    this.#now = now;
-  }
-
-  get at(): number {
-    return this.#deadlineAt;
-  }
-
-  expired(): boolean {
-    return this.remaining() === 0;
-  }
-
-  remaining(): number {
-    return Math.max(0, this.#deadlineAt - this.#now());
-  }
+export interface RestartDeadline {
+  readonly at: number;
+  expired(): boolean;
+  remaining(): number;
 }
+
+export const createRestartDeadline = (
+  deadlineAt: number,
+  now: () => number = Date.now,
+): RestartDeadline => ({
+  at: deadlineAt,
+  expired: () => Math.max(0, deadlineAt - now()) === 0,
+  remaining: () => Math.max(0, deadlineAt - now()),
+});

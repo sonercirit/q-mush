@@ -1,4 +1,4 @@
-import { RunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
+import { isRunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import type { AgentSessionUsageUpdate } from "../shared/session-model.ts";
 import type { SessionAgentRuntimeDependencies } from "./session-agent-runtime.ts";
 import type { CompactionUsage } from "./session-compaction-usage.ts";
@@ -81,7 +81,7 @@ function isSessionRestartHandoff(
   return (
     runtime.restartHandoffRequested() &&
     ((error instanceof DOMException && error.name === "AbortError") ||
-      error instanceof RunnerDisconnectedError)
+      isRunnerDisconnectedError(error))
   );
 }
 

@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { sessions, users } from "../../shared/database/schema.ts";
 import { SYSTEM_ID } from "../../shared/ids.ts";
-import { DrizzleAuthStore } from "../../sync-engine/auth-store.ts";
+import { createDrizzleAuthStore } from "../../sync-engine/auth-store.ts";
 import { createSchemaCompatibleTestDatabase } from "./authenticated-integration-test-helpers.ts";
 
 const CREATED_AT = 1_700_000_000_000;
@@ -34,7 +34,7 @@ function createIdGenerator(): (timestamp: number) => string {
 
 test("audits profile updates and soft-deletes expired sessions", () => {
   const database = createSchemaCompatibleTestDatabase();
-  const store = new DrizzleAuthStore(database, createIdGenerator());
+  const store = createDrizzleAuthStore(database, createIdGenerator());
 
   store.createSession(
     "first-token",

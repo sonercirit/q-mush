@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -100,7 +100,7 @@ describe("runner command disconnect survival", () => {
     );
 
     await expect(result).rejects.toEqual(
-      new RunnerDisconnectedError(
+      createRunnerDisconnectedError(
         "The runner process restarted before the command returned",
       ),
     );

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { toolSettings } from "../../shared/database/schema.ts";
 import { TOOL_SETTINGS_PATH } from "../../shared/routes.ts";
-import { RealtimeHub } from "../realtime-hub.ts";
+import { createRealtimeHub } from "../realtime-hub.ts";
 import { ToolSettingsStore } from "../tool-settings-store.ts";
 import { createToolSettingsIntegration } from "../tool-settings.ts";
 import {
@@ -13,7 +13,7 @@ import {
   TEST_NOW,
   TEST_USER_ID,
 } from "./authenticated-integration-test-helpers.ts";
-import { RecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
+import { createRecordingRealtimeSocket } from "./realtime-hub-test-helpers.ts";
 
 function apiSettings(
   executionLimitMinutes: number,
@@ -146,9 +146,9 @@ describe("tool settings API", () => {
 
   test("publishes saved settings only through the authenticated user's channel", async () => {
     const { auth, database } = createAuthenticatedTestContext();
-    const realtime = new RealtimeHub();
-    const owner = new RecordingRealtimeSocket();
-    const other = new RecordingRealtimeSocket();
+    const realtime = createRealtimeHub();
+    const owner = createRecordingRealtimeSocket();
+    const other = createRecordingRealtimeSocket();
     realtime.setUser(TEST_USER_ID, owner, true, "workspace-1");
     realtime.setUser(TEST_FOREIGN_USER_ID, other, true, "workspace-1");
     const integration = createToolSettingsIntegration(auth, {

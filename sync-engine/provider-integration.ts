@@ -9,10 +9,10 @@ import {
   type ProviderCredentialDetails,
   type ProviderId,
 } from "../shared/provider-credential-store.ts";
-import { ProviderQuotaStore } from "../shared/provider-quota-store.ts";
+import { createProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
 import {
-  ConnectedAccountOAuth,
+  createConnectedAccountOAuth,
   type ConnectedAccountOAuthConfiguration,
 } from "./connected-account-oauth.ts";
 import {
@@ -153,7 +153,7 @@ export function createProviderIntegration(options: {
   const quotaStore =
     options.configuration === undefined
       ? undefined
-      : new ProviderQuotaStore(runtime.database, runtime.generateId);
+      : createProviderQuotaStore(runtime.database, runtime.generateId);
   const sessionStore =
     options.configuration === undefined
       ? undefined
@@ -206,7 +206,7 @@ export function createProviderIntegration(options: {
   const connectedAccount =
     baseOAuthConfiguration === undefined
       ? undefined
-      : new ConnectedAccountOAuth(
+      : createConnectedAccountOAuth(
           {
             ...baseOAuthConfiguration,
             ...(options.configuration?.redirectUri === undefined

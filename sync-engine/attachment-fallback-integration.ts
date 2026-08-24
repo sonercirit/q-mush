@@ -7,8 +7,14 @@ import {
   discoverModelOption,
   type AgentModelDiscoverer,
 } from "./agent-model-discovery.ts";
-import { AttachmentFallbackApi } from "./attachment-fallback-api.ts";
-import { AttachmentFallbackStore } from "./attachment-fallback-store.ts";
+import {
+  createAttachmentFallbackApi,
+  type AttachmentFallbackApi,
+} from "./attachment-fallback-api.ts";
+import {
+  createAttachmentFallbackStore,
+  type AttachmentFallbackStore,
+} from "./attachment-fallback-store.ts";
 import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
 import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 import type { SessionRequestHelpers } from "./session-request-helpers.ts";
@@ -27,11 +33,11 @@ export function createAttachmentFallbackIntegration(options: {
   readonly api: AttachmentFallbackApi;
   readonly store: AttachmentFallbackStore;
 } {
-  const store = new AttachmentFallbackStore(
+  const store = createAttachmentFallbackStore(
     options.database,
     options.generateId,
   );
-  const api = new AttachmentFallbackApi({
+  const api = createAttachmentFallbackApi({
     now: options.now,
     requests: options.requests,
     store,

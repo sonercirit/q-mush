@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { CredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
+import { createCredentialPoolBalancer } from "../../shared/credential-pool-balancer.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import type { AgentModelDiscoverer } from "../agent-model-discovery.ts";
 import { createModelCredentialPool } from "../model-credential-pool.ts";
@@ -112,7 +112,7 @@ test("recovery replacement cannot create a child", async () => {
   };
   const pool = createModelCredentialPool(
     poolDependencies,
-    new CredentialPoolBalancer(),
+    createCredentialPoolBalancer(),
   );
   vi.spyOn(pool, "candidates").mockImplementation(() => {
     recoverFromRestart(restart, "restart");
@@ -176,7 +176,7 @@ test("restart-aborted credential candidates return server restarting", async () 
         return Promise.resolve(credential);
       },
     },
-    new CredentialPoolBalancer(),
+    createCredentialPoolBalancer(),
   );
   const setup = agentActionsSetup("none", false, {
     modelCredentialPool: pool,
@@ -303,7 +303,7 @@ test("recovery replacement cannot create a realtime session", async () => {
         database,
         readCredential: () => Promise.resolve(credential),
       },
-      new CredentialPoolBalancer(),
+      createCredentialPoolBalancer(),
     ),
     notify: () => undefined,
     now: () => 0,

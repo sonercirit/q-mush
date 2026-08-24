@@ -8,7 +8,7 @@ import {
   isDevelopmentRestartRequestMessage,
   RESTART_PROGRESS_INTERVAL_MS,
 } from "../shared/development-shutdown.ts";
-import { RestartDeadline } from "../shared/restart-deadline.ts";
+import { createRestartDeadline } from "../shared/restart-deadline.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
 import { createCoreIntegrationResources } from "./core-integration-resources.ts";
@@ -26,12 +26,12 @@ import {
   startDatabaseRetryFixture,
 } from "./database-write-resilience-fixture.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   installDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "./database-write-resilience.ts";
-import { DevelopmentRestartLifecycle } from "./development-restart.ts";
-import { EngineHealth } from "./engine-health.ts";
+import { createDevelopmentRestartLifecycle } from "./development-restart.ts";
+import { createEngineHealth } from "./engine-health.ts";
 import { createGenericIntegrationFromEnvironment } from "./generic-provider.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -66,7 +66,7 @@ import { createSessionIntegration } from "./sessions.ts";
 import { createToolSettingsIntegration } from "./tool-settings.ts";
 
 const databasePath = readDatabasePath(Bun.env);
-const health = new EngineHealth();
+const health = createEngineHealth();
 const database = openDatabaseAndCleanupRepairSnapshots(databasePath, {
   health,
 });
@@ -92,7 +92,7 @@ if (vacuum.rebuilt) {
     "Q Mush rebuilt the database once to enable incremental vacuum maintenance",
   );
 }
-const writeResilience = new DatabaseWriteResilience({ health });
+const writeResilience = createDatabaseWriteResilience({ health });
 installDatabaseWriteResilience(database, writeResilience);
 let vacuumTimer = startIncrementalVacuum(database.$client);
 const [clientJavaScript, pages, runnerExecutables, stylesheet] =
@@ -303,7 +303,7 @@ const restartProgressReporting = (() => {
   };
 })();
 
-const lifecycle = new DevelopmentRestartLifecycle({
+const lifecycle = createDevelopmentRestartLifecycle({
   drainFailed: (error) => {
     console.warn(
       `Q Mush development restart drain failed: ${errorMessage(error)}`,
@@ -341,7 +341,7 @@ async function shutDown(): Promise<void> {
 
 process.on("message", (message) => {
   if (isDevelopmentRestartRequestMessage(message)) {
-    void lifecycle.restart(new RestartDeadline(message.deadlineAt));
+    void lifecycle.restart(createRestartDeadline(message.deadlineAt));
   } else if (message === DEVELOPMENT_RESTART_ESCALATE_MESSAGE) {
     sessions.escalateDrain();
   } else if (message === FINAL_SHUTDOWN_REQUEST_MESSAGE) {

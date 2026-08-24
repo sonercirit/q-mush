@@ -3,10 +3,10 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
-  DatabaseWriteResilience,
+  createDatabaseWriteResilience,
   startDatabaseRecoveryWatcher,
 } from "../database-write-resilience.ts";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth } from "../engine-health.ts";
 import { SessionStore } from "../session-store.ts";
 import {
   TEST_NOW,
@@ -101,14 +101,14 @@ test.each([
     vi.useFakeTimers();
     let diskFull = true;
     let writeAttempts = 0;
-    const health = new EngineHealth(vi.fn());
+    const health = createEngineHealth(vi.fn());
     const fullError = Object.assign(new Error("database or disk is full"), {
       code: "SQLITE_FULL",
     });
     const { detail, storeSetup } = setupStore();
     const setup = launchFailureSetup(
       storeSetup,
-      new DatabaseWriteResilience({
+      createDatabaseWriteResilience({
         attempt: (operation) => {
           writeAttempts += 1;
           if (diskFull && writeAttempts !== 5) throw fullError;
@@ -140,7 +140,7 @@ test.each([
     expect(setup.hasPendingReconciliation()).toBe(true);
 
     let unrelatedAttempts = 0;
-    const unrelatedWrite = new DatabaseWriteResilience({
+    const unrelatedWrite = createDatabaseWriteResilience({
       attempt(operation) {
         const thisAttempt = unrelatedAttempts;
         unrelatedAttempts += 1;

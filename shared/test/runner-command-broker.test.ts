@@ -4,7 +4,7 @@ import {
   type RunnerCommandResult,
   type RunnerToolCommand,
 } from "../../shared/runner-command-broker.ts";
-import { RunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
+import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
   brokerRunnerCommand,
@@ -520,7 +520,7 @@ describe("runner command broker", () => {
     const current = broker.dispatch(brokerRunnerCommand());
 
     await expect(old).rejects.toEqual(
-      new RunnerDisconnectedError(
+      createRunnerDisconnectedError(
         "The runner connection was superseded before the command returned",
       ),
     );

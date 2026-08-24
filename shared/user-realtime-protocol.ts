@@ -86,15 +86,26 @@ export type UserRealtimeCommand = Readonly<{
   type: "command";
 }>;
 
-export class UserRealtimeProtocolError extends Error {
-  readonly commandId: string | undefined;
+const USER_REALTIME_PROTOCOL_ERROR = "UserRealtimeProtocolError" as const;
 
-  constructor(message: string, commandId?: string) {
-    super(message);
-    this.name = "UserRealtimeProtocolError";
-    this.commandId = commandId;
-  }
+export interface UserRealtimeProtocolError extends Error {
+  readonly commandId: string | undefined;
+  readonly name: typeof USER_REALTIME_PROTOCOL_ERROR;
 }
+
+const createUserRealtimeProtocolError = (
+  message: string,
+  commandId?: string,
+): UserRealtimeProtocolError =>
+  Object.assign(new Error(message), {
+    commandId,
+    name: USER_REALTIME_PROTOCOL_ERROR,
+  });
+
+export const isUserRealtimeProtocolError = (
+  value: unknown,
+): value is UserRealtimeProtocolError =>
+  value instanceof Error && value.name === USER_REALTIME_PROTOCOL_ERROR;
 
 function identifier(value: unknown): string | undefined {
   return typeof value === "string" && IDENTIFIER_PATTERN.test(value)
@@ -104,14 +115,14 @@ function identifier(value: unknown): string | undefined {
 
 export function readUserRealtimeCommand(message: string): UserRealtimeCommand {
   if (utf8ByteLength(message) > MAXIMUM_REALTIME_MESSAGE_BYTES) {
-    throw new UserRealtimeProtocolError("The realtime command was too large");
+    throw createUserRealtimeProtocolError("The realtime command was too large");
   }
 
   let value: Readonly<Record<string, unknown>>;
   try {
     value = parseJsonRecord(message, "The realtime command was invalid");
   } catch {
-    throw new UserRealtimeProtocolError("The realtime command was invalid");
+    throw createUserRealtimeProtocolError("The realtime command was invalid");
   }
 
   const commandId = identifier(value["commandId"]);
@@ -134,7 +145,7 @@ export function readUserRealtimeCommand(message: string): UserRealtimeCommand {
       ),
     )
   ) {
-    throw new UserRealtimeProtocolError(
+    throw createUserRealtimeProtocolError(
       "The realtime command was invalid",
       commandId,
     );

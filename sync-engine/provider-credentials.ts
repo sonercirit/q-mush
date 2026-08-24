@@ -1,6 +1,6 @@
 import { isRecord, type AuthenticatedUser } from "../shared/auth-model.ts";
 import {
-  DuplicateProviderCredentialError,
+  isDuplicateProviderCredentialError,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
@@ -289,7 +289,7 @@ export function createProviderCredentialEndpoints(options: {
         return invalidApiKeyResponse();
       }
 
-      if (error instanceof DuplicateProviderCredentialError) {
+      if (isDuplicateProviderCredentialError(error)) {
         return createApiError("credential_exists", 409);
       }
 

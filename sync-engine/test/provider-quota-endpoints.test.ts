@@ -5,7 +5,7 @@ import {
   providerQuotaResetReceipts,
   providerQuotaSettings,
 } from "../../shared/database/schema.ts";
-import { ProviderQuotaStore } from "../../shared/provider-quota-store.ts";
+import { createProviderQuotaStore } from "../../shared/provider-quota-store.ts";
 import { codexUsageFixture } from "../../shared/test/provider-quota-fixtures.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../../sync-engine/openai.ts";
 import {
@@ -260,7 +260,7 @@ describe("provider quota endpoints", () => {
   test("recovers a stale reset with its original provider idempotency key", async () => {
     const setupResult = await connectedQuotaSetup(5, 2);
     const { database, integration, providerRequests } = setupResult;
-    new ProviderQuotaStore(database).reserveReset(
+    createProviderQuotaStore(database).reserveReset(
       TEST_USER_ID,
       CREDENTIAL_ID,
       "stranded-reset",

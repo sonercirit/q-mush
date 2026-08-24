@@ -1,44 +1,56 @@
 import type { GoogleAuth } from "./auth.ts";
-import { AuthenticatedIntegration } from "./authenticated-integration.ts";
+import { withAuthenticatedUser } from "./authenticated-request.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 
 type AuthenticatedCollectionMethod = (
   userId: string,
 ) => Promise<Response> | Response;
 
-export abstract class AuthenticatedCollectionIntegration extends AuthenticatedIntegration {
-  protected collectionRoute(
-    request: Request,
-    methods: Readonly<
-      Partial<Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod>>
-    >,
-  ): Promise<Response> | Response {
+type CollectionRoute = (
+  request: Request,
+  methods: Readonly<
+    Partial<Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod>>
+  >,
+) => Promise<Response> | Response;
+
+export interface AuthenticatedCollectionIntegration {
+  readonly collectionRoute: CollectionRoute;
+  readonly route: CollectionRouteDispatcher;
+}
+
+type CollectionRouteDispatcher = (
+  request: Request,
+  serve: (userId: string, method: string) => Promise<Response> | Response,
+) => Promise<Response> | Response;
+
+export function createAuthenticatedCollectionIntegration(
+  auth: GoogleAuth,
+): AuthenticatedCollectionIntegration {
+  const route: CollectionRouteDispatcher = (request, serve) => {
+    const method = request.method;
+    return withAuthenticatedUser(auth, request, ({ id }) => serve(id, method));
+  };
+  const collectionRoute: CollectionRoute = (request, methods) => {
+    const handlers: Readonly<
+      Record<"GET" | "POST" | "PUT", AuthenticatedCollectionMethod | undefined>
+    > = {
+      GET: methods.GET,
+      POST: methods.POST,
+      PUT: methods.PUT,
+    };
     const dispatch = (
       userId: string,
       method: string,
     ): Promise<Response> | Response => {
-      let handler: AuthenticatedCollectionMethod | undefined;
-      switch (method) {
-        case "GET":
-          handler = methods.GET;
-          break;
-        case "POST":
-          handler = methods.POST;
-          break;
-        case "PUT":
-          handler = methods.PUT;
-          break;
-        default:
-          break;
-      }
+      const handler =
+        method === "GET" || method === "POST" || method === "PUT"
+          ? handlers[method]
+          : undefined;
       return handler === undefined
         ? createMethodNotAllowedResponse(Object.keys(methods).join(", "))
         : handler(userId);
     };
-    return this.route(request, dispatch);
-  }
-
-  protected constructor(auth: GoogleAuth) {
-    super(auth);
-  }
+    return route(request, dispatch);
+  };
+  return { collectionRoute, route };
 }

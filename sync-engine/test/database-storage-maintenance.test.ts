@@ -15,7 +15,7 @@ import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-
 import { checkDatabaseFreeSpace } from "../database-free-space.ts";
 import { cleanupRepairSnapshots } from "../database-repair-snapshots.ts";
 import { openDatabaseAndCleanupRepairSnapshots } from "../database-storage-maintenance.ts";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth } from "../engine-health.ts";
 
 const TEST_MINIMUM_FREE_BYTES = 5 * 1024 ** 3;
 
@@ -118,7 +118,7 @@ test("damaged content prevents all recovery-file pruning", () => {
   writeSync(file, Buffer.from([0]), 0, 1, (rootPage - 1) * pageSize);
   closeSync(file);
   const warn = vi.fn();
-  const health = new EngineHealth(warn);
+  const health = createEngineHealth(warn);
 
   const database = openDatabaseAndCleanupRepairSnapshots(fixture.databasePath, {
     health,
@@ -136,7 +136,7 @@ test("damaged content prevents all recovery-file pruning", () => {
 
 test("low-space preflight degrades and then restores storage health", () => {
   const warn = vi.fn();
-  const health = new EngineHealth(warn);
+  const health = createEngineHealth(warn);
   const databasePath = join(temporaryDirectory(), "q-mush.sqlite");
   const stats = (bytes: number) => () => ({
     bavail: bytes,

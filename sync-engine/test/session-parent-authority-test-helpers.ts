@@ -173,7 +173,7 @@ export function authoritySetup(options: {
   );
   const notify = vi.fn(() => {
     if (options.fenceOnNotify === true) {
-      new RunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
+      createRunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
     }
   });
   const runtimes = new SessionRuntimes();
@@ -251,7 +251,7 @@ export function authoritySetup(options: {
 
 export function fenceParent(setup: AuthoritySetup): void {
   expect(
-    new RunnerStore(setup.database).remove(
+    createRunnerStore(setup.database).remove(
       TEST_USER_ID,
       RUNNER_ID,
       TEST_NOW + 3,

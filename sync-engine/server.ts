@@ -311,19 +311,34 @@ function routeSessionItem(
     (id) => {
       if (segments.length !== 2) return undefined;
       const route = segments[1];
-      switch (route) {
-        case "compact":
-        case "compaction":
-        case "continue":
-        case "reassign":
-        case "stop":
-          return sessions[route](request, id);
-        case "messages":
-          return sessions.message(request, id);
-        case undefined:
-        default:
-          return undefined;
-      }
+      const routes: Readonly<
+        Record<
+          | "compact"
+          | "compaction"
+          | "continue"
+          | "messages"
+          | "reassign"
+          | "stop",
+          () => Promise<Response> | Response
+        >
+      > = {
+        compact: () => sessions.compact(request, id),
+        compaction: () => sessions.compaction(request, id),
+        continue: () => sessions.continue(request, id),
+        messages: () => sessions.message(request, id),
+        reassign: () => sessions.reassign(request, id),
+        stop: () => sessions.stop(request, id),
+      };
+      const handler =
+        route === "compact" ||
+        route === "compaction" ||
+        route === "continue" ||
+        route === "messages" ||
+        route === "reassign" ||
+        route === "stop"
+          ? routes[route]
+          : undefined;
+      return handler?.();
     },
   );
 }
@@ -341,17 +356,24 @@ function routeItemSegments(
 ): Promise<Response> | Response | undefined {
   return routeItemRequest(segments, actions.item, (id) => {
     if (segments.length === 2) {
-      switch (segments[1]) {
-        case "default":
-          return actions.default?.(id);
-        case "session-reassignment":
-          return actions.sessionReassignment?.(id);
-        case "scopes":
-          return actions.scopes?.(id);
-        case undefined:
-        default:
-          return undefined;
-      }
+      const route = segments[1];
+      const routes: Readonly<
+        Record<
+          "default" | "scopes" | "session-reassignment",
+          ((id: string) => Promise<Response> | Response) | undefined
+        >
+      > = {
+        default: actions.default,
+        scopes: actions.scopes,
+        "session-reassignment": actions.sessionReassignment,
+      };
+      const handler =
+        route === "default" ||
+        route === "scopes" ||
+        route === "session-reassignment"
+          ? routes[route]
+          : undefined;
+      return handler?.(id);
     }
     return undefined;
   });

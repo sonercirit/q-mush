@@ -1,16 +1,15 @@
 import { Buffer } from "node:buffer";
 import { expect, test } from "vitest";
-import {
-  createCredentialCipher,
-  CredentialCipher,
-} from "../../shared/credential-cipher.ts";
+import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 
 const API_KEY = "sk-or-v1-sensitive-api-key";
 const CONTEXT = "user-id:credential-id";
 
 test("encrypts credentials with authenticated context", () => {
-  const cipher = new CredentialCipher(Buffer.alloc(32, 3), () =>
-    Buffer.alloc(12, 5),
+  const cipher = createCredentialCipher(
+    Buffer.alloc(32, 3).toString("base64url"),
+    "Credential encryption key",
+    () => Buffer.alloc(12, 5),
   );
   const encrypted = cipher.seal(API_KEY, CONTEXT);
 
@@ -26,9 +25,12 @@ test("encrypts credentials with authenticated context", () => {
 test("requires a 32-byte base64url encryption key", () => {
   const braveKey = Buffer.alloc(32, 4).toString("base64url");
 
-  expect(
-    createCredentialCipher(braveKey, "BRAVE_SEARCH_CREDENTIAL_KEY"),
-  ).toBeInstanceOf(CredentialCipher);
+  const cipher = createCredentialCipher(
+    braveKey,
+    "BRAVE_SEARCH_CREDENTIAL_KEY",
+  );
+  expect(typeof cipher.open).toBe("function");
+  expect(typeof cipher.seal).toBe("function");
   expect(() =>
     createCredentialCipher("not-base64url!", "BRAVE_SEARCH_CREDENTIAL_KEY"),
   ).toThrow("BRAVE_SEARCH_CREDENTIAL_KEY must be a 32-byte base64url value");

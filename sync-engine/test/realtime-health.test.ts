@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { EngineHealth } from "../engine-health.ts";
+import { createEngineHealth } from "../engine-health.ts";
 import {
   configuredRealtimeTestIntegration,
   REALTIME_TEST_USER,
@@ -11,7 +11,7 @@ import {
 } from "./realtime-test-socket-helpers.ts";
 
 test("sends and publishes storage-health snapshots", () => {
-  const health = new EngineHealth(() => undefined);
+  const health = createEngineHealth(() => undefined);
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth(REALTIME_TEST_USER),
     health,

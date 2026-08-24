@@ -43,7 +43,7 @@ type RealtimeCommandErrorAcknowledgement = Readonly<{
 type RealtimeCommandAcknowledgement =
   RealtimeCommandErrorAcknowledgement | RealtimeCommandSuccess;
 
-export interface SerializedRealtimeAcknowledgement {
+interface SerializedRealtimeAcknowledgement {
   readonly serialized: string;
   readonly value: RealtimeCommandAcknowledgement;
 }
@@ -75,7 +75,7 @@ interface CompletedUserUsage {
   results: number;
 }
 
-interface RealtimeCommandLedgerOptions {
+export interface RealtimeCommandLedgerOptions {
   readonly maximumCompletedResultBytes?: number;
   readonly maximumCompletedResultBytesPerUser?: number;
   readonly maximumCompletedResults?: number;
@@ -98,102 +98,97 @@ function positiveLimit(limit: number | undefined): boolean {
   return limit === undefined || (Number.isSafeInteger(limit) && limit >= 1);
 }
 
-export class RealtimeCommandLedger {
-  readonly #commandIds = new Map<string, Map<string, LedgerEntry>>();
-  #completedResultBytes = 0;
-  readonly #completedUsers = new Map<string, CompletedUserUsage>();
-  readonly #entries = new Map<string, Map<string, LedgerEntry>>();
-  readonly #maximumCompletedResultBytes: number;
-  readonly #maximumCompletedResultBytesPerUser: number;
-  readonly #maximumCompletedResults: number;
-  readonly #maximumCompletedResultsPerUser: number;
-  readonly #maximumEntries: number;
-  readonly #maximumEntriesPerUser: number;
-  readonly #maximumPendingBytesPerUser: number;
-  readonly #maximumPendingEntries: number;
-  readonly #maximumPendingEntriesPerOperation:
-    Readonly<Partial<Record<string, number>>> | undefined;
-  readonly #maximumPendingEntriesPerUser: number;
-  readonly #maximumResultBytes: number;
-  #nextCompletionOrder = 0n;
-  readonly #now: () => number;
-  readonly #payloadBytes: (command: UserRealtimeCommand) => number;
-  #pendingEntries = 0;
-  readonly #pendingUsers = new Map<
+type RealtimeCommandExecute = (
+  userId: string,
+  workspaceId: string,
+  command: UserRealtimeCommand,
+  execute: () => unknown,
+) => Promise<SerializedRealtimeAcknowledgement>;
+
+export interface RealtimeCommandLedger {
+  readonly execute: RealtimeCommandExecute;
+}
+
+export function createRealtimeCommandLedger(
+  options: RealtimeCommandLedgerOptions = {},
+): RealtimeCommandLedger {
+  const ledgerCommandIds = new Map<string, Map<string, LedgerEntry>>();
+  let ledgerCompletedResultBytes = 0;
+  const ledgerCompletedUsers = new Map<string, CompletedUserUsage>();
+  const ledgerEntries = new Map<string, Map<string, LedgerEntry>>();
+  let ledgerNextCompletionOrder = 0n;
+  let ledgerPendingEntries = 0;
+  const ledgerPendingUsers = new Map<
     string,
     { bytes: number; entries: number; operations: Map<string, number> }
   >();
-  readonly #retentionMs: number;
+  const ledgerMaximumCompletedResultBytes =
+    options.maximumCompletedResultBytes ??
+    DEFAULT_MAXIMUM_COMPLETED_RESULT_BYTES;
+  const ledgerMaximumCompletedResultBytesPerUser =
+    options.maximumCompletedResultBytesPerUser ??
+    DEFAULT_MAXIMUM_COMPLETED_RESULT_BYTES_PER_USER;
+  const ledgerMaximumCompletedResults =
+    options.maximumCompletedResults ?? DEFAULT_MAXIMUM_COMPLETED_RESULTS;
+  const ledgerMaximumCompletedResultsPerUser =
+    options.maximumCompletedResultsPerUser ??
+    DEFAULT_MAXIMUM_COMPLETED_RESULTS_PER_USER;
+  const ledgerMaximumEntries =
+    options.maximumEntries ?? DEFAULT_MAXIMUM_ENTRIES;
+  const ledgerMaximumEntriesPerUser =
+    options.maximumEntriesPerUser ?? DEFAULT_MAXIMUM_ENTRIES_PER_USER;
+  const ledgerMaximumPendingBytesPerUser =
+    options.maximumPendingBytesPerUser ??
+    DEFAULT_MAXIMUM_PENDING_BYTES_PER_USER;
+  const ledgerMaximumPendingEntries =
+    options.maximumPendingEntries ?? DEFAULT_MAXIMUM_PENDING_ENTRIES;
+  const ledgerMaximumPendingEntriesPerOperation =
+    options.maximumPendingEntriesPerOperation === undefined
+      ? undefined
+      : Object.fromEntries(
+          Object.entries(options.maximumPendingEntriesPerOperation),
+        );
+  const ledgerMaximumPendingEntriesPerUser =
+    options.maximumPendingEntriesPerUser ??
+    DEFAULT_MAXIMUM_PENDING_ENTRIES_PER_USER;
+  const ledgerMaximumResultBytes =
+    options.maximumResultBytes ?? MAXIMUM_COMMAND_RESULT_LENGTH;
+  const ledgerNow = options.now ?? Date.now;
+  const ledgerPayloadBytes = options.payloadBytes ?? commandPayloadBytes;
+  const ledgerRetentionMs = options.retentionMs ?? 7 * 24 * 60 * 60 * 1_000;
 
-  constructor(options: RealtimeCommandLedgerOptions = {}) {
-    this.#maximumCompletedResultBytes =
-      options.maximumCompletedResultBytes ??
-      DEFAULT_MAXIMUM_COMPLETED_RESULT_BYTES;
-    this.#maximumCompletedResultBytesPerUser =
-      options.maximumCompletedResultBytesPerUser ??
-      DEFAULT_MAXIMUM_COMPLETED_RESULT_BYTES_PER_USER;
-    this.#maximumCompletedResults =
-      options.maximumCompletedResults ?? DEFAULT_MAXIMUM_COMPLETED_RESULTS;
-    this.#maximumCompletedResultsPerUser =
-      options.maximumCompletedResultsPerUser ??
-      DEFAULT_MAXIMUM_COMPLETED_RESULTS_PER_USER;
-    this.#maximumEntries = options.maximumEntries ?? DEFAULT_MAXIMUM_ENTRIES;
-    this.#maximumEntriesPerUser =
-      options.maximumEntriesPerUser ?? DEFAULT_MAXIMUM_ENTRIES_PER_USER;
-    this.#maximumPendingBytesPerUser =
-      options.maximumPendingBytesPerUser ??
-      DEFAULT_MAXIMUM_PENDING_BYTES_PER_USER;
-    this.#maximumPendingEntries =
-      options.maximumPendingEntries ?? DEFAULT_MAXIMUM_PENDING_ENTRIES;
-    this.#maximumPendingEntriesPerOperation =
-      options.maximumPendingEntriesPerOperation === undefined
-        ? undefined
-        : Object.fromEntries(
-            Object.entries(options.maximumPendingEntriesPerOperation),
-          );
-    this.#maximumPendingEntriesPerUser =
-      options.maximumPendingEntriesPerUser ??
-      DEFAULT_MAXIMUM_PENDING_ENTRIES_PER_USER;
-    this.#maximumResultBytes =
-      options.maximumResultBytes ?? MAXIMUM_COMMAND_RESULT_LENGTH;
-    this.#now = options.now ?? Date.now;
-    this.#payloadBytes = options.payloadBytes ?? commandPayloadBytes;
-    this.#retentionMs = options.retentionMs ?? 7 * 24 * 60 * 60 * 1_000;
-
-    const operationLimits = Object.entries(
-      this.#maximumPendingEntriesPerOperation ?? {},
-    );
-    if (
-      !positiveLimit(this.#maximumCompletedResultBytes) ||
-      !positiveLimit(this.#maximumCompletedResultBytesPerUser) ||
-      !positiveLimit(this.#maximumCompletedResults) ||
-      !positiveLimit(this.#maximumCompletedResultsPerUser) ||
-      !positiveLimit(this.#maximumEntries) ||
-      !positiveLimit(this.#maximumEntriesPerUser) ||
-      !positiveLimit(this.#maximumPendingBytesPerUser) ||
-      !positiveLimit(this.#maximumPendingEntries) ||
-      !positiveLimit(this.#maximumPendingEntriesPerUser) ||
-      !positiveLimit(this.#maximumResultBytes) ||
-      !positiveLimit(this.#retentionMs) ||
-      typeof this.#now !== "function" ||
-      typeof this.#payloadBytes !== "function" ||
-      !operationLimits.every(
-        ([operation, limit]) =>
-          /^[a-z][a-z\d_]*(?:\.[a-z][a-z\d_]*){1,7}$/u.test(operation) &&
-          positiveLimit(limit),
-      )
-    ) {
-      throw new RangeError("Realtime command ledger limits must be positive");
-    }
+  const operationLimits = Object.entries(
+    ledgerMaximumPendingEntriesPerOperation ?? {},
+  );
+  if (
+    !positiveLimit(ledgerMaximumCompletedResultBytes) ||
+    !positiveLimit(ledgerMaximumCompletedResultBytesPerUser) ||
+    !positiveLimit(ledgerMaximumCompletedResults) ||
+    !positiveLimit(ledgerMaximumCompletedResultsPerUser) ||
+    !positiveLimit(ledgerMaximumEntries) ||
+    !positiveLimit(ledgerMaximumEntriesPerUser) ||
+    !positiveLimit(ledgerMaximumPendingBytesPerUser) ||
+    !positiveLimit(ledgerMaximumPendingEntries) ||
+    !positiveLimit(ledgerMaximumPendingEntriesPerUser) ||
+    !positiveLimit(ledgerMaximumResultBytes) ||
+    !positiveLimit(ledgerRetentionMs) ||
+    typeof ledgerNow !== "function" ||
+    typeof ledgerPayloadBytes !== "function" ||
+    !operationLimits.every(
+      ([operation, limit]) =>
+        /^[a-z][a-z\d_]*(?:\.[a-z][a-z\d_]*){1,7}$/u.test(operation) &&
+        positiveLimit(limit),
+    )
+  ) {
+    throw new RangeError("Realtime command ledger limits must be positive");
   }
-
-  #deleteEntry(
+  function deleteEntry(
     userId: string,
     idempotencyKey: string,
     entry: LedgerEntry,
   ): void {
-    const userCommandIds = this.#commandIds.get(userId);
-    const userEntries = this.#entries.get(userId);
+    const userCommandIds = ledgerCommandIds.get(userId);
+    const userEntries = ledgerEntries.get(userId);
     if (
       userCommandIds?.get(
         scopedCommandIdentity(entry.workspaceId, entry.commandId),
@@ -206,27 +201,27 @@ export class RealtimeCommandLedger {
       scopedCommandIdentity(entry.workspaceId, entry.commandId),
     );
     userEntries.delete(idempotencyKey);
-    this.#removeRetainedResult(entry);
+    removeRetainedResult(entry);
     if (userCommandIds.size === 0) {
-      this.#commandIds.delete(userId);
+      ledgerCommandIds.delete(userId);
     }
     if (userEntries.size === 0) {
-      this.#entries.delete(userId);
+      ledgerEntries.delete(userId);
     }
   }
 
-  #removeRetainedResult(entry: LedgerEntry): void {
+  function removeRetainedResult(entry: LedgerEntry): void {
     const completionOrder = entry.completionOrder;
     if (completionOrder === undefined || entry.retainedResult === undefined) {
       return;
     }
-    this.#completedResultBytes -= entry.completedBytes;
-    const user = this.#completedUsers.get(entry.userId);
+    ledgerCompletedResultBytes -= entry.completedBytes;
+    const user = ledgerCompletedUsers.get(entry.userId);
     if (user !== undefined) {
       user.bytes -= entry.completedBytes;
       user.results -= 1;
       if (user.results === 0) {
-        this.#completedUsers.delete(entry.userId);
+        ledgerCompletedUsers.delete(entry.userId);
       }
     }
     entry.completedBytes = 0;
@@ -235,12 +230,12 @@ export class RealtimeCommandLedger {
     entry.retainedResult = undefined;
   }
 
-  *#matchingEntries(
+  function* matchingEntries(
     matches: (entry: LedgerEntry) => boolean,
   ): IterableIterator<
     readonly [userId: string, idempotencyKey: string, entry: LedgerEntry]
   > {
-    for (const [userId, entries] of this.#entries) {
+    for (const [userId, entries] of ledgerEntries) {
       for (const [idempotencyKey, entry] of entries) {
         if (matches(entry)) {
           yield [userId, idempotencyKey, entry];
@@ -249,23 +244,21 @@ export class RealtimeCommandLedger {
     }
   }
 
-  #pruneExpired(now: number): void {
+  function pruneExpired(now: number): void {
     const expired = new Array<
       readonly [userId: string, idempotencyKey: string, entry: LedgerEntry]
     >();
-    for (const entry of this.#matchingEntries(
-      ({ expiresAt }) => expiresAt <= now,
-    )) {
+    for (const entry of matchingEntries(({ expiresAt }) => expiresAt <= now)) {
       expired.push(entry);
     }
     for (const entry of expired) {
-      this.#deleteEntry(...entry);
+      deleteEntry(...entry);
     }
   }
 
-  #oldestRetainedResult(userId?: string): LedgerEntry | undefined {
+  function oldestRetainedResult(userId?: string): LedgerEntry | undefined {
     let oldest: LedgerEntry | undefined;
-    for (const [, , entry] of this.#matchingEntries(
+    for (const [, , entry] of matchingEntries(
       ({ retainedResult }) => retainedResult !== undefined,
     )) {
       if (userId !== undefined && entry.userId !== userId) {
@@ -282,57 +275,65 @@ export class RealtimeCommandLedger {
     return oldest;
   }
 
-  #evictResultBodies(userId: string): void {
-    let user = this.#completedUsers.get(userId);
+  function evictResultBodies(userId: string): void {
+    let user = ledgerCompletedUsers.get(userId);
     while (
       user !== undefined &&
-      (user.bytes > this.#maximumCompletedResultBytesPerUser ||
-        user.results > this.#maximumCompletedResultsPerUser)
+      (user.bytes > ledgerMaximumCompletedResultBytesPerUser ||
+        user.results > ledgerMaximumCompletedResultsPerUser)
     ) {
-      const oldest = this.#oldestRetainedResult(userId);
+      const oldest = oldestRetainedResult(userId);
       if (oldest === undefined) {
         break;
       }
-      this.#removeRetainedResult(oldest);
-      user = this.#completedUsers.get(userId);
+      removeRetainedResult(oldest);
+      user = ledgerCompletedUsers.get(userId);
     }
 
-    let oldest = this.#oldestRetainedResult();
+    let oldest = oldestRetainedResult();
     while (oldest !== undefined) {
       let retainedResults = 0;
-      const results = this.#matchingEntries(
+      const results = matchingEntries(
         ({ retainedResult }) => retainedResult !== undefined,
       );
       while (!results.next().done) {
         retainedResults += 1;
       }
       if (
-        this.#completedResultBytes <= this.#maximumCompletedResultBytes &&
-        retainedResults <= this.#maximumCompletedResults
+        ledgerCompletedResultBytes <= ledgerMaximumCompletedResultBytes &&
+        retainedResults <= ledgerMaximumCompletedResults
       ) {
         break;
       }
-      this.#removeRetainedResult(oldest);
-      oldest = this.#oldestRetainedResult();
+      removeRetainedResult(oldest);
+      oldest = oldestRetainedResult();
     }
   }
 
-  #canStart(userId: string, operation: string, payloadBytes: number): boolean {
-    const user = this.#pendingUsers.get(userId);
-    const operationLimit = this.#maximumPendingEntriesPerOperation?.[operation];
+  function canStart(
+    userId: string,
+    operation: string,
+    payloadBytes: number,
+  ): boolean {
+    const user = ledgerPendingUsers.get(userId);
+    const operationLimit = ledgerMaximumPendingEntriesPerOperation?.[operation];
     return (
-      this.#pendingEntries < this.#maximumPendingEntries &&
-      (user?.entries ?? 0) < this.#maximumPendingEntriesPerUser &&
+      ledgerPendingEntries < ledgerMaximumPendingEntries &&
+      (user?.entries ?? 0) < ledgerMaximumPendingEntriesPerUser &&
       Number.isSafeInteger(payloadBytes) &&
       payloadBytes >= 0 &&
-      payloadBytes <= this.#maximumPendingBytesPerUser - (user?.bytes ?? 0) &&
+      payloadBytes <= ledgerMaximumPendingBytesPerUser - (user?.bytes ?? 0) &&
       (operationLimit === undefined ||
         (user?.operations.get(operation) ?? 0) < operationLimit)
     );
   }
 
-  #addPending(userId: string, operation: string, payloadBytes: number): void {
-    const user = this.#pendingUsers.get(userId) ?? {
+  function addPending(
+    userId: string,
+    operation: string,
+    payloadBytes: number,
+  ): void {
+    const user = ledgerPendingUsers.get(userId) ?? {
       bytes: 0,
       entries: 0,
       operations: new Map<string, number>(),
@@ -340,16 +341,13 @@ export class RealtimeCommandLedger {
     user.bytes += payloadBytes;
     user.entries += 1;
     user.operations.set(operation, (user.operations.get(operation) ?? 0) + 1);
-    this.#pendingUsers.set(userId, user);
-    this.#pendingEntries += 1;
+    ledgerPendingUsers.set(userId, user);
+    ledgerPendingEntries += 1;
   }
 
-  #removePending(
-    userId: string,
-    operation: string,
-    payloadBytes: number,
-  ): void {
-    const user = this.#pendingUsers.get(userId);
+  function removePending(...pending: readonly [string, string, number]): void {
+    const [userId, operation, payloadBytes] = pending;
+    const user = ledgerPendingUsers.get(userId);
     if (user === undefined) {
       return;
     }
@@ -362,40 +360,40 @@ export class RealtimeCommandLedger {
       user.operations.set(operation, operationEntries);
     }
     if (user.entries === 0) {
-      this.#pendingUsers.delete(userId);
+      ledgerPendingUsers.delete(userId);
     }
-    this.#pendingEntries -= 1;
+    ledgerPendingEntries -= 1;
   }
 
-  #completionExpiry(): number {
-    const completedAt = this.#nowValue();
+  function completionExpiry(): number {
+    const completedAt = nowValue();
     if (completedAt === undefined || !Number.isSafeInteger(completedAt)) {
       return Number.POSITIVE_INFINITY;
     }
-    const expiresAt = completedAt + this.#retentionMs;
+    const expiresAt = completedAt + ledgerRetentionMs;
     return Number.isSafeInteger(expiresAt)
       ? expiresAt
       : Number.POSITIVE_INFINITY;
   }
 
-  #retainResult(entry: LedgerEntry, result: CommandResult): void {
+  function retainResult(entry: LedgerEntry, result: CommandResult): void {
     const bytes = resultBodyBytes(result);
-    this.#nextCompletionOrder += 1n;
+    ledgerNextCompletionOrder += 1n;
     entry.completedBytes = bytes;
-    entry.completionOrder = this.#nextCompletionOrder;
+    entry.completionOrder = ledgerNextCompletionOrder;
     entry.retainedResult = result;
-    this.#completedResultBytes += bytes;
-    const user = this.#completedUsers.get(entry.userId) ?? {
+    ledgerCompletedResultBytes += bytes;
+    const user = ledgerCompletedUsers.get(entry.userId) ?? {
       bytes: 0,
       results: 0,
     };
     user.bytes += bytes;
     user.results += 1;
-    this.#completedUsers.set(entry.userId, user);
-    this.#evictResultBodies(entry.userId);
+    ledgerCompletedUsers.set(entry.userId, user);
+    evictResultBodies(entry.userId);
   }
 
-  #complete(
+  function complete(
     entry: LedgerEntry,
     execution: CommandExecution,
     result: CommandResult,
@@ -405,13 +403,13 @@ export class RealtimeCommandLedger {
         commandId: entry.commandId,
         ...result,
       });
-      this.#removePending(entry.userId, entry.operation, entry.pendingBytes);
+      removePending(entry.userId, entry.operation, entry.pendingBytes);
       if (commandRequiresDurableReceipt(entry.operation)) {
-        entry.expiresAt = this.#completionExpiry();
-        this.#retainResult(entry, result);
+        entry.expiresAt = completionExpiry();
+        retainResult(entry, result);
       } else {
         // Later retries execute a fresh read and cannot consume mutation slots.
-        this.#deleteEntry(
+        deleteEntry(
           entry.userId,
           scopedCommandIdentity(entry.workspaceId, entry.idempotencyKey),
           entry,
@@ -422,11 +420,14 @@ export class RealtimeCommandLedger {
     }
   }
 
-  #error(commandId: string, error: string): SerializedRealtimeAcknowledgement {
+  function error(
+    commandId: string,
+    error: string,
+  ): SerializedRealtimeAcknowledgement {
     return acknowledgement({ commandId, error, type: "command_error" });
   }
 
-  #replay(
+  function replay(
     command: UserRealtimeCommand,
     commandDigest: string | undefined,
     entry: LedgerEntry,
@@ -434,7 +435,7 @@ export class RealtimeCommandLedger {
     | SerializedRealtimeAcknowledgement
     | Promise<SerializedRealtimeAcknowledgement> {
     if (commandDigest === undefined || entry.commandDigest !== commandDigest) {
-      return this.#error(command.commandId, "idempotency_conflict");
+      return error(command.commandId, "idempotency_conflict");
     }
     const receipt = entry.completedAcknowledgement;
     if (receipt !== undefined) {
@@ -457,31 +458,27 @@ export class RealtimeCommandLedger {
     );
   }
 
-  #nowValue(): number | undefined {
+  function nowValue(): number | undefined {
     try {
-      return this.#now();
+      return ledgerNow();
     } catch {
       return undefined;
     }
   }
 
-  async execute(
-    userId: string,
-    workspaceId: string,
-    command: UserRealtimeCommand,
-    execute: () => unknown,
-  ): Promise<SerializedRealtimeAcknowledgement> {
-    const admittedAt = this.#nowValue();
+  const execute: RealtimeCommandExecute = async (...parameters) => {
+    const [userId, workspaceId, command, executeCommand] = parameters;
+    const admittedAt = nowValue();
     if (
       admittedAt === undefined ||
       !Number.isSafeInteger(admittedAt) ||
       userId.length === 0 ||
       workspaceId.length === 0
     ) {
-      return this.#error(command.commandId, "command_capacity_exceeded");
+      return error(command.commandId, "command_capacity_exceeded");
     }
-    this.#pruneExpired(admittedAt);
-    const userEntries = this.#entries.get(userId);
+    pruneExpired(admittedAt);
+    const userEntries = ledgerEntries.get(userId);
     // Retained outcomes are local to the authenticated connection workspace.
     // Reusing either identifier in another workspace starts a fresh command.
     const idempotencyIdentity = scopedCommandIdentity(
@@ -494,43 +491,43 @@ export class RealtimeCommandLedger {
     );
     const existing = userEntries?.get(idempotencyIdentity);
     const commandDigest = commandFingerprint(command);
-    const commandIdEntry = this.#commandIds.get(userId)?.get(commandIdentity);
+    const commandIdEntry = ledgerCommandIds.get(userId)?.get(commandIdentity);
     if (commandIdEntry !== undefined) {
       if (commandIdEntry !== existing) {
-        return this.#error(command.commandId, "command_id_conflict");
+        return error(command.commandId, "command_id_conflict");
       }
-      return this.#replay(command, commandDigest, commandIdEntry);
+      return replay(command, commandDigest, commandIdEntry);
     }
     if (existing !== undefined) {
-      return this.#replay(command, commandDigest, existing);
+      return replay(command, commandDigest, existing);
     }
 
     let payloadBytes: number | undefined;
     try {
-      payloadBytes = this.#payloadBytes(command);
+      payloadBytes = ledgerPayloadBytes(command);
     } catch {
       payloadBytes = undefined;
     }
     if (commandDigest === undefined) {
-      return this.#error(command.commandId, "invalid_command");
+      return error(command.commandId, "invalid_command");
     }
     if (payloadBytes === undefined || !Number.isSafeInteger(payloadBytes)) {
-      return this.#error(command.commandId, "command_capacity_exceeded");
+      return error(command.commandId, "command_capacity_exceeded");
     }
-    const admission = this.#admission(userId, command.operation, payloadBytes);
-    if (admission !== undefined) {
+    const admissionResult = admission(userId, command.operation, payloadBytes);
+    if (admissionResult !== undefined) {
       // No mutation ran, so a lost rejection may be retried with the exact
       // envelope and admitted later; the rejection reserves nothing.
-      return this.#error(command.commandId, admission);
+      return error(command.commandId, admissionResult);
     }
 
-    this.#addPending(userId, command.operation, payloadBytes);
+    addPending(userId, command.operation, payloadBytes);
     let execution: CommandExecution;
     try {
-      execution = commandExecution(execute, this.#maximumResultBytes);
+      execution = commandExecution(executeCommand, ledgerMaximumResultBytes);
     } catch {
-      this.#removePending(userId, command.operation, payloadBytes);
-      return this.#error(command.commandId, "command_failed");
+      removePending(userId, command.operation, payloadBytes);
+      return error(command.commandId, "command_failed");
     }
     const created: LedgerEntry = {
       commandDigest,
@@ -548,24 +545,24 @@ export class RealtimeCommandLedger {
       workspaceId,
     };
     const userCommandIds =
-      this.#commandIds.get(userId) ?? new Map<string, LedgerEntry>();
+      ledgerCommandIds.get(userId) ?? new Map<string, LedgerEntry>();
     userCommandIds.set(commandIdentity, created);
-    this.#commandIds.set(userId, userCommandIds);
+    ledgerCommandIds.set(userId, userCommandIds);
     const selectedUserEntries = userEntries ?? new Map<string, LedgerEntry>();
     selectedUserEntries.set(idempotencyIdentity, created);
-    this.#entries.set(userId, selectedUserEntries);
+    ledgerEntries.set(userId, selectedUserEntries);
 
     void execution.result.then((result) => {
-      this.#complete(created, execution, result);
+      complete(created, execution, result);
     });
 
     const result = await execution.result;
     return acknowledgement({ commandId: command.commandId, ...result });
-  }
+  };
 
-  #durableEntries(userId?: string): number {
+  function durableEntries(userId?: string): number {
     let count = 0;
-    for (const [entryUserId] of this.#matchingEntries(({ operation }) =>
+    for (const [entryUserId] of matchingEntries(({ operation }) =>
       commandRequiresDurableReceipt(operation),
     )) {
       if (userId === undefined || entryUserId === userId) {
@@ -575,20 +572,22 @@ export class RealtimeCommandLedger {
     return count;
   }
 
-  #admission(
+  function admission(
     userId: string,
     operation: string,
     payloadBytes: number,
   ): string | undefined {
     if (
       commandRequiresDurableReceipt(operation) &&
-      (this.#durableEntries() >= this.#maximumEntries ||
-        this.#durableEntries(userId) >= this.#maximumEntriesPerUser)
+      (durableEntries() >= ledgerMaximumEntries ||
+        durableEntries(userId) >= ledgerMaximumEntriesPerUser)
     ) {
       return RECEIPT_CAPACITY_EXCEEDED;
     }
-    return this.#canStart(userId, operation, payloadBytes)
+    return canStart(userId, operation, payloadBytes)
       ? undefined
       : "command_capacity_exceeded";
   }
+
+  return { execute };
 }

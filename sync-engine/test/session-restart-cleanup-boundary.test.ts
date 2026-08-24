@@ -1,5 +1,5 @@
 import { expect, onTestFinished, test, vi } from "vitest";
-import { RestartDeadline } from "../../shared/restart-deadline.ts";
+import { createRestartDeadline } from "../../shared/restart-deadline.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
   RunnerCommandBroker,
@@ -43,7 +43,7 @@ function completeCleanup(
 }
 
 function drainExpired(cleanup: SessionExecutionCleanup): Promise<void> {
-  return cleanup.drainPending(new RestartDeadline(0, () => 0));
+  return cleanup.drainPending(createRestartDeadline(0, () => 0));
 }
 
 async function pendingCleanup() {
@@ -118,8 +118,8 @@ test("overlapping drains suppress cleanup until every drain settles", async () =
   vi.spyOn(broker, "cancelSessionCommands").mockReturnValue([]);
   const cleanup = new SessionExecutionCleanup(broker);
   const first = containerCleanup(cleanup);
-  const shortDrain = cleanup.drainPending(new RestartDeadline(20, () => 0));
-  const longDrain = cleanup.drainPending(new RestartDeadline(100, () => 0));
+  const shortDrain = cleanup.drainPending(createRestartDeadline(20, () => 0));
+  const longDrain = cleanup.drainPending(createRestartDeadline(100, () => 0));
 
   expect(timers).toHaveLength(2);
   timers[0]?.();

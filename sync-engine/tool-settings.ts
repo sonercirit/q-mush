@@ -2,7 +2,10 @@ import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import { readToolSettings } from "../shared/tool-limits.ts";
 import type { GoogleAuth } from "./auth.ts";
-import { AuthenticatedCollectionIntegration } from "./authenticated-collection-integration.ts";
+import {
+  createAuthenticatedCollectionIntegration,
+  type AuthenticatedCollectionIntegration,
+} from "./authenticated-collection-integration.ts";
 import {
   createApiError,
   createJsonResponse,
@@ -23,16 +26,14 @@ interface ToolSettingsDependencies {
   readonly realtime?: RealtimeHub;
 }
 
-class DrizzleToolSettingsIntegration
-  extends AuthenticatedCollectionIntegration
-  implements ToolSettingsIntegration
-{
+class DrizzleToolSettingsIntegration implements ToolSettingsIntegration {
+  readonly #authenticated: AuthenticatedCollectionIntegration;
   readonly #now: () => number;
   readonly #realtime: RealtimeHub | undefined;
   readonly store: ToolSettingsStore;
 
   constructor(auth: GoogleAuth, dependencies: ToolSettingsDependencies) {
-    super(auth);
+    this.#authenticated = createAuthenticatedCollectionIntegration(auth);
     this.#now = dependencies.now ?? Date.now;
     this.#realtime = dependencies.realtime;
     this.store = new ToolSettingsStore(
@@ -44,7 +45,7 @@ class DrizzleToolSettingsIntegration
   collection(request: Request): Promise<Response> | Response {
     const current = (userId: string): Response =>
       createJsonResponse(this.store.read(userId));
-    return this.collectionRoute(request, {
+    return this.#authenticated.collectionRoute(request, {
       GET: current,
       PUT: (userId) => this.#write(request, userId),
     });
