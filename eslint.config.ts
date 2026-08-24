@@ -28,6 +28,23 @@ const INLINE_CONFIGURATION_MESSAGE =
   "Inline ESLint configuration is forbidden; fix the violation instead.";
 const ESLINT_DIRECTIVE_PATTERN =
   /^\s*eslint-(?:disable|enable)(?:-line|-next-line)?(?:\s|$)/u;
+const RESTRICTED_TYPESCRIPT_SYNTAX = [
+  {
+    message:
+      "Switch statements are forbidden; use data-driven dispatch or conditionals.",
+    selector: "SwitchStatement",
+  },
+  {
+    message:
+      "Class declarations are forbidden; use functions and plain objects.",
+    selector: "ClassDeclaration",
+  },
+  {
+    message:
+      "Class expressions are forbidden; use functions and plain objects.",
+    selector: "ClassExpression",
+  },
+];
 
 function workspaceForPath(path: string): string | undefined {
   const [workspace] = relative(ROOT_DIRECTORY, path).split(sep);
@@ -307,6 +324,7 @@ export default defineConfig(
       ],
       "@typescript-eslint/switch-exhaustiveness-check": "error",
       "no-duplicate-imports": ["error", { allowSeparateTypeImports: false }],
+      "no-restricted-syntax": ["error", ...RESTRICTED_TYPESCRIPT_SYNTAX],
       "q-mush/canonical-imports": "error",
       "q-mush/import-boundaries": "error",
     },
@@ -377,6 +395,7 @@ export default defineConfig(
       ],
       "no-restricted-syntax": [
         "error",
+        ...RESTRICTED_TYPESCRIPT_SYNTAX,
         {
           message:
             "Do not pass an HTML-like string to Response. Render TSX instead.",

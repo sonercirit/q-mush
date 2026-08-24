@@ -115,6 +115,9 @@ declare function consume(value: string): void;
 
 consume(unknownValue as string);
 
+class DeclaredService {}
+const ExpressedService = class {};
+
 ${"sw" + "itch"} (choice) {
   case "first":
     console.log(choice);
@@ -127,7 +130,13 @@ container.innerHTML = markup;
 const response = new Response("<main>Raw response</main>");
 const templateResponse = new Response(\`<section>\${markup}</section>\`);
 const eslint: ESLint | undefined = undefined;
-console.log(eslint, response, templateResponse);
+console.log(
+  eslint,
+  response,
+  templateResponse,
+  DeclaredService,
+  ExpressedService,
+);
 `,
       ),
       writeFile(
@@ -156,6 +165,9 @@ console.log(<main>{htmlExample}</main>);
     expect(output).toContain("@typescript-eslint/consistent-type-assertions");
     expect(output).toContain("@typescript-eslint/consistent-type-imports");
     expect(output).toContain("@typescript-eslint/switch-exhaustiveness-check");
+    expect(output).toContain("Switch statements are forbidden");
+    expect(output).toContain("Class declarations are forbidden");
+    expect(output).toContain("Class expressions are forbidden");
     expect(output).toContain("no-restricted-properties");
     expect(output).toContain("no-restricted-syntax");
     expect(output).toContain("HTML-like template");
