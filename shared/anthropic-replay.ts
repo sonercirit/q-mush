@@ -154,26 +154,37 @@ export function projectAnthropicReplayFields(
     : undefined;
 }
 
+const replayBlockTypeReaders: Record<
+  AnthropicReplayBlockType,
+  () => AnthropicReplayBlockType
+> = {
+  bash_code_execution_tool_result: () => "bash_code_execution_tool_result",
+  code_execution_tool_result: () => "code_execution_tool_result",
+  container_upload: () => "container_upload",
+  redacted_thinking: () => "redacted_thinking",
+  server_tool_use: () => "server_tool_use",
+  text: () => "text",
+  text_editor_code_execution_tool_result: () =>
+    "text_editor_code_execution_tool_result",
+  thinking: () => "thinking",
+  tool_search_tool_result: () => "tool_search_tool_result",
+  tool_use: () => "tool_use",
+  web_fetch_tool_result: () => "web_fetch_tool_result",
+  web_search_tool_result: () => "web_search_tool_result",
+};
+
+function isAnthropicReplayBlockType(
+  value: string,
+): value is AnthropicReplayBlockType {
+  return Object.hasOwn(replayBlockTypeReaders, value);
+}
+
 export function readAnthropicReplayBlockType(
   value: unknown,
 ): AnthropicReplayBlockType | undefined {
-  switch (value) {
-    case "thinking":
-    case "redacted_thinking":
-    case "text":
-    case "tool_use":
-    case "server_tool_use":
-    case "web_search_tool_result":
-    case "web_fetch_tool_result":
-    case "code_execution_tool_result":
-    case "container_upload":
-    case "bash_code_execution_tool_result":
-    case "text_editor_code_execution_tool_result":
-    case "tool_search_tool_result":
-      return value;
-    default:
-      return undefined;
-  }
+  return typeof value === "string" && isAnthropicReplayBlockType(value)
+    ? replayBlockTypeReaders[value]()
+    : undefined;
 }
 
 function isValidReplayOptionalFields(
