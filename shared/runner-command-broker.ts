@@ -10,8 +10,9 @@ import {
   type PendingRunnerCommand,
 } from "./runner-command-pending.ts";
 import {
-  RunnerCommandSurvivalState,
+  createRunnerCommandSurvivalState,
   type RunnerCommandSurvivalOptions,
+  type RunnerCommandSurvivalState,
 } from "./runner-command-survival.ts";
 import {
   type DispatchRunnerToolCommand,
@@ -68,7 +69,7 @@ export class RunnerCommandBroker {
     this.#delivery = new RunnerCommandDelivery((commandId) =>
       this.#pending.get(commandId),
     );
-    this.#survival = new RunnerCommandSurvivalState(options);
+    this.#survival = createRunnerCommandSurvivalState(options);
   }
 
   dispatch(

@@ -5,104 +5,88 @@ export interface RunnerCommandSurvivalOptions {
   readonly maximumCancellationTombstones?: number;
 }
 
-export class RunnerCommandSurvivalState {
-  readonly #cancellationTombstones = new Map<string, Set<string>>();
-  readonly #log: (message: string) => void;
-  readonly #maximumCancellationTombstones: number;
-  readonly #runnerProcessNonces = new Map<string, string | undefined>();
-
-  constructor(options: RunnerCommandSurvivalOptions = {}) {
-    const maximumCancellationTombstones =
-      options.maximumCancellationTombstones ?? 1_000;
-    if (
-      !Number.isSafeInteger(maximumCancellationTombstones) ||
-      maximumCancellationTombstones < 1
-    ) {
-      throw new RangeError(
-        "The runner cancellation tombstone limit must be positive",
-      );
-    }
-    this.#log = options.log ?? console.error;
-    this.#maximumCancellationTombstones = maximumCancellationTombstones;
-  }
-
-  deliverCancellations(
+export interface RunnerCommandSurvivalState {
+  readonly acknowledgeCancellation: (
+    runnerId: string,
+    commandId: string,
+  ) => boolean;
+  readonly deliverCancellations: (
     runnerId: string,
     deliver: (commandId: string) => boolean,
-  ): boolean {
-    const tombstones = this.#cancellationTombstones.get(runnerId);
-    if (tombstones === undefined) {
-      return true;
-    }
-    for (const commandId of tombstones) {
-      if (!deliver(commandId)) {
-        return false;
-      }
-    }
-    return true;
-  }
+  ) => boolean;
+  readonly processMatches: (runnerId: string, processNonce: string) => boolean;
+  readonly recordCancellation: (runnerId: string, commandId: string) => void;
+  readonly stageProcess: (
+    runnerId: string,
+    processNonce?: string,
+  ) => RunnerProcessCommit;
+}
 
-  acknowledgeCancellation(runnerId: string, commandId: string): boolean {
-    const tombstones = this.#cancellationTombstones.get(runnerId);
-    if (tombstones?.delete(commandId) !== true) {
-      return false;
-    }
-    if (tombstones.size === 0) {
-      this.#cancellationTombstones.delete(runnerId);
-    }
-    return true;
-  }
-
-  processMatches(runnerId: string, processNonce: string): boolean {
-    return (
-      this.#runnerProcessNonces.has(runnerId) &&
-      this.#runnerProcessNonces.get(runnerId) === processNonce
+export function createRunnerCommandSurvivalState(
+  options: RunnerCommandSurvivalOptions = {},
+): RunnerCommandSurvivalState {
+  const cancellationTombstones = new Map<string, Set<string>>();
+  const log = options.log ?? console.error;
+  const maximumCancellationTombstones =
+    options.maximumCancellationTombstones ?? 1_000;
+  const runnerProcessNonces = new Map<string, string | undefined>();
+  if (
+    !Number.isSafeInteger(maximumCancellationTombstones) ||
+    maximumCancellationTombstones < 1
+  ) {
+    throw new RangeError(
+      "The runner cancellation tombstone limit must be positive",
     );
   }
 
-  stageProcess(runnerId: string, processNonce?: string): RunnerProcessCommit {
-    const sameProcess =
-      processNonce !== undefined && this.processMatches(runnerId, processNonce);
-    return () => {
-      if (!sameProcess) {
-        this.#runnerProcessNonces.set(runnerId, processNonce);
-        this.#cancellationTombstones.delete(runnerId);
-      }
-    };
-  }
+  const processMatches = (runnerId: string, processNonce: string): boolean =>
+    runnerProcessNonces.has(runnerId) &&
+    runnerProcessNonces.get(runnerId) === processNonce;
 
-  recordCancellation(runnerId: string, commandId: string): void {
-    const tombstones = this.#cancellationTombstones.get(runnerId) ?? new Set();
-    tombstones.delete(commandId);
-    tombstones.add(commandId);
-    this.#cancellationTombstones.set(runnerId, tombstones);
-    if (
-      this.#cancellationTombstoneCount() <= this.#maximumCancellationTombstones
-    ) {
-      return;
-    }
-    for (const [discardedRunnerId, discardedTombstones] of this
-      .#cancellationTombstones) {
-      const discarded = discardedTombstones.values().next().value;
-      if (discarded === undefined) {
-        continue;
+  return {
+    acknowledgeCancellation(runnerId, commandId) {
+      const tombstones = cancellationTombstones.get(runnerId);
+      if (tombstones?.delete(commandId) !== true) return false;
+      if (tombstones.size === 0) cancellationTombstones.delete(runnerId);
+      return true;
+    },
+    deliverCancellations(runnerId, deliver) {
+      const tombstones = cancellationTombstones.get(runnerId);
+      if (tombstones === undefined) return true;
+      for (const commandId of tombstones) if (!deliver(commandId)) return false;
+      return true;
+    },
+    processMatches,
+    recordCancellation(runnerId, commandId) {
+      const tombstones = cancellationTombstones.get(runnerId) ?? new Set();
+      tombstones.delete(commandId);
+      tombstones.add(commandId);
+      cancellationTombstones.set(runnerId, tombstones);
+      let count = 0;
+      for (const entries of cancellationTombstones.values())
+        count += entries.size;
+      if (count <= maximumCancellationTombstones) return;
+      for (const [discardedRunnerId, entries] of cancellationTombstones) {
+        const discarded = entries.values().next().value;
+        if (discarded === undefined) continue;
+        entries.delete(discarded);
+        if (entries.size === 0)
+          cancellationTombstones.delete(discardedRunnerId);
+        log(
+          `Q Mush discarded an unacknowledged runner cancellation tombstone for ${discarded} after reaching the safety limit.`,
+        );
+        return;
       }
-      discardedTombstones.delete(discarded);
-      if (discardedTombstones.size === 0) {
-        this.#cancellationTombstones.delete(discardedRunnerId);
-      }
-      this.#log(
-        `Q Mush discarded an unacknowledged runner cancellation tombstone for ${discarded} after reaching the safety limit.`,
-      );
-      return;
-    }
-  }
-
-  #cancellationTombstoneCount(): number {
-    let count = 0;
-    for (const tombstones of this.#cancellationTombstones.values()) {
-      count += tombstones.size;
-    }
-    return count;
-  }
+    },
+    stageProcess(runnerId, processNonce) {
+      const sameProcess =
+        processNonce !== undefined && processMatches(runnerId, processNonce);
+      return () => {
+        if (!sameProcess) {
+          runnerProcessNonces.set(runnerId, processNonce);
+          cancellationTombstones.delete(runnerId);
+        }
+      };
+    },
+  };
 }
