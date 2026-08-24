@@ -44,14 +44,14 @@ function createFailingRemovalRunnerStore(database: AppDatabase): RunnerStore {
   const store = new RunnerStore(database);
   return new Proxy(store, {
     get(target, property, receiver) {
-      if (property === "exists") return () => true;
-      if (property === "remove") {
-        return () => {
-          throw new Error("injected removal failure");
-        };
+      if (property !== "remove") {
+        if (property === "exists") return () => true;
+        const inherited: unknown = Reflect.get(target, property, receiver);
+        return inherited;
       }
-      const value: unknown = Reflect.get(target, property, receiver);
-      return value;
+      return function failRemoval(): never {
+        throw new Error("injected removal failure");
+      };
     },
   });
 }

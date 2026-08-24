@@ -24,26 +24,21 @@ export const REALTIME_TEST_USER: AuthenticatedUser = {
 
 export interface RealtimeUpgradeServer {
   data: QmushWebSocketData | undefined;
-  upgrade(
+  upgrade: (
     request: Request,
     options: { readonly data: QmushWebSocketData },
-  ): boolean;
+  ) => boolean;
 }
 
 export function createRealtimeUpgradeServer(): RealtimeUpgradeServer {
-  let data: QmushWebSocketData | undefined;
-  return {
-    get data() {
-      return data;
-    },
-    set data(value) {
-      data = value;
-    },
+  const server: RealtimeUpgradeServer = {
+    data: undefined,
     upgrade: (_request, options) => {
-      data = options.data;
+      server.data = options.data;
       return true;
     },
   };
+  return server;
 }
 
 export function realtimeTestAuth(user: AuthenticatedUser | null): GoogleAuth {
