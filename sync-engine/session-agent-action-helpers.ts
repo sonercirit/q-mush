@@ -1,8 +1,8 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
-  ProviderCredentialStore,
   type ProviderCredentialAccess,
+  listActiveModelCredentials,
 } from "../shared/provider-credential-store.ts";
 import type {
   AgentSessionDetail,
@@ -173,7 +173,7 @@ export async function spawnAgentSession(options: {
     selection.provider,
     selection.credentialId,
   );
-  const summaries = ProviderCredentialStore.listActiveModelCredentials(
+  const summaries = listActiveModelCredentials(
     dependencies.database,
     userId,
     selection.provider,

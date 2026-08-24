@@ -5,8 +5,8 @@ import {
 import type { AppDatabase } from "../shared/database.ts";
 import { isBalancedCredentialId } from "../shared/provider-credential-pool.ts";
 import {
-  ProviderCredentialStore,
   type ProviderCredentialAccess,
+  listActiveModelCredentials,
 } from "../shared/provider-credential-store.ts";
 import { throwIfSignalAborted } from "../shared/validation.ts";
 import { isCredentialRejectionError } from "./agent-model-discovery-fetch.ts";
@@ -68,7 +68,7 @@ export class ModelCredentialPool {
   }
 
   #activeSummaries(userId: string, selection: ModelCredentialSelection) {
-    return ProviderCredentialStore.listActiveModelCredentials(
+    return listActiveModelCredentials(
       this.#dependencies.database,
       userId,
       selection.provider,

@@ -1,13 +1,16 @@
 import { eq } from "drizzle-orm";
 import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import {
   createCredentialCipher,
   fingerprintProviderCredential,
 } from "../../shared/credential-cipher.ts";
 import { providerCredentials } from "../../shared/database/schema.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  type ProviderCredentialStore,
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { createGoogleAuthFromEnvironment } from "../../sync-engine/auth.ts";
 import {
   createOpenAiIntegrationFromEnvironment,
@@ -259,7 +262,7 @@ async function setupConnectedCredential() {
   );
   return {
     ...setup,
-    store: new ProviderCredentialStore(
+    store: createProviderCredentialStore(
       setup.database,
       createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
       "openai",
@@ -393,7 +396,7 @@ describe("OpenAI credentials", () => {
       redirect_uri: CALLBACK_URL,
     });
     expect(providerRequests).toHaveLength(4);
-    const credentialStore = new ProviderCredentialStore(
+    const credentialStore = createProviderCredentialStore(
       database,
       createCredentialCipher(ENVIRONMENT.OPENAI_CREDENTIAL_KEY),
       "openai",
@@ -485,9 +488,9 @@ describe("OpenAI credentials", () => {
       }),
     );
 
-    const endpointReconnect = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockReturnValue(true);
+    database.$client.exec(`CREATE TRIGGER reject_unexpected_endpoint_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN SELECT RAISE(ABORT, 'unexpected endpoint reconnect'); END`);
     store.markRequiresReauthentication(TEST_USER_ID, FIRST_OAUTH_ID, TEST_NOW);
     const unflagged = beginReconnect(integration, "openai-state-six");
     database
@@ -516,8 +519,7 @@ describe("OpenAI credentials", () => {
       "openai-state-eight",
     );
     await expectWrongAccount(integration, missingStoredIdentity);
-    expect(endpointReconnect).not.toHaveBeenCalled();
-    endpointReconnect.mockRestore();
+    database.$client.exec("DROP TRIGGER reject_unexpected_endpoint_reconnect");
     database.$client.close();
   });
 
@@ -525,20 +527,10 @@ describe("OpenAI credentials", () => {
     const setup = await setupConnectedCredential();
     const { database, integration, store } = setup;
     const unchangedSecret = markForReconnect(store);
-    const originalUpdateSecret = store.updateSecret.bind(store);
-    const updateSecret = vi
-      .spyOn(ProviderCredentialStore.prototype, "updateSecret")
-      .mockImplementation((...parameters) => {
-        const reconnectOnly = parameters[4] === true;
-        if (reconnectOnly) {
-          database
-            .update(providerCredentials)
-            .set({ providerAccountId: "chatgpt-workspace-two" })
-            .where(eq(providerCredentials.id, FIRST_OAUTH_ID))
-            .run();
-        }
-        return originalUpdateSecret(...parameters);
-      });
+    database.$client.exec(`CREATE TRIGGER change_account_during_reconnect
+      BEFORE UPDATE OF encrypted_credential ON provider_credentials
+      BEGIN UPDATE provider_credentials SET provider_account_id = 'chatgpt-workspace-two'
+      WHERE id = '${FIRST_OAUTH_ID}'; END`);
 
     try {
       const reconnect = beginReconnect(integration, SECOND_STATE);
@@ -547,7 +539,6 @@ describe("OpenAI credentials", () => {
         unchangedSecret,
       );
     } finally {
-      updateSecret.mockRestore();
       database.$client.close();
     }
   });

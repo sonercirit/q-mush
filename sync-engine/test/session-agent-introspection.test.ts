@@ -9,8 +9,8 @@ import {
 import { SYSTEM_ID } from "../../shared/ids.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
 import {
-  ProviderCredentialStore,
   type ProviderCredentialAccess,
+  listModelCredentials,
 } from "../../shared/provider-credential-store.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import {
@@ -539,7 +539,7 @@ describe("session agent introspection tools", () => {
       })
       .run();
 
-    const page = ProviderCredentialStore.listModelCredentials(
+    const page = listModelCredentials(
       database,
       TEST_USER_ID,
       10,
@@ -551,14 +551,14 @@ describe("session agent introspection tools", () => {
         label: `Other ${String(index)}`,
       });
     }
-    const searchable = ProviderCredentialStore.listModelCredentials(
+    const searchable = listModelCredentials(
       database,
       TEST_USER_ID,
       0,
       10,
       "Key 1",
     );
-    const literalWildcard = ProviderCredentialStore.listModelCredentials(
+    const literalWildcard = listModelCredentials(
       database,
       TEST_USER_ID,
       0,

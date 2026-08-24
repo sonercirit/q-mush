@@ -5,7 +5,9 @@ import {
   agentSessions,
   providerCredentials,
 } from "../../shared/database/schema.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import {
   createSessionRestartControl,
   type SessionRestartControl,
@@ -203,7 +205,7 @@ test("restart recovery enforces the pending session workspace credential scope",
     })
     .where(eq(providerCredentials.id, running.credentialId))
     .run();
-  const credentialStore = new ProviderCredentialStore(
+  const credentialStore = createProviderCredentialStore(
     setup.database,
     cipher,
     "openai",

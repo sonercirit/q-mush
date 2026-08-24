@@ -3,11 +3,11 @@ import {
   type CredentialCipher,
 } from "../shared/credential-cipher.ts";
 import {
-  ProviderCredentialStore,
   type ProviderApiFormat,
   type ProviderCredentialAccess,
   type ProviderCredentialDetails,
   type ProviderId,
+  createProviderCredentialStore,
 } from "../shared/provider-credential-store.ts";
 import { createProviderQuotaStore } from "../shared/provider-quota-store.ts";
 import type { GoogleAuth } from "./auth.ts";
@@ -136,7 +136,7 @@ export function createProviderIntegration(options: {
   const store =
     options.configuration === undefined
       ? undefined
-      : new ProviderCredentialStore(
+      : createProviderCredentialStore(
           runtime.database,
           options.configuration.cipher,
           options.provider,

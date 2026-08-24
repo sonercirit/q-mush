@@ -2,7 +2,9 @@ import { Buffer } from "node:buffer";
 import { describe, expect, test } from "vitest";
 import { createCredentialCipher } from "../../shared/credential-cipher.ts";
 import { balancedCredentialId } from "../../shared/provider-credential-pool.ts";
-import { ProviderCredentialStore } from "../../shared/provider-credential-store.ts";
+import {
+  createProviderCredentialStore,
+} from "../../shared/provider-credential-store.ts";
 import { ModelCredentialPool } from "../model-credential-pool.ts";
 import { createOpenAiIntegrationFromEnvironment } from "../openai.ts";
 import {
@@ -66,7 +68,7 @@ function refreshPool(
 ) {
   const { auth, database } = createAuthenticatedTestContext();
   const ids = [...credentialIds];
-  const store = new ProviderCredentialStore(
+  const store = createProviderCredentialStore(
     database,
     createCredentialCipher(CREDENTIAL_KEY),
     "openai",
