@@ -53,7 +53,9 @@ function createEndlessToolModel(): EndlessToolModel {
       model.steps += 1;
       return Promise.resolve(
         providerStep(`Step ${String(messages.length)}.`, {
-          toolCalls: [toolCall("bash", { command: "printf work", timeout: 30 })],
+          toolCalls: [
+            toolCall("bash", { command: "printf work", timeout: 30 }),
+          ],
         }),
       );
     },
