@@ -6,7 +6,6 @@ import {
   type ToolStreamSnapshotFrame,
 } from "../shared/tool-stream.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
-import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import {
   toolSyncKey,
   type ToolSyncRequest,
@@ -23,6 +22,13 @@ import {
   MAXIMUM_PENDING_STREAM_FRAGMENTS,
   MAXIMUM_PENDING_STREAM_KEYS,
 } from "./realtime-stream-buffer-limits.ts";
+import type {
+  RealtimeStreamBarrier,
+  RealtimeStreamBatch,
+  RealtimeStreamBuffer,
+  SessionDelta,
+  StreamServerEvent,
+} from "./realtime-stream-buffer-types.ts";
 import {
   appendToolDelta,
   emptyChannelChunks,
@@ -34,8 +40,6 @@ import {
   validatedToolDelta,
   type BufferedStreamUpdate,
   type RealtimeStreamUpdate,
-  type RealtimeToolStreamUpdate,
-  type SessionStreamDelta,
 } from "./realtime-stream-buffer-update.ts";
 import {
   terminalToolState,
@@ -43,42 +47,14 @@ import {
   toolStateSessionId,
   type RetainedToolState,
 } from "./realtime-stream-tool-state.ts";
-export type { RealtimeStreamUpdate, RealtimeToolStreamUpdate };
-type SessionDelta = SessionStreamDelta;
-type StreamServerEvent = SessionDelta | ToolStreamDeltaFrame;
-export interface RealtimeStreamBatch {
-  readonly type: "stream_batch";
-  readonly updates: readonly RealtimeStreamUpdate[];
-}
-export type RealtimeClientEvent =
-  Exclude<RealtimeServerEvent, StreamServerEvent> | RealtimeStreamBatch;
-export interface RealtimeStreamBarrier {
-  readonly epoch: number;
-  readonly sessionId: string;
-}
-export interface RealtimeStreamBuffer {
-  readonly pending: boolean;
-  clear(): void;
-  clearPending(): void;
-  markBarrier(sessionId: string): RealtimeStreamBarrier;
-  releaseBarrier(barrier: RealtimeStreamBarrier): void;
-  activeToolStreams(sessionId?: string): readonly ToolSyncRequest[];
-  takeToolResyncRequests(): readonly ToolSyncRequest[];
-  clearToolSession(sessionId: string): void;
-  queue(event: StreamServerEvent): void;
-  takeNext(
-    maximumUpdates?: number,
-    selectedSessionId?: string,
-    withinBudget?: () => boolean,
-  ): RealtimeStreamBatch | undefined;
-  takeBarrier(
-    barrier: RealtimeStreamBarrier,
-    maximumUpdates?: number,
-    withinBudget?: () => boolean,
-  ): RealtimeStreamBatch | undefined;
-  barrierPending(barrier: RealtimeStreamBarrier): boolean;
-  applyToolSnapshot(snapshot: ToolStreamSnapshotFrame): ToolStreamSnapshotFrame;
-}
+export type {
+  RealtimeClientEvent,
+  RealtimeStreamBarrier,
+  RealtimeStreamBatch,
+  RealtimeStreamBuffer,
+  RealtimeStreamUpdate,
+  RealtimeToolStreamUpdate,
+} from "./realtime-stream-buffer-types.ts";
 export function createRealtimeStreamBuffer(): RealtimeStreamBuffer {
   let isSelectedTurn = true;
   let pendingBytes = 0;

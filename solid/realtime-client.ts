@@ -1,8 +1,5 @@
 import { REALTIME_PATH } from "../shared/routes.ts";
-import {
-  USER_REALTIME_MAX_PAYLOAD_LENGTH,
-  type SESSION_REALTIME_OPERATIONS,
-} from "../shared/user-realtime-protocol.ts";
+import { USER_REALTIME_MAX_PAYLOAD_LENGTH } from "../shared/user-realtime-protocol.ts";
 import { utf8ByteLength } from "../shared/utf8.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import {
@@ -18,6 +15,13 @@ import {
   type PendingCommand,
   type QueuedCommand,
 } from "./realtime-client-command.ts";
+import type {
+  BrowserWebSocket,
+  BrowserWebSocketFactory,
+  FrameCallback,
+  RealtimeListener,
+  SessionRealtimeOperation,
+} from "./realtime-client-contract.ts";
 import {
   createToolSyncTracker,
   type ToolSyncRequest,
@@ -31,16 +35,6 @@ import {
   type RealtimeStreamBuffer,
 } from "./realtime-stream-buffer.ts";
 import { sessionIsActive } from "./session-controller-guards.ts";
-interface BrowserWebSocket extends EventTarget {
-  readonly readyState: number;
-  close(): void;
-  send(data: string): void;
-}
-type BrowserWebSocketFactory = (url: string) => BrowserWebSocket;
-type FrameCallback = (callback: () => void) => number;
-type RealtimeListener = (event: RealtimeClientEvent) => void;
-type SessionRealtimeOperation =
-  (typeof SESSION_REALTIME_OPERATIONS)[keyof typeof SESSION_REALTIME_OPERATIONS];
 type DeferredStateEvent = Extract<
   RealtimeServerEvent,
   {

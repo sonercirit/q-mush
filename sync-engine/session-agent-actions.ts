@@ -46,53 +46,11 @@ function runnerUnavailableOutput(): string {
   return sessionToolOutput({ error: "runner_unavailable" });
 }
 
-export interface SessionAgentActions {
-  readonly actions: (
-    parentSessionId: string,
-    userId: string,
-    parentGeneration: number,
-    toolSettings: ToolSettings,
-  ) => SessionAgentToolActions;
-  readonly finished: (detail: AgentSessionDetail, userId: string) => void;
-  readonly isDraining: () => boolean;
-  readonly reportAll: (pending: readonly PendingSpawnedSession[]) => void;
-  readonly reportOne: (detail: AgentSessionDetail, userId: string) => void;
-  readonly reportedParent: (
-    report: SpawnedSessionCompletion,
-    userId: string,
-  ) => void;
-  readonly stopChildren: (parent: AgentSessionDetail, userId: string) => void;
-  readonly stopSession: (
-    sessionId: string,
-    detail?: AgentSessionDetail,
-  ) => void;
-}
-
-interface SessionAgentActionsError extends Error {
-  readonly tag: "session_agent_actions";
-}
-
-function createSessionAgentActionsError(
-  message: string,
-): SessionAgentActionsError {
-  const error = Object.assign(new Error(message), {
-    tag: "session_agent_actions" as const,
-  });
-  if (!isSessionAgentActionsError(error)) {
-    throw new Error("Failed to create a session agent actions error");
-  }
-  return error;
-}
-
-function isSessionAgentActionsError(
-  error: unknown,
-): error is SessionAgentActionsError {
-  return (
-    error instanceof Error &&
-    "tag" in error &&
-    error.tag === "session_agent_actions"
-  );
-}
+import {
+  createSessionAgentActionsError,
+  type SessionAgentActions,
+} from "./session-agent-actions-types.ts";
+export type { SessionAgentActions } from "./session-agent-actions-types.ts";
 
 export function createSessionAgentActions(
   dependencies: SessionAgentActionsDependencies,

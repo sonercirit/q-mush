@@ -1,9 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
-import {
-  SESSION_REALTIME_OPERATIONS,
-  type UserRealtimeCommand,
-} from "../../shared/user-realtime-protocol.ts";
+import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import { createReactiveState } from "../../solid/reactive-state.ts";
 import type { SessionViewState } from "../../solid/session-client.tsx";
 import {
@@ -14,21 +11,18 @@ import { initialSessionViewState } from "../../solid/session-state.ts";
 import { summaryFromDetail } from "../../solid/session-summary-codec.ts";
 import type { SessionCommandTransport } from "../../solid/session-transport.ts";
 import { TEST_SESSION_DETAIL } from "./session-fixtures.ts";
-import { transcriptMessage } from "./transcript-ordering-fixtures.ts";
 
-type OperationName = keyof typeof SESSION_REALTIME_OPERATIONS;
-type Operation = UserRealtimeCommand["operation"];
-type Payload = UserRealtimeCommand["payload"];
-type PendingFlag = "compacting" | "creating" | "sending" | "stopping";
-type ReconciliationTest = () => Promise<void>;
-type StateMatch = Readonly<Record<string, unknown>>;
-
-async function waitFor(expectation: () => void): Promise<void> {
-  await vi.waitFor(expectation);
-}
-
-type SessionMutationName = "compact" | "continueSession" | "send" | "stop";
-type ControllerMutationName = SessionMutationName | "create";
+import type {
+  ControllerMutationName,
+  Operation,
+  OperationName,
+  Payload,
+  PendingFlag,
+  ReconciliationTest,
+  SessionMutationName,
+  StateMatch,
+} from "./session-controller-reconciliation-types.ts";
+const waitFor = vi.waitFor;
 
 const MUTATION_OPERATIONS: Readonly<
   Record<ControllerMutationName, OperationName>
@@ -45,31 +39,15 @@ interface CreationScenarioOptions {
   readonly sessions?: readonly AgentSessionDetail[] | undefined;
 }
 
-export function sessionDetail(
-  changes: Partial<AgentSessionDetail> = {},
-): AgentSessionDetail {
-  return { ...TEST_SESSION_DETAIL, ...changes };
-}
-
-export function createdSessionDetail(
-  prompt: string,
-  changes: Partial<AgentSessionDetail> = {},
-): AgentSessionDetail {
-  return sessionDetail({
-    ...changes,
-    messages: changes.messages ?? [
-      transcriptMessage("created-user", prompt, "user", 2),
-    ],
-  });
-}
-
-export function sessionUserMessage(
-  id: string,
-  content: string,
-  createdAt: number,
-): AgentSessionDetail["messages"][number] {
-  return transcriptMessage(id, content, "user", createdAt);
-}
+import {
+  createdSessionDetail,
+  sessionDetail,
+} from "./session-controller-reconciliation-detail-fixtures.ts";
+export {
+  createdSessionDetail,
+  sessionDetail,
+  sessionUserMessage,
+} from "./session-controller-reconciliation-detail-fixtures.ts";
 
 interface PendingSessionCommand {
   readonly operation: Operation;
@@ -650,7 +628,7 @@ export async function expectMismatchedCreationBlocked(
 }
 
 export function registerReconciliationTests(
-  scenarios: Readonly<Record<string, ReconciliationTest>>,
+  scenarios: Record<string, ReconciliationTest>,
 ): void {
   for (const [name, run] of Object.entries(scenarios)) {
     test(name, run);

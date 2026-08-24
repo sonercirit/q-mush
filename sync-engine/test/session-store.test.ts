@@ -21,6 +21,14 @@ import {
 } from "./authenticated-integration-test-helpers.ts";
 import { testCompactionHandoffMessage } from "./compaction-test-fixtures.ts";
 import {
+  ASSISTANT_MESSAGE_ID,
+  RUNNER_ID,
+  SESSION_ID,
+  THINKING_MESSAGE_ID,
+  TOOL_MESSAGE_ID,
+  USER_MESSAGE_ID,
+} from "./session-store-ids.ts";
+import {
   markTestSessionRunning,
   runningStore,
 } from "./session-store-lifecycle-test-helpers.ts";
@@ -34,16 +42,7 @@ import {
 import {
   createStore,
   createTestSession,
-  STORE_RUNNER_ID,
-  STORE_SESSION_ID,
 } from "./session-store-test-fixtures.ts";
-const RUNNER_ID = STORE_RUNNER_ID;
-const SESSION_ID = STORE_SESSION_ID;
-const USER_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000044";
-const THINKING_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000045";
-const ASSISTANT_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000046";
-const TOOL_MESSAGE_ID = "018bcfe5-6800-7000-8000-000000000047";
-
 function testUserImageMessage(
   id: string,
   content: string,

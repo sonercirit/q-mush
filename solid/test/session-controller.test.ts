@@ -30,9 +30,7 @@ import {
   sessionMessageIds,
   transcriptMessage,
 } from "./transcript-ordering-fixtures.ts";
-afterEach(() => {
-  vi.restoreAllMocks();
-});
+afterEach(vi.restoreAllMocks);
 function selectedSessionState(state: SessionViewState): SessionViewState {
   return { ...state, selectedId: TEST_SESSION_DETAIL.id };
 }
@@ -77,7 +75,7 @@ interface SelectedTurn {
   readonly user: AgentSessionDetail["messages"][number];
 }
 interface SelectedIdleTurn extends SelectedTurn {
-  readonly assistant: AgentSessionDetail["messages"][number];
+  assistant: AgentSessionDetail["messages"][number];
 }
 function selectedTurn(
   sessionId: string,

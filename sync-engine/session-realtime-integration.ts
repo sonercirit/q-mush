@@ -17,38 +17,27 @@ import {
   isRealtimeCommandError,
   type RealtimeCommandError,
 } from "../shared/user-realtime-protocol.ts";
-import type { AgentModelDiscoverer } from "./agent-model-discovery.ts";
-import type { ModelCredentialPool } from "./model-credential-pool.ts";
-import type { OpenRouterProviderDiscoverer } from "./openrouter-provider-discovery.ts";
-import type { SessionAgentActions } from "./session-agent-actions.ts";
 import type {
   AuthenticatedSessionAction,
   SessionDetailLookup,
 } from "./session-command-types.ts";
 import { startManualSessionCompaction } from "./session-compaction-actions.ts";
 import { createSessionContextTokenCapAction } from "./session-context-limit-action.ts";
-import { type SessionLaunchBoundary } from "./session-creation.ts";
 import {
   readSessionCredential,
   type SessionCredentialSelection,
 } from "./session-credential-access.ts";
 import type { SessionCredentialOperation } from "./session-credential-operation.ts";
-import type { SessionCredentialReaders } from "./session-credential-readers.ts";
 import { requiredSessionDetail } from "./session-detail.ts";
 import { readAuthorizedSessionHistory } from "./session-history.ts";
 import type { CreateSessionInput, PromptInput } from "./session-input.ts";
 import type { SessionPendingInputCommand } from "./session-pending-input-request.ts";
 import { type CancelPendingInputResult } from "./session-pending-inputs.ts";
-import type { SessionProviderUpdateDependencies } from "./session-provider-update.ts";
 import {
   answerSessionQuestionsCommand,
   isQuestionActionFailure,
-  type SessionQuestionActionDependencies,
 } from "./session-question-actions.ts";
-import {
-  queueSessionForUser,
-  type SessionQueueDependencies,
-} from "./session-queue.ts";
+import { queueSessionForUser } from "./session-queue.ts";
 import type {
   SessionAutoCompactionAction,
   SessionCancelPendingInputAction,
@@ -74,7 +63,6 @@ import {
   sessionReassignmentError,
 } from "./session-reassignment-request.ts";
 import type { SessionReassignmentInput } from "./session-reassignment.ts";
-import type { SessionStore } from "./session-store-interface.ts";
 import {
   applySessionToolUpdate,
   isSessionToolUpdateError,
@@ -82,33 +70,11 @@ import {
   type SessionToolUpdateDependencies,
 } from "./session-tool-update.ts";
 
-type RealtimeSessionCommandDependencies = SessionLaunchBoundary &
-  Pick<SessionQueueDependencies, "runnerIsAvailable"> &
-  Omit<RealtimeSessionCommandsOptions, "availability" | "lifecycle">;
-
-interface RealtimeSessionCommandsOptions {
-  readonly actions: SessionAgentActions;
-  readonly database: SessionToolUpdateDependencies["store"]["database"];
-  readonly discoverModels: AgentModelDiscoverer;
-  readonly discoverOpenRouterProviders: OpenRouterProviderDiscoverer;
-  readonly lifecycle: SessionLaunchBoundary;
-  readonly modelCredentialPool: ModelCredentialPool;
-  readonly providers: SessionCredentialReaders;
-  readonly providerUpdates: Omit<
-    SessionProviderUpdateDependencies,
-    "discoverModels" | "discoverOpenRouterProviders" | "providers" | "store"
-  >;
-  readonly questions: SessionQuestionActionDependencies;
-  readonly restartSignal: () => AbortSignal;
-  readonly toolUpdates: Omit<
-    SessionToolUpdateDependencies,
-    "readCredentialSource" | "store"
-  >;
-  readonly availability: Pick<SessionQueueDependencies, "runnerIsAvailable">;
-  readonly store: SessionStore;
-}
-
-export type { RealtimeSessionCommandsOptions };
+import type {
+  RealtimeSessionCommandDependencies,
+  RealtimeSessionCommandsOptions,
+} from "./session-realtime-options.ts";
+export type { RealtimeSessionCommandsOptions } from "./session-realtime-options.ts";
 
 async function responseValue(response: Response): Promise<void> {
   return requireJsonResponse(response);

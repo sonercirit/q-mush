@@ -1,13 +1,14 @@
 import { isValidBoundedString } from "./string-validation.ts";
+import {
+  MAXIMUM_TOOL_STREAM_DELTA_BYTES,
+  MAXIMUM_TOOL_STREAM_FIELD_BYTES,
+  MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH,
+  MAXIMUM_TOOL_STREAMS_PER_SESSION,
+  MAXIMUM_TOOL_STREAMS_PER_USER,
+} from "./tool-stream-limits.ts";
 import { utf8ByteLength } from "./utf8.ts";
 import { isRecord } from "./validation.ts";
-
-export const MAXIMUM_TOOL_STREAM_DELTA_BYTES = 32 * 1_024;
-export const MAXIMUM_TOOL_STREAM_FIELD_BYTES = 256 * 1_024;
-export const MAXIMUM_TOOL_STREAM_IDENTIFIER_LENGTH = 1_024;
-export const MAXIMUM_TOOL_STREAMS_PER_SESSION = 100;
-export const MAXIMUM_TOOL_STREAMS_PER_USER = 1_000;
-export const TOOL_STREAM_TRUNCATED_MARKER = "\n[stream truncated]";
+export * from "./tool-stream-limits.ts";
 
 export type ToolStreamTerminalState =
   "completed" | "failed" | "canceled" | "timed-out";
@@ -572,10 +573,10 @@ function createToolStreamSnapshotStore(
   };
 }
 
-export interface ToolStreamHubStateOptions {
-  readonly maximumStreamsPerSession?: number;
-  readonly maximumStreamsPerUser?: number;
-}
+export type ToolStreamHubStateOptions = Partial<{
+  maximumStreamsPerSession: number;
+  maximumStreamsPerUser: number;
+}>;
 
 interface UserToolStreamState {
   readonly sessions: Map<string, ToolStreamSnapshotStore>;

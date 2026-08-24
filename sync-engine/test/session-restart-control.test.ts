@@ -17,10 +17,7 @@ const OPENROUTER_CREDENTIAL = restartTestCredential("openrouter-credential", {
   secret: "openrouter-secret",
 });
 
-function runnerGate(
-  gates: Map<string, RestartRequest>,
-  runnerId: string,
-): RestartRequest | undefined {
+function runnerGate(gates: Map<string, RestartRequest>, runnerId: string) {
   return gates.get(runnerId);
 }
 
@@ -241,10 +238,10 @@ function finalShutdownControl() {
   return control(() => "final-shutdown");
 }
 
-const FINAL_SHUTDOWN_DRAINS = [
-  { restartId: "final-shutdown", scope: { kind: "server" } },
-  { restartId: "final-shutdown", scope: { kind: "server" } },
-] as const;
+const FINAL_SHUTDOWN_DRAINS = Array.from({ length: 2 }, () => ({
+  restartId: "final-shutdown",
+  scope: { kind: "server" as const },
+}));
 
 function expectNoForcePark(runtimes: TestRestartRuntimes): void {
   expect(runtimes.forceParkCalls).toBe(0);
