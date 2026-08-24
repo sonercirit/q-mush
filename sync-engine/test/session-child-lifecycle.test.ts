@@ -2,7 +2,6 @@ import { describe, expect, test } from "vitest";
 import type {
   AgentConversationMessage,
   AgentModel,
-  AgentModelStep,
 } from "../../shared/agent-loop.ts";
 import {
   TEST_AUTHENTICATED_USER,
@@ -65,54 +64,47 @@ function isSpawnedToolResult(message: AgentConversationMessage): boolean {
   return message.role === "tool" && message.toolName === "spawn_session";
 }
 
-class ParentTerminalWithRunningChildModel implements AgentModel {
-  readonly #childCompletion = Promise.withResolvers<undefined>();
-  readonly #parentCompletion = Promise.withResolvers<"complete" | "fail">();
-  readonly childStarted = Promise.withResolvers<undefined>();
-  readonly parentWaiting = Promise.withResolvers<undefined>();
-  parentRequests = 0;
+interface ParentTerminalWithRunningChildModel extends AgentModel {
+  readonly childStarted: PromiseWithResolvers<undefined>;
+  readonly parentWaitingPromise: Promise<undefined>;
+  finishChild(): void;
+  finishParent(outcome: "complete" | "fail"): void;
+}
 
-  get parentWaitingPromise(): Promise<undefined> {
-    return this.parentWaiting.promise;
-  }
-
-  finishChild(): void {
-    this.#childCompletion.resolve();
-  }
-
-  finishParent(outcome: "complete" | "fail"): void {
-    this.#parentCompletion.resolve(outcome);
-  }
-
-  async complete(
-    messages: readonly AgentConversationMessage[],
-    signal?: AbortSignal,
-  ): Promise<AgentModelStep> {
-    if (includesChildPrompt(messages)) {
-      this.childStarted.resolve();
-      await abortable(this.#childCompletion.promise, signal);
-      return providerStep("The child completed its delegated work.");
-    }
-
-    this.parentRequests += 1;
-    const spawned = messages.some(isSpawnedToolResult);
-    if (!spawned) {
-      return providerStep("Delegating work before I finish.", {
-        toolCalls: [spawnCall(CHILD_PROMPT)],
-      });
-    }
-
-    this.parentWaiting.resolve();
-    const outcome = await abortable(this.#parentCompletion.promise, signal);
-    if (outcome === "fail") {
-      throw new Error("Parent failed after spawning its child");
-    }
-    return providerStep(
-      this.parentRequests === 2
-        ? "The parent completed normally."
-        : "The parent was unexpectedly resumed by a child callback.",
-    );
-  }
+function createParentTerminalWithRunningChildModel(): ParentTerminalWithRunningChildModel {
+  const childCompletion = Promise.withResolvers<undefined>();
+  const parentCompletion = Promise.withResolvers<"complete" | "fail">();
+  const childStarted = Promise.withResolvers<undefined>();
+  const parentWaiting = Promise.withResolvers<undefined>();
+  let parentRequests = 0;
+  return {
+    childStarted,
+    parentWaitingPromise: parentWaiting.promise,
+    finishChild() { childCompletion.resolve(); },
+    finishParent(outcome) { parentCompletion.resolve(outcome); },
+    async complete(messages, signal) {
+      if (includesChildPrompt(messages)) {
+        childStarted.resolve();
+        await abortable(childCompletion.promise, signal);
+        return providerStep("The child completed its delegated work.");
+      }
+      parentRequests += 1;
+      const spawned = messages.some(isSpawnedToolResult);
+      if (!spawned) {
+        return providerStep("Delegating work before I finish.", {
+          toolCalls: [spawnCall(CHILD_PROMPT)],
+        });
+      }
+      parentWaiting.resolve();
+      const outcome = await abortable(parentCompletion.promise, signal);
+      if (outcome === "fail") throw new Error("Parent failed after spawning its child");
+      return providerStep(
+        parentRequests === 2
+          ? "The parent completed normally."
+          : "The parent was unexpectedly resumed by a child callback.",
+      );
+    },
+  };
 }
 
 type ChildLifecycleSetup = Awaited<ReturnType<typeof runningChildSetup>>;
@@ -125,7 +117,7 @@ function childFor(setup: ConnectedSetup) {
 }
 
 async function runningChildSetup() {
-  const model = new ParentTerminalWithRunningChildModel();
+  const model = createParentTerminalWithRunningChildModel();
   const setup = await startToolSession(model);
   await model.parentWaitingPromise;
   const child = childFor(setup);
