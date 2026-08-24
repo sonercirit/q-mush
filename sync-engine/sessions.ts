@@ -28,7 +28,7 @@ import { createSessionFailureReconciler } from "./session-failure-reconciler.ts"
 import { createSessionFinisher } from "./session-finisher.ts";
 import { compactIdleSessions } from "./session-idle-compaction.ts";
 import {
-  SessionIntegrationApi,
+  createSessionIntegrationApi,
   type SessionIntegrationApiResources,
 } from "./session-integration-api.ts";
 import type { SessionIntegration } from "./session-integration.ts";
@@ -457,12 +457,7 @@ function createDrizzleSessionIntegration(
     };
   }
 
-  class ClosureSessionIntegrationApi extends SessionIntegrationApi {
-    protected get resources(): SessionIntegrationApiResources {
-      return resources();
-    }
-  }
-  const api = new ClosureSessionIntegrationApi();
+  const api = createSessionIntegrationApi(resources());
   return Object.assign(api, {
     abortAgentActionsForRestart: () => {
       restartController.abort("integration test restart");

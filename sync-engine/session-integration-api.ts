@@ -108,29 +108,20 @@ export interface SessionIntegrationApiResources {
   readonly workspaces: SessionWorkspaceReader;
 }
 
-type WorkspaceResponseAction<Result extends Promise<Response> | Response> = (
-  user: AuthenticatedUser,
-  workspaceId: string,
-) => Result;
-
 type CollectionMethod = "GET" | "POST";
 
 function isCollectionMethod(method: string): method is CollectionMethod {
   return method === "GET" || method === "POST";
 }
 
-export abstract class SessionIntegrationApi implements SessionDetailReader {
-  protected abstract readonly resources: SessionIntegrationApiResources;
+export interface SessionIntegrationApi extends SessionDetailReader {
+  collection(request: Request): Response | Promise<Response>;
+}
 
-  #forWorkspace(
-    request: Request,
-    action: WorkspaceResponseAction<Response>,
-  ): Response;
-  #forWorkspace(
-    request: Request,
-    action: WorkspaceResponseAction<Promise<Response> | Response>,
-  ): Promise<Response> | Response;
-  #forWorkspace(
+export function createSessionIntegrationApi(resources: SessionIntegrationApiResources) {
+  const api = {
+
+  forWorkspace(
     request: Request,
     action: (
       user: AuthenticatedUser,
@@ -138,32 +129,36 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     ) => Promise<Response> | Response,
   ): Promise<Response> | Response {
     return forRequestWorkspace(
-      this.resources.requests,
-      this.resources.workspaces,
+      resources.requests,
+      resources.workspaces,
       request,
       action,
     );
-  }
+  },
 
   collection(request: Request): Response | Promise<Response> {
-    return this.#forWorkspace(request, (user, workspaceId) => {
+    return forRequestWorkspace(
+      resources.requests,
+      resources.workspaces,
+      request,
+      (user, workspaceId) => {
       const handlers: Record<
         CollectionMethod,
         () => Response | Promise<Response>
       > = {
         GET: () =>
           createJsonResponse({
-            sessions: this.resources.store.list(user.id, workspaceId),
+            sessions: resources.store.list(user.id, workspaceId),
           }),
-        POST: () => this.resources.createForUser(request, user, workspaceId),
+        POST: () => resources.createForUser(request, user, workspaceId),
       };
       return isCollectionMethod(request.method)
         ? handlers[request.method]()
         : createMethodNotAllowedResponse("GET, POST");
     });
-  }
+  },
 
-  #postForWorkspace(
+  postForWorkspace(
     request: Request,
     action: (
       user: AuthenticatedUser,
@@ -171,35 +166,35 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     ) => Response | Promise<Response>,
   ): Promise<Response> {
     return Promise.resolve(
-      this.resources.requests.postForUser(request, (user) => {
+      resources.requests.postForUser(request, (user) => {
         const run = () =>
           withRequestSessionWorkspace(
             request,
             user,
-            this.resources.workspaces,
+            resources.workspaces,
             (workspaceId) => action(user, workspaceId),
           );
         return run();
       }),
     );
-  }
+  },
 
-  #queueWithoutPrompt(request: Request, sessionId: string): Promise<Response> {
-    const queue = this.resources.queueForUser;
-    return this.#postForWorkspace(request, (user, workspaceId) =>
+  queueWithoutPrompt(request: Request, sessionId: string): Promise<Response> {
+    const queue = resources.queueForUser;
+    return api.postForWorkspace(request, (user, workspaceId) =>
       queue(user, sessionId, workspaceId),
     );
-  }
+  },
 
   compact(request: Request, sessionId: string): Promise<Response> {
-    return this.#postForWorkspace(request, (user, workspaceId) =>
-      this.resources.compactForUser(user, sessionId, workspaceId),
+    return api.postForWorkspace(request, (user, workspaceId) =>
+      resources.compactForUser(user, sessionId, workspaceId),
     );
-  }
+  },
 
   continue(request: Request, sessionId: string): Promise<Response> {
-    return this.#queueWithoutPrompt(request, sessionId);
-  }
+    return api.queueWithoutPrompt(request, sessionId);
+  },
 
   message(request: Request, sessionId: string): Promise<Response> {
     const run = async (user: AuthenticatedUser): Promise<Response> => {
@@ -209,226 +204,230 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
         : withRequestSessionWorkspace(
             request,
             user,
-            this.resources.workspaces,
+            resources.workspaces,
             (workspaceId) =>
-              this.resources.queueForUser(user, sessionId, workspaceId, input),
+              resources.queueForUser(user, sessionId, workspaceId, input),
           );
     };
     return Promise.resolve(
-      this.resources.requests.authenticate(request, "POST", run),
+      resources.requests.authenticate(request, "POST", run),
     );
-  }
+  },
 
   commitRunnerProcess(runnerId: string, processNonce?: string): void {
-    this.resources.broker.commitRunnerProcess(runnerId, processNonce);
-  }
+    resources.broker.commitRunnerProcess(runnerId, processNonce);
+  },
 
   completeRunnerCommand(
     runnerId: string,
     commandId: string,
     result: Parameters<RunnerCommandBroker["complete"]>[2],
   ): boolean {
-    return this.resources.broker.complete(runnerId, commandId, result);
-  }
+    return resources.broker.complete(runnerId, commandId, result);
+  },
 
-  deliverRunnerCommands: DeliverRunnerCommands = ({
+  deliverRunnerCommands: (({
     connectionGeneration,
     deliver,
     deliverCancellation,
     processNonce,
     runnerId,
   }) =>
-    this.resources.broker.deliverRunnerCommands(
+    resources.broker.deliverRunnerCommands(
       runnerId,
       processNonce,
       deliver,
       deliverCancellation,
       connectionGeneration,
-    );
+    )) satisfies DeliverRunnerCommands,
 
   runnerConnectionGeneration(runnerId: string): number {
-    return this.resources.broker.runnerConnectionGeneration(runnerId);
-  }
+    return resources.broker.runnerConnectionGeneration(runnerId);
+  },
 
   replaceRunnerConnection(runnerId: string, replacedGeneration: number): void {
-    this.resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
-  }
+    resources.broker.replaceRunnerConnection(runnerId, replacedGeneration);
+  },
 
   acknowledgeRunnerCancellation(runnerId: string, commandId: string): boolean {
-    return this.resources.broker.acknowledgeCancellation(runnerId, commandId);
-  }
+    return resources.broker.acknowledgeCancellation(runnerId, commandId);
+  },
 
   async drain(
     deadline = new RestartDeadline(
-      this.resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
-      this.resources.now,
+      resources.now() + DEVELOPMENT_RESTART_LIFECYCLE_MS,
+      resources.now,
     ),
   ): Promise<void> {
-    this.resources.restartController.abort(
+    resources.restartController.abort(
       new DOMException("The server is restarting", "RestartHandoff"),
     );
-    this.resources.shutdownInterrupted.beginLiveDrain();
-    await this.resources.restart.drainServer(deadline);
-    await this.resources.executionCleanup.drainPending(deadline);
-  }
+    resources.shutdownInterrupted.beginLiveDrain();
+    await resources.restart.drainServer(deadline);
+    await resources.executionCleanup.drainPending(deadline);
+  },
 
   async drainFinal(): Promise<void> {
-    await this.resources.restart.drainServerFinal();
-    await Promise.allSettled(this.resources.executionCleanup.pending);
-  }
+    await resources.restart.drainServerFinal();
+    await Promise.allSettled(resources.executionCleanup.pending);
+  },
 
   escalateDrain(): boolean {
-    return this.resources.restart.escalateServerDrain();
-  }
+    return resources.restart.escalateServerDrain();
+  },
 
   drainProgress(
     userId?: string,
     workspaceId?: string,
   ): readonly RestartDrainSessionProgress[] {
-    if (userId === undefined) return this.resources.restart.drainProgress();
+    if (userId === undefined) return resources.restart.drainProgress();
     return this.drainProgressForSessions(
       new Set(
-        this.resources.store.list(userId, workspaceId).map(({ id }) => id),
+        resources.store.list(userId, workspaceId).map(({ id }) => id),
       ),
     );
-  }
+  },
 
   drainProgressForSessions(
     sessionIds: ReadonlySet<string>,
   ): readonly RestartDrainSessionProgress[] {
-    return this.resources.restart.drainProgress(undefined, (sessionId) =>
+    return resources.restart.drainProgress(undefined, (sessionId) =>
       sessionIds.has(sessionId),
     );
-  }
+  },
 
   restoreDevelopmentDrainRecovery(): void {
-    this.resources.shutdownInterrupted.enableRecovery();
-    this.resources.restart.restoreServerDrain();
-    this.resources.restartController.restore();
+    resources.shutdownInterrupted.enableRecovery();
+    resources.restart.restoreServerDrain();
+    resources.restartController.restore();
     // Sessions the abandoned drain already parked into durable handoffs, and
     // work queued while the gate was closed, only resume when recovery and
     // the queued launcher run again.
-    this.#resumeParkedAndQueued();
-  }
+    api.resumeParkedAndQueued();
+  },
 
-  #resumeParkedAndQueued(runnerId?: string): void {
-    this.resources.restartCoordinator.recover(runnerId);
-    for (const userId of this.resources.store.queuedSessionOwnerIds()) {
-      this.resources.launchQueuedSessions(userId);
+  resumeParkedAndQueued(runnerId?: string): void {
+    resources.restartCoordinator.recover(runnerId);
+    for (const userId of resources.store.queuedSessionOwnerIds()) {
+      resources.launchQueuedSessions(userId);
     }
-  }
+  },
 
   async prepareFinalShutdown(): Promise<void> {
-    this.resources.stopLivenessScans();
-    this.resources.shutdownInterrupted.enableRecovery();
-    await this.resources.restart.prepareServerShutdown();
-  }
+    resources.stopLivenessScans();
+    resources.shutdownInterrupted.enableRecovery();
+    await resources.restart.prepareServerShutdown();
+  },
 
   drainRunner(runnerId: string, restartId: string): Promise<void> {
-    return this.resources.restart.drainRunner(runnerId, restartId);
-  }
+    return resources.restart.drainRunner(runnerId, restartId);
+  },
 
   escalateRunnerDrain(runnerId: string, restartId: string): boolean {
-    return this.resources.restart.escalateRunnerDrain(runnerId, restartId);
-  }
+    return resources.restart.escalateRunnerDrain(runnerId, restartId);
+  },
 
-  #authenticatedWorkspace(
+  authenticatedWorkspace(
     request: Request,
   ):
     | { readonly user: AuthenticatedUser; readonly workspaceId: string }
     | Response {
-    const user = this.resources.auth.authenticatedUser(request);
+    const user = resources.auth.authenticatedUser(request);
     if (user === null) {
       return createApiError("unauthorized", 401);
     }
     const workspaceId = requestSessionWorkspaceId(
       request,
       user.id,
-      this.resources.workspaces,
+      resources.workspaces,
     );
     return workspaceId === undefined
       ? createApiError("workspace_unavailable", 409)
       : { user, workspaceId };
-  }
+  },
 
   async directories(request: Request, runnerId: string): Promise<Response> {
-    const authenticated = this.#authenticatedWorkspace(request);
+    const authenticated = api.authenticatedWorkspace(request);
     return authenticated instanceof Response
       ? authenticated
-      : this.resources.requests.directories(
+      : resources.requests.directories(
           request,
           runnerId,
           authenticated.workspaceId,
         );
-  }
+  },
 
-  detailForUser: SessionDetailReader["detailForUser"] = (
+  detailForUser: ((
     userId,
     sessionId,
     workspaceId,
-  ) => this.resources.store.get(userId, sessionId, workspaceId);
+  ) => resources.store.get(userId, sessionId, workspaceId)) satisfies SessionDetailReader["detailForUser"],
 
   item(request: Request, sessionId: string): Response {
-    return this.#forWorkspace(request, (user, workspaceId) =>
-      storedSessionResponse(
-        this.resources.store,
-        user.id,
-        sessionId,
-        workspaceId,
-      ),
+    return forRequestWorkspace(
+      resources.requests,
+      resources.workspaces,
+      request,
+      (user, workspaceId) =>
+        storedSessionResponse(
+          resources.store,
+          user.id,
+          sessionId,
+          workspaceId,
+        ),
     );
-  }
+  },
 
   listForUser(
     userId: string,
     workspaceId?: string,
   ): readonly AgentSessionSummary[] {
-    return this.resources.store.list(userId, workspaceId);
-  }
+    return resources.store.list(userId, workspaceId);
+  },
 
   pendingQuestionForUser(
     userId: string,
     sessionId: string,
   ): PendingAskQuestions | null {
-    return this.resources.store.pendingQuestions(userId, sessionId);
-  }
+    return resources.store.pendingQuestions(userId, sessionId);
+  },
 
-  #getForUser(
+  getForUser(
     request: Request,
     action: (user: AuthenticatedUser) => Promise<Response>,
   ): Promise<Response> {
     return authenticatedGet(request, {
       action,
       forUser: (requested, serve) =>
-        this.resources.requests.forUser(requested, serve),
+        resources.requests.forUser(requested, serve),
     });
-  }
+  },
 
   models(request: Request): Promise<Response> {
-    return this.#getForUser(
+    return api.getForUser(
       request,
-      this.resources.modelsForUser.bind(null, request),
+      resources.modelsForUser.bind(null, request),
     );
-  }
+  },
 
   openRouterProviders(request: Request): Promise<Response> {
-    return this.#getForUser(request, (user) =>
+    return api.getForUser(request, (user) =>
       openRouterProvidersForUser({
-        discover: this.resources.discoverOpenRouterProviders,
-        pool: this.resources.modelCredentialPool,
+        discover: resources.discoverOpenRouterProviders,
+        pool: resources.modelCredentialPool,
         request,
-        signal: this.resources.restartController.signal,
+        signal: resources.restartController.signal,
         user,
-        withCredential: this.resources.withCredentialAccess,
+        withCredential: resources.withCredentialAccess,
       }),
     );
-  }
+  },
 
   pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate {
     const runtimeRestartId =
-      this.resources.restart.pendingRunnerRestart(runnerId);
+      resources.restart.pendingRunnerRestart(runnerId);
     const durableGate =
-      this.resources.restartCoordinator.pendingRunnerRestart(runnerId);
+      resources.restartCoordinator.pendingRunnerRestart(runnerId);
     if (durableGate.status === "conflicted") {
       return durableGate;
     }
@@ -447,84 +446,84 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       restartId: runtimeRestartId,
       status: "pending",
     };
-  }
+  },
 
   async reassign(request: Request, sessionId: string): Promise<Response> {
     return reassignSessionRequest(
       {
-        authenticate: this.resources.requests.authenticate,
-        notify: this.resources.notify,
-        now: this.resources.now,
-        store: this.resources.store,
-        workspaces: this.resources.workspaces,
+        authenticate: resources.requests.authenticate,
+        notify: resources.notify,
+        now: resources.now,
+        store: resources.store,
+        workspaces: resources.workspaces,
       },
       request,
       sessionId,
     );
-  }
+  },
 
   runnerConnected(runnerId: string): void {
-    this.#resumeParkedAndQueued(runnerId);
-    void recoverAnsweredQuestions(this.resources.questionActions, runnerId);
-  }
+    api.resumeParkedAndQueued(runnerId);
+    void recoverAnsweredQuestions(resources.questionActions, runnerId);
+  },
 
   runnerDisconnected(runnerId: string): void {
-    this.resources.liveness.runnerDisconnected(runnerId);
+    resources.liveness.runnerDisconnected(runnerId);
     const restartPending =
-      this.resources.restart.draining() ||
-      this.resources.restart.pendingRunnerRestart(runnerId) !== undefined;
-    this.resources.broker.disconnectRunner(runnerId, !restartPending);
-  }
+      resources.restart.draining() ||
+      resources.restart.pendingRunnerRestart(runnerId) !== undefined;
+    resources.broker.disconnectRunner(runnerId, !restartPending);
+  },
 
   streamRunnerCommand(
     runnerId: string,
     commandId: string,
     delta: Parameters<RunnerCommandBroker["stream"]>[2],
   ): boolean {
-    return this.resources.broker.stream(runnerId, commandId, delta);
-  }
+    return resources.broker.stream(runnerId, commandId, delta);
+  },
 
   runnerRestartReady(runnerId: string, restartId: string): void {
-    if (!this.resources.restartCoordinator.resumeRunner(runnerId, restartId)) {
+    if (!resources.restartCoordinator.resumeRunner(runnerId, restartId)) {
       return;
     }
-    this.resources.restartCoordinator.recover(runnerId, restartId);
-  }
+    resources.restartCoordinator.recover(runnerId, restartId);
+  },
 
   runnerOperational(runnerId: string, restartId?: string): void {
-    this.resources.liveness.runnerConnected(runnerId);
+    resources.liveness.runnerConnected(runnerId);
     if (restartId !== undefined) {
-      this.resources.restartCoordinator.recover(runnerId, restartId);
+      resources.restartCoordinator.recover(runnerId, restartId);
     }
-  }
+  },
 
   async runnerRemoved(userId: string, runnerId: string): Promise<void> {
-    await this.resources.runnerRemoval.removed(userId, runnerId);
-  }
+    await resources.runnerRemoval.removed(userId, runnerId);
+  },
 
   async compaction(request: Request, sessionId: string): Promise<Response> {
     const methodError = requireRequestMethod(request, "POST");
     if (methodError !== undefined) {
       return methodError;
     }
-    const authenticated = this.#authenticatedWorkspace(request);
+    const authenticated = api.authenticatedWorkspace(request);
     if (authenticated instanceof Response) {
       return authenticated;
     }
     return updateSessionCompactionMode(
       {
-        auth: this.resources.auth,
-        now: this.resources.now,
+        auth: resources.auth,
+        now: resources.now,
         onChanged: (detail, userId) => {
-          this.resources.notify(userId, detail.id);
+          resources.notify(userId, detail.id);
         },
         requiredWorkspaceId: authenticated.workspaceId,
-        store: this.resources.store,
+        store: resources.store,
       },
       request,
       sessionId,
     );
-  }
+  },
 
   async stop(request: Request, sessionId: string): Promise<Response> {
     const cascade =
@@ -535,33 +534,33 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
         ? await parseJsonRequest(request, readSessionStopInput)
         : true;
     if (cascade === undefined) return createApiError("invalid_request", 400);
-    return this.resources.requests.postForUser(request, (user) =>
+    return resources.requests.postForUser(request, (user) =>
       withRequestSessionWorkspace(
         request,
         user,
-        this.resources.workspaces,
+        resources.workspaces,
         (workspaceId) =>
           withStoredWorkspaceSession(
-            this.resources.store,
+            resources.store,
             user,
             sessionId,
             workspaceId,
             async (existing) => {
-              this.resources.runtimes.abort(sessionId);
-              this.resources.broker.cancelSessionCommands(sessionId);
-              await this.resources.runtimes.cleared(sessionId);
+              resources.runtimes.abort(sessionId);
+              resources.broker.cancelSessionCommands(sessionId);
+              await resources.runtimes.cleared(sessionId);
               if (existing.status !== "stopped") {
-                this.resources.store.stop(
+                resources.store.stop(
                   user.id,
                   sessionId,
-                  this.resources.now(),
+                  resources.now(),
                 );
-                if (cascade) this.resources.stopChildren(existing, user.id);
+                if (cascade) resources.stopChildren(existing, user.id);
               }
-              await this.resources.executionCleanup.cleanupTerminal(existing);
-              this.resources.notify(user.id, sessionId);
+              await resources.executionCleanup.cleanupTerminal(existing);
+              resources.notify(user.id, sessionId);
               return storedSessionResponse(
-                this.resources.store,
+                resources.store,
                 user.id,
                 sessionId,
                 workspaceId,
@@ -571,4 +570,6 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
       ),
     );
   }
+  };
+  return api;
 }
