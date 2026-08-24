@@ -31,7 +31,7 @@ import {
   completeRestartCommands,
   createRestartSessions,
   expectRestartPaused,
-  MultiSessionRestartModel,
+  createMultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   RESTART_SESSION_COUNT,
@@ -314,7 +314,7 @@ function corruptRestartHandoff(
 }
 
 test("multiple sessions resume their interrupted steps after one server recreation", async () => {
-  const model = new MultiSessionRestartModel();
+  const model = createMultiSessionRestartModel();
   const { ids, initial } = await drainParkedSessions(model);
   expect(ids).toHaveLength(RESTART_SESSION_COUNT);
   assertSessionStatuses(initial, ids, "paused");
@@ -339,7 +339,7 @@ test("multiple sessions resume their interrupted steps after one server recreati
 });
 
 test("one corrupt handoff fails visibly without blocking other restart resumes", async () => {
-  const model: AgentModel = new MultiSessionRestartModel();
+  const model: AgentModel = createMultiSessionRestartModel();
   const parked = await drainParkedSessions(model);
   const { ids, initial } = parked;
   const corruptId = ids[1];

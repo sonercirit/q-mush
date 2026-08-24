@@ -18,7 +18,7 @@ import {
   completeRestartCommands,
   createRestartSessions,
   expectRestartPaused,
-  MultiSessionRestartModel,
+  createMultiSessionRestartModel,
   nextCommandId,
   recreateRestartSetup,
   restartSessionDetail,
@@ -215,7 +215,7 @@ test("the production session drain force-parks at its injected deadline", async 
 test("a forced runner drain persists and resumes its runner handoff", async () => {
   const clock = createSessionRestartTestClock(1_700_000_000_000);
   const { id, setup } = await deadlineSession(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "runner-deadline-command",
     clock,
   );
@@ -235,7 +235,7 @@ test("a forced runner drain persists and resumes its runner handoff", async () =
     status: "paused",
   });
   const recreated = connectedSessionSetup(
-    new MultiSessionRestartModel(),
+    createMultiSessionRestartModel(),
     "api_key",
     undefined,
     {

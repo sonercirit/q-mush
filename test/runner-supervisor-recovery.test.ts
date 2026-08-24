@@ -15,7 +15,7 @@ import {
   reconnectDurableSessionRunner,
 } from "../sync-engine/test/session-restart-runner-continuity-helpers.ts";
 import {
-  MultiSessionRestartModel,
+  createMultiSessionRestartModel,
   nextCommandId,
   restartSessionIds,
   waitForRestartCommands,
@@ -79,7 +79,7 @@ function expectParkedSession(setup: RestartStepSetup, sessionId: string): void {
 }
 
 test("the supervisor restores a parked session through a double engine restart", async () => {
-  const model = new MultiSessionRestartModel();
+  const model = createMultiSessionRestartModel();
   const initial = connectedSessionSetup(model, "api_key", undefined, {
     commandId: nextCommandId("supervised-initial"),
   });

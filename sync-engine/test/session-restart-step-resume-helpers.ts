@@ -1,9 +1,5 @@
 import { expect } from "vitest";
-import type {
-  AgentConversationMessage,
-  AgentModel,
-  AgentModelStep,
-} from "../../shared/agent-loop.ts";
+import type { AgentModel } from "../../shared/agent-loop.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
@@ -20,23 +16,23 @@ export const RESTART_SESSION_COUNT = 3;
 
 export type RestartStepSetup = ReturnType<typeof connectedSessionSetup>;
 
-export class MultiSessionRestartModel implements AgentModel {
-  complete(
-    messages: readonly AgentConversationMessage[],
-  ): Promise<AgentModelStep> {
-    const completed = messages.some((message) =>
-      message.content.includes("Durable tool output"),
-    );
-    return Promise.resolve(
-      completed
-        ? providerStep("Completed after restart.")
-        : providerStep("Using a tool.", {
-            toolCalls: [
-              toolCall("bash", { command: "printf durable", timeout: 30 }),
-            ],
-          }),
-    );
-  }
+export function createMultiSessionRestartModel(): AgentModel {
+  return {
+    complete(messages) {
+      const completed = messages.some((message) =>
+        message.content.includes("Durable tool output"),
+      );
+      return Promise.resolve(
+        completed
+          ? providerStep("Completed after restart.")
+          : providerStep("Using a tool.", {
+              toolCalls: [
+                toolCall("bash", { command: "printf durable", timeout: 30 }),
+              ],
+            }),
+      );
+    },
+  };
 }
 
 export function restartSessionIds(setup: RestartStepSetup): readonly string[] {
