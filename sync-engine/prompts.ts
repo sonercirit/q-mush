@@ -26,8 +26,11 @@ interface PromptDependencies {
 }
 
 export interface PromptIntegration {
-  collection(request: Request): Promise<Response> | Response;
-  item(request: Request, id: string): Promise<Response> | Response;
+  readonly collection: (request: Request) => Promise<Response> | Response;
+  readonly item: (
+    request: Request,
+    promptId: string,
+  ) => Promise<Response> | Response;
 }
 
 const PROMPT_REQUEST_MAXIMUM_BYTES =
