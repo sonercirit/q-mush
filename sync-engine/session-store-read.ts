@@ -288,7 +288,8 @@ export function withInterruptedInternalToolResults(
 
   for (const internal of messages) {
     const { message } = internal;
-    const handlers: Record<AgentSessionMessage["role"], () => void> = {
+    type InterruptRole = typeof message.role;
+    const handlers: Record<InterruptRole, () => void> = {
       assistant: () => {
         finishPending();
         complete.push(internal);
@@ -420,7 +421,8 @@ export function conversationFromInternalMessages(
         ? { message: source.message }
         : replayForIdentity(source, identity);
     const message = internal.message;
-    const handlers: Record<AgentSessionMessage["role"], () => void> = {
+    type ConversationRole = typeof message.role;
+    const handlers: Record<ConversationRole, () => void> = {
       assistant: () => {
         conversation.push({
           content: message.content,

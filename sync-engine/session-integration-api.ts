@@ -149,7 +149,7 @@ export abstract class SessionIntegrationApi implements SessionDetailReader {
     return this.#forWorkspace(request, (user, workspaceId) => {
       const handlers: Record<
         CollectionMethod,
-        () => Promise<Response> | Response
+        () => Response | Promise<Response>
       > = {
         GET: () =>
           createJsonResponse({
