@@ -226,7 +226,8 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
     [SESSION_REALTIME_OPERATIONS.compact]: () => payloadHasKeyCount(payload, 1),
     [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () =>
       payloadHasKeyCount(payload, 1),
-    [SESSION_REALTIME_OPERATIONS.continue]: () => payloadHasKeyCount(payload, 1),
+    [SESSION_REALTIME_OPERATIONS.continue]: () =>
+      payloadHasKeyCount(payload, 1),
     [SESSION_REALTIME_OPERATIONS.followUp]: followUp,
     [SESSION_REALTIME_OPERATIONS.reassign]: () =>
       Object.keys(payload).length === 3 &&
