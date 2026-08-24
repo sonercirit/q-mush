@@ -139,7 +139,11 @@ describe("session store", () => {
     store.appendCurrentAgentMessage(SESSION_ID, toolMessage, TEST_NOW + 5);
     store.updateCurrentUsage(SESSION_ID, { contextTokens: 1_000, costBasis: "reported", costUsd: 0.1 }, TEST_NOW + 5);
     store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: "estimated", costUsd: 0.05 }, TEST_NOW + 5);
-    expect(store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6)).toBe(true);
+    const settled = store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6);
+    expect(settled).toBe(true);
+    expect(store.list(TEST_USER_ID)).toEqual([
+      expect.objectContaining({ id: SESSION_ID, status: "idle" }),
+    ]);
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
     expect(detail?.agentFile).toEqual({

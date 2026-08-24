@@ -17,6 +17,10 @@ type PendingFlag = "compacting" | "creating" | "sending" | "stopping";
 type ReconciliationTest = () => Promise<void>;
 type StateMatch = Readonly<Record<string, unknown>>;
 
+async function waitForExpectation(expectation: () => void): Promise<void> {
+  await vi.waitFor(expectation);
+}
+
 type SessionMutationName = "compact" | "continueSession" | "send" | "stop";
 type ControllerMutationName = SessionMutationName | "create";
 
@@ -346,8 +350,8 @@ function createReconciliationScenario(state: SessionViewState): ReconciliationSc
       scenario.expectState(createdSelectionState(sessionId));
     },
 
-    async expectEventuallyCreatedSessionSelected(sessionId: string): Promise<void> {
-      await vi.waitFor(() => {
+    expectEventuallyCreatedSessionSelected(sessionId: string): Promise<void> {
+      return waitForExpectation(() => {
         scenario.expectCreatedSessionSelected(sessionId);
       });
     },
@@ -361,14 +365,14 @@ function createReconciliationScenario(state: SessionViewState): ReconciliationSc
       expect(controller.state.error).toContain(fragment);
     },
 
-    async expectEventuallyError(fragment: string): Promise<void> {
-      await vi.waitFor(() => {
+    expectEventuallyError(fragment: string): Promise<void> {
+      return waitForExpectation(() => {
         scenario.expectError(fragment);
       });
     },
 
     expectEventuallyState(expected: StateMatch): Promise<void> {
-      return vi.waitFor(() => {
+      return waitForExpectation(() => {
         scenario.expectState(expected);
       });
     },
