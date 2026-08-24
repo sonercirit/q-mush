@@ -5,7 +5,7 @@ import type {
 } from "./realtime-stream-buffer-update.ts";
 import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
 import type { RetainedToolState } from "./realtime-stream-tool-state.ts";
-export function streamBatch(
+function streamBatch(
   updates: readonly RealtimeStreamUpdate[],
 ): RealtimeStreamBatch | undefined {
   return updates.length === 0 ? undefined : { type: "stream_batch", updates };
