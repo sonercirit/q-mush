@@ -294,45 +294,73 @@ type TranscriptRenderableMessageProps = TranscriptMessageProps & {
   readonly streamEntries: () => ReadonlyMap<string, ToolStreamEntry>;
 };
 
+type TranscriptMessageRole = AgentSessionMessage["role"];
+type TranscriptMessageOf<Role extends TranscriptMessageRole> = Extract<
+  AgentSessionMessage,
+  { readonly role: Role }
+>;
+type TranscriptMessageRenderer = {
+  readonly [Role in TranscriptMessageRole]: (
+    props: TranscriptRenderableMessageProps & {
+      readonly message: TranscriptMessageOf<Role>;
+    },
+  ) => JSX.Element;
+};
+
+const transcriptMessageRenderers: TranscriptMessageRenderer = {
+  assistant: (props) => (
+    <ConversationTranscriptMessage
+      liveToolStreams={props.liveToolStreams}
+      message={props.message}
+      settings={props.settings()}
+      onFork={props.onForkMessage}
+      showContent={props.filters.assistantMessages}
+      showTools={props.filters.toolActivity}
+      toolStreams={props.streamEntries}
+    />
+  ),
+  compaction_request: (props) => (
+    <CompactionRequestTranscriptMessage message={props.message} />
+  ),
+  error: (props) => <NoteTranscriptMessage kind="error" message={props.message} />,
+  thinking: (props) => (
+    <NoteTranscriptMessage kind="thinking" message={props.message} />
+  ),
+  tool: (props) => (
+    <ToolResultTranscriptMessage
+      callArguments={props.callArguments}
+      message={props.message}
+    />
+  ),
+  system: (props) => <ConversationTranscriptMessage message={props.message} />,
+  user: (props) => (
+    <ConversationTranscriptMessage
+      onFork={props.onForkMessage}
+      message={props.message}
+    />
+  ),
+};
+
+function renderTypedTranscriptMessage<Role extends TranscriptMessageRole>(
+  props: TranscriptRenderableMessageProps,
+  message: TranscriptMessageOf<Role>,
+): JSX.Element {
+  return untrack(() => transcriptMessageRenderers[message.role])({
+    callArguments: props.callArguments,
+    filters: props.filters,
+    liveToolStreams: props.liveToolStreams,
+    message,
+    nestedScrollKey: props.nestedScrollKey,
+    onForkMessage: props.onForkMessage,
+    settings: props.settings,
+    streamEntries: props.streamEntries,
+  });
+}
+
 function renderTranscriptMessage(
   props: TranscriptRenderableMessageProps,
 ): JSX.Element {
-  switch (untrack(() => props.message.role)) {
-    case "assistant":
-      return (
-        <ConversationTranscriptMessage
-          liveToolStreams={props.liveToolStreams}
-          message={props.message}
-          settings={props.settings()}
-          onFork={props.onForkMessage}
-          showContent={props.filters.assistantMessages}
-          showTools={props.filters.toolActivity}
-          toolStreams={props.streamEntries}
-        />
-      );
-    case "compaction_request":
-      return <CompactionRequestTranscriptMessage message={props.message} />;
-    case "error":
-      return <NoteTranscriptMessage kind="error" message={props.message} />;
-    case "thinking":
-      return <NoteTranscriptMessage kind="thinking" message={props.message} />;
-    case "tool":
-      return (
-        <ToolResultTranscriptMessage
-          callArguments={props.callArguments}
-          message={props.message}
-        />
-      );
-    case "system":
-      return <ConversationTranscriptMessage message={props.message} />;
-    case "user":
-      return (
-        <ConversationTranscriptMessage
-          onFork={props.onForkMessage}
-          message={props.message}
-        />
-      );
-  }
+  return renderTypedTranscriptMessage(props, untrack(() => props.message));
 }
 
 function TranscriptMessage(
