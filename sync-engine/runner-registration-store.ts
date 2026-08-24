@@ -72,7 +72,25 @@ export type RunnerRegistrationTransaction = Parameters<
   Parameters<AppDatabase["transaction"]>[0]
 >[0];
 
-class RunnerRegistrationChanged extends Error {}
+interface RunnerRegistrationChangedError extends Error {
+  readonly kind: "runner_registration_changed";
+}
+
+function createRunnerRegistrationChangedError(): RunnerRegistrationChangedError {
+  return Object.assign(new Error("Runner registration changed"), {
+    kind: "runner_registration_changed" as const,
+  });
+}
+
+function isRunnerRegistrationChangedError(
+  error: unknown,
+): error is RunnerRegistrationChangedError {
+  return (
+    error instanceof Error &&
+    "kind" in error &&
+    error.kind === "runner_registration_changed"
+  );
+}
 
 export interface RunnerRegistrationStoreContext extends RunnerRegistrationStorePrimitives {
   applyFinalizedReservation(
@@ -91,98 +109,92 @@ export interface RunnerRegistrationStoreContext extends RunnerRegistrationStoreP
   ) => boolean;
 }
 
-export class RunnerRegistrationStore implements RunnerRegistrationOperations {
-  readonly #activeRunnerCondition: RunnerRegistrationStorePrimitives["activeRunnerCondition"];
-  readonly #activeTokenCondition: RunnerRegistrationStorePrimitives["activeTokenCondition"];
-  readonly #generateActivationId: () => string;
-  readonly #runnerRegistrationSelection: RunnerRegistrationStorePrimitives["runnerRegistrationSelection"];
-  readonly #tokenHashMatches: RunnerRegistrationStorePrimitives["tokenHashMatches"];
-  readonly #tokenDigestBackfilled = new Set<string>();
+export interface RunnerRegistrationStore extends RunnerRegistrationOperations {
+  readonly database: AppDatabase;
+}
 
-  constructor(
-    readonly database: AppDatabase,
-    primitives: RunnerRegistrationStorePrimitives,
-    generateActivationId: () => string,
-  ) {
-    this.#activeRunnerCondition = primitives.activeRunnerCondition;
-    this.#activeTokenCondition = primitives.activeTokenCondition;
-    this.#generateActivationId = generateActivationId;
-    this.#runnerRegistrationSelection = primitives.runnerRegistrationSelection;
-    this.#tokenHashMatches = primitives.tokenHashMatches;
-  }
-
-  #selectedRegistration(
+export function createRunnerRegistrationStore(
+  database: AppDatabase,
+  primitives: RunnerRegistrationStorePrimitives,
+  generateActivationId: () => string,
+): RunnerRegistrationStore {
+  const activeRunnerCondition = primitives.activeRunnerCondition;
+  const activeTokenCondition = primitives.activeTokenCondition;
+  const runnerRegistrationSelection = primitives.runnerRegistrationSelection;
+  const tokenHashMatches = primitives.tokenHashMatches;
+  const tokenDigestBackfilled = new Set<string>();
+  function selectedRegistration(
     database: Pick<AppDatabase, "select">,
     condition: ReturnType<typeof and>,
   ): StoredRunnerRegistration | undefined {
     return storedRunnerRegistration(
       database,
-      this.#runnerRegistrationSelection(),
+      runnerRegistrationSelection(),
       condition,
     );
   }
 
-  #tokenRegistration(token: string): StoredRunnerRegistration | undefined {
+  function tokenRegistration(
+    token: string,
+  ): StoredRunnerRegistration | undefined {
     const matching = runnerQuery(
-      this.database,
-      this.#runnerRegistrationSelection(),
-      this.#activeTokenCondition(token),
+      database,
+      runnerRegistrationSelection(),
+      activeTokenCondition(token),
     ).all();
     const stored = matching.length === 1 ? matching[0] : undefined;
-    if (
-      stored === undefined ||
-      !this.#tokenHashMatches(stored.tokenHash, token)
-    ) {
+    if (stored === undefined || !tokenHashMatches(stored.tokenHash, token)) {
       return undefined;
     }
     if (stored.tokenDigest !== "" || stored.activationPhase !== null) {
       return stored;
     }
     const digest = createTokenDigest(token);
-    if (this.#tokenDigestBackfilled.has(digest)) {
+    if (tokenDigestBackfilled.has(digest)) {
       return stored;
     }
     try {
-      const backfilled = this.database
+      const backfilled = database
         .update(runners)
         .set({ tokenDigest: digest })
         .where(
           legacyRunnerTokenCondition(
-            this.#activeRunnerCondition,
+            activeRunnerCondition,
             stored.id,
             stored.tokenHash,
           ),
         )
-        .returning(this.#runnerRegistrationSelection())
+        .returning(runnerRegistrationSelection())
         .get();
-      this.#tokenDigestBackfilled.add(digest);
+      tokenDigestBackfilled.add(digest);
       return backfilled;
     } catch {
       return undefined;
     }
   }
 
-  #activationSource(token: string): StoredRunnerRegistration | undefined {
-    const tokenRegistration = this.#tokenRegistration(token);
-    if (tokenRegistration === undefined) {
+  function activationSource(
+    token: string,
+  ): StoredRunnerRegistration | undefined {
+    const registration = tokenRegistration(token);
+    if (registration === undefined) {
       return undefined;
     }
-    const sourceId = tokenRegistration.activationSourceId;
+    const sourceId = registration.activationSourceId;
     if (sourceId === null) {
-      return tokenRegistration;
+      return registration;
     }
     return (
-      this.#selectedRegistration(this.database, eq(runners.id, sourceId)) ??
-      tokenRegistration
+      selectedRegistration(database, eq(runners.id, sourceId)) ?? registration
     );
   }
 
-  preflight(
+  function preflight(
     token: string,
     metadata: RunnerMetadata,
     activationId?: string,
   ): RunnerRegistrationPreflightResult {
-    const source = this.#tokenRegistration(token);
+    const source = tokenRegistration(token);
     if (source === undefined) {
       return { status: "unknown_token" };
     }
@@ -193,8 +205,8 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
         return { status: "registration_changed" };
       }
 
-      const target = this.#selectedRegistration(
-        this.database,
+      const target = selectedRegistration(
+        database,
         activeRegistrationTargetCondition(fence),
       );
       if (target === undefined || !runnerReservationMatches(target, fence)) {
@@ -211,8 +223,8 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
     if (source.machineFingerprint !== null && !sourceOwnsMachine) {
       return { status: "token_already_used" };
     }
-    const target = this.#selectedRegistration(
-      this.database,
+    const target = selectedRegistration(
+      database,
       activeMachineRunnerCondition(metadata),
     );
     if (
@@ -226,7 +238,7 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
     return {
       connection: { id: registrationTarget.id, userId: source.userId },
       registration: {
-        activationId: activationId ?? this.#generateActivationId(),
+        activationId: activationId ?? generateActivationId(),
         metadata,
         source,
         target: registrationTarget,
@@ -236,7 +248,7 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
     };
   }
 
-  commit(
+  function commit(
     preflight: RunnerRegistrationPreflight,
     options: RunnerRegistrationPrepareOptions,
   ): RunnerRegistrationCommitResult {
@@ -255,7 +267,7 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
         (existingFence.lifecycle === options.lifecycle &&
           existingFence.restartId === options.restartId)) &&
         existingFence.activationId === preflight.activationId &&
-        this.fenceIsCurrent(existingFence)
+        fenceIsCurrent(existingFence)
         ? {
             registration: {
               connection: {
@@ -269,17 +281,17 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
         : { status: "registration_changed" };
     }
     try {
-      return this.database.transaction((transaction) => {
-        const source = this.#selectedRegistration(
+      return database.transaction((transaction) => {
+        const source = selectedRegistration(
           transaction,
-          this.#activeRunnerCondition({ id: preflight.source.id }),
+          activeRunnerCondition({ id: preflight.source.id }),
         );
         const target =
           preflight.target.id === preflight.source.id
             ? source
-            : this.#selectedRegistration(
+            : selectedRegistration(
                 transaction,
-                this.#activeRunnerCondition({ id: preflight.target.id }),
+                activeRunnerCondition({ id: preflight.target.id }),
               );
 
         const currentComputer = transaction
@@ -319,19 +331,19 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
             (currentComputer.id !== target.id ||
               currentComputer.userId !== source.userId))
         ) {
-          throw new RunnerRegistrationChanged();
+          throw createRunnerRegistrationChangedError();
         }
         const generation = source.activationGeneration + 1;
         const values = createReservationValues(preflight, options, generation);
         const prepared = transaction
           .update(runners)
           .set(values)
-          .where(registrationSnapshotCondition(this.#context(), source))
-          .returning(this.#runnerRegistrationSelection())
+          .where(registrationSnapshotCondition(context(), source))
+          .returning(runnerRegistrationSelection())
           .all();
         const persisted = prepared[0];
         if (prepared.length !== 1 || persisted === undefined) {
-          throw new RunnerRegistrationChanged();
+          throw createRunnerRegistrationChangedError();
         }
         if (target.id !== source.id) {
           const targetReserved = exactlyOneUpdatedRow(
@@ -342,17 +354,17 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
               activationReservationId: preflight.activationId,
               activationReservationSourceId: source.id,
             },
-            registrationSnapshotCondition(this.#context(), target),
+            registrationSnapshotCondition(context(), target),
             runners.id,
           );
 
           if (!targetReserved) {
-            throw new RunnerRegistrationChanged();
+            throw createRunnerRegistrationChangedError();
           }
         }
         const fence = durableRegistrationFence(persisted);
         if (fence?.generation !== generation) {
-          throw new RunnerRegistrationChanged();
+          throw createRunnerRegistrationChangedError();
         }
         return {
           registration: {
@@ -363,23 +375,23 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
         };
       });
     } catch (error) {
-      if (error instanceof RunnerRegistrationChanged) {
+      if (isRunnerRegistrationChangedError(error)) {
         return { status: "registration_changed" };
       }
       throw error;
     }
   }
 
-  receipt(fence: RunnerRegistrationFence): string {
+  function receipt(fence: RunnerRegistrationFence): string {
     return activationReceipt(fence);
   }
 
-  receiptState(
+  function receiptState(
     token: string,
     metadata: RunnerMetadata,
     receipt: string,
   ): RunnerActivationReceiptState | undefined {
-    const current = this.#activationSource(token);
+    const current = activationSource(token);
     const fence =
       current === undefined ? undefined : durableRegistrationFence(current);
     if (
@@ -390,7 +402,7 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
       return undefined;
     }
     const target = runnerQuery(
-      this.database,
+      database,
       {
         activationGeneration: runners.activationGeneration,
         activationId: runners.activationId,
@@ -424,51 +436,53 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
     };
   }
 
-  fenceIsCurrent(fence: RunnerRegistrationFence): boolean {
+  function fenceIsCurrent(fence: RunnerRegistrationFence): boolean {
     return (
-      storedRunnerId(this.database, durableActivationCondition(fence)) !==
+      storedRunnerId(database, durableActivationCondition(fence)) !==
         undefined &&
-      storedRunnerId(this.database, durableTargetCondition(fence)) !== undefined
+      storedRunnerId(database, durableTargetCondition(fence)) !== undefined
     );
   }
 
-  finalizeRegistration(
+  function finalizeRegistration(
     fence: RunnerRegistrationFence,
     options: RunnerRegistrationFinalizeOptions,
   ): RunnerRegistrationActivationResult {
-    return finalizeRunnerRegistration(this.#context(), fence, options);
+    return finalizeRunnerRegistration(context(), fence, options);
   }
 
-  settleActivationLifecycle(...parameters: RunnerLifecycleParameters): boolean {
-    return settleRunnerActivationLifecycle(this.#context(), ...parameters);
+  function settleActivationLifecycle(
+    ...parameters: RunnerLifecycleParameters
+  ): boolean {
+    return settleRunnerActivationLifecycle(context(), ...parameters);
   }
 
-  touchFinalizedActivation(
+  function touchFinalizedActivation(
     ...[token, metadata, receipt, now]: readonly [
       ...FinalizedRunnerActivationParameters,
       now: number,
     ]
   ): RunnerConnection | undefined {
-    const source = this.#activationSource(token);
+    const source = activationSource(token);
     const fence =
       source === undefined ? undefined : durableRegistrationFence(source);
     return fence?.phase !== "finalized" ||
       !runnerMetadataMatches(source, metadata) ||
       !receiptMatches(fence, receipt)
       ? undefined
-      : touchFinalizedRunnerActivation(this.#context(), fence, now);
+      : touchFinalizedRunnerActivation(context(), fence, now);
   }
 
-  register(
+  function register(
     token: string,
     metadata: RunnerMetadata,
     now: number,
   ): RunnerRegistrationResult {
-    const preflight = this.preflight(token, metadata);
-    if (preflight.status !== "ready") {
-      return preflight;
+    const registrationPreflight = preflight(token, metadata);
+    if (registrationPreflight.status !== "ready") {
+      return registrationPreflight;
     }
-    const committed = this.commit(preflight.registration, {
+    const committed = commit(registrationPreflight.registration, {
       lifecycle: "ordinary",
       now,
     });
@@ -476,32 +490,45 @@ export class RunnerRegistrationStore implements RunnerRegistrationOperations {
       return committed;
     }
     const fence = committed.registration.fence;
-    const activated = this.finalizeRegistration(fence, {
+    const activated = finalizeRegistration(fence, {
       now,
-      receipt: this.receipt(fence),
+      receipt: receipt(fence),
     });
     return activated.status === "activated"
       ? { id: activated.connection.id, status: "registered" }
       : activated;
   }
 
-  #context(): RunnerRegistrationStoreContext {
+  function context(): RunnerRegistrationStoreContext {
     return {
-      activeRunnerCondition: this.#activeRunnerCondition,
-      activeTokenCondition: this.#activeTokenCondition,
+      activeRunnerCondition: activeRunnerCondition,
+      activeTokenCondition: activeTokenCondition,
       applyFinalizedReservation: (transaction, source, now, touchOnly) =>
         applyFinalizedRunnerReservation(
-          this.#context(),
+          context(),
           transaction,
           source,
           now,
           touchOnly,
         ),
-      database: this.database,
+      database: database,
       durableFence: durableRegistrationFence,
       receiptMatches,
-      runnerRegistrationSelection: this.#runnerRegistrationSelection,
-      tokenHashMatches: this.#tokenHashMatches,
+      runnerRegistrationSelection: runnerRegistrationSelection,
+      tokenHashMatches: tokenHashMatches,
     };
   }
+
+  return {
+    commit,
+    database,
+    fenceIsCurrent,
+    finalizeRegistration,
+    preflight,
+    receipt,
+    receiptState,
+    register,
+    settleActivationLifecycle,
+    touchFinalizedActivation,
+  };
 }

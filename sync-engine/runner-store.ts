@@ -36,7 +36,7 @@ import {
   runnerRegistrationSelection,
   runnerTokenSelection,
 } from "./runner-registration-query.ts";
-import { RunnerRegistrationStore } from "./runner-registration-store.ts";
+import { createRunnerRegistrationStore } from "./runner-registration-store.ts";
 import type { RunnerConnection } from "./runner-registration-types.ts";
 import { orderedRunnerQuery } from "./runner-selection.ts";
 import {
@@ -203,7 +203,7 @@ export class RunnerStore {
       ownerIdColumn: runnerWorkspaces.runnerId,
       ownerTable: runners,
     };
-    this.registration = new RunnerRegistrationStore(
+    this.registration = createRunnerRegistrationStore(
       database,
       {
         activeRunnerCondition,
