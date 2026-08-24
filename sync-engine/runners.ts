@@ -30,12 +30,13 @@ import type {
   RunnerLifecycleParameters,
 } from "./runner-registration-parameters.ts";
 import {
-  RunnerStore,
+  createRunnerStore,
   type RunnerConnection,
   type RunnerMetadata,
   type RunnerPage,
   type RunnerRegistrationFence,
   type RunnerRegistrationPrepareOptions,
+  type RunnerStore,
 } from "./runner-store.ts";
 import { updateAuthenticatedConnectionScopes } from "./scoped-collection.ts";
 import {
@@ -234,7 +235,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     this.#randomToken = dependencies.randomToken ?? defaultRandomToken;
     this.#store =
       dependencies.store ??
-      new RunnerStore(
+      createRunnerStore(
         dependencies.database ?? createDatabase(":memory:"),
         dependencies.randomId ?? createUuidV7,
         dependencies.generateActivationId ?? createUuidV7,

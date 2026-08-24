@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
 import { useSynchronousTemporaryDirectories } from "../../shared/test/temporary-directories.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   addTestProviderCredential,
@@ -195,7 +195,7 @@ function replacementFork() {
 describe("session store forks", () => {
   test("copies conversation context through the inclusive fork point", () => {
     const { database, source, store } = prepareForkSource();
-    new RunnerStore(database).setOnline(
+    createRunnerStore(database).setOnline(
       STORE_RUNNER_ID,
       TEST_USER_ID,
       TEST_NOW + 6,
@@ -374,7 +374,7 @@ describe("session store forks", () => {
   test("preserves a source runner reassignment requirement", () => {
     const { database, store } = prepareForkSource();
     expect(
-      new RunnerStore(database).remove(
+      createRunnerStore(database).remove(
         TEST_USER_ID,
         STORE_RUNNER_ID,
         TEST_NOW + 6,

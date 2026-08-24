@@ -5,7 +5,7 @@ import type { AppDatabase } from "../../shared/database.ts";
 import { agentSessions } from "../../shared/database/schema.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import { ModelCredentialPool } from "../../sync-engine/model-credential-pool.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
@@ -164,7 +164,7 @@ export function authoritySetup(options: {
   );
   const notify = vi.fn(() => {
     if (options.fenceOnNotify === true) {
-      new RunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
+      createRunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
     }
   });
   const runtimes = new SessionRuntimes();
@@ -245,7 +245,7 @@ export function authoritySetup(options: {
 
 export function fenceParent(setup: AuthoritySetup): void {
   expect(
-    new RunnerStore(setup.database).remove(
+    createRunnerStore(setup.database).remove(
       TEST_USER_ID,
       RUNNER_ID,
       TEST_NOW + 3,

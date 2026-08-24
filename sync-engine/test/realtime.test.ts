@@ -10,7 +10,7 @@ import type {
   createRealtimeIntegration,
   QmushWebSocketData,
 } from "../../sync-engine/realtime.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { createRunnerIntegration } from "../../sync-engine/runners.ts";
 import { TEST_PENDING_QUESTIONS } from "./ask-questions-test-fixtures.ts";
 import {
@@ -467,7 +467,7 @@ test("runner removal closes its socket, publishes the list, and responds before 
   const runners = createRunnerIntegration(auth, {
     now: () => TEST_NOW,
     randomToken: () => "runner-removal-token",
-    store: new RunnerStore(database, () => runnerId),
+    store: createRunnerStore(database, () => runnerId),
   });
   const created = runners.collection(
     createAuthenticatedRequest(RUNNERS_PATH, undefined, "POST"),

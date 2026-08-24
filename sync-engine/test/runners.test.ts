@@ -10,7 +10,10 @@ import {
   type RunnerSummary,
 } from "../../shared/runner-model.ts";
 import { readJsonRecord } from "../../sync-engine/oauth.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import {
+  createRunnerStore,
+  type RunnerStore,
+} from "../../sync-engine/runner-store.ts";
 import {
   createRunnerIntegration,
   type RunnerIntegration,
@@ -41,7 +44,7 @@ const SECOND_TOKEN = "qmr_second-setup-token";
 const THIRD_TOKEN = "qmr_third-setup-token";
 
 function createFailingRemovalRunnerStore(database: AppDatabase): RunnerStore {
-  const store = new RunnerStore(database);
+  const store = createRunnerStore(database);
   return new Proxy(store, {
     get(target, property, receiver) {
       if (property !== "remove") {
@@ -281,8 +284,8 @@ describe("runner setup", () => {
     ensureWaveOneColumns(firstDatabase);
     ensureWaveOneColumns(secondDatabase);
     addTestUser(firstDatabase, TEST_USER_ID);
-    const first = new RunnerStore(firstDatabase, () => FIRST_RUNNER_ID);
-    const second = new RunnerStore(secondDatabase, () => SECOND_RUNNER_ID);
+    const first = createRunnerStore(firstDatabase, () => FIRST_RUNNER_ID);
+    const second = createRunnerStore(secondDatabase, () => SECOND_RUNNER_ID);
 
     const results = [first, second].map((store) => {
       try {

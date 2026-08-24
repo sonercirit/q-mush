@@ -10,7 +10,7 @@ import type {
   AgentSessionMessage,
 } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import { endGenerationSessionTurn } from "../../sync-engine/session-turn-store.ts";
 import { TEST_AGENT_IMAGE } from "./agent-image-fixtures.ts";
@@ -547,7 +547,7 @@ describe("session store", () => {
     const { database, store } = createStore();
     createTestSession(store);
 
-    const runnerStore = new RunnerStore(database);
+    const runnerStore = createRunnerStore(database);
     runnerStore.setOnline(RUNNER_ID, TEST_USER_ID, TEST_NOW + 1, false);
 
     expectStoredSession(store, SESSION_ID, {

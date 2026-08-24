@@ -1,7 +1,7 @@
 import { expect, test } from "vitest";
 import { agentSessions } from "../../shared/database/schema.ts";
 import type { RestartHandoffOperation } from "../../shared/session-model.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import {
   TEST_NOW,
@@ -313,7 +313,7 @@ test.each(["paused", "queued", "running"] as const)(
     });
 
     const removalNow = TEST_NOW + 6;
-    const runnerStore = new RunnerStore(setup.database);
+    const runnerStore = createRunnerStore(setup.database);
     expect(runnerStore.remove(TEST_USER_ID, STORE_RUNNER_ID, removalNow)).toBe(
       true,
     );
