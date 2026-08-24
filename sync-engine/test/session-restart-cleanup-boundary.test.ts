@@ -10,7 +10,7 @@ import {
   type SessionExecutionCleanup,
 } from "../../sync-engine/session-execution-cleanup.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../sync-engine/session-runtime.ts";
 
 function expectCleanupInactive(broker: RunnerCommandBroker): void {
   expect(broker.isActive(TEST_SESSION_DETAIL.runnerId, "cleanup-command")).toBe(
@@ -69,7 +69,7 @@ async function pendingCleanup() {
 
 test("development restart cancels pending execution cleanup without waiting", async () => {
   const { broker, cleanup, promise } = await pendingCleanup();
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const restart = createSessionRestartControl(
     runtimes,
     () => "restart-cleanup",

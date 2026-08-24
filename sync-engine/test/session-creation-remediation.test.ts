@@ -8,7 +8,7 @@ import {
 } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { createSessionRestartAbort } from "../../sync-engine/session-restart-abort.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { createSessionForUser } from "../../sync-engine/session-user-actions.ts";
 import { createTestProviderCredential } from "./authenticated-integration-test-helpers.ts";
 import { emptyTestModelCatalog } from "./realtime-session-fixture.ts";
@@ -139,7 +139,7 @@ test("HTTP creation retains restart identity across credential lookup", async ()
         setup.dependencies.discoverOpenRouterProviders,
       launchBoundary: () => ({
         ...setup.dependencies,
-        runtimes: new SessionRuntimes(),
+        runtimes: createSessionRuntimes(),
         store: createStore().store,
       }),
       restartSignal: () => restart.signal,

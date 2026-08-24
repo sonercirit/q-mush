@@ -11,7 +11,7 @@ import {
   type SessionFinisher,
 } from "../../sync-engine/session-finisher.ts";
 import type { SessionLauncher } from "../../sync-engine/session-launcher.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { TEST_USER_ID } from "./authenticated-integration-test-helpers.ts";
 import { providerStep } from "./provider-step-fixtures.ts";
 import type { CompactionStoreSetup } from "./session-compaction-test-helpers.ts";
@@ -45,7 +45,7 @@ export function launchFailureSetup(
   const notify = vi.fn();
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const finished = vi.spyOn(actions, "finished");
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const broker = new RunnerCommandBroker({
     commandId: () => "recovered-launch-agent-file",
   });

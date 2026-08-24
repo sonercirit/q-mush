@@ -13,7 +13,7 @@ import {
   type SessionAgentActions,
 } from "../../sync-engine/session-agent-actions.ts";
 import type { executeSessionAgentTool } from "../../sync-engine/session-agent-tools.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import type { SessionAgentActionsDependencies } from "../session-agent-actions-dependencies.ts";
 import {
@@ -136,7 +136,7 @@ export function launchRace(
   race: LaunchRace,
   now: () => number,
 ): LaunchRaceRun {
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const shouldDrain = race !== "none";
   let launched: AgentSessionDetail | undefined;
   return {

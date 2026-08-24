@@ -6,7 +6,7 @@ import type { SessionRuntimePendingComponent } from "../../shared/session-model.
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
 import { createSessionLivenessWatchdogState } from "../../sync-engine/session-liveness-watchdog.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../sync-engine/session-shutdown-interrupted-store.ts";
 import { notifySessionSteeringInput } from "../../sync-engine/session-steering-wakeup.ts";
 import {
@@ -89,7 +89,7 @@ export function watchdogSetup(
     graceMs: options.graceMs ?? 60_000,
     notify,
     now: () => now,
-    runtimes: options.runtimes ?? new SessionRuntimes(),
+    runtimes: options.runtimes ?? createSessionRuntimes(),
     shutdownInterrupted,
     store: setup.store,
   });
@@ -164,7 +164,7 @@ function launchPendingRuntime(
   setup: ReturnType<typeof runningSetup>,
   component: SessionRuntimePendingComponent,
 ) {
-  const runtimes = new SessionRuntimes(() => Date.now());
+  const runtimes = createSessionRuntimes(() => Date.now());
   const runtime = launchRuntime(
     setup,
     runtimes,
@@ -233,7 +233,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
       },
       notify: vi.fn(),
       now: () => TEST_NOW,
-      runtimes: new SessionRuntimes(),
+      runtimes: createSessionRuntimes(),
       shutdownInterrupted: ShutdownInterruptedSessionStore({
         database: setup.database,
         generateId: () => "scheduler-handoff-message",
@@ -326,7 +326,7 @@ test("fails a running session whose runtime disappeared beyond the grace bound",
 });
 test("requires the stored execution generation to match its runtime", () => {
   const setup = runningSetup();
-  const staleRuntimes = new SessionRuntimes();
+  const staleRuntimes = createSessionRuntimes();
   const runtime = launchRuntime(
     setup,
     staleRuntimes,
@@ -464,7 +464,7 @@ test("a watchdog-failed child reports failure to its parent exactly once", () =>
     .query("UPDATE agent_sessions SET status = 'running' WHERE id = ?")
     .run(setup.childId);
   const actions = orchestrationActions(setup.database, setup.store);
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const parentRuntime = Promise.withResolvers<undefined>();
   expect(
     runtimes.launch(
@@ -554,7 +554,7 @@ test("does not time out an engine-side sleep", async () => {
 });
 test("does not time out a twenty-minute command on a live runner connection", async () => {
   const setup = runningSetup();
-  const currentRuntimes = new SessionRuntimes();
+  const currentRuntimes = createSessionRuntimes();
   const runtime = launchRuntime(
     setup,
     currentRuntimes,

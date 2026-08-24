@@ -22,7 +22,7 @@ import type {
   RestartHandoffIdentity,
   RestartHandoffSettlement,
 } from "../../sync-engine/session-restart-store.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import type { SessionStore } from "../../sync-engine/session-store.ts";
 import {
   TEST_NOW,
@@ -107,7 +107,7 @@ function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
   const broker = new RunnerCommandBroker({
     commandId: () => "restart-agent-file-command",
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const modelFactories = vi.fn(() => model);
   const launcher = createTestSessionLauncher({
     actions,
@@ -163,7 +163,7 @@ function manualCompactionSetup(
   const broker = new RunnerCommandBroker({
     commandId: () => "manual-compaction-agent-file",
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   const compactorRequests: AgentConversationMessage[][] = [];
   const modelFactories = vi.fn<AgentModelFactory>((options) => ({
     complete: (messages: readonly AgentConversationMessage[]) => {

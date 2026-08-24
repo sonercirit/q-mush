@@ -11,7 +11,7 @@ import {
   type SessionAgentActions,
 } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import { createSessionStore, type SessionStore } from "../../sync-engine/session-store.ts";
 import { insertWorkspace } from "../../sync-engine/workspace-write.ts";
 import {
@@ -170,7 +170,7 @@ export function authoritySetup(options: {
       new RunnerStore(database).remove(TEST_USER_ID, RUNNER_ID, TEST_NOW + 3);
     }
   });
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   if (options.hidePreparedChild === true) {
     const storedGet = store.get.bind(store);
     let childReads = 0;

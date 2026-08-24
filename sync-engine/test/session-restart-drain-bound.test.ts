@@ -3,7 +3,8 @@ import { DEVELOPMENT_RESTART_LIFECYCLE_MS } from "../../shared/development-shutd
 import { testDeferred } from "../../shared/test/promise-fixtures.ts";
 import { createSessionRestartControl } from "../../sync-engine/session-restart-control.ts";
 import {
-  SessionRuntimes,
+  createSessionRuntimes,
+  type SessionRuntimes,
   type RestartRequest,
 } from "../../sync-engine/session-runtime.ts";
 import {
@@ -100,7 +101,7 @@ function testRestartControl(
 
 function restartRuntimeFixture(logged: string[] = []) {
   const clock = createSessionRestartTestClock();
-  const runtimes = new SessionRuntimes(clock.now);
+  const runtimes = createSessionRuntimes(clock.now);
   return {
     clock,
     control: testRestartControl(clock, runtimes, logged),

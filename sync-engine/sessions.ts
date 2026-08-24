@@ -87,7 +87,7 @@ import {
   createRunnerRemovalCoordinator,
   type RunnerRemovalCoordinator,
 } from "./session-runner-removal.ts";
-import { SessionRuntimes } from "./session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
 import { createSessionStore, type SessionStore } from "./session-store.ts";
@@ -180,7 +180,7 @@ class DrizzleSessionIntegration
       dependencies.modelFactory ??
       ((options) => new ChatCompletionsAgentModel(options));
     this.#now = dependencies.now ?? Date.now;
-    this.#runtimes = new SessionRuntimes(this.#now);
+    this.#runtimes = createSessionRuntimes(this.#now);
     this.#providers = providers;
     const credentials = createSessionCredentialAccess(providers);
     this.#readCredential = (...arguments_) => credentials.read(...arguments_);

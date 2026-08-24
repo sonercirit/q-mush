@@ -12,7 +12,7 @@ import { startManualSessionCompaction } from "../../sync-engine/session-compacti
 import { createValidatedSession } from "../../sync-engine/session-creation.ts";
 import type { CreateSessionInput } from "../../sync-engine/session-input.ts";
 import { queueSessionForUser } from "../../sync-engine/session-queue.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes, type SessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import {
   createTestProviderCredential,
   TEST_AUTHENTICATED_USER,
@@ -514,7 +514,7 @@ test.each(["failed", "paused", "queued", "running", "stopped"] as const)(
         notify: () => undefined,
         now: setup.now,
         operation: "compact_and_continue",
-        runtimes: new SessionRuntimes(),
+        runtimes: createSessionRuntimes(),
         store: setup.store,
       },
       TEST_AUTHENTICATED_USER,

@@ -14,7 +14,7 @@ import {
   createSessionRestartCoordinator,
   type SessionRestartCoordinator,
 } from "../../sync-engine/session-restart-coordinator.ts";
-import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../sync-engine/session-runtime.ts";
 import {
   TEST_NOW,
   TEST_USER_ID,
@@ -52,7 +52,7 @@ function restartCoordinatorFixture(
   readCredential: RestartCoordinatorCredentialRead = () => CREDENTIAL,
 ): RestartCoordinatorFixture {
   const restart = createSessionRestartControl(
-    new SessionRuntimes(),
+    createSessionRuntimes(),
     () => "unused-server-restart",
   );
   let retry: (() => void) | undefined;

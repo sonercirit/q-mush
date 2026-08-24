@@ -12,7 +12,7 @@ import {
 } from "../../../shared/development-shutdown.ts";
 import { createUuidV7 } from "../../../shared/ids.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../../shared/tool-limits.ts";
-import { SessionRuntimes } from "../../../sync-engine/session-runtime.ts";
+import { createSessionRuntimes } from "../../../sync-engine/session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "../../../sync-engine/session-shutdown-interrupted-store.ts";
 import { createSessionStore } from "../../../sync-engine/session-store.ts";
 
@@ -131,7 +131,7 @@ if (mode === "start" || mode === "start-no-ack") {
   }
   store.transitionRuntime(sessionId, "running", now + 1, 0);
   const interrupted = shutdownStore();
-  const runtimes = new SessionRuntimes();
+  const runtimes = createSessionRuntimes();
   runtimes.launch(sessionId, runnerId, 0, "step", ({ restartRequest }) => {
     restartRequest((request, durable) => {
       if (durable) {

@@ -1,7 +1,8 @@
 import { describe, expect, test } from "vitest";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import {
-  SessionRuntimes,
+  createSessionRuntimes,
+  type SessionRuntimes,
   type RestartRequest,
   type RestartScope,
 } from "../../sync-engine/session-runtime.ts";
@@ -142,7 +143,7 @@ function restoreRunnerGate(
 describe("session runtimes", () => {
   test("tracks pending components with a shared clock and generation fencing", async () => {
     let now = 101;
-    const runtimes = new SessionRuntimes(() => now);
+    const runtimes = createSessionRuntimes(() => now);
     const runtime = pendingRuntime(runtimes, 4);
     expect(runtime.launched).toBe(true);
 
@@ -165,7 +166,7 @@ describe("session runtimes", () => {
   });
 
   test("fences stale callbacks and aborts after generation replacement", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const stale = pendingRuntime(runtimes, 1);
     expect(stale.launched).toBe(true);
     stale.finish();
@@ -190,7 +191,7 @@ describe("session runtimes", () => {
   });
 
   test("rejects duplicate launches without replacing the active runtime", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const first = deferredRuntime(runtimes, "session-1", "runner-1");
     await Promise.resolve();
 
@@ -206,7 +207,7 @@ describe("session runtimes", () => {
   });
 
   test("publishes restart identity to every active runtime before awaiting settlement", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const persisted: RestartRequest[] = [];
     let finish: (() => void) | undefined;
     expect(
@@ -237,7 +238,7 @@ describe("session runtimes", () => {
   });
 
   test("clears a durable marker after the runtime settles cleanly", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     let finish: (() => void) | undefined;
     let cleared = false;
     expect(
@@ -264,7 +265,7 @@ describe("session runtimes", () => {
   });
 
   test("scopes runner drains and retains them until exact acknowledgement", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const active = activeRuntimes(runtimes);
     await Promise.resolve();
 
@@ -292,7 +293,7 @@ describe("session runtimes", () => {
   });
 
   test("server drains include every active runner", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const active = await activeRuntimePair(runtimes);
 
     const drain = runtimes.drain({ kind: "server" }, "server-restart");
@@ -314,7 +315,7 @@ describe("session runtimes", () => {
   });
 
   test("preserves the first request during overlapping drains", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const runtime = deferredRuntime(runtimes, "session-1", "runner-1");
     await Promise.resolve();
 
@@ -338,14 +339,14 @@ describe("session runtimes", () => {
   });
 
   test("retains a completed runner drain across disconnect until acknowledgement", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     await runtimes.drain(runnerScope(), "restart-1");
     expectRunnerBlocked(runtimes);
     releaseRunner(runtimes, "restart-1", true);
   });
 
   test("restoring an exact gate is idempotent and conflicting IDs fail closed", () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
 
     restoreRunnerGate(runtimes, "restart-restored", true);
     restoreRunnerGate(runtimes, "restart-restored", true);
@@ -363,7 +364,7 @@ describe("session runtimes", () => {
   });
 
   test("server gates stay authoritative over restored runner gates", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
 
     restoreRunnerGate(runtimes, "runner-restart", true);
     await runtimes.drain({ kind: "server" }, "server-restart");
@@ -375,7 +376,7 @@ describe("session runtimes", () => {
   });
 
   test("rejects conflicting restart IDs for one scope", async () => {
-    const runtimes = new SessionRuntimes();
+    const runtimes = createSessionRuntimes();
     const initialDrain = runtimes.drain(runnerScope("runner-1"), "first");
     await initialDrain;
     const conflictingDrain = runtimes.drain(runnerScope("runner-1"), "second");

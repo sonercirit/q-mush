@@ -135,39 +135,68 @@ function applyRequest(
   else runner(scope.runnerId, request);
 }
 
-export class SessionRuntimes {
-  readonly #active = new Map<string, ActiveSessionRuntime>();
-  readonly #drainingRunners = new Map<string, RunnerRestartGate>();
-  readonly #now: () => number;
-  #drainingServer: RestartRequest | undefined;
+export interface SessionRuntimes {
+  readonly draining: boolean;
+  drainProgress(scope?: RestartScope): readonly RestartDrainProgress[];
+  forcePark(scope: RestartScope, initialPersistence?: Promise<unknown>): Promise<readonly string[]>;
+  active(sessionId: string): boolean; activeForGeneration(sessionId: string, generation: number): boolean;
+  pending(sessionId: string, generation: number): SessionRuntimePending | undefined; abort(sessionId: string): void;
+  activeGenerationMatches(sessionId: string, generation: number): boolean; abortForGeneration(sessionId: string, generation: number, reason?: DOMException): boolean;
+  settled(sessionId: string): Promise<void>; cleared(sessionId: string): Promise<void>; accepts(runnerId: string): boolean;
+  drainRequest(scope: RestartScope): RestartRequest | undefined; pendingRestart(runnerId: string): RestartRequest | undefined;
+  mark(scope: RestartScope, restartId: string): Promise<void>; requestDrain(scope: RestartScope, restartId: string, durable: boolean): RestartDrainSettlement; drain(scope: RestartScope, restartId: string): Promise<void>;
+  launch(sessionId: string, runnerId: string, generationOrRun: number | SessionRuntime, boundaryOrRun?: RestartBoundary | SessionRuntime, maybeRun?: SessionRuntime): boolean;
+  resumeRunner(runnerId: string, restartId: string): boolean; blockRunner(runnerId: string): void; restoreRunner(runnerId: string, restartId: string): boolean; start(runnerId?: string): void;
+}
 
-  constructor(now: () => number = Date.now) {
-    this.#now = now;
-  }
+export function createSessionRuntimes(now: () => number = Date.now): SessionRuntimes {
+  const activeRuntimes = new Map<string, ActiveSessionRuntime>();
+  const drainingRunners = new Map<string, RunnerRestartGate>();
+  let drainingServer: RestartRequest | undefined;
+  const requestRestart = (scope: RestartScope, restartId: string, durable: boolean): RestartRequestOutcome => {
+    assertRestartId(restartId);
+    const existing = scope.kind === "server" ? drainingServer : drainingRunners.get(scope.runnerId);
+    assertCompatibleRestart(existing, restartId);
+    const request = existing ?? restartRequest(scope, restartId);
+    if (existing === undefined) applyRequest(scope, request, (value) => { drainingServer = value; }, (runnerId, value) => { drainingRunners.set(runnerId, value); });
+    const affected = [...activeRuntimes.values()].filter(({ runnerId }) => scopeIncludes(scope, runnerId));
+    for (const runtime of affected) {
+      const scopedRequest = { ...request, boundary: runtime.boundary };
+      if (runtime.restartRequest === undefined || (durable && scope.kind === "server" && runtime.restartRequest.requestedBy === "runner")) runtime.restartRequest = scopedRequest;
+      runtime.restartRequestedAt ??= now();
+      runtime.restartDurable ||= durable;
+    }
+    const persistence = affected.flatMap((runtime) => {
+      const pending = trackRestartPersistence(runtime, runtime.persistRestart?.(runtime.restartRequest ?? request, runtime.restartDurable), runtime.restartDurable, false);
+      return pending === undefined ? [] : [pending];
+    });
+    return { affected, persistence: Promise.all(persistence).then(() => undefined) };
+  };
+  const runtimes: SessionRuntimes = {
 
-  get draining(): boolean {
-    return this.#drainingServer !== undefined;
-  }
+  get draining() {
+    return drainingServer !== undefined;
+  },
 
   // Sessions still holding a requested restart open, longest wait first, so a
   // drain can report exactly what it waits on.
   drainProgress(scope?: RestartScope): readonly RestartDrainProgress[] {
-    const now = this.#now();
-    return [...this.#active]
+    const currentTime = now();
+    return [...activeRuntimes]
       .flatMap(([sessionId, runtime]) =>
         runtime.restartRequestedAt === undefined ||
         (scope !== undefined && !scopeIncludes(scope, runtime.runnerId))
           ? []
           : [
               {
-                elapsedMs: now - runtime.restartRequestedAt,
+                elapsedMs: currentTime - runtime.restartRequestedAt,
                 runnerId: runtime.runnerId,
                 sessionId,
               },
             ],
       )
       .sort((first, second) => second.elapsedMs - first.elapsedMs);
-  }
+  },
 
   // Force-parks the runtimes a drain still waits on. Persistence is invoked
   // immediately beforehand with the force-park flag so a runner-scoped drain
@@ -176,7 +205,7 @@ export class SessionRuntimes {
     scope: RestartScope,
     initialPersistence: Promise<unknown> = Promise.resolve(),
   ): Promise<readonly string[]> {
-    const candidates = [...this.#active.entries()].filter(
+    const candidates = [...activeRuntimes.entries()].filter(
       ([, runtime]) =>
         runtime.restartRequest !== undefined &&
         !runtime.forceParked &&
@@ -222,31 +251,31 @@ export class SessionRuntimes {
       );
     }
     return parked;
-  }
+  },
 
   active(sessionId: string): boolean {
-    return this.#active.has(sessionId);
-  }
+    return activeRuntimes.has(sessionId);
+  },
 
   activeForGeneration(sessionId: string, generation: number): boolean {
-    return this.activeGenerationMatches(sessionId, generation);
-  }
+    return runtimes.activeGenerationMatches(sessionId, generation);
+  },
 
   pending(
     sessionId: string,
     generation: number,
   ): SessionRuntimePending | undefined {
-    const runtime = this.#active.get(sessionId);
+    const runtime = activeRuntimes.get(sessionId);
     return runtime?.generation === generation ? runtime.pending : undefined;
-  }
+  },
 
   abort(sessionId: string): void {
-    this.#active.get(sessionId)?.controller.abort();
-  }
+    activeRuntimes.get(sessionId)?.controller.abort();
+  },
 
   activeGenerationMatches(sessionId: string, generation: number): boolean {
-    return this.#active.get(sessionId)?.generation === generation;
-  }
+    return activeRuntimes.get(sessionId)?.generation === generation;
+  },
 
   abortForGeneration(
     sessionId: string,
@@ -256,114 +285,53 @@ export class SessionRuntimes {
       "AbortError",
     ),
   ): boolean {
-    if (!this.activeGenerationMatches(sessionId, generation)) {
+    if (!runtimes.activeGenerationMatches(sessionId, generation)) {
       return false;
     }
-    this.#active.get(sessionId)?.controller.abort(reason);
+    activeRuntimes.get(sessionId)?.controller.abort(reason);
     return true;
-  }
+  },
 
   settled(sessionId: string): Promise<void> {
-    return this.#active.get(sessionId)?.settled ?? Promise.resolve();
-  }
+    return activeRuntimes.get(sessionId)?.settled ?? Promise.resolve();
+  },
 
   cleared(sessionId: string): Promise<void> {
-    const runtime = this.#active.get(sessionId);
+    const runtime = activeRuntimes.get(sessionId);
     return runtime === undefined
       ? Promise.resolve()
       : runtime.settled.then(
-          () => this.cleared(sessionId),
-          () => this.cleared(sessionId),
+          () => runtimes.cleared(sessionId),
+          () => runtimes.cleared(sessionId),
         );
-  }
+  },
 
   accepts(runnerId: string): boolean {
     return (
-      this.#drainingServer === undefined && !this.#drainingRunners.has(runnerId)
+      drainingServer === undefined && !drainingRunners.has(runnerId)
     );
-  }
+  },
 
   drainRequest(scope: RestartScope): RestartRequest | undefined {
     if (scope.kind === "server") {
-      return this.#drainingServer;
+      return drainingServer;
     }
-    const gate = this.#drainingRunners.get(scope.runnerId);
+    const gate = drainingRunners.get(scope.runnerId);
     return gate === BLOCKED_RUNNER_RESTART ? undefined : gate;
-  }
+  },
 
   pendingRestart(runnerId: string): RestartRequest | undefined {
-    const runnerGate = this.#drainingRunners.get(runnerId);
+    const runnerGate = drainingRunners.get(runnerId);
     return (
-      this.#drainingServer ??
+      drainingServer ??
       (runnerGate === BLOCKED_RUNNER_RESTART ? undefined : runnerGate)
     );
-  }
-
-  #request(
-    scope: RestartScope,
-    restartId: string,
-    durable: boolean,
-  ): RestartRequestOutcome {
-    assertRestartId(restartId);
-    const existing =
-      scope.kind === "server"
-        ? this.#drainingServer
-        : this.#drainingRunners.get(scope.runnerId);
-    assertCompatibleRestart(existing, restartId);
-    const request = existing ?? restartRequest(scope, restartId);
-    if (existing === undefined) {
-      applyRequest(
-        scope,
-        request,
-        (value) => {
-          this.#drainingServer = value;
-        },
-        (runnerId, value) => {
-          this.#drainingRunners.set(runnerId, value);
-        },
-      );
-    }
-    const affected = [...this.#active.values()].filter(({ runnerId }) =>
-      scopeIncludes(scope, runnerId),
-    );
-    for (const runtime of affected) {
-      const scopedRequest = {
-        ...request,
-        boundary: runtime.boundary,
-      };
-      if (
-        runtime.restartRequest === undefined ||
-        (durable &&
-          scope.kind === "server" &&
-          runtime.restartRequest.requestedBy === "runner")
-      ) {
-        runtime.restartRequest = scopedRequest;
-      }
-      runtime.restartRequestedAt ??= this.#now();
-      runtime.restartDurable ||= durable;
-    }
-    const persistence = affected.flatMap((runtime) => {
-      const pending = trackRestartPersistence(
-        runtime,
-        runtime.persistRestart?.(
-          runtime.restartRequest ?? request,
-          runtime.restartDurable,
-        ),
-        runtime.restartDurable,
-        false,
-      );
-      return pending === undefined ? [] : [pending];
-    });
-    return {
-      affected,
-      persistence: Promise.all(persistence).then(() => undefined),
-    };
-  }
+  },
 
   mark(scope: RestartScope, restartId: string): Promise<void> {
-    const outcome = this.#request(scope, restartId, true);
+    const outcome = requestRestart(scope, restartId, true);
     return outcome.persistence;
-  }
+  },
 
   // Requests the drain and hands back the settlement wait so callers can bound
   // it; the request itself, including durable persistence, always completes.
@@ -374,19 +342,19 @@ export class SessionRuntimes {
     restartId: string,
     durable: boolean,
   ): RestartDrainSettlement {
-    const { affected, persistence } = this.#request(scope, restartId, durable);
+    const { affected, persistence } = requestRestart(scope, restartId, durable);
     return {
       persistence,
       settled: persistence.then(() =>
         Promise.allSettled(affected.map(({ settled }) => settled)),
       ),
     };
-  }
+  },
 
   async drain(scope: RestartScope, restartId: string): Promise<void> {
-    const { settled } = this.requestDrain(scope, restartId, false);
+    const { settled } = runtimes.requestDrain(scope, restartId, false);
     await settled;
-  }
+  },
 
   launch(
     sessionId: string,
@@ -407,8 +375,8 @@ export class SessionRuntimes {
         : generationOrRun;
     if (
       run === undefined ||
-      !this.accepts(runnerId) ||
-      this.#active.has(sessionId)
+      !runtimes.accepts(runnerId) ||
+      activeRuntimes.has(sessionId)
     ) {
       return false;
     }
@@ -419,7 +387,7 @@ export class SessionRuntimes {
       forceParked: false,
       generation,
       pendingPersistence: [],
-      pending: { component: "startup", since: this.#now() },
+      pending: { component: "startup", since: now() },
       persistRestart: undefined,
       restartDurable: false,
       restartRequest: undefined,
@@ -428,20 +396,20 @@ export class SessionRuntimes {
       runnerId,
       settled: Promise.resolve(),
     };
-    this.#active.set(sessionId, runtime);
+    activeRuntimes.set(sessionId, runtime);
     try {
       runtime.settled = Promise.resolve(
         run({
           controller,
           pendingComponent: (component) => {
-            if (this.#active.get(sessionId) !== runtime) {
+            if (activeRuntimes.get(sessionId) !== runtime) {
               return false;
             }
             const unchanged = runtime.pending.component === component;
             if (unchanged && component !== "provider_admission") {
               return false;
             }
-            runtime.pending = { component, since: this.#now() };
+            runtime.pending = { component, since: now() };
             return true;
           },
           restartRequest: (persist) => {
@@ -476,24 +444,24 @@ export class SessionRuntimes {
       if (runtime.restartDurable && !runtime.forceParked) {
         void runtime.clearDurable?.();
       }
-      if (this.#active.get(sessionId) === runtime) {
-        this.#active.delete(sessionId);
+      if (activeRuntimes.get(sessionId) === runtime) {
+        activeRuntimes.delete(sessionId);
       }
     };
     void runtime.settled.then(clear, clear);
     return true;
-  }
+  },
 
   resumeRunner(runnerId: string, restartId: string): boolean {
-    const restart = this.#drainingRunners.get(runnerId);
+    const restart = drainingRunners.get(runnerId);
     if (
-      this.#drainingServer !== undefined ||
+      drainingServer !== undefined ||
       restart === BLOCKED_RUNNER_RESTART ||
       restart?.restartId !== restartId
     ) {
       return false;
     }
-    for (const runtime of this.#active.values()) {
+    for (const runtime of activeRuntimes.values()) {
       if (
         runtime.runnerId === runnerId &&
         runtime.restartRequest?.restartId === restartId
@@ -502,36 +470,36 @@ export class SessionRuntimes {
         runtime.restartRequestedAt = undefined;
       }
     }
-    this.#drainingRunners.delete(runnerId);
+    drainingRunners.delete(runnerId);
     return true;
-  }
+  },
 
   blockRunner(runnerId: string): void {
-    if (this.#drainingServer === undefined) {
-      this.#drainingRunners.set(runnerId, BLOCKED_RUNNER_RESTART);
+    if (drainingServer === undefined) {
+      drainingRunners.set(runnerId, BLOCKED_RUNNER_RESTART);
     }
-  }
+  },
 
   restoreRunner(runnerId: string, restartId: string): boolean {
     assertRestartId(restartId);
-    if (this.#drainingServer !== undefined) {
+    if (drainingServer !== undefined) {
       return false;
     }
-    const existing = this.#drainingRunners.get(runnerId);
+    const existing = drainingRunners.get(runnerId);
     assertCompatibleRestart(existing, restartId);
-    this.#drainingRunners.set(
+    drainingRunners.set(
       runnerId,
       existing ?? restartRequest({ kind: "runner", runnerId }, restartId),
     );
     return true;
-  }
+  },
 
   start(runnerId?: string): void {
     if (runnerId === undefined) {
-      const abandoned = this.#drainingServer;
-      this.#drainingServer = undefined;
+      const abandoned = drainingServer;
+      drainingServer = undefined;
       if (abandoned === undefined) return;
-      for (const runtime of this.#active.values()) {
+      for (const runtime of activeRuntimes.values()) {
         if (
           runtime.restartRequest?.requestedBy !== "server" ||
           runtime.restartRequest.restartId !== abandoned.restartId
@@ -541,7 +509,7 @@ export class SessionRuntimes {
         // A runner drain the server request had taken authority over is still
         // gating this runner, so the session stays its pending work instead of
         // vanishing from that drain's progress and force-park candidates.
-        const runnerGate = this.#drainingRunners.get(runtime.runnerId);
+        const runnerGate = drainingRunners.get(runtime.runnerId);
         if (runnerGate !== undefined && runnerGate !== BLOCKED_RUNNER_RESTART) {
           runtime.restartRequest = {
             ...runnerGate,
@@ -557,6 +525,7 @@ export class SessionRuntimes {
       }
       return;
     }
-    this.#drainingRunners.delete(runnerId);
-  }
+    drainingRunners.delete(runnerId);
+  }  };
+  return runtimes;
 }
