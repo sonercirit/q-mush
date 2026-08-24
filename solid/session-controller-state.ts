@@ -65,13 +65,13 @@ function toolStreamsMatch(
   return true;
 }
 
+type CompactionEvent = Extract<
+  RealtimeServerEvent,
+  { type: "session_compaction_request" | "session_compaction_settled" }
+>;
+
 export interface SessionRealtimeState {
-  applyCompaction(
-    event: Extract<
-      RealtimeServerEvent,
-      { type: "session_compaction_request" | "session_compaction_settled" }
-    >,
-  ): void;
+  applyCompaction(event: CompactionEvent): void;
   applyDetail(detail: AgentSessionDetail): void;
   applyReconnectDetail(detail: AgentSessionDetail): void;
   applySessions(sessions: readonly AgentSessionSummary[]): void;
@@ -272,12 +272,7 @@ export function createSessionRealtimeState(
     });
   }
 
-  function applyCompaction(
-    event: Extract<
-      RealtimeServerEvent,
-      { type: "session_compaction_request" | "session_compaction_settled" }
-    >,
-  ): void {
+  function applyCompaction(event: CompactionEvent): void {
     if (event.type === "session_compaction_settled") {
       clearCompaction(event.sessionId);
       const detail = revisionView.value.detail;

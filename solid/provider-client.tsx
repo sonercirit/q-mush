@@ -1,5 +1,4 @@
 import { createSignal, For, Show, type Accessor, type JSX } from "solid-js";
-import type { ProviderQuotaResetOutcome } from "../shared/provider-quota.ts";
 import {
   GLOBAL_WORKSPACE_ID,
   type WorkspaceList,
@@ -10,19 +9,16 @@ import { optionalWorkspaces } from "./connection-client.ts";
 import { controllerView } from "./controller-view.ts";
 import { DefaultableActions } from "./defaultable-actions.tsx";
 import { FormField } from "./form-field.tsx";
+import type { ProviderController } from "./provider-controller.ts";
 import type {
   ProviderCredential,
-  ProviderCredentialAddInput,
   ProviderViewState,
 } from "./provider-credential-model.ts";
 import type { ProviderPanelConfiguration } from "./provider-panel-configuration.ts";
 import { ProviderQuota } from "./provider-quota-client.tsx";
 import { renderDebugBoundary } from "./render-debug.tsx";
 import { ScopedConnectionEditor } from "./scoped-connection-editor.tsx";
-import {
-  createSessionReassignmentDialogController,
-  type SessionReassignmentDialogController,
-} from "./session-reassignment-dialog-controller.ts";
+import { createSessionReassignmentDialogController } from "./session-reassignment-dialog-controller.ts";
 import { SessionReassignmentDialog } from "./session-reassignment-dialog.tsx";
 
 export {
@@ -483,22 +479,7 @@ export function ProviderPanel(props: ProviderPanelProps): JSX.Element {
   );
 }
 
-export interface ProviderPanelController {
-  readonly view: Accessor<ProviderViewState>;
-  add(...input: ProviderCredentialAddInput): Promise<void>;
-  load(): Promise<void>;
-  loadQuota(credentialId: string): Promise<void>;
-  consumeQuotaReset(
-    credentialId: string,
-  ): Promise<ProviderQuotaResetOutcome | undefined>;
-  setQuotaThreshold(credentialId: string, threshold: number): Promise<void>;
-  confirmSessionReassignment(
-    dialog: SessionReassignmentDialogController,
-  ): Promise<void>;
-  remove(credentialId: string): Promise<void>;
-  setDefault(credentialId: string): Promise<void>;
-  setScopes(
-    credentialId: string,
-    workspaceIds: readonly string[],
-  ): Promise<void>;
-}
+export type ProviderPanelController = Omit<
+  ProviderController,
+  "reset" | "setWorkspace" | "state"
+>;
