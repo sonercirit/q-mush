@@ -1,8 +1,10 @@
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
-import type { RealtimeTestSetupOptions } from "./realtime-client-test-setup.ts";
-import { realtimeTestSetup } from "./realtime-client-test-setup.ts";
+import {
+  realtimeTestSetup,
+  type RealtimeTestSetupOptions,
+} from "./realtime-client-test-setup.ts";
 
 export function advancingClock(): () => number {
   let clock = 0;
