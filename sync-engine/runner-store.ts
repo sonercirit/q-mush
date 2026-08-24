@@ -181,6 +181,21 @@ function accessibleRunnerIds(
   return workspaceId === undefined ? undefined : read(workspaceId);
 }
 
+type SetRunnerScopes = (
+  userId: string,
+  runnerId: string,
+  workspaceIds: readonly string[],
+  now: number,
+) => boolean;
+type ListOnlineRunners = (
+  userId: string,
+  now: number,
+  offset: number,
+  limit: number,
+  search?: string,
+  workspaceId?: string,
+) => RunnerPage;
+
 export interface RunnerStore {
   readonly database: AppDatabase;
   readonly registration: RunnerRegistrationOperations;
@@ -204,12 +219,7 @@ export interface RunnerStore {
     now: number,
     workspaceId?: string,
   ) => boolean;
-  readonly setScopes: (
-    userId: string,
-    runnerId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ) => boolean;
+  readonly setScopes: SetRunnerScopes;
   readonly setDefault: (
     userId: string,
     runnerId: string,
@@ -226,14 +236,7 @@ export interface RunnerStore {
     now: number,
     workspaceId?: string,
   ) => readonly RunnerSummary[];
-  readonly listOnline: (
-    userId: string,
-    now: number,
-    offset: number,
-    limit: number,
-    search?: string,
-    workspaceId?: string,
-  ) => RunnerPage;
+  readonly listOnline: ListOnlineRunners;
   readonly remove: (userId: string, runnerId: string, now: number) => boolean;
 }
 
@@ -430,12 +433,8 @@ export function createRunnerStore(
     return available([userId, runnerId, now, workspaceId]);
   }
 
-  function setScopes(
-    userId: string,
-    runnerId: string,
-    workspaceIds: readonly string[],
-    now: number,
-  ): boolean {
+  const setScopes: SetRunnerScopes = (...scopeUpdate) => {
+    const [userId, runnerId, workspaceIds, now] = scopeUpdate;
     if (!exists(userId, runnerId)) {
       return false;
     }
@@ -459,7 +458,7 @@ export function createRunnerStore(
       );
     });
     return true;
-  }
+  };
 
   function setDefault(userId: string, runnerId: string, now: number): boolean {
     return database.transaction((transaction) => {
@@ -554,14 +553,8 @@ export function createRunnerStore(
     );
   }
 
-  function listOnline(
-    userId: string,
-    now: number,
-    offset: number,
-    limit: number,
-    search?: string,
-    workspaceId?: string,
-  ): RunnerPage {
+  const listOnline: ListOnlineRunners = (...pageSelection) => {
+    const [userId, now, offset, limit, search, workspaceId] = pageSelection;
     if (!validPageWindow(offset, limit)) {
       throw new Error("The runner page is invalid");
     }
@@ -586,7 +579,7 @@ export function createRunnerStore(
         return { items, totalItems };
       },
     );
-  }
+  };
 
   function remove(userId: string, runnerId: string, now: number): boolean {
     const removed = database.transaction((transaction) => {

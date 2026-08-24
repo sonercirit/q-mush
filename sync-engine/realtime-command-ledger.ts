@@ -98,13 +98,15 @@ function positiveLimit(limit: number | undefined): boolean {
   return limit === undefined || (Number.isSafeInteger(limit) && limit >= 1);
 }
 
+type RealtimeCommandExecute = (
+  userId: string,
+  workspaceId: string,
+  command: UserRealtimeCommand,
+  execute: () => unknown,
+) => Promise<SerializedRealtimeAcknowledgement>;
+
 export interface RealtimeCommandLedger {
-  readonly execute: (
-    userId: string,
-    workspaceId: string,
-    command: UserRealtimeCommand,
-    execute: () => unknown,
-  ) => Promise<SerializedRealtimeAcknowledgement>;
+  readonly execute: RealtimeCommandExecute;
 }
 
 export function createRealtimeCommandLedger(
@@ -343,11 +345,8 @@ export function createRealtimeCommandLedger(
     ledgerPendingEntries += 1;
   }
 
-  function removePending(
-    userId: string,
-    operation: string,
-    payloadBytes: number,
-  ): void {
+  function removePending(...pending: readonly [string, string, number]): void {
+    const [userId, operation, payloadBytes] = pending;
     const user = ledgerPendingUsers.get(userId);
     if (user === undefined) {
       return;
@@ -467,12 +466,8 @@ export function createRealtimeCommandLedger(
     }
   }
 
-  async function execute(
-    userId: string,
-    workspaceId: string,
-    command: UserRealtimeCommand,
-    execute: () => unknown,
-  ): Promise<SerializedRealtimeAcknowledgement> {
+  const execute: RealtimeCommandExecute = async (...parameters) => {
+    const [userId, workspaceId, command, executeCommand] = parameters;
     const admittedAt = nowValue();
     if (
       admittedAt === undefined ||
@@ -529,7 +524,7 @@ export function createRealtimeCommandLedger(
     addPending(userId, command.operation, payloadBytes);
     let execution: CommandExecution;
     try {
-      execution = commandExecution(execute, ledgerMaximumResultBytes);
+      execution = commandExecution(executeCommand, ledgerMaximumResultBytes);
     } catch {
       removePending(userId, command.operation, payloadBytes);
       return error(command.commandId, "command_failed");
@@ -563,7 +558,7 @@ export function createRealtimeCommandLedger(
 
     const result = await execution.result;
     return acknowledgement({ commandId: command.commandId, ...result });
-  }
+  };
 
   function durableEntries(userId?: string): number {
     let count = 0;

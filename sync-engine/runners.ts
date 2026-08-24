@@ -327,12 +327,9 @@ export function createRunnerIntegration(
   }
 
   function onlineForUser(
-    userId: string,
-    workspaceId?: string,
+    ...selection: readonly [string, string?]
   ): readonly RunnerSummary[] {
-    return list(userId, workspaceId).filter(
-      ({ status }) => status === "online",
-    );
+    return list(...selection).filter(({ status }) => status === "online");
   }
 
   function preflightRegistration(
