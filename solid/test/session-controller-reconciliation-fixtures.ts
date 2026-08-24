@@ -558,13 +558,13 @@ function createReconciliationScenario(
   return scenario;
 }
 
-export function activeReconciliationScenario(): ReconciliationScenario {
+function activeReconciliationScenario(): ReconciliationScenario {
   const running = sessionDetail({ status: "running" });
   return createReconciliationScenario(
     selectedState({ detail: running, sessions: [summaryFromDetail(running)] }),
   );
 }
-export function creationReconciliationScenario(
+function creationReconciliationScenario(
   prompt = "Frozen creation",
   options: CreationScenarioOptions = {},
 ): ReconciliationScenario {
