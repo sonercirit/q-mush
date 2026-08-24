@@ -477,7 +477,7 @@ export interface ToolStreamSnapshotStore {
   deleteOldest(): boolean;
 }
 
-export function createToolStreamSnapshotStore(
+function createToolStreamSnapshotStore(
   options: ToolStreamSnapshotStoreOptions,
 ): ToolStreamSnapshotStore {
   const entries = new Map<string, ToolStreamEntry>();

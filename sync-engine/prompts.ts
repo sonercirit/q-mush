@@ -152,7 +152,7 @@ class DrizzlePromptIntegration implements PromptIntegration {
   }
 
   item(request: Request, promptId: string): Promise<Response> | Response {
-    return this.route(request, (userId, method) => {
+    return this.#authenticated.route(request, (userId, method) => {
       const handlers: Record<
         "DELETE" | "GET" | "PUT",
         () => Promise<Response> | Response

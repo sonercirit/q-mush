@@ -4,6 +4,7 @@ import { REALTIME_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
 import {
   createRealtimeCommandError,
+  isUserRealtimeProtocolError,
   readUserRealtimeCommand,
   USER_REALTIME_MAX_PAYLOAD_LENGTH,
 } from "../shared/user-realtime-protocol.ts";

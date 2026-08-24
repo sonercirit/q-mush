@@ -8,7 +8,7 @@ import {
   createModelCredentialPool,
   type ModelCredentialPool,
 } from "../../sync-engine/model-credential-pool.ts";
-import { RunnerStore } from "../../sync-engine/runner-store.ts";
+import { createRunnerStore } from "../../sync-engine/runner-store.ts";
 import { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import { startManualSessionCompactionForUserId } from "../../sync-engine/session-compaction-actions.ts";
 import { SessionRuntimes } from "../../sync-engine/session-runtime.ts";

@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import { SESSION_REALTIME_OPERATIONS } from "../../shared/user-realtime-protocol.ts";
 import {
   createRealtimeCommandFailure,
-  RealtimeCommandLedger,
+  createRealtimeCommandLedger,
 } from "../../sync-engine/realtime-command-ledger.ts";
 import {
   command,
