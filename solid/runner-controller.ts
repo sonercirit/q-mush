@@ -115,7 +115,10 @@ export function createRunnerController(
       }
       return;
     }
-    if (stateController.value.creating || stateController.value.settingDefaultId !== undefined) {
+    if (
+      stateController.value.creating ||
+      stateController.value.settingDefaultId !== undefined
+    ) {
       return;
     }
 
@@ -148,7 +151,10 @@ export function createRunnerController(
     setWorkspace(GLOBAL_WORKSPACE_ID);
   }
 
-  function setScopes(runnerId: string, workspaceIds: readonly string[]): Promise<void> {
+  function setScopes(
+    runnerId: string,
+    workspaceIds: readonly string[],
+  ): Promise<void> {
     return stateController.mutation(
       connectionScopesPath(RUNNERS_PATH, runnerId),
       jsonRequestInit({ workspaceIds }, "PUT"),
@@ -289,13 +295,18 @@ export function createRunnerController(
           pending: "removingId",
           success: (id) => ({
             removingId: undefined,
-            runners: stateController.value.runners?.filter((runner) => runner.id !== id),
+            runners: stateController.value.runners?.filter(
+              (runner) => runner.id !== id,
+            ),
             setup: setupWithoutRunner(stateController.value.setup, id),
           }),
         };
   }
 
-  async function mutate(mutation: RunnerMutation, runnerId: string): Promise<void> {
+  async function mutate(
+    mutation: RunnerMutation,
+    runnerId: string,
+  ): Promise<void> {
     const configuration = mutationConfiguration(mutation, runnerId);
     if (mutation === "remove") {
       pendingRemovalRunners = undefined;
@@ -339,9 +350,20 @@ export function createRunnerController(
     stateController.patch(patch);
   }
   return {
-    get state() { return stateController.value; },
-    get view() { return stateController.accessor; },
-    applyRealtime, copyCommand: copyCommandAction, create, load, remove, reset, setDefault,
-    setScopes, setWorkspace,
+    get state() {
+      return stateController.value;
+    },
+    get view() {
+      return stateController.accessor;
+    },
+    applyRealtime,
+    copyCommand: copyCommandAction,
+    create,
+    load,
+    remove,
+    reset,
+    setDefault,
+    setScopes,
+    setWorkspace,
   };
 }

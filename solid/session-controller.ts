@@ -42,8 +42,9 @@ import { showNewestSessionHistory } from "./session-controller-history.ts";
 import { SessionLoadController } from "./session-controller-load.ts";
 import type { SessionToolUpdateResult } from "./session-controller-options.ts";
 import {
-  SessionPendingInputController,
+  createSessionPendingInputController,
   type PendingInputTimer,
+  type SessionPendingInputController,
 } from "./session-controller-pending-input.ts";
 import { updatedSessionQuestions } from "./session-controller-question-event.ts";
 import { answerSessionQuestions } from "./session-controller-questions.ts";
@@ -122,7 +123,7 @@ export class SessionController {
     );
     this.#models = createSessionModelController(this.#view, transport);
     this.#providers = createSessionProviderController(this.#view);
-    this.#pendingInputs = new SessionPendingInputController({
+    this.#pendingInputs = createSessionPendingInputController({
       loader: this.#loader,
       realtime: this.#live,
       transport,

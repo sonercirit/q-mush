@@ -5,7 +5,10 @@ import {
   RunnerPanel,
   type RunnerViewState,
 } from "../runner-client.tsx";
-import { createRunnerController, type RunnerController } from "../runner-controller.ts";
+import {
+  createRunnerController,
+  type RunnerController,
+} from "../runner-controller.ts";
 import {
   expectTestText,
   findTestButton,
