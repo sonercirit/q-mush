@@ -214,55 +214,42 @@ export function readRunnerMetadata(value: unknown): RunnerMetadata | undefined {
   return { architecture, machineFingerprint, name, platform };
 }
 
-class DrizzleRunnerIntegration implements RunnerIntegration {
-  readonly #auth: GoogleAuth;
-  readonly #now: () => number;
-  readonly #removalListeners = new Set<RunnerRemovalListeners>();
-  readonly #parentReportListeners = new Set<RunnerParentReportListener>();
-  readonly #randomToken: () => string;
-  readonly #runnerIsAvailable: SessionRunnerAvailability;
-  readonly #store: RunnerStore;
-
-  constructor(auth: GoogleAuth, dependencies: RunnerDependencies) {
-    this.#auth = auth;
-    this.#now = dependencies.now ?? Date.now;
-    if (dependencies.onRemoved !== undefined) {
-      this.#removalListeners.add({
-        removed: dependencies.onRemoved,
-        removing: () => undefined,
-      });
-    }
-    this.#randomToken = dependencies.randomToken ?? defaultRandomToken;
-    this.#store =
-      dependencies.store ??
-      createRunnerStore(
-        dependencies.database ?? createDatabase(":memory:"),
-        dependencies.randomId ?? createUuidV7,
-        dependencies.generateActivationId ?? createUuidV7,
-        (userId, report) => {
-          for (const listener of this.#parentReportListeners) {
-            listener(userId, report);
-          }
-        },
-      );
-    this.#runnerIsAvailable = runnerAvailabilityAt(this.#store, this.#now);
+export function createRunnerIntegration(
+  auth: GoogleAuth,
+  dependencies: RunnerDependencies = {},
+): RunnerIntegration {
+  const now = dependencies.now ?? Date.now;
+  const removalListeners = new Set<RunnerRemovalListeners>();
+  const parentReportListeners = new Set<RunnerParentReportListener>();
+  if (dependencies.onRemoved !== undefined) {
+    removalListeners.add({
+      removed: dependencies.onRemoved,
+      removing: () => undefined,
+    });
   }
-
-  collection(request: Request): Response {
-    return withAuthenticatedUser(this.#auth, request, (user) =>
-      this.#collectionForUser(request, user),
+  const randomToken = dependencies.randomToken ?? defaultRandomToken;
+  const store =
+    dependencies.store ??
+    createRunnerStore(
+      dependencies.database ?? createDatabase(":memory:"),
+      dependencies.randomId ?? createUuidV7,
+      dependencies.generateActivationId ?? createUuidV7,
+      (userId, report) => {
+        for (const listener of parentReportListeners) listener(userId, report);
+      },
+    );
+  const runnerIsAvailable = runnerAvailabilityAt(store, now);
+  function collection(request: Request): Response {
+    return withAuthenticatedUser(auth, request, (user) =>
+      collectionForUser(request, user),
     );
   }
 
-  connect(
+  function connect(
     token: string,
     metadata: RunnerMetadata,
   ): ConnectedRunner | undefined {
-    const proposal = this.preflightRegistration(
-      token,
-      metadata,
-      createUuidV7(),
-    );
+    const proposal = preflightRegistration(token, metadata, createUuidV7());
     if (proposal === undefined) {
       return undefined;
     }
@@ -274,7 +261,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     if (activated.status !== "activated") {
       return undefined;
     }
-    return this.#store.registration.settleActivationLifecycle(
+    return store.registration.settleActivationLifecycle(
       proposal.activationId,
       "ordinary",
     )
@@ -282,32 +269,38 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       : undefined;
   }
 
-  #setOnline(runner: RunnerConnection, online: boolean): void {
-    runNoncriticalDatabaseWrite(this.#store.database, () => {
-      this.#store.setOnline(runner.id, runner.userId, this.#now(), online);
+  function setOnline(runner: RunnerConnection, online: boolean): void {
+    runNoncriticalDatabaseWrite(store.database, () => {
+      store.setOnline(runner.id, runner.userId, now(), online);
     });
   }
 
-  disconnected(runner: RunnerConnection): void {
-    this.#setOnline(runner, false);
+  function disconnected(runner: RunnerConnection): void {
+    setOnline(runner, false);
   }
 
-  #list(userId: string, workspaceId?: string): readonly RunnerSummary[] {
-    return this.#store.list(userId, this.#now(), workspaceId);
+  function list(
+    userId: string,
+    workspaceId?: string,
+  ): readonly RunnerSummary[] {
+    return store.list(userId, now(), workspaceId);
   }
 
-  listForUser(userId: string, workspaceId?: string): readonly RunnerSummary[] {
-    return this.#list(userId, workspaceId);
+  function listForUser(
+    userId: string,
+    workspaceId?: string,
+  ): readonly RunnerSummary[] {
+    return list(userId, workspaceId);
   }
 
-  listOnlineForUser(
+  function listOnlineForUser(
     userId: string,
     query: RunnerOptionQuery,
     workspaceId?: string,
   ): RunnerPage {
-    return this.#store.listOnline(
+    return store.listOnline(
       userId,
-      this.#now(),
+      now(),
       query.offset,
       query.limit,
       query.search,
@@ -315,43 +308,39 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     );
   }
 
-  onParentReport(listener: RunnerParentReportListener): void {
-    this.#parentReportListeners.add(listener);
+  function onParentReport(listener: RunnerParentReportListener): void {
+    parentReportListeners.add(listener);
   }
 
-  onRemoved(listener: RunnerRemovedListener): void {
-    this.#removalListeners.add({
+  function onRemoved(listener: RunnerRemovedListener): void {
+    removalListeners.add({
       removed: listener,
       removing: () => undefined,
     });
   }
 
-  onRemoving(listener: RunnerRemovingListener): void {
-    this.#removalListeners.add({
+  function onRemoving(listener: RunnerRemovingListener): void {
+    removalListeners.add({
       removed: () => undefined,
       removing: listener,
     });
   }
 
-  onlineForUser(
+  function onlineForUser(
     userId: string,
     workspaceId?: string,
   ): readonly RunnerSummary[] {
-    return this.#list(userId, workspaceId).filter(
+    return list(userId, workspaceId).filter(
       ({ status }) => status === "online",
     );
   }
 
-  preflightRegistration(
+  function preflightRegistration(
     token: string,
     metadata: RunnerMetadata,
     activationId = createUuidV7(),
   ): RunnerRegistrationProposal | undefined {
-    const result = this.#store.registration.preflight(
-      token,
-      metadata,
-      activationId,
-    );
+    const result = store.registration.preflight(token, metadata, activationId);
     if (result.status !== "ready") {
       return undefined;
     }
@@ -366,7 +355,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         if (
           committed?.status === "registered" &&
           fence !== undefined &&
-          this.#store.registration.fenceIsCurrent(fence)
+          store.registration.fenceIsCurrent(fence)
         ) {
           return committed;
         }
@@ -376,13 +365,10 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         committed = (() => {
           const preparation: RunnerRegistrationPrepareOptions = {
             lifecycle,
-            now: this.#now(),
+            now: now(),
             ...(restartId === undefined ? {} : { restartId }),
           };
-          const result = this.#store.registration.commit(
-            registration,
-            preparation,
-          );
+          const result = store.registration.commit(registration, preparation);
           if (result.status !== "registered") {
             fence = undefined;
             return result;
@@ -391,7 +377,7 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
           fence = result.registration.fence;
           activated = undefined;
           return {
-            activationReceipt: this.#store.registration.receipt(fence),
+            activationReceipt: store.registration.receipt(fence),
             connected: { connection, userId: connection.userId },
             status: "registered" as const,
           };
@@ -405,8 +391,8 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
         if (fence === undefined) {
           return { status: "registration_changed" as const };
         }
-        const applied = this.#store.registration.finalizeRegistration(fence, {
-          now: this.#now(),
+        const applied = store.registration.finalizeRegistration(fence, {
+          now: now(),
           receipt,
         });
         activated =
@@ -429,36 +415,36 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     };
   }
 
-  installer(request: Request): Response {
+  function installer(request: Request): Response {
     return request.method === "GET"
-      ? this.#serveInstaller(request)
+      ? serveInstaller(request)
       : createMethodNotAllowedResponse("GET");
   }
 
-  async remove(request: Request, runnerId: string): Promise<Response> {
+  async function remove(request: Request, runnerId: string): Promise<Response> {
     if (request.method !== "DELETE") {
       return createMethodNotAllowedResponse("DELETE");
     }
     return await Promise.resolve(
-      withAuthenticatedUser(this.#auth, request, (user) => {
-        if (!this.#store.exists(user.id, runnerId)) {
+      withAuthenticatedUser(auth, request, (user) => {
+        if (!store.exists(user.id, runnerId)) {
           return createApiError("not_found", 404);
         }
-        const removed = this.#store.remove(user.id, runnerId, this.#now());
+        const removed = store.remove(user.id, runnerId, now());
         if (!removed) {
           return createApiError("not_found", 404);
         }
-        for (const { removing } of this.#removalListeners) {
+        for (const { removing } of removalListeners) {
           removing(user.id, runnerId);
         }
-        this.#notifyRemoved(user.id, runnerId);
+        notifyRemoved(user.id, runnerId);
         return createNoContentResponse();
       }),
     );
   }
 
-  #notifyRemoved(userId: string, runnerId: string): void {
-    for (const { removed } of this.#removalListeners) {
+  function notifyRemoved(userId: string, runnerId: string): void {
+    for (const { removed } of removalListeners) {
       try {
         void Promise.resolve(removed(userId, runnerId)).catch(() => {
           // Removal is committed; asynchronous cleanup must not hold its response.
@@ -469,90 +455,89 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     }
   }
 
-  receiptState(
+  function receiptState(
     token: string,
     metadata: RunnerMetadata,
     receipt: string,
   ): RunnerActivationReceiptValidation | undefined {
-    return this.#store.registration.receiptState(token, metadata, receipt);
+    return store.registration.receiptState(token, metadata, receipt);
   }
 
-  settleActivationLifecycle(...parameters: RunnerLifecycleParameters): boolean {
+  function settleActivationLifecycle(
+    ...parameters: RunnerLifecycleParameters
+  ): boolean {
     return settleActivationLifecycleParameters(
-      this.#store.registration.settleActivationLifecycle.bind(
-        this.#store.registration,
-      ),
+      store.registration.settleActivationLifecycle.bind(store.registration),
       parameters,
     );
   }
 
-  touchFinalizedActivation(
+  function touchFinalizedActivation(
     ...[token, metadata, receipt]: FinalizedRunnerActivationParameters
   ): ConnectedRunner | undefined {
-    const connection = this.#store.registration.touchFinalizedActivation(
+    const connection = store.registration.touchFinalizedActivation(
       token,
       metadata,
       receipt,
-      this.#now(),
+      now(),
     );
     return connection === undefined
       ? undefined
       : { connection, userId: connection.userId };
   }
 
-  runnerIsAvailable: SessionRunnerAvailability = (
-    userId,
-    runnerId,
-    workspaceId,
-  ) => this.#runnerIsAvailable(userId, runnerId, workspaceId);
-
-  runnerToken(request: Request): string | undefined {
+  function runnerToken(request: Request): string | undefined {
     const token = readBearerToken(request);
-    return token !== undefined && this.#store.hasActiveToken(token)
+    return token !== undefined && store.hasActiveToken(token)
       ? token
       : undefined;
   }
 
-  seen(runner: RunnerConnection): void {
-    this.#setOnline(runner, true);
+  function seen(runner: RunnerConnection): void {
+    setOnline(runner, true);
   }
 
-  setDefault(request: Request, runnerId: string): Response {
-    return setOwnedDefault(request, this.#auth, (userId) => {
-      return this.#store.setDefault(userId, runnerId, this.#now());
+  function setDefault(request: Request, runnerId: string): Response {
+    return setOwnedDefault(request, auth, (userId) => {
+      return store.setDefault(userId, runnerId, now());
     });
   }
 
-  async setScopes(request: Request, runnerId: string): Promise<Response> {
+  async function setScopes(
+    request: Request,
+    runnerId: string,
+  ): Promise<Response> {
     return updateAuthenticatedConnectionScopes(
       request,
-      (action) => withAuthenticatedUser(this.#auth, request, action),
+      (action) => withAuthenticatedUser(auth, request, action),
       (userId, workspaceIds) =>
-        this.#store.setScopes(userId, runnerId, workspaceIds, this.#now()),
+        store.setScopes(userId, runnerId, workspaceIds, now()),
     );
   }
 
-  #collectionForUser(request: Request, user: AuthenticatedUser): Response {
+  function collectionForUser(
+    request: Request,
+    user: AuthenticatedUser,
+  ): Response {
     return scopedCollectionForUser({
-      create: () => this.#createSetup(request, user),
+      create: () => createSetup(request, user),
       key: "runners",
-      read: (userId, workspaceId) =>
-        this.#store.list(userId, this.#now(), workspaceId),
+      read: (userId, workspaceId) => store.list(userId, now(), workspaceId),
       request,
       user,
       validate: (userId, workspaceId) =>
-        this.#store.workspaceScopesAreValid(userId, [workspaceId]),
+        store.workspaceScopesAreValid(userId, [workspaceId]),
     });
   }
 
-  #serveInstaller(request: Request): Response {
+  function serveInstaller(request: Request): Response {
     const url = new URL(request.url);
     const token = url.searchParams.get("token");
 
     if (
       token === null ||
       !RUNNER_TOKEN_PATTERN.test(token) ||
-      !this.#store.hasActiveToken(token)
+      !store.hasActiveToken(token)
     ) {
       return new Response("Not found", { status: 404 });
     }
@@ -574,23 +559,18 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
     return new Response(renderRunnerInstaller(url.origin, token), { headers });
   }
 
-  #createSetup(request: Request, user: AuthenticatedUser): Response {
+  function createSetup(request: Request, user: AuthenticatedUser): Response {
     const workspaceId = requestWorkspaceId(request);
     const workspaceIds = workspaceId === null ? undefined : [workspaceId];
     if (
       workspaceIds !== undefined &&
       (!isWorkspaceId(workspaceId) ||
-        !this.#store.workspaceScopesAreValid(user.id, workspaceIds))
+        !store.workspaceScopesAreValid(user.id, workspaceIds))
     ) {
       return createApiError("invalid_scope", 409);
     }
-    const token = createRunnerToken(this.#randomToken);
-    const runner = this.#store.create(
-      user.id,
-      token,
-      this.#now(),
-      workspaceIds,
-    );
+    const token = createRunnerToken(randomToken);
+    const runner = store.create(user.id, token, now(), workspaceIds);
     const installerUrl = new URL(RUNNER_INSTALLER_PATH, request.url);
     installerUrl.searchParams.set("token", token);
     const downloadUrl = new URL(installerUrl);
@@ -607,11 +587,27 @@ class DrizzleRunnerIntegration implements RunnerIntegration {
       201,
     );
   }
-}
 
-export function createRunnerIntegration(
-  auth: GoogleAuth,
-  dependencies: RunnerDependencies = {},
-): RunnerIntegration {
-  return new DrizzleRunnerIntegration(auth, dependencies);
+  return {
+    collection,
+    connect,
+    disconnected,
+    installer,
+    listForUser,
+    listOnlineForUser,
+    onParentReport,
+    onRemoved,
+    onRemoving,
+    onlineForUser,
+    preflightRegistration,
+    receiptState,
+    remove,
+    runnerIsAvailable,
+    runnerToken,
+    seen,
+    setDefault,
+    setScopes,
+    settleActivationLifecycle,
+    touchFinalizedActivation,
+  };
 }
