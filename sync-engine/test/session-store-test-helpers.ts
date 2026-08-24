@@ -1,5 +1,6 @@
 import type { AppDatabase } from "../../shared/database.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
+import { createSessionSettingContext } from "../../sync-engine/session-store-settings.ts";
 import {
   createSessionStore,
   type SessionStore,
@@ -66,10 +67,10 @@ export function testStoreReadResources(
   store: SessionStore,
 ) {
   return {
-    database,
+    ...createSessionSettingContext(database, (userId, sessionId, workspaceId) =>
+      store.get(userId, sessionId, workspaceId),
+    ),
     generateId: () => crypto.randomUUID(),
     toolSettings: () => DEFAULT_TOOL_SETTINGS,
-    read: (userId: string, sessionId: string, workspaceId?: string) =>
-      store.get(userId, sessionId, workspaceId),
   };
 }

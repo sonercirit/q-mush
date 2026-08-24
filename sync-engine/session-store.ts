@@ -93,6 +93,7 @@ import type { SessionStoreWriteResources } from "./session-store-resources.ts";
 import { createSessionStoreRestarts } from "./session-store-restarts.ts";
 import { createSessionStoreRuntime } from "./session-store-runtime.ts";
 import {
+  createSessionSettingContext,
   setSessionCompactionFlag,
   setSessionContextTokenCap,
   type SessionCompactionFlagParameters,
@@ -107,6 +108,15 @@ import {
   type PendingSpawnedSession,
   type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
+type SpawnedReportParameters = readonly [
+  userId: string,
+  childId: string,
+  childGeneration: number,
+  parentId: string,
+  parentGeneration: number,
+  content: string,
+  now: number,
+];
 import { readStoredSessionGeneration } from "./session-store-state.ts";
 import {
   stopStoredSession,
@@ -162,11 +172,12 @@ export function createSessionStore(
   ) => ({ database, identity: spawnIdentity(userId, sessionId, generation) });
   const readPendingQuestions = (userId: string, sessionId: string) =>
     questionsStore.pending(userId, sessionId);
-  const settingContext = () => ({
-    database,
-    read: (userId: string, sessionId: string, workspaceId?: string) =>
-      store.get(userId, sessionId, workspaceId),
-  });
+  const settingContext = () =>
+    createSessionSettingContext(
+      database,
+      (userId: string, sessionId: string, workspaceId?: string) =>
+        store.get(userId, sessionId, workspaceId),
+    );
   const currentGeneration = (sessionId: string): number => {
     const current = readStoredSessionGeneration({
       condition: activeSessionCondition({ id: sessionId }),
@@ -178,6 +189,28 @@ export function createSessionStore(
   };
   const currentStore = (): CurrentSessionStore =>
     createCurrentSessionStore(store, currentGeneration);
+  const spawnedReportDisposition = (
+    ...[
+      userId,
+      childId,
+      childGeneration,
+      parentId,
+      parentGeneration,
+      content,
+      now,
+    ]: SpawnedReportParameters
+  ): SpawnedReportDisposition | undefined =>
+    appendSpawnedSessionReport({
+      childGeneration,
+      childId,
+      content,
+      database,
+      generateId,
+      now,
+      parentGeneration,
+      parentId,
+      userId,
+    });
   const store = {
     repairSpawnedSessionLineage(now?: number): SpawnLineageRepairResult {
       return repairSpawnedSessionLineage(database, now);
@@ -462,47 +495,13 @@ export function createSessionStore(
         userId,
       });
     },
-    appendSpawnedSessionReport(
-      userId: string,
-      childId: string,
-      childGeneration: number,
-      parentId: string,
-      parentGeneration: number,
-      content: string,
-      now: number,
-    ): boolean {
-      return (
-        store.spawnedSessionCallbackDisposition(
-          userId,
-          childId,
-          childGeneration,
-          parentId,
-          parentGeneration,
-          content,
-          now,
-        ) !== undefined
-      );
+    appendSpawnedSessionReport(...parameters: SpawnedReportParameters): boolean {
+      return spawnedReportDisposition(...parameters) !== undefined;
     },
     spawnedSessionCallbackDisposition(
-      userId: string,
-      childId: string,
-      childGeneration: number,
-      parentId: string,
-      parentGeneration: number,
-      content: string,
-      now: number,
+      ...parameters: SpawnedReportParameters
     ): SpawnedReportDisposition | undefined {
-      return appendSpawnedSessionReport({
-        childGeneration,
-        childId,
-        content,
-        database: database,
-        generateId: generateId,
-        now,
-        parentGeneration,
-        parentId,
-        userId,
-      });
+      return spawnedReportDisposition(...parameters);
     },
     activeSpawnedSessionChildren(userId: string, sessionId: string) {
       return activeSpawnedSessionChildren(database, userId, sessionId);

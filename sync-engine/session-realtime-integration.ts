@@ -78,7 +78,7 @@ import {
   type SessionToolUpdateDependencies,
 } from "./session-tool-update.ts";
 
-export type RealtimeSessionCommandDependencies = SessionLaunchBoundary &
+type RealtimeSessionCommandDependencies = SessionLaunchBoundary &
   Pick<SessionQueueDependencies, "runnerIsAvailable"> &
   Omit<RealtimeSessionCommandsOptions, "availability" | "lifecycle">;
 

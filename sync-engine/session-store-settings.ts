@@ -1,3 +1,4 @@
+import type { AppDatabase } from "../shared/database.ts";
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import {
   setStoredSessionCompactionFlag,
@@ -15,6 +16,13 @@ export type SessionContextTokenCapParameters = readonly [
   now: number,
   workspaceId?: string,
 ];
+
+export function createSessionSettingContext(
+  database: AppDatabase,
+  read: SessionSettingContext["read"],
+): SessionSettingContext {
+  return { database, read };
+}
 
 export function setSessionContextTokenCap(
   context: SessionSettingContext,

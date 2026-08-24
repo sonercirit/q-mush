@@ -12,7 +12,7 @@ export type RestartScope =
   | { readonly kind: "server" }
   | { readonly kind: "runner"; readonly runnerId: string };
 
-export type RestartBoundary = "handoff" | "step";
+type RestartBoundary = "handoff" | "step";
 
 export interface RestartRequest {
   readonly boundary: RestartBoundary;
@@ -135,6 +135,14 @@ function applyRequest(
   else runner(scope.runnerId, request);
 }
 
+type SessionLaunchParameters = readonly [
+  sessionId: string,
+  runnerId: string,
+  generationOrRun: number | SessionRuntime,
+  boundaryOrRun?: RestartBoundary | SessionRuntime,
+  maybeRun?: SessionRuntime,
+];
+
 export interface SessionRuntimes {
   readonly draining: boolean;
   drainProgress(scope?: RestartScope): readonly RestartDrainProgress[];
@@ -167,13 +175,7 @@ export interface SessionRuntimes {
     durable: boolean,
   ): RestartDrainSettlement;
   drain(scope: RestartScope, restartId: string): Promise<void>;
-  launch(
-    sessionId: string,
-    runnerId: string,
-    generationOrRun: number | SessionRuntime,
-    boundaryOrRun?: RestartBoundary | SessionRuntime,
-    maybeRun?: SessionRuntime,
-  ): boolean;
+  launch(...parameters: SessionLaunchParameters): boolean;
   resumeRunner(runnerId: string, restartId: string): boolean;
   blockRunner(runnerId: string): void;
   restoreRunner(runnerId: string, restartId: string): boolean;
@@ -426,13 +428,13 @@ export function createSessionRuntimes(
       await settled;
     },
 
-    launch(
-      sessionId: string,
-      runnerId: string,
-      generationOrRun: number | SessionRuntime,
-      boundaryOrRun?: RestartBoundary | SessionRuntime,
-      maybeRun?: SessionRuntime,
-    ): boolean {
+    launch(...[
+      sessionId,
+      runnerId,
+      generationOrRun,
+      boundaryOrRun,
+      maybeRun,
+    ]: SessionLaunchParameters): boolean {
       const generation =
         typeof generationOrRun === "number" ? generationOrRun : 0;
       const boundary =
