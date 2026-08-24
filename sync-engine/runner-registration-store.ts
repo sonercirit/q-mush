@@ -154,16 +154,15 @@ export function createRunnerRegistrationStore(
       return stored;
     }
     try {
+      const legacyCondition = legacyRunnerTokenCondition(
+        activeRunnerCondition,
+        stored.id,
+        stored.tokenHash,
+      );
       const backfilled = database
         .update(runners)
         .set({ tokenDigest: digest })
-        .where(
-          legacyRunnerTokenCondition(
-            activeRunnerCondition,
-            stored.id,
-            stored.tokenHash,
-          ),
-        )
+        .where(legacyCondition)
         .returning(runnerRegistrationSelection())
         .get();
       tokenDigestBackfilled.add(digest);
