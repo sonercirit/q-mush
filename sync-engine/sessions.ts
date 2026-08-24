@@ -71,8 +71,8 @@ import {
 } from "./session-question-actions.ts";
 import { launchAnsweredQuestionSession } from "./session-question-launcher.ts";
 import { launchQueuedSessions } from "./session-queued-launcher.ts";
+import type { SessionRealtimeCommands } from "./session-realtime-commands.ts";
 import { createRealtimeSessionCommands } from "./session-realtime-factory.ts";
-import type { RealtimeSessionCommands } from "./session-realtime-integration.ts";
 import {
   createSessionRequestHelpers,
   type SessionRequestHelpers,
@@ -121,7 +121,7 @@ class DrizzleSessionIntegration
   readonly #onChange = new Set<(userId: string, sessionId: string) => void>();
   readonly #providers: SessionCredentialReaders;
   readonly #realtime: RealtimeHub | undefined;
-  readonly #realtimeCommands: RealtimeSessionCommands;
+  readonly #realtimeCommands: SessionRealtimeCommands;
   readonly #questions: SessionQuestionActionDependencies;
   readonly #requests: SessionRequestHelpers;
   readonly #launch: SessionLaunchBoundary["launch"];
