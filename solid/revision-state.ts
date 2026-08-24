@@ -21,24 +21,43 @@ export interface RevisionState<State extends object> {
 }
 
 export function createRevisionState<State extends object>(
-  value: Accessor<State>, setState: ReactiveState<State>["setState"],
+  value: Accessor<State>,
+  setState: ReactiveState<State>["setState"],
 ): RevisionState<State> {
   let revision = 0;
-  const setValue = (next: State): void => { setState(() => next); };
+  const setValue = (next: State): void => {
+    setState(() => next);
+  };
   const state: RevisionState<State> = {
     accessor: value,
-    get value() { return value(); },
-    advance() { revision += 1; },
-    begin(patch) { state.advance(); if (patch !== undefined) state.patch(patch); return revision; },
+    get value() {
+      return value();
+    },
+    advance() {
+      revision += 1;
+    },
+    begin(patch) {
+      state.advance();
+      if (patch !== undefined) state.patch(patch);
+      return revision;
+    },
     isCurrent: (candidate) => candidate === revision,
-    patch(patch) { setValue({ ...value(), ...patch }); },
-    patchCurrent(candidate, patch) { return state.patchCurrentWith(candidate, () => patch); },
+    patch(patch) {
+      setValue({ ...value(), ...patch });
+    },
+    patchCurrent(candidate, patch) {
+      return state.patchCurrentWith(candidate, () => patch);
+    },
     patchCurrentWith(candidate, patch) {
       if (!state.isCurrent(candidate)) return false;
-      state.patch(patch()); return true;
+      state.patch(patch());
+      return true;
     },
     replaceSilently: setValue,
-    reset(next) { state.advance(); setValue(next); },
+    reset(next) {
+      state.advance();
+      setValue(next);
+    },
   };
   return state;
 }

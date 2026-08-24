@@ -119,17 +119,15 @@ test("discovers global fallbacks through the mounted workspace", async () => {
         }
         toolSettings={new ToolSettingsController()}
         user={{ email: "user@example.com", id: "user-1", name: "User" }}
-        workspaces={
-          createWorkspaceController(
-            undefined,
-            createReactiveState(
-              createWorkspaceViewState({
-                defaultWorkspaceId: TEST_WORKSPACE_LIST.defaultWorkspaceId,
-                workspaces: TEST_WORKSPACE_LIST.workspaces.slice(0, 1),
-              }),
-            ),
-          )
-        }
+        workspaces={createWorkspaceController(
+          undefined,
+          createReactiveState(
+            createWorkspaceViewState({
+              defaultWorkspaceId: TEST_WORKSPACE_LIST.defaultWorkspaceId,
+              workspaces: TEST_WORKSPACE_LIST.workspaces.slice(0, 1),
+            }),
+          ),
+        )}
       />
     ),
     DISPOSALS,

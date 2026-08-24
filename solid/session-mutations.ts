@@ -192,18 +192,23 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
     typeof payload["prompt"] === "string" &&
     (payload["kind"] === "follow_up" || payload["kind"] === "steer");
   const handlers: Record<SessionMutationOperation, () => boolean> = {
-    [SESSION_REALTIME_OPERATIONS.compact]: () => Object.keys(payload).length === 1,
-    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () => Object.keys(payload).length === 1,
-    [SESSION_REALTIME_OPERATIONS.continue]: () => Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.compact]: () =>
+      Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () =>
+      Object.keys(payload).length === 1,
+    [SESSION_REALTIME_OPERATIONS.continue]: () =>
+      Object.keys(payload).length === 1,
     [SESSION_REALTIME_OPERATIONS.followUp]: followUp,
     [SESSION_REALTIME_OPERATIONS.reassign]: () =>
       Object.keys(payload).length === 3 &&
       typeof payload["runnerId"] === "string" &&
       typeof payload["workingDirectory"] === "string",
     [SESSION_REALTIME_OPERATIONS.send]: () =>
-      validOptionalImagePayload(payload, 2) && typeof payload["prompt"] === "string",
+      validOptionalImagePayload(payload, 2) &&
+      typeof payload["prompt"] === "string",
     [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
-      Object.keys(payload).length === 2 && typeof payload["autoCompact"] === "boolean",
+      Object.keys(payload).length === 2 &&
+      typeof payload["autoCompact"] === "boolean",
     [SESSION_REALTIME_OPERATIONS.setContextTokenCap]: () =>
       Object.keys(payload).length === 2 &&
       (payload["userContextTokenCap"] === null ||
@@ -211,11 +216,14 @@ function validSessionMutationPayload(mutation: SessionMutation): boolean {
           Number.isSafeInteger(payload["userContextTokenCap"]) &&
           payload["userContextTokenCap"] > 0)),
     [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
-      Object.keys(payload).length === 2 && typeof payload["idleCompact"] === "boolean",
+      Object.keys(payload).length === 2 &&
+      typeof payload["idleCompact"] === "boolean",
     [SESSION_REALTIME_OPERATIONS.steer]: followUp,
     [SESSION_REALTIME_OPERATIONS.stop]: () =>
-      Object.keys(payload).length === (payload["cascade"] === undefined ? 1 : 2) &&
-      (payload["cascade"] === undefined || typeof payload["cascade"] === "boolean"),
+      Object.keys(payload).length ===
+        (payload["cascade"] === undefined ? 1 : 2) &&
+      (payload["cascade"] === undefined ||
+        typeof payload["cascade"] === "boolean"),
     [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
   };
   return handlers[mutation.operation]();
@@ -275,19 +283,32 @@ function mutationIsReconciled(
     [SESSION_REALTIME_OPERATIONS.compact]: () => generationAdvanced,
     [SESSION_REALTIME_OPERATIONS.compactAndContinue]: () => generationAdvanced,
     [SESSION_REALTIME_OPERATIONS.continue]: () => generationAdvanced,
-    [SESSION_REALTIME_OPERATIONS.followUp]: () => detail.pendingInputs.some(
-      ({ clientRequestId }) => clientRequestId === mutation.payload["clientRequestId"]),
-    [SESSION_REALTIME_OPERATIONS.reassign]: () => generationAdvanced &&
+    [SESSION_REALTIME_OPERATIONS.followUp]: () =>
+      detail.pendingInputs.some(
+        ({ clientRequestId }) =>
+          clientRequestId === mutation.payload["clientRequestId"],
+      ),
+    [SESSION_REALTIME_OPERATIONS.reassign]: () =>
+      generationAdvanced &&
       detail.runnerId === mutation.payload["runnerId"] &&
-      detail.workingDirectory === mutation.payload["workingDirectory"] && !detail.runnerRequired,
+      detail.workingDirectory === mutation.payload["workingDirectory"] &&
+      !detail.runnerRequired,
     [SESSION_REALTIME_OPERATIONS.send]: () => {
       const prompt = mutation.payload["prompt"];
       const images = mutation.payload["images"] ?? [];
       const previousMessageIds = new Set(baseline.messages.map(({ id }) => id));
-      return generationAdvanced && typeof prompt === "string" && Array.isArray(images) &&
-        detail.messages.some((message) => !previousMessageIds.has(message.id) &&
-          message.role === "user" && message.content === prompt &&
-          serializedValuesMatch(message.images, images));
+      return (
+        generationAdvanced &&
+        typeof prompt === "string" &&
+        Array.isArray(images) &&
+        detail.messages.some(
+          (message) =>
+            !previousMessageIds.has(message.id) &&
+            message.role === "user" &&
+            message.content === prompt &&
+            serializedValuesMatch(message.images, images),
+        )
+      );
     },
     [SESSION_REALTIME_OPERATIONS.setAutoCompaction]: () =>
       detail.autoCompact === mutation.payload["autoCompact"],
@@ -295,8 +316,11 @@ function mutationIsReconciled(
       detail.userContextTokenCap === mutation.payload["userContextTokenCap"],
     [SESSION_REALTIME_OPERATIONS.setIdleCompaction]: () =>
       detail.idleCompact === mutation.payload["idleCompact"],
-    [SESSION_REALTIME_OPERATIONS.steer]: () => detail.pendingInputs.some(
-      ({ clientRequestId }) => clientRequestId === mutation.payload["clientRequestId"]),
+    [SESSION_REALTIME_OPERATIONS.steer]: () =>
+      detail.pendingInputs.some(
+        ({ clientRequestId }) =>
+          clientRequestId === mutation.payload["clientRequestId"],
+      ),
     [SESSION_REALTIME_OPERATIONS.stop]: () => detail.status === "stopped",
     [SESSION_REALTIME_OPERATIONS.updateProvider]: () => false,
   };

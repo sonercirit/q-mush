@@ -326,8 +326,7 @@ export class RealtimeConnection {
         `${matched.type}:${matched.sessionId}`,
       session_compaction_settled: (matched) =>
         `${matched.type}:${matched.sessionId}`,
-      session_questions: (matched) =>
-        `session_questions:${matched.sessionId}`,
+      session_questions: (matched) => `session_questions:${matched.sessionId}`,
       sessions: (matched) => matched.type,
       sessions_changed: (matched) => matched.type,
       tool_stream_snapshot: (matched) =>
