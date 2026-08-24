@@ -2,7 +2,7 @@ import type { AgentModelCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_MODELS_PATH } from "../shared/routes.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import { requestJson } from "./browser-http.ts";
-import { DiscoveryCache } from "./discovery-cache.ts";
+import { createDiscoveryCache } from "./discovery-cache.ts";
 import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -13,7 +13,7 @@ import { sessionModelDiscoveryState } from "./session-state.ts";
 import type { SessionCommandTransport } from "./session-transport.ts";
 
 export class SessionModelController {
-  readonly #catalogs = new DiscoveryCache<AgentModelCatalog>();
+  readonly #catalogs = createDiscoveryCache<AgentModelCatalog>();
   readonly #state: RevisionState<SessionViewState>;
   readonly #transport: SessionCommandTransport | undefined;
 

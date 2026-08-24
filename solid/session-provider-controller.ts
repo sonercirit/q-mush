@@ -1,7 +1,7 @@
 import type { OpenRouterProviderCatalog } from "../shared/agent-configuration.ts";
 import { SESSION_OPENROUTER_PROVIDERS_PATH } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
-import { DiscoveryCache } from "./discovery-cache.ts";
+import { createDiscoveryCache } from "./discovery-cache.ts";
 import { shouldDiscover } from "./discovery-state.ts";
 import type { RevisionState } from "./revision-state.ts";
 import type { SessionViewState } from "./session-client.tsx";
@@ -14,7 +14,7 @@ function discoveryKey(credential: string, model: string): string {
 }
 
 export class SessionProviderController {
-  readonly #catalogs = new DiscoveryCache<OpenRouterProviderCatalog>();
+  readonly #catalogs = createDiscoveryCache<OpenRouterProviderCatalog>();
   readonly #state: RevisionState<SessionViewState>;
   #workspaceId = "";
 

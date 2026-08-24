@@ -1,82 +1,74 @@
-export class DiscoveryCache<Value> {
-  readonly #values = new Map<string, Value>();
-  #request = 0;
-
-  #apply(
-    key: string,
-    value: Value,
-    apply: (key: string, value: Value) => void,
-  ): void {
-    apply(key, value);
-  }
-
+export interface DiscoveryCache<Value> {
   begin(
     key: string,
     force: boolean,
     apply: (key: string, value: Value) => void,
     start: (request: number) => void,
-  ): boolean {
-    const cached = this.get(key, force);
-    if (cached !== undefined) {
-      this.#apply(key, cached, apply);
-      return false;
-    }
-    start(this.nextRequest());
-    return true;
-  }
-
-  clear(): void {
-    this.#values.clear();
-    this.#request += 1;
-  }
-
-  delete(): void {
-    this.#request += 1;
-  }
-
-  get(key: string, force: boolean): Value | undefined {
-    return force ? undefined : this.#values.get(key);
-  }
-
-  nextRequest(): number {
-    this.#request += 1;
-    return this.#request;
-  }
-
-  isCurrent(request: number): boolean {
-    return request === this.#request;
-  }
-
-  catch(request: number, current: () => boolean): boolean {
-    return this.isCurrent(request) && current();
-  }
-
+  ): boolean;
+  clear(): void;
+  delete(): void;
+  get(key: string, force: boolean): Value | undefined;
+  nextRequest(): number;
+  isCurrent(request: number): boolean;
+  catch(request: number, current: () => boolean): boolean;
   handleFailure(
     request: number,
     current: () => boolean,
     fail: () => void,
-  ): void {
-    if (this.catch(request, current)) {
-      fail();
-    }
-  }
-
+  ): void;
   resolve(
     request: number,
     key: string,
     value: Value,
     current: () => boolean,
     apply: (key: string, value: Value) => void,
-  ): boolean {
-    if (!this.catch(request, current)) {
-      return false;
-    }
-    this.set(key, value);
-    this.#apply(key, value, apply);
-    return true;
-  }
+  ): boolean;
+  set(key: string, value: Value): void;
+}
 
-  set(key: string, value: Value): void {
-    this.#values.set(key, value);
-  }
+export function createDiscoveryCache<Value>(): DiscoveryCache<Value> {
+  const values = new Map<string, Value>();
+  let request = 0;
+  const nextRequest = (): number => {
+    request += 1;
+    return request;
+  };
+  const isCurrent = (candidate: number): boolean => candidate === request;
+  const caught = (candidate: number, current: () => boolean): boolean =>
+    isCurrent(candidate) && current();
+  const set = (key: string, value: Value): void => {
+    values.set(key, value);
+  };
+  return {
+    begin(key, force, apply, start) {
+      const cached = force ? undefined : values.get(key);
+      if (cached !== undefined) {
+        apply(key, cached);
+        return false;
+      }
+      start(nextRequest());
+      return true;
+    },
+    clear() {
+      values.clear();
+      request += 1;
+    },
+    delete() {
+      request += 1;
+    },
+    get: (key, force) => (force ? undefined : values.get(key)),
+    nextRequest,
+    isCurrent,
+    catch: caught,
+    handleFailure(candidate, current, fail) {
+      if (caught(candidate, current)) fail();
+    },
+    resolve(candidate, key, value, current, apply) {
+      if (!caught(candidate, current)) return false;
+      set(key, value);
+      apply(key, value);
+      return true;
+    },
+    set,
+  };
 }
