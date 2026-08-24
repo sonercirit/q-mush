@@ -253,14 +253,7 @@ function createQuestion(
   now: number,
   generation = 3,
 ) {
-  return store.create(
-    USER_ID,
-    SESSION_ID,
-    generation,
-    toolCallId,
-    input,
-    now,
-  );
+  return store.create(USER_ID, SESSION_ID, generation, toolCallId, input, now);
 }
 
 function selectedAnswer(value: string): AskQuestionAnswers {
@@ -316,17 +309,17 @@ describe("ask questions store", () => {
       activeStartedAt: NOW + 21,
     };
 
-    expect(() =>
-      createQuestion(store, "call-other", NOW + 30),
-    ).toThrow("already has pending questions");
+    expect(() => createQuestion(store, "call-other", NOW + 30)).toThrow(
+      "already has pending questions",
+    );
     expect(persistence.state.requests).toHaveLength(1);
   });
 
   test("does not persist a request when the generation is stale", () => {
     const { persistence, store } = setup();
-    expect(() =>
-      createQuestion(store, "call-question", NOW + 20, 2),
-    ).toThrow("not running");
+    expect(() => createQuestion(store, "call-question", NOW + 20, 2)).toThrow(
+      "not running",
+    );
     expect(persistence.state.requests).toEqual([]);
   });
 
@@ -399,9 +392,9 @@ describe("ask questions store", () => {
       "answered",
     ]);
     expect(persistence.state.toolResults).toHaveLength(1);
-    expect(
-      answerQuestion(store, NOW + 50, selectedAnswer("stop")),
-    ).toEqual({ status: "conflict" });
+    expect(answerQuestion(store, NOW + 50, selectedAnswer("stop"))).toEqual({
+      status: "conflict",
+    });
   });
 
   test("delivers a custom answer in the tool result", () => {
