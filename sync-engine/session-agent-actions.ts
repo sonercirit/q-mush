@@ -255,12 +255,10 @@ export function createSessionAgentActions(
       detail,
       userId,
     );
-    if (reported !== undefined) {
-      dependencies.notify(
-        userId,
-        reported.disposition === "terminal" ? detail.id : reported.parentId,
-      );
-    }
+    if (reported === undefined) return undefined;
+    const notifiedSessionId =
+      reported.disposition === "terminal" ? detail.id : reported.parentId;
+    dependencies.notify(userId, notifiedSessionId);
     return reported;
   }
 
