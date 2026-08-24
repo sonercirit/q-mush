@@ -202,43 +202,53 @@ function failCreatedSession(
   transitionTestSession(setup, detail, "failed", now);
 }
 
+interface LaunchableSessionContext {
+  readonly created: AgentSessionDetail;
+  readonly now: () => number;
+  readonly setup: SessionStoreTestSetup;
+}
+
+type LaunchableSessionHandler = (context: LaunchableSessionContext) => void;
+
+const launchableSessionHandlers: Record<
+  AgentSessionStatus,
+  LaunchableSessionHandler
+> = {
+  completed: () => unsupportedFixtureStatus("completed"),
+  failed: ({ created, now, setup }) => {
+    failCreatedSession(setup, created, now);
+  },
+  idle: ({ created, now, setup }) => {
+    transitionTestSession(setup, created, "running", now);
+    transitionTestSession(setup, created, "idle", now);
+  },
+  paused: ({ created, now, setup }) => {
+    expect(
+      setup.store.pauseQueuedForRestart(
+        { generation: created.generation, sessionId: created.id },
+        "server",
+        RESTART_ID,
+        "compact",
+        now(),
+      ),
+    ).toBe(true);
+  },
+  queued: () => undefined,
+  running: ({ created, now, setup }) => {
+    transitionTestSession(setup, created, "running", now);
+  },
+  stopped: ({ created, now, setup }) => {
+    expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);
+  },
+};
+
 function launchableSessionSetup(
   status: AgentSessionStatus,
 ): FailedLaunchTestSetup {
   const setup = createStore();
   const now = testClock();
   const created = createTestSession(setup.store);
-  switch (status) {
-    case "completed": {
-      return unsupportedFixtureStatus(status);
-    }
-    case "failed":
-      failCreatedSession(setup, created, now);
-      break;
-    case "idle":
-      transitionTestSession(setup, created, "running", now);
-      transitionTestSession(setup, created, "idle", now);
-      break;
-    case "paused":
-      expect(
-        setup.store.pauseQueuedForRestart(
-          { generation: created.generation, sessionId: created.id },
-          "server",
-          RESTART_ID,
-          "compact",
-          now(),
-        ),
-      ).toBe(true);
-      break;
-    case "queued":
-      break;
-    case "running":
-      transitionTestSession(setup, created, "running", now);
-      break;
-    case "stopped":
-      expect(setup.store.stop(TEST_USER_ID, created.id, now())).toBe(true);
-      break;
-  }
+  launchableSessionHandlers[status]({ created, now, setup });
   const detail = expectStoredSession(setup, TEST_USER_ID, created.id, {
     status,
   });
