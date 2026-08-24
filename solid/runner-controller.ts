@@ -6,7 +6,7 @@ import {
 } from "../shared/routes.ts";
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
 import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
 import { createReactiveState } from "./reactive-state.ts";
 import {
@@ -216,7 +216,7 @@ export class RunnerController {
     } catch (error) {
       if (this.#isCurrent(revision)) {
         const unavailable =
-          error instanceof HttpResponseError && error.status === 503;
+          isHttpResponseError(error) && error.status === 503;
         this.#patch({
           creating: false,
           error: unavailable

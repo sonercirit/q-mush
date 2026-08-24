@@ -1,6 +1,6 @@
 import type { AgentSessionDetail } from "../shared/session-model.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
-import { HttpResponseError } from "./browser-http.ts";
+import { isHttpResponseError } from "./browser-http.ts";
 import type { SessionViewState } from "./session-client.tsx";
 import { readSessionDetail } from "./session-codec.ts";
 import type { SessionMutationAcknowledgement } from "./session-mutation-acknowledgement.ts";
@@ -384,7 +384,7 @@ export function sessionMutationError(error: unknown, action: string): string {
     );
   }
   if (
-    (error instanceof HttpResponseError && error.status === 409) ||
+    (isHttpResponseError(error) && error.status === 409) ||
     (code !== undefined &&
       [
         "request_conflict",

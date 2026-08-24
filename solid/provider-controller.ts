@@ -10,7 +10,7 @@ import {
 } from "../shared/routes.ts";
 import { readSessionCredentialReassignmentResult } from "../shared/session-credential-reassignment.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
-import { HttpResponseError, request, requestJson } from "./browser-http.ts";
+import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
 import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
 import {
   createProviderViewState,
@@ -149,7 +149,7 @@ export class ProviderController {
     await this.#state.load({
       failure: (error) => ({
         error:
-          error instanceof HttpResponseError
+          isHttpResponseError(error)
             ? this.#loadError(error.status)
             : this.#loadError(0),
       }),
@@ -361,7 +361,7 @@ export class ProviderController {
       init,
       request,
       (error) => {
-        const status = error instanceof HttpResponseError ? error.status : 0;
+        const status = isHttpResponseError(error) ? error.status : 0;
         return { ...settled, error: errorMessage(status) };
       },
       { ...pending, error: undefined },

@@ -10,7 +10,7 @@ import {
 } from "../shared/session-provider-update.ts";
 import { SESSION_REALTIME_OPERATIONS } from "../shared/user-realtime-protocol.ts";
 import type { WorkspaceSummary } from "../shared/workspace-model.ts";
-import { HttpResponseError, requestJson } from "./browser-http.ts";
+import { isHttpResponseError, requestJson } from "./browser-http.ts";
 import {
   readAgentModelCatalog,
   readOpenRouterProviderCatalog,
@@ -54,7 +54,7 @@ function modelDiscoveryFailure(
 ): SessionModelDiscoveryFailure {
   const providerName = provider === "openrouter" ? "OpenRouter" : "Provider";
   const code =
-    error instanceof HttpResponseError
+    isHttpResponseError(error)
       ? error.code
       : typeof error === "object" &&
           error !== null &&
@@ -71,7 +71,7 @@ function modelDiscoveryFailure(
     return { error: "That workspace is unavailable for model discovery." };
   }
   if (
-    error instanceof HttpResponseError &&
+    isHttpResponseError(error) &&
     error.code === "provider_unavailable"
   ) {
     return {
