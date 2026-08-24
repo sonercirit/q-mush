@@ -108,6 +108,13 @@ import {
   type PendingSpawnedSession,
   type SpawnedReportDisposition,
 } from "./session-store-spawns.ts";
+import { readStoredSessionGeneration } from "./session-store-state.ts";
+import {
+  stopStoredSession,
+  transitionSessionRuntime,
+} from "./session-store-transitions.ts";
+import { appendSessionUserMessage } from "./session-store-values.ts";
+import { activeSessionToolSettings } from "./session-turn-store.ts";
 type SpawnedReportParameters = readonly [
   userId: string,
   childId: string,
@@ -117,13 +124,6 @@ type SpawnedReportParameters = readonly [
   content: string,
   now: number,
 ];
-import { readStoredSessionGeneration } from "./session-store-state.ts";
-import {
-  stopStoredSession,
-  transitionSessionRuntime,
-} from "./session-store-transitions.ts";
-import { appendSessionUserMessage } from "./session-store-values.ts";
-import { activeSessionToolSettings } from "./session-turn-store.ts";
 export function createSessionStore(
   database: AppDatabase,
   generateId: IdGenerator = createUuidV7,
@@ -495,7 +495,9 @@ export function createSessionStore(
         userId,
       });
     },
-    appendSpawnedSessionReport(...parameters: SpawnedReportParameters): boolean {
+    appendSpawnedSessionReport(
+      ...parameters: SpawnedReportParameters
+    ): boolean {
       return spawnedReportDisposition(...parameters) !== undefined;
     },
     spawnedSessionCallbackDisposition(

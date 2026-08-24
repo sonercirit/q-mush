@@ -428,13 +428,15 @@ export function createSessionRuntimes(
       await settled;
     },
 
-    launch(...[
-      sessionId,
-      runnerId,
-      generationOrRun,
-      boundaryOrRun,
-      maybeRun,
-    ]: SessionLaunchParameters): boolean {
+    launch(
+      ...[
+        sessionId,
+        runnerId,
+        generationOrRun,
+        boundaryOrRun,
+        maybeRun,
+      ]: SessionLaunchParameters
+    ): boolean {
       const generation =
         typeof generationOrRun === "number" ? generationOrRun : 0;
       const boundary =
