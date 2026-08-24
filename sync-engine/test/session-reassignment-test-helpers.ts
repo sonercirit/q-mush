@@ -43,22 +43,20 @@ export async function postSessionAction(
   action: string,
 ): Promise<Response> {
   const path = `${SESSIONS_PATH}/${SESSION_ID}/${action}`;
-  switch (action) {
-    case "compact":
-      return setup.sessions.compact(
-        createAuthenticatedRequest(path, undefined, "POST"),
-        SESSION_ID,
-      );
-    case "continue":
-      return setup.sessions.continue(
-        createAuthenticatedRequest(path, undefined, "POST"),
-        SESSION_ID,
-      );
-    case "stop":
-      return stopSessionRequest(setup);
-    default:
-      throw new Error("The session test action is invalid");
+  const handlers: Record<string, () => Promise<Response>> = {
+    compact: () => Promise.resolve(setup.sessions.compact(
+      createAuthenticatedRequest(path, undefined, "POST"), SESSION_ID,
+    )),
+    continue: () => setup.sessions.continue(
+      createAuthenticatedRequest(path, undefined, "POST"), SESSION_ID,
+    ),
+    stop: () => stopSessionRequest(setup),
+  };
+  const handler = handlers[action];
+  if (handler === undefined) {
+    throw new Error("The session test action is invalid");
   }
+  return handler();
 }
 
 export function stopSessionRequest(
