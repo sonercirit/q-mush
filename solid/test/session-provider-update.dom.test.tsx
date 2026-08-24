@@ -31,7 +31,9 @@ interface InvalidContextCapError extends Error {
   readonly code: "invalid_context_token_cap";
 }
 
-function isInvalidContextCapError(error: unknown): error is InvalidContextCapError {
+function isInvalidContextCapError(
+  error: unknown,
+): error is InvalidContextCapError {
   return (
     error instanceof Error &&
     "code" in error &&
