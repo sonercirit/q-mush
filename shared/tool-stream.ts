@@ -452,9 +452,3 @@ export function createToolStreamSnapshotFrame(
     type: "tool_stream_snapshot",
   };
 }
-
-export {
-  createToolStreamHubState,
-  type ToolStreamHubState,
-  type ToolStreamHubStateOptions,
-} from "./tool-stream-hub.ts";

@@ -1,8 +1,6 @@
 import type { RunnerToolCommand } from "../shared/runner-command-broker.ts";
-import {
-  createToolStreamHubState,
-  type ToolStreamDeltaFrame,
-} from "../shared/tool-stream.ts";
+import { createToolStreamHubState } from "../shared/tool-stream-hub.ts";
+import { type ToolStreamDeltaFrame } from "../shared/tool-stream.ts";
 
 export interface RealtimeSocket {
   close(code?: number, reason?: string): void;

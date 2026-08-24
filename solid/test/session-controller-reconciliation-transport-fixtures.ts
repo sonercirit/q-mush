@@ -36,11 +36,6 @@ import {
   createdSessionDetail,
   sessionDetail,
 } from "./session-controller-reconciliation-detail-fixtures.ts";
-export {
-  createdSessionDetail,
-  sessionDetail,
-  sessionUserMessage,
-} from "./session-controller-reconciliation-detail-fixtures.ts";
 
 export interface PendingSessionCommand {
   readonly operation: Operation;
