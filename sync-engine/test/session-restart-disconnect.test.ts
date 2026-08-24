@@ -4,7 +4,7 @@ import type {
   AgentModel,
   AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { ActiveSessionTools } from "../../sync-engine/active-session-tools.ts";
 import { runPersistedSession } from "../../sync-engine/session-run.ts";
@@ -62,7 +62,7 @@ test("disconnect during an in-flight runner command persists the exact restart h
   });
   const agentFileDispatched = Promise.withResolvers<undefined>();
   const toolDispatched = Promise.withResolvers<undefined>();
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: (() => {
       const ids = ["agent-file-command", "in-flight-command"];
       return () => ids.shift() ?? "unexpected-command";

@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import { testAgentModelCatalog } from "../../shared/test/agent-model-fixtures.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
@@ -217,7 +217,7 @@ describe("global tool time limit integration", () => {
       const finishedErrors: unknown[] = [];
       const factorySelections: unknown[] = [];
       const timeout = vi.spyOn(globalThis, "setTimeout");
-      const broker = new RunnerCommandBroker({
+      const broker = createRunnerCommandBroker({
         cancel: (_runnerId, commandId) => {
           canceled.resolve(commandId);
         },

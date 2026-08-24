@@ -1,7 +1,7 @@
 import type { AuthenticatedUser } from "../shared/auth-model.ts";
 import { createDatabase } from "../shared/database.ts";
 import { createUuidV7 } from "../shared/ids.ts";
-import { RunnerCommandBroker } from "../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../shared/runner-command-broker.ts";
 import type { RestartHandoffOperation } from "../shared/session-model.ts";
 import { ActiveSessionTools } from "./active-session-tools.ts";
 import {
@@ -137,7 +137,7 @@ class DrizzleSessionIntegration
     this.#realtime = dependencies.realtime;
     this.#broker =
       dependencies.broker ??
-      new RunnerCommandBroker({
+      createRunnerCommandBroker({
         cancel: (runnerId, commandId) =>
           this.#realtime?.publishRunnerCancellation(runnerId, commandId),
         deliver: (runnerId, command) =>

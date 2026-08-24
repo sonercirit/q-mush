@@ -11,8 +11,9 @@ import type { ProviderModelPricing } from "../../shared/provider-model-pricing.t
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
   RUNNER_EXECUTION_CLEANUP_COMMAND,
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import type { RunnerSummary } from "../../shared/runner-model.ts";
 import { normalizeSearchText } from "../../shared/search.ts";
@@ -237,7 +238,7 @@ export function connectedSessionSetup(
   let latestRunnerCommand: RunnerToolCommand | undefined;
   const broker =
     options.broker ??
-    new RunnerCommandBroker({
+    createRunnerCommandBroker({
       commandId: options.commandId ?? (() => RUNNER_COMMAND_ID),
       deliver: (runnerId, command) => {
         if (command.tool === RUNNER_EXECUTION_CLEANUP_COMMAND) {

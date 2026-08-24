@@ -8,8 +8,9 @@ import type {
 import { isRecord } from "../../shared/auth-model.ts";
 import { SESSIONS_PATH } from "../../shared/routes.ts";
 import {
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import {
   createAuthenticatedRequest,
@@ -124,7 +125,7 @@ function autoCompletingAgentFileBroker(): {
 } {
   const commands: RunnerToolCommand[] = [];
   let commandSequence = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => `phantom-step-command-${String(++commandSequence)}`,
     deliver: (runnerId, command) => {
       commands.push(command);

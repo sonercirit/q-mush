@@ -1,5 +1,5 @@
 import { describe, expect, test } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 import {
@@ -30,7 +30,7 @@ async function expectCompletedResult(
 test("cancels only commands from a revoked execution generation", async () => {
   const canceled: string[] = [];
   let id = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     cancel: (_runnerId, commandId) => canceled.push(commandId),
     commandId: () => `generation-${String(++id)}`,
     deliver: () => true,

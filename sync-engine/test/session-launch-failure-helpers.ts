@@ -1,5 +1,5 @@
 import { expect, vi } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import {
   installDatabaseWriteResilience,
@@ -43,7 +43,7 @@ export function launchFailureSetup(
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
   const finished = vi.spyOn(actions, "finished");
   const runtimes = new SessionRuntimes();
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "recovered-launch-agent-file",
   });
   const pending = new Map<string, Parameters<SessionFinisher["finish"]>>();

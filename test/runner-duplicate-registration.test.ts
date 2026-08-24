@@ -7,8 +7,9 @@ import {
 } from "../runner/runner-update.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import {
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerToolCommand,
+  createRunnerCommandBroker,
 } from "../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../shared/runner-disconnected-error.ts";
 import {
@@ -202,7 +203,7 @@ test("a supervised relaunch supersedes a stale restart process without rejecting
   let staleRestartProcess: FakeRunnerProcess | undefined;
   let connectionGeneration = 0;
   let nextCommandId = 0;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () =>
       ++nextCommandId === 1
         ? "command-on-stale-restart-process"

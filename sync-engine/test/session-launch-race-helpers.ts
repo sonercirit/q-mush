@@ -2,7 +2,7 @@ import { expect } from "vitest";
 import { AGENT_SESSION_TOOL_NAMES } from "../../shared/agent-tools.ts";
 import type { AppDatabase } from "../../shared/database.ts";
 import type { ProviderCredentialAccess } from "../../shared/provider-credential-store.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type {
   AgentSessionDetail,
   RestartHandoffOperation,
@@ -190,7 +190,7 @@ export function agentActionsSetup(
   const actions = new SessionAgentActions({
     abortSession: () => undefined,
     activeSession: () => false,
-    broker: new RunnerCommandBroker(),
+    broker: createRunnerCommandBroker(),
     browseDirectories: () =>
       Promise.resolve({ status: "directory_unavailable" }),
     cleanupSession: () => undefined,

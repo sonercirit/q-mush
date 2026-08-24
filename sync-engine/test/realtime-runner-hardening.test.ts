@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { RUNNER_REALTIME_PATH, RUNNERS_PATH } from "../../shared/routes.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import { runnerRegistrationRejectedMessage } from "../../shared/runner-realtime-protocol.ts";
 import {
   createAuthenticatedRequest,
@@ -456,7 +456,7 @@ test("fresh process nonce fails disconnected commands before queued delivery", a
   const delivered: string[] = [];
   const rejected: unknown[] = [];
   const commandId = ["fresh", "process", "command"].join("-");
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => commandId,
     deliver: (_runnerId, command) => command.tool === "read",
   });

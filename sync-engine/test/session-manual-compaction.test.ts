@@ -4,7 +4,7 @@ import {
   type AgentModel,
   type AgentModelStep,
 } from "../../shared/agent-loop.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { ModelConversationCompactor } from "../../sync-engine/agent-compaction.ts";
 import {
@@ -75,7 +75,7 @@ function runtimeDependencies(
   let now = TEST_NOW + 2;
   return {
     braveSearch: { execute: () => Promise.resolve("unused search") },
-    broker: new RunnerCommandBroker(),
+    broker: createRunnerCommandBroker(),
     pendingComponent: () => undefined,
     credential: {
       accountId: null,

@@ -1,5 +1,5 @@
 import { expect, test, vi } from "vitest";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import { createRunnerDisconnectedError } from "../../shared/runner-disconnected-error.ts";
 import {
   DEFAULT_TOOL_SETTINGS,
@@ -32,7 +32,7 @@ test("loading deadline preserves a concurrent restart handoff", async () => {
   try {
     const disconnected = Promise.withResolvers<never>();
     let restartRequested = false;
-    const broker = new RunnerCommandBroker();
+    const broker = createRunnerCommandBroker();
     vi.spyOn(broker, "dispatch").mockImplementation(() => {
       restartRequested = true;
       dispatched.resolve();

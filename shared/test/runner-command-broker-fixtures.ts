@@ -1,9 +1,10 @@
 import { expect } from "vitest";
 import {
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type DispatchRunnerToolCommand,
   type RunnerCommandResult,
   type RunnerToolCommand,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { captureBrokerRejection } from "./promise-test-helpers.ts";
 
@@ -52,7 +53,7 @@ export function revocableRunnerDispatch(
   } = {},
 ): RevocableDispatch {
   let authorized = true;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     ...options,
     commandId: () => commandId,
   });
@@ -93,7 +94,7 @@ export function deliveredBroker(
     readonly cancel?: (runnerId: string, canceledId: string) => void;
   } = {},
 ): RunnerCommandBroker {
-  return new RunnerCommandBroker({
+  return createRunnerCommandBroker({
     ...options,
     commandId: typeof commandId === "string" ? () => commandId : commandId,
     deliver: () => true,

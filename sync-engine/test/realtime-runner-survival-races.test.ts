@@ -1,7 +1,8 @@
 import { expect, test } from "vitest";
 import {
-  RunnerCommandBroker,
+  type RunnerCommandBroker,
   type RunnerCommandResult,
+  createRunnerCommandBroker,
 } from "../../shared/runner-command-broker.ts";
 import { captureBrokerRejection } from "../../shared/test/promise-test-helpers.ts";
 import { connectedRunnerRealtimeTestIntegration } from "./realtime-test-helpers.ts";
@@ -87,7 +88,7 @@ function tombstonedCommand(commandId: string): Readonly<{
   broker: RunnerCommandBroker;
   rejection: Promise<unknown>;
 }> {
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => commandId,
   });
   broker.registerRunnerProcess(RUNNER_ID, PROCESS_A);
@@ -108,7 +109,7 @@ test("failed fresh-process delivery rolls authority and survival state back toge
     "newly-queued-command",
   ];
   let acceptImmediateDelivery = true;
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => {
       const commandId = commandIds.shift();
       if (commandId === undefined) throw new Error("Missing command ID");
@@ -205,7 +206,7 @@ test("failed fresh-process delivery rolls authority and survival state back toge
 
 test("cancellation frames precede surviving queued command frames on the wire", async () => {
   const commandIds = ["wire-canceled", "wire-surviving"];
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => commandIds.shift() ?? "unexpected-command",
     deliver: () => true,
   });

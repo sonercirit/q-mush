@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type { AgentModel } from "../../shared/agent-loop.ts";
 import { agentSessions, runners } from "../../shared/database/schema.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { SessionRuntimePendingComponent } from "../../shared/session-model.ts";
 import type { SessionDependencies } from "../../sync-engine/session-dependencies.ts";
 import { createSessionLivenessWatchdog } from "../../sync-engine/session-liveness-scheduler.ts";
@@ -82,7 +82,7 @@ export function watchdogSetup(
   const watchdog = new SessionLivenessWatchdog({
     actions: options.actions ?? { finished, reportAll, stopChildren },
     allowUnsafeTestTiming: options.allowUnsafeTestTiming ?? true,
-    broker: options.broker ?? new RunnerCommandBroker(),
+    broker: options.broker ?? createRunnerCommandBroker(),
     cleanup: options.cleanup ?? vi.fn(),
     database: setup.database,
     generateId: () => "watchdog-failure-message",
@@ -224,7 +224,7 @@ function schedulerSetup(liveness?: SessionDependencies["liveness"]) {
         reportAll: vi.fn(),
         stopChildren: vi.fn(),
       },
-      broker: new RunnerCommandBroker(),
+      broker: createRunnerCommandBroker(),
       cleanup: vi.fn(),
       database: setup.database,
       dependencies: {
@@ -390,7 +390,7 @@ test("preserves early acknowledgement", () => {
 test("fails a queued runner command even when its runner recently connected", async () => {
   const setup = runningSetup();
   const runtime = launchPendingRuntime(setup, "startup");
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "undispatched-command",
   });
   const queuedCommand = dispatchBash(setup, broker);
@@ -560,7 +560,7 @@ test("does not time out a twenty-minute command on a live runner connection", as
     currentRuntimes,
     setup.detail.generation,
   );
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "twenty-minute-command",
     deliver: () => true,
   });

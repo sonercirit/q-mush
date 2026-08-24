@@ -1,4 +1,4 @@
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { SessionAgentActionDependencies } from "../../sync-engine/session-agent-action-helpers.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
 import {
@@ -18,7 +18,7 @@ export const EMPTY_SESSION_REQUEST_MODEL_METADATA = {
 function sessionAgentActionDefaults() {
   const runtimeDefaults = sessionAgentActionRuntimeDefaults();
   return {
-    broker: new RunnerCommandBroker(),
+    broker: createRunnerCommandBroker(),
     cleanupSession: () => undefined,
     discoverModels: () => Promise.resolve({ defaultModel: null, models: [] }),
     ...runtimeDefaults,

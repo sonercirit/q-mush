@@ -6,7 +6,7 @@ import type {
 } from "../../shared/agent-loop.ts";
 import { createAgentSystemPrompt } from "../../shared/agent-prompt.ts";
 import { agentMessages, agentSessions } from "../../shared/database/schema.ts";
-import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
+import { type RunnerCommandBroker, createRunnerCommandBroker} from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { DEFAULT_TOOL_SETTINGS } from "../../shared/tool-limits.ts";
 import type { SessionAgentActions } from "../../sync-engine/session-agent-actions.ts";
@@ -101,7 +101,7 @@ function recoveredRunSetup(model: AgentModel): RecoveredRunSetup {
     now: () => TEST_NOW + 5,
     store,
   });
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "restart-agent-file-command",
   });
   const runtimes = new SessionRuntimes();
@@ -157,7 +157,7 @@ function manualCompactionSetup(
   const storeSetup = createStore();
   const detail = createTestSession(storeSetup.store);
   const actions = orchestrationActions(storeSetup.database, storeSetup.store);
-  const broker = new RunnerCommandBroker({
+  const broker = createRunnerCommandBroker({
     commandId: () => "manual-compaction-agent-file",
   });
   const runtimes = new SessionRuntimes();
