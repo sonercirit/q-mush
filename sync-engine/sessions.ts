@@ -62,7 +62,9 @@ import { createToolSettingsStore } from "./tool-settings-store.ts";
 export type { SessionIntegration } from "./session-integration.ts";
 
 export interface DrizzleSessionIntegration extends SessionIntegration {
+  /** @internal Simulates a restart boundary in integration tests. */
   abortAgentActionsForRestart(): void;
+  /** @internal Exposes the configured restart gate to integration tests. */
   agentActionsDraining(): boolean;
 }
 

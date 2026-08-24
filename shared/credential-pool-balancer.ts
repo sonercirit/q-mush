@@ -22,7 +22,11 @@ export interface CredentialPoolBalancer {
   ) => readonly Member[];
 }
 
-/** Deterministic in-process round robin for credential pools. */
+/**
+ * Deterministic in-process round robin for credential pools. Pool membership is
+ * supplied on every selection, so workspace scoping and removals remain
+ * authoritative in the credential store.
+ */
 export function createCredentialPoolBalancer(
   options: CredentialPoolOptions = {},
 ): CredentialPoolBalancer {

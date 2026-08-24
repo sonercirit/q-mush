@@ -23,6 +23,7 @@ interface DevelopmentRestartLifecycleOptions {
  */
 export interface DevelopmentRestartLifecycle {
   readonly restarting: boolean;
+  /** Returns false when the final shutdown already started. */
   beginFinalShutdown(): boolean;
   restart(deadline: RestartDeadline): Promise<void>;
 }
