@@ -3,7 +3,10 @@ import { RunnerCommandBroker } from "../../shared/runner-command-broker.ts";
 import type { AgentSessionDetail } from "../../shared/session-model.ts";
 import { captureBrokerRejection } from "../../shared/test/promise-test-helpers.ts";
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
-import { RunnerRemovalCoordinator } from "../../sync-engine/session-runner-removal.ts";
+import {
+  createRunnerRemovalCoordinator,
+  type RunnerRemovalCoordinator,
+} from "../../sync-engine/session-runner-removal.ts";
 
 const REMOVED_RUNNER_ID = "runner-removed";
 const OTHER_RUNNER_ID = "runner-other";
@@ -112,7 +115,7 @@ function coordinator(
   session = testSession(),
   settled: () => Promise<void> = () => Promise.resolve(),
 ): RunnerRemovalCoordinator {
-  return new RunnerRemovalCoordinator({
+  return createRunnerRemovalCoordinator({
     broker,
     notify: () => undefined,
     now: () => 2,

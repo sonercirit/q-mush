@@ -74,7 +74,10 @@ import { SessionRequestHelpers } from "./session-request-helpers.ts";
 import { createSessionRestartAbort } from "./session-restart-abort.ts";
 import { createSessionRestartControl } from "./session-restart-control.ts";
 import { SessionRestartCoordinator } from "./session-restart-coordinator.ts";
-import { RunnerRemovalCoordinator } from "./session-runner-removal.ts";
+import {
+  createRunnerRemovalCoordinator,
+  type RunnerRemovalCoordinator,
+} from "./session-runner-removal.ts";
 import { SessionRuntimes } from "./session-runtime.ts";
 import { ShutdownInterruptedSessionStore } from "./session-shutdown-interrupted-store.ts";
 import type { SpawnedReportDisposition } from "./session-store-spawns.ts";
@@ -216,7 +219,7 @@ class DrizzleSessionIntegration
       restartSignal: () => this.#restartController.signal,
     });
     this.#cleanup = createSessionExecutionCleanup(this.#broker);
-    this.#removal = new RunnerRemovalCoordinator({
+    this.#removal = createRunnerRemovalCoordinator({
       broker: this.#broker,
       now: this.#now,
       notify: this.#notify,
