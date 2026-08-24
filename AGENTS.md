@@ -193,8 +193,8 @@ Memory.
   presets, imports `.gitignore`, bans non-const assertions and all TypeScript
   `switch` statements and classes: use data-driven dispatch, closure factories,
   and tagged error factories with type guards instead. It enforces canonical
-  named imports (one declaration/module with inline `type` markers). Default imports:
-  only `@eslint/js`, `@tailwindcss/vite`, `vite-plugin-solid`; aliases,
+  named imports (one declaration/module with inline `type` markers). Default
+  imports: only `@eslint/js`, `@tailwindcss/vite`, `vite-plugin-solid`; aliases,
   namespaces, dynamic imports, import attributes, import-equals, `import()`
   types, side-effect imports (except production/browser-test `solid/styles.css`)
   are rejected. First-party code rejects unsafe DOM HTML injection,
