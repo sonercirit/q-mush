@@ -406,10 +406,9 @@ describe("agent model discovery", () => {
 });
 
 test("inherited model metadata keys are not treated as present", () => {
-  const metadata = Object.create({ toString: 16_384 }) as Record<
-    string,
-    unknown
-  >;
+  const metadata: Record<string, unknown> = Object.create({
+    toString: 16_384,
+  });
   metadata["id"] = "inherited-metadata";
 
   expect(
