@@ -9,15 +9,22 @@ import {
 import { TEST_SESSION_DETAIL } from "../../shared/test/session-fixtures.ts";
 import { createSessionExecutionCleanup } from "../../sync-engine/session-execution-cleanup.ts";
 
-class RecordingCleanupBroker extends RunnerCommandBroker {
-  readonly commands: DispatchRunnerToolCommand[] = [];
+interface RecordingCleanupBroker {
+  readonly broker: RunnerCommandBroker;
+  readonly commands: DispatchRunnerToolCommand[];
+}
 
-  override dispatch(
-    input: DispatchRunnerToolCommand,
-  ): Promise<RunnerCommandResult> {
-    this.commands.push(input);
+function createRecordingCleanupBroker(): RecordingCleanupBroker {
+  const commands: DispatchRunnerToolCommand[] = [];
+  const broker = new RunnerCommandBroker({
+    commandId: () => "unused-cleanup-command",
+    deliver: () => false,
+  });
+  broker.dispatch = (input): Promise<RunnerCommandResult> => {
+    commands.push(input);
     return Promise.resolve({ output: "cleaned", state: "completed" });
-  }
+  };
+  return { broker, commands };
 }
 
 function cleanupDetail(executionEnvironment: "bare_metal" | "container") {
@@ -25,10 +32,10 @@ function cleanupDetail(executionEnvironment: "bare_metal" | "container") {
 }
 
 function cleanupSetup(executionEnvironment: "bare_metal" | "container") {
-  const broker = new RecordingCleanupBroker();
+  const recording = createRecordingCleanupBroker();
   return {
-    broker,
-    cleanup: createSessionExecutionCleanup(broker),
+    broker: recording,
+    cleanup: createSessionExecutionCleanup(recording.broker),
     detail: cleanupDetail(executionEnvironment),
   };
 }
