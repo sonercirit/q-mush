@@ -82,10 +82,7 @@ type AnthropicEventKind =
   | "message_delta"
   | "message_start"
   | "message_stop";
-type AnthropicDeltaKind =
-  | "input_json_delta"
-  | "text_delta"
-  | "thinking_delta";
+type AnthropicDeltaKind = "input_json_delta" | "text_delta" | "thinking_delta";
 type AnthropicBlockKind = "text" | "thinking" | "tool_use";
 
 function isDispatchKey<Kind extends string>(
@@ -297,10 +294,7 @@ export function createAnthropicStreamAccumulator(
   };
   const blockHandlers: Record<
     AnthropicBlockKind,
-    (
-      index: number,
-      block: Readonly<Record<string, unknown>>,
-    ) => void
+    (index: number, block: Readonly<Record<string, unknown>>) => void
   > = {
     text: (_index, block) => {
       accumulator.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
