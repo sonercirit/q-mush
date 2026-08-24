@@ -10,7 +10,10 @@ import {
   isProviderStreamErrorEvent,
   readProviderStreamError,
 } from "./provider-error.ts";
-import { AnthropicReplayCapture } from "./provider-stream-anthropic-replay.ts";
+import {
+  createAnthropicReplayCapture,
+  type AnthropicReplayCapture,
+} from "./provider-stream-anthropic-replay.ts";
 import { BufferedAccumulator } from "./provider-stream-buffers.ts";
 import {
   providerEventIndex,
@@ -88,7 +91,7 @@ export class AnthropicStreamAccumulator extends BufferedAccumulator {
   ) {
     super(onDelta);
     this.#requestModel = model;
-    this.#replay = new AnthropicReplayCapture(provenance);
+    this.#replay = createAnthropicReplayCapture(provenance);
   }
 
   finish(): AgentModelStep {
