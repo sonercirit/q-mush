@@ -38,12 +38,12 @@ function browsingError(error: unknown): string {
 export interface DirectoryPickerController {
   readonly state: DirectoryPickerState;
   readonly view: Accessor<DirectoryPickerState>;
-    browse(path: string): Promise<void>;
-    choose(): string | undefined;
-    close(): void;
-    open(runnerId: string, path: string, workspaceId?: string): Promise<void>;
-    reset(): void;
-    retry(): Promise<void>;
+  browse(path: string): Promise<void>;
+  choose(): string | undefined;
+  close(): void;
+  open(runnerId: string, path: string, workspaceId?: string): Promise<void>;
+  reset(): void;
+  retry(): Promise<void>;
 }
 
 export function createDirectoryPickerController(
@@ -52,7 +52,6 @@ export function createDirectoryPickerController(
   let abort: AbortController | undefined;
   let request = 0;
   const controller: DirectoryPickerController = {
-
     get state() {
       return view.state();
     },
@@ -62,18 +61,18 @@ export function createDirectoryPickerController(
     },
 
     browse(path: string): Promise<void> {
-    const runnerId = this.state.runnerId;
-    return runnerId === undefined
-      ? Promise.resolve()
-      : load(runnerId, path, false);
+      const runnerId = this.state.runnerId;
+      return runnerId === undefined
+        ? Promise.resolve()
+        : load(runnerId, path, false);
     },
 
     choose(): string | undefined {
-    const path = this.state.listing?.path;
+      const path = this.state.listing?.path;
 
-    if (path !== undefined) {
-      controller.close();
-    }
+      if (path !== undefined) {
+        controller.close();
+      }
 
       return path;
     },
@@ -91,10 +90,9 @@ export function createDirectoryPickerController(
     },
 
     retry(): Promise<void> {
-    const path = this.state.requestedPath;
+      const path = this.state.requestedPath;
       return path === undefined ? Promise.resolve() : controller.browse(path);
     },
-
   };
 
   function resetState(): void {

@@ -2,7 +2,10 @@ import { type Accessor } from "solid-js";
 import { TOOL_SETTINGS_PATH } from "../shared/routes.ts";
 import { readToolSettings, type ToolSettings } from "../shared/tool-limits.ts";
 import { requestJson } from "./browser-http.ts";
-import { createControllerState, jsonRequestInit } from "./controller-mutation.ts";
+import {
+  createControllerState,
+  jsonRequestInit,
+} from "./controller-mutation.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 
 export interface ToolSettingsViewState {

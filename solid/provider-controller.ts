@@ -11,7 +11,11 @@ import {
 import { readSessionCredentialReassignmentResult } from "../shared/session-credential-reassignment.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
-import { createControllerState, jsonRequestInit, type ControllerState } from "./controller-mutation.ts";
+import {
+  createControllerState,
+  jsonRequestInit,
+  type ControllerState,
+} from "./controller-mutation.ts";
 import {
   createProviderViewState,
   readProviderCredentials,

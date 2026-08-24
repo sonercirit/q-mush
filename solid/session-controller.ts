@@ -6,7 +6,10 @@ import type {
   AgentSessionStatus,
   AgentSessionSummary,
 } from "../shared/session-model.ts";
-import { createDirectoryPickerController, type DirectoryPickerController } from "./directory-picker-controller.ts";
+import {
+  createDirectoryPickerController,
+  type DirectoryPickerController,
+} from "./directory-picker-controller.ts";
 import { createReactiveState, type ReactiveState } from "./reactive-state.ts";
 import type { RealtimeServerEvent } from "./realtime-client-codec.ts";
 import type { RealtimeStreamBatch } from "./realtime-stream-buffer.ts";
@@ -70,7 +73,10 @@ import {
   runUnlessSessionMutation,
   sessionMutationPending,
 } from "./session-pending.ts";
-import { createSessionProviderController, type SessionProviderController } from "./session-provider-controller.ts";
+import {
+  createSessionProviderController,
+  type SessionProviderController,
+} from "./session-provider-controller.ts";
 import { initialSessionViewState } from "./session-state.ts";
 import type {
   SessionTranscriptFilterName,

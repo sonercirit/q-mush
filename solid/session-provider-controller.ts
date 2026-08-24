@@ -20,34 +20,120 @@ export interface SessionProviderController {
   setWorkspace(workspaceId: string): void;
 }
 
-export function createSessionProviderController(state: RevisionState<SessionViewState>): SessionProviderController {
+export function createSessionProviderController(
+  state: RevisionState<SessionViewState>,
+): SessionProviderController {
   const catalogs = createDiscoveryCache<OpenRouterProviderCatalog>();
   let workspaceId = "";
-  const matchesDraft = (credential: string, model: string): boolean => state.value.draft.credential === credential && state.value.draft.model === model;
-  const apply = (key: string, catalog: OpenRouterProviderCatalog): void => { state.patch({ openSelect: undefined, providerDiscovery: sessionProviderDiscoveryState(key, false, catalog) }); };
-  async function load(request: number, key: string, credentialValue: string, credentialId: string, model: string): Promise<void> {
+  const matchesDraft = (credential: string, model: string): boolean =>
+    state.value.draft.credential === credential &&
+    state.value.draft.model === model;
+  const apply = (key: string, catalog: OpenRouterProviderCatalog): void => {
+    state.patch({
+      openSelect: undefined,
+      providerDiscovery: sessionProviderDiscoveryState(key, false, catalog),
+    });
+  };
+  async function load(
+    request: number,
+    key: string,
+    credentialValue: string,
+    credentialId: string,
+    model: string,
+  ): Promise<void> {
     const query = new URLSearchParams({ credentialId, model, workspaceId });
     try {
-      const catalog = readOpenRouterProviderCatalog(await requestJson(`${SESSION_OPENROUTER_PROVIDERS_PATH}?${query.toString()}`));
-      catalogs.resolve(request, key, catalog, () => matchesDraft(credentialValue, model), apply);
+      const catalog = readOpenRouterProviderCatalog(
+        await requestJson(
+          `${SESSION_OPENROUTER_PROVIDERS_PATH}?${query.toString()}`,
+        ),
+      );
+      catalogs.resolve(
+        request,
+        key,
+        catalog,
+        () => matchesDraft(credentialValue, model),
+        apply,
+      );
     } catch {
-      catalogs.handleFailure(request, () => matchesDraft(credentialValue, model), () => { state.patch({ providerDiscovery: sessionProviderDiscoveryState(key, false, undefined, "Serving-provider discovery failed") }); });
+      catalogs.handleFailure(
+        request,
+        () => matchesDraft(credentialValue, model),
+        () => {
+          state.patch({
+            providerDiscovery: sessionProviderDiscoveryState(
+              key,
+              false,
+              undefined,
+              "Serving-provider discovery failed",
+            ),
+          });
+        },
+      );
     }
   }
   const controller: SessionProviderController = {
     clear() {
-      catalogs.delete(); const draft = state.value.draft;
-      if (draft.openRouterProviderTag.length > 0 || state.value.providerDiscovery.key !== undefined) state.patch({ draft: { ...draft, openRouterProviderTag: "" }, openSelect: state.value.openSelect === "openRouterProviderTag" ? undefined : state.value.openSelect, providerDiscovery: sessionProviderDiscoveryState(undefined, false) });
+      catalogs.delete();
+      const draft = state.value.draft;
+      if (
+        draft.openRouterProviderTag.length > 0 ||
+        state.value.providerDiscovery.key !== undefined
+      )
+        state.patch({
+          draft: { ...draft, openRouterProviderTag: "" },
+          openSelect:
+            state.value.openSelect === "openRouterProviderTag"
+              ? undefined
+              : state.value.openSelect,
+          providerDiscovery: sessionProviderDiscoveryState(undefined, false),
+        });
     },
     ensure(credentialValue, model, force = false) {
       const credential = selectedSessionCredential(credentialValue);
-      if (credential?.provider !== "openrouter" || model.length === 0 || !matchesDraft(credentialValue, model)) { controller.clear(); return; }
-      const key = discoveryKey(credentialValue, model); const discovery = state.value.providerDiscovery;
-      if (!shouldDiscover({ currentKey: discovery.key, expectedKey: key, force, state: discovery })) return;
-      catalogs.begin(key, force, apply, (request) => { state.patch({ draft: { ...state.value.draft, openRouterProviderTag: "" }, openSelect: undefined, providerDiscovery: sessionProviderDiscoveryState(key, true) }); void load(request, key, credentialValue, credential.credentialId, model); });
+      if (
+        credential?.provider !== "openrouter" ||
+        model.length === 0 ||
+        !matchesDraft(credentialValue, model)
+      ) {
+        controller.clear();
+        return;
+      }
+      const key = discoveryKey(credentialValue, model);
+      const discovery = state.value.providerDiscovery;
+      if (
+        !shouldDiscover({
+          currentKey: discovery.key,
+          expectedKey: key,
+          force,
+          state: discovery,
+        })
+      )
+        return;
+      catalogs.begin(key, force, apply, (request) => {
+        state.patch({
+          draft: { ...state.value.draft, openRouterProviderTag: "" },
+          openSelect: undefined,
+          providerDiscovery: sessionProviderDiscoveryState(key, true),
+        });
+        void load(
+          request,
+          key,
+          credentialValue,
+          credential.credentialId,
+          model,
+        );
+      });
     },
-    reset() { catalogs.clear(); workspaceId = ""; },
-    setWorkspace(nextWorkspaceId) { catalogs.clear(); controller.clear(); workspaceId = nextWorkspaceId; },
+    reset() {
+      catalogs.clear();
+      workspaceId = "";
+    },
+    setWorkspace(nextWorkspaceId) {
+      catalogs.clear();
+      controller.clear();
+      workspaceId = nextWorkspaceId;
+    },
   };
   return controller;
 }
