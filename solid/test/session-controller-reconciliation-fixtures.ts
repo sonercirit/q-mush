@@ -17,7 +17,7 @@ type PendingFlag = "compacting" | "creating" | "sending" | "stopping";
 type ReconciliationTest = () => Promise<void>;
 type StateMatch = Readonly<Record<string, unknown>>;
 
-async function waitForExpectation(expectation: () => void): Promise<void> {
+async function waitFor(expectation: () => void) {
   await vi.waitFor(expectation);
 }
 
@@ -59,7 +59,7 @@ interface PendingSessionCommand {
   reject(message: string): void;
   resolve(value: unknown): void;
   resolveDetail(changes?: Partial<AgentSessionDetail>): void;
-  resolveSummaries(...details: readonly AgentSessionDetail[]): void;
+  resolveSummaries(...details: AgentSessionDetail[]): void;
 }
 
 function createPendingSessionCommand(
@@ -350,8 +350,8 @@ function createReconciliationScenario(state: SessionViewState): ReconciliationSc
       scenario.expectState(createdSelectionState(sessionId));
     },
 
-    expectEventuallyCreatedSessionSelected(sessionId: string): Promise<void> {
-      return waitForExpectation(() => {
+    expectEventuallyCreatedSessionSelected(sessionId: string) {
+      return waitFor(() => {
         scenario.expectCreatedSessionSelected(sessionId);
       });
     },
@@ -365,14 +365,14 @@ function createReconciliationScenario(state: SessionViewState): ReconciliationSc
       expect(controller.state.error).toContain(fragment);
     },
 
-    expectEventuallyError(fragment: string): Promise<void> {
-      return waitForExpectation(() => {
+    expectEventuallyError(fragment: string) {
+      return waitFor(() => {
         scenario.expectError(fragment);
       });
     },
 
-    expectEventuallyState(expected: StateMatch): Promise<void> {
-      return waitForExpectation(() => {
+    expectEventuallyState(expected: StateMatch) {
+      return waitFor(() => {
         scenario.expectState(expected);
       });
     },

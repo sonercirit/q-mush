@@ -141,9 +141,7 @@ describe("session store", () => {
     store.updateCurrentUsage(SESSION_ID, { contextTokens: null, costBasis: "estimated", costUsd: 0.05 }, TEST_NOW + 5);
     const settled = store.transitionCurrent(SESSION_ID, "idle", TEST_NOW + 6);
     expect(settled).toBe(true);
-    expect(store.list(TEST_USER_ID)).toEqual([
-      expect.objectContaining({ id: SESSION_ID, status: "idle" }),
-    ]);
+    expect(store.list(TEST_USER_ID)).toEqual([expect.objectContaining({ id: SESSION_ID, status: "idle" })]);
 
     const detail = store.get(TEST_USER_ID, SESSION_ID);
     expect(detail?.agentFile).toEqual({
