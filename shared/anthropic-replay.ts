@@ -115,25 +115,31 @@ export function anthropicReplayRequestModel(
 
 const INVALID_REPLAY = "Anthropic assistant replay data is invalid";
 
-function isAnthropicReplayValue(value: unknown): value is AnthropicReplayValue {
-  if (value === null) return true;
-  switch (typeof value) {
-    case "boolean":
-    case "string":
-      return true;
-    case "number":
-      return Number.isFinite(value);
-    case "object":
-      return Array.isArray(value)
+type ReplayValueType = ReturnType<typeof replayValueType>;
+
+function replayValueType(value: unknown) {
+  return typeof value;
+}
+
+const replayValueReaders: Record<ReplayValueType, (value: unknown) => boolean> =
+  {
+    bigint: () => false,
+    boolean: () => true,
+    function: () => false,
+    number: (value) => typeof value === "number" && Number.isFinite(value),
+    object: (value) =>
+      value === null ||
+      (Array.isArray(value)
         ? value.every(isAnthropicReplayValue)
-        : isRecord(value) && Object.values(value).every(isAnthropicReplayValue);
-    case "bigint":
-    case "function":
-    case "symbol":
-    case "undefined":
-      return false;
-  }
-  throw new Error("Unreachable replay value type");
+        : isRecord(value) &&
+          Object.values(value).every(isAnthropicReplayValue)),
+    string: () => true,
+    symbol: () => false,
+    undefined: () => false,
+  };
+
+function isAnthropicReplayValue(value: unknown): value is AnthropicReplayValue {
+  return replayValueReaders[replayValueType(value)](value);
 }
 
 export function isAnthropicReplayObject(
@@ -220,6 +226,14 @@ function hasReplayToolIdentity(value: AnthropicReplayObject): boolean {
   );
 }
 
+function hasValidToolResult(value: AnthropicReplayObject): boolean {
+  return (
+    typeof value["tool_use_id"] === "string" &&
+    value["tool_use_id"].length > 0 &&
+    isAnthropicReplayValue(value["content"])
+  );
+}
+
 export function isAnthropicReplayBlock(
   value: unknown,
 ): value is AnthropicReplayBlock {
@@ -233,44 +247,33 @@ export function isAnthropicReplayBlock(
   if (!isValidReplayOptionalFields(value, type)) {
     return false;
   }
-  switch (type) {
-    case "thinking":
-      return (
-        typeof value["thinking"] === "string" &&
-        typeof value["signature"] === "string" &&
-        value["signature"].length > 0
-      );
-    case "redacted_thinking":
-      return typeof value["data"] === "string" && value["data"].length > 0;
-    case "text":
-      // Whitespace-only text still belongs to the assistant message that the
-      // replay has to reproduce exactly; only empty text is dropped, because
-      // the Messages API rejects blank text blocks.
-      return typeof value["text"] === "string" && value["text"].length > 0;
-    case "tool_use":
-      return (
-        hasReplayToolIdentity(value) && isAnthropicReplayObject(value["input"])
-      );
-    case "server_tool_use":
-      return (
-        hasReplayToolIdentity(value) && isAnthropicReplayValue(value["input"])
-      );
-    case "container_upload":
-      return (
-        typeof value["file_id"] === "string" && value["file_id"].length > 0
-      );
-    case "bash_code_execution_tool_result":
-    case "code_execution_tool_result":
-    case "text_editor_code_execution_tool_result":
-    case "tool_search_tool_result":
-    case "web_fetch_tool_result":
-    case "web_search_tool_result":
-      return (
-        typeof value["tool_use_id"] === "string" &&
-        value["tool_use_id"].length > 0 &&
-        isAnthropicReplayValue(value["content"])
-      );
-  }
+  const readers: Record<
+    AnthropicReplayBlockType,
+    (block: AnthropicReplayObject) => boolean
+  > = {
+    thinking: (block) =>
+      typeof block["thinking"] === "string" &&
+      typeof block["signature"] === "string" &&
+      block["signature"].length > 0,
+    redacted_thinking: (block) =>
+      typeof block["data"] === "string" && block["data"].length > 0,
+    text: (block) =>
+      // Whitespace-only text must be retained; the API rejects only blank text.
+      typeof block["text"] === "string" && block["text"].length > 0,
+    tool_use: (block) =>
+      hasReplayToolIdentity(block) && isAnthropicReplayObject(block["input"]),
+    server_tool_use: (block) =>
+      hasReplayToolIdentity(block) && isAnthropicReplayValue(block["input"]),
+    container_upload: (block) =>
+      typeof block["file_id"] === "string" && block["file_id"].length > 0,
+    bash_code_execution_tool_result: hasValidToolResult,
+    code_execution_tool_result: hasValidToolResult,
+    text_editor_code_execution_tool_result: hasValidToolResult,
+    tool_search_tool_result: hasValidToolResult,
+    web_fetch_tool_result: hasValidToolResult,
+    web_search_tool_result: hasValidToolResult,
+  };
+  return readers[type](value);
 }
 
 function readAnthropicAssistantReplay(
