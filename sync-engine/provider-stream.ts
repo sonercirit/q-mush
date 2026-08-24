@@ -14,7 +14,11 @@ import {
 } from "./provider-error.ts";
 import { createAnthropicStreamAccumulator } from "./provider-stream-anthropic.ts";
 import { createBufferedAccumulator } from "./provider-stream-buffers.ts";
-import { providerEventIndex, providerStep } from "./provider-stream-helpers.ts";
+import {
+  accumulatorResult,
+  providerEventIndex,
+  providerStep,
+} from "./provider-stream-helpers.ts";
 
 type ProviderStreamProtocol =
   "anthropic" | "chat_completions" | "chat_completions_json" | "responses";
@@ -422,17 +426,13 @@ function createResponsesAccumulator(
       accumulator.pushText(stringDelta(value, "text"));
     }
   };
-  return {
-    get completed() {
-      return isCompleted();
-    },
+  return accumulatorResult({
+    completed: isCompleted,
     finish,
     protocol: "responses",
     push,
-    get receivedEvent() {
-      return accumulator.receivedEvent();
-    },
-  };
+    receivedEvent: accumulator.receivedEvent,
+  });
 }
 
 function readChatDelta(value: unknown): Readonly<Record<string, unknown>> {
@@ -575,15 +575,13 @@ function createChatCompletionsAccumulator(
       tokenUsage = nextTokenUsage;
     }
   };
-  return {
-    completed: false,
+  return accumulatorResult({
+    completed: () => false,
     finish,
     protocol: "chat_completions",
     push,
-    get receivedEvent() {
-      return accumulator.receivedEvent();
-    },
-  };
+    receivedEvent: accumulator.receivedEvent,
+  });
 }
 
 function createJsonChatCompletionsAccumulator(
@@ -610,17 +608,13 @@ function createJsonChatCompletionsAccumulator(
       accumulator.emitToolCallProgress(index, toolCall);
     }
   };
-  return {
-    get completed() {
-      return completed();
-    },
+  return accumulatorResult({
+    completed,
     finish,
     protocol: "chat_completions_json",
     push,
-    get receivedEvent() {
-      return accumulator.receivedEvent();
-    },
-  };
+    receivedEvent: accumulator.receivedEvent,
+  });
 }
 
 type ProviderTextDeltaHandler = (delta: ProviderTextDelta) => void;

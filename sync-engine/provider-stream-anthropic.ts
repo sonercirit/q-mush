@@ -13,6 +13,7 @@ import {
 import { createAnthropicReplayCapture } from "./provider-stream-anthropic-replay.ts";
 import { createBufferedAccumulator } from "./provider-stream-buffers.ts";
 import {
+  accumulatorResult,
   providerEventIndex,
   providerStep,
   type PartialProviderToolCall,
@@ -316,15 +317,11 @@ export function createAnthropicStreamAccumulator(
       accumulator.registerToolCall(index, toolUseCall(block, input));
     },
   };
-  return {
-    get completed() {
-      return completed();
-    },
+  return accumulatorResult({
+    completed,
     finish,
-    protocol: "anthropic" as const,
+    protocol: "anthropic",
     push,
-    get receivedEvent() {
-      return accumulator.receivedEvent();
-    },
-  };
+    receivedEvent: accumulator.receivedEvent,
+  });
 }
