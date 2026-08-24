@@ -19,8 +19,9 @@ import {
   type QueuedCommand,
 } from "./realtime-client-command.ts";
 import {
-  ToolSyncTracker,
+  createToolSyncTracker,
   type ToolSyncRequest,
+  type ToolSyncTracker,
 } from "./realtime-client-tool-sync.ts";
 import {
   RealtimeStreamBuffer,
@@ -107,7 +108,7 @@ export class RealtimeConnection {
   readonly #buffer = new RealtimeStreamBuffer();
   #streamFrame: number | undefined;
   #socket: BrowserWebSocket | undefined;
-  readonly #toolSync = new ToolSyncTracker();
+  readonly #toolSync: ToolSyncTracker;
   #stopped = true;
   #workspaceId = GLOBAL_WORKSPACE_ID;
   constructor(
@@ -120,6 +121,7 @@ export class RealtimeConnection {
       readonly requestFrame?: FrameCallback;
       readonly selectedSession?: () => string | undefined;
       readonly setTimeout?: (callback: () => void, delay: number) => number;
+      readonly toolSync?: ToolSyncTracker;
     } = {},
   ) {
     this.#createSocket = options.createSocket ?? ((url) => new WebSocket(url));
@@ -132,6 +134,7 @@ export class RealtimeConnection {
     this.#clearTimeout = options.clearTimeout ?? window.clearTimeout;
     this.#setTimeout = options.setTimeout ?? window.setTimeout;
     this.#selected = options.selectedSession ?? noSelectedSession;
+    this.#toolSync = options.toolSync ?? createToolSyncTracker();
   }
   onReconnect(listener: () => void): () => void {
     this.#reconnects.add(listener);

@@ -1,3 +1,4 @@
+import type { ToolSyncTracker } from "../realtime-client-tool-sync.ts";
 import type { RealtimeServerEvent } from "../realtime-client-codec.ts";
 import type { RealtimeClientEvent } from "../realtime-stream-buffer.ts";
 import type { RealtimeTestSocket } from "./realtime-client-fixtures.ts";
@@ -23,6 +24,7 @@ export interface StreamingRealtimeFixture {
 export interface StreamingRealtimeFixtureOptions {
   readonly now?: () => number;
   readonly selectedSession?: () => string | undefined;
+  readonly toolSync?: ToolSyncTracker;
 }
 
 export function streamingRealtimeFixture(
