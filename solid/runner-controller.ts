@@ -7,7 +7,7 @@ import {
 import type { RunnerSummary } from "../shared/runner-model.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
-import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
+import { createControllerState, jsonRequestInit, type ControllerState } from "./controller-mutation.ts";
 import { createReactiveState } from "./reactive-state.ts";
 import {
   createRunnerViewState,
@@ -89,7 +89,7 @@ export class RunnerController {
   #pendingRemovalRunners: readonly RunnerSummary[] | undefined;
 
   constructor(view = createReactiveState(initialRunnerState())) {
-    this.#state = new ControllerState(view);
+    this.#state = createControllerState(view);
   }
 
   get state(): RunnerViewState {

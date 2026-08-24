@@ -11,7 +11,7 @@ import {
 import { readSessionCredentialReassignmentResult } from "../shared/session-credential-reassignment.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { isHttpResponseError, request, requestJson } from "./browser-http.ts";
-import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
+import { createControllerState, jsonRequestInit, type ControllerState } from "./controller-mutation.ts";
 import {
   createProviderViewState,
   readProviderCredentials,
@@ -50,7 +50,7 @@ export class ProviderController {
     view = createReactiveState(initialProviderState()),
   ) {
     this.#configuration = configuration;
-    this.#state = new ControllerState(view);
+    this.#state = createControllerState(view);
   }
 
   get state(): ProviderViewState {

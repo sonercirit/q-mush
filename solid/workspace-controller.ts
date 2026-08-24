@@ -2,7 +2,7 @@ import { createSignal } from "solid-js";
 import { WORKSPACES_PATH, workspaceDefaultPath } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
 import { request, requestJson } from "./browser-http.ts";
-import { ControllerState, jsonRequestInit } from "./controller-mutation.ts";
+import { createControllerState, jsonRequestInit } from "./controller-mutation.ts";
 import { createReactiveState } from "./reactive-state.ts";
 import {
   createWorkspaceViewState,
@@ -22,7 +22,7 @@ export function createWorkspaceController(
   view = createReactiveState(createWorkspaceViewState(undefined)),
 ): WorkspaceController {
   const [selectedId, setSelectedId] = createSignal(GLOBAL_WORKSPACE_ID);
-  const state = new ControllerState(view);
+  const state = createControllerState(view);
   const load = async (): Promise<void> => {
     const result = await state.load({
       failure: () => ({ error: "We could not load your workspaces." }),
