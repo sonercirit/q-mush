@@ -72,7 +72,7 @@ interface SessionAgentActionsError extends Error {
   readonly tag: "session_agent_actions";
 }
 
-function createSessionAgentActionsError(
+export function createSessionAgentActionsError(
   message: string,
 ): SessionAgentActionsError {
   return Object.assign(new Error(message), {
