@@ -73,6 +73,27 @@ function eventIndex(
   return readNonNegativeSafeInteger(event["index"]);
 }
 
+type AnthropicEventKind =
+  | "content_block_delta"
+  | "content_block_start"
+  | "content_block_stop"
+  | "message"
+  | "message_delta"
+  | "message_start"
+  | "message_stop";
+type AnthropicDeltaKind =
+  | "input_json_delta"
+  | "text_delta"
+  | "thinking_delta";
+type AnthropicBlockKind = "text" | "thinking" | "tool_use";
+
+function isDispatchKey<Kind extends string>(
+  handlers: Readonly<Record<Kind, unknown>>,
+  value: unknown,
+): value is Kind {
+  return typeof value === "string" && Object.hasOwn(handlers, value);
+}
+
 export function createAnthropicStreamAccumulator(
   model: string,
   provenance: string,
@@ -128,32 +149,12 @@ export function createAnthropicStreamAccumulator(
     if (isProviderStreamErrorEvent(event)) {
       throw readProviderStreamError(event);
     }
-    switch (event["type"]) {
-      case "message_start":
-        readMessageStart(event["message"]);
-        return;
-      case "content_block_start":
-        startBlock(event);
-        return;
-      case "content_block_delta":
-        pushDelta(event);
-        return;
-      case "content_block_stop":
-        replay.stop(eventIndex(event));
-        return;
-      case "message_delta":
-        readStopReason(event["delta"]);
-        readOutputTokens(event["usage"]);
-        return;
-      case "message_stop":
-        stopped = true;
-        return;
-      case "message":
-        readCompleteMessage(event);
-        return;
-      default:
-        return;
+    const kind = event["type"];
+    if (isDispatchKey(eventHandlers, kind)) {
+      eventHandlers[kind](event);
+      return;
     }
+    // Anthropic may add ignorable event kinds at runtime.
   };
 
   const readMessageStart = (message: unknown): void => {
@@ -206,22 +207,9 @@ export function createAnthropicStreamAccumulator(
     const delta = event["delta"];
     if (!isRecord(delta)) throw new Error(INVALID_DELTA);
     const index = eventIndex(event);
-    switch (delta["type"]) {
-      case "text_delta":
-        accumulator.pushText(
-          requiredRecordString(delta, "text", INVALID_DELTA),
-        );
-        break;
-      case "thinking_delta":
-        accumulator.pushThinking(
-          requiredRecordString(delta, "thinking", INVALID_DELTA),
-        );
-        break;
-      case "input_json_delta":
-        appendToolInput(event);
-        break;
-      default:
-        break;
+    const kind = delta["type"];
+    if (isDispatchKey(deltaHandlers, kind)) {
+      deltaHandlers[kind](event, delta);
     }
     replay.delta(index, delta);
   };
@@ -262,27 +250,71 @@ export function createAnthropicStreamAccumulator(
     block: Readonly<Record<string, unknown>>,
   ): void => {
     replay.complete(index, block);
-    switch (block["type"]) {
-      case "text":
-        accumulator.pushText(
-          requiredRecordString(block, "text", INVALID_BLOCK),
-        );
-        return;
-      case "thinking":
-        accumulator.pushThinking(
-          requiredRecordString(block, "thinking", INVALID_BLOCK),
-        );
-        return;
-      case "tool_use": {
-        // A parsed JSON body always re-serializes; the whole event came from
-        // JSON.parse.
-        const input = JSON.stringify(block["input"] ?? {});
-        accumulator.registerToolCall(index, toolUseCall(block, input));
-        return;
-      }
-      default:
-        return;
+    const kind = block["type"];
+    if (isDispatchKey(blockHandlers, kind)) {
+      blockHandlers[kind](index, block);
     }
+  };
+
+  const eventHandlers: Record<
+    AnthropicEventKind,
+    (event: Readonly<Record<string, unknown>>) => void
+  > = {
+    content_block_delta: pushDelta,
+    content_block_start: startBlock,
+    content_block_stop: (event) => {
+      replay.stop(eventIndex(event));
+    },
+    message: readCompleteMessage,
+    message_delta: (event) => {
+      readStopReason(event["delta"]);
+      readOutputTokens(event["usage"]);
+    },
+    message_start: (event) => {
+      readMessageStart(event["message"]);
+    },
+    message_stop: () => {
+      stopped = true;
+    },
+  };
+  const deltaHandlers: Record<
+    AnthropicDeltaKind,
+    (
+      event: Readonly<Record<string, unknown>>,
+      delta: Readonly<Record<string, unknown>>,
+    ) => void
+  > = {
+    input_json_delta: appendToolInput,
+    text_delta: (_event, delta) => {
+      accumulator.pushText(requiredRecordString(delta, "text", INVALID_DELTA));
+    },
+    thinking_delta: (_event, delta) => {
+      accumulator.pushThinking(
+        requiredRecordString(delta, "thinking", INVALID_DELTA),
+      );
+    },
+  };
+  const blockHandlers: Record<
+    AnthropicBlockKind,
+    (
+      index: number,
+      block: Readonly<Record<string, unknown>>,
+    ) => void
+  > = {
+    text: (_index, block) => {
+      accumulator.pushText(requiredRecordString(block, "text", INVALID_BLOCK));
+    },
+    thinking: (_index, block) => {
+      accumulator.pushThinking(
+        requiredRecordString(block, "thinking", INVALID_BLOCK),
+      );
+    },
+    tool_use: (index, block) => {
+      // A parsed JSON body always re-serializes; the whole event came from
+      // JSON.parse.
+      const input = JSON.stringify(block["input"] ?? {});
+      accumulator.registerToolCall(index, toolUseCall(block, input));
+    },
   };
   return {
     get completed() {
