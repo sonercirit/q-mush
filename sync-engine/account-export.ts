@@ -22,12 +22,12 @@ import {
 } from "../shared/database/schema.ts";
 import { sha256 } from "../shared/sha256.ts";
 
-import type {
-  AccountExport,
-  AccountExportBlob,
-  AccountExportRecord,
+import {
+  ACCOUNT_EXPORT_ENTITIES,
+  type AccountExport,
+  type AccountExportBlob,
+  type AccountExportRecord,
 } from "../shared/account-export.ts";
-import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
 
 const ordinaryTables = [
   users,

@@ -1,7 +1,9 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { AccountExport } from "../shared/account-export.ts";
-import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
+import {
+  ACCOUNT_EXPORT_ENTITIES,
+  type AccountExport,
+} from "../shared/account-export.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 
 export interface CatchUpSource {

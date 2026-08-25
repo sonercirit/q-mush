@@ -2,8 +2,10 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import type { AccountExport } from "../../shared/account-export.ts";
-import { ACCOUNT_EXPORT_ENTITIES } from "../../shared/account-export.ts";
+import {
+  ACCOUNT_EXPORT_ENTITIES,
+  type AccountExport,
+} from "../../shared/account-export.ts";
 import { sha256 } from "../../shared/sha256.ts";
 import {
   catchUpRunnerReplica,
