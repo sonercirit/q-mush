@@ -44,8 +44,11 @@ browser views and an entitlement-scoped engine backup.
    additionally back up all session entities and blobs and may use the managed
    endpoint-encrypted relay. A linked account's engine backup subscriber may
    also act as a recovery anchor. The engine can query what it stores; this is
-   deliberately not E2EE-blind backup. A free subscriber rejects session
-   operations, snapshots, manifests, blobs, and acknowledgements.
+   deliberately not E2EE-blind backup. Engine backup storage is sharded by
+   user—one SQLite database per account—so accounts' data never touch each
+   other, and shards persist to S3-compatible object storage with engine disk as
+   only a bounded cache. A free subscriber rejects session operations,
+   snapshots, manifests, blobs, and acknowledgements.
 5. **Discovery stays inside the private mesh.** Admitted members keep persistent
    authenticated links, cache every member's current candidates, and gossip
    signed address changes only over encrypted member channels. Members report

@@ -31,9 +31,16 @@ before commitment if full-runner capacity cannot accept it; every ready runner
 eventually stores verified bytes.
 
 Runners use SQLite and a content-addressed blob directory; the engine stores its
-entitled projection. Solid requests bounded active views and may cache selected
-responses, but receives no operation log and owns no shared outbox. A draft is
-shared only when a runner accepts its command.
+entitled projection. Both sides shard SQLite by user: each account's runner
+replica and engine backup live in that account's own database file, so no two
+accounts' data share a database or touch each other. Cross-account queries do
+not exist. Because engine disk is expensive, S3-compatible object storage is the
+engine's storage of record for shard databases and backup blobs: the engine
+hydrates an account's shard into a bounded local cache on demand and its durable
+acknowledgement requires the completed object-store write, never only the cache.
+Solid requests bounded active views and may cache selected responses, but
+receives no operation log and owns no shared outbox. A draft is shared only when
+a runner accepts its command.
 
 The logical storage layers are:
 
