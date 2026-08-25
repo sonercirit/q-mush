@@ -160,7 +160,7 @@ const ACCOUNT_EXPORT_PAGE_LIMIT = 100;
 export interface AccountExportPage {
   readonly blobs: readonly AccountExportBlob[];
   readonly done: boolean;
-  readonly nextOffset: number;
+  readonly nextCursor: string | undefined;
   readonly records: readonly AccountExportRecord[];
   readonly revision: string;
 }
@@ -190,7 +190,7 @@ function boundedRows(
   table: AnySQLiteTable,
   userId: string,
   limit: number,
-  offset: number,
+  afterId: string | undefined,
   columns: ReturnType<typeof getTableColumns> = getTableColumns(table),
 ): readonly Record<string, unknown>[] {
   const selection = Object.values(columns).reduce(
@@ -200,15 +200,24 @@ function boundedRows(
   const name = getTableName(table);
   const owner = name === "users" ? "id" : "user_id";
   return database.$client
-    .query<Record<string, unknown>, [string, number, number]>(
-      `SELECT ${selection} FROM "${name}" WHERE "${owner}" = ? ORDER BY "id" LIMIT ? OFFSET ?`,
+    .query<Record<string, unknown>, [string, string, number]>(
+      `SELECT ${selection} FROM "${name}" WHERE "${owner}" = ? AND "id" > ? ORDER BY "id" LIMIT ?`,
     )
-    .all(userId, limit, offset);
+    .all(userId, afterId ?? "", limit);
+}
+function decodeCursor(cursor: string | undefined) {
+  if (cursor === undefined) return { entity: "", id: "" };
+  const separator = cursor.indexOf(":");
+  if (separator < 1) throw new Error("Invalid account export cursor");
+  return {
+    entity: cursor.slice(0, separator),
+    id: cursor.slice(separator + 1),
+  };
 }
 export function exportAccountPage(
   database: AppDatabase,
   userId: string,
-  offset: number,
+  cursor?: string,
   limit = ACCOUNT_EXPORT_PAGE_LIMIT,
 ): AccountExportPage {
   return database.$client.transaction(() => {
@@ -216,28 +225,21 @@ export function exportAccountPage(
     const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
     const accumulator = createExportAccumulator();
     const { blobs, records } = accumulator;
-    let skipped = 0;
+    const position = decodeCursor(cursor);
+    let reachedPosition = position.entity === "";
     for (const { table, selected } of exportedTables) {
       if (records.length >= safeLimit) break;
       const name = getTableName(table);
-      const ownershipColumn = name === "users" ? "id" : "user_id";
-      const count =
-        database.$client
-          .query<{ count: number }, [string]>(
-            `SELECT COUNT(*) AS count FROM "${name}" WHERE "${ownershipColumn}" = ?`,
-          )
-          .get(userId)?.count ?? 0;
-      if (offset >= skipped + count) {
-        skipped += count;
-        continue;
+      if (!reachedPosition) {
+        reachedPosition = name === position.entity;
+        if (!reachedPosition) continue;
       }
-      const tableOffset = Math.max(0, offset - skipped);
       for (const originalRow of boundedRows(
         database,
         table,
         userId,
         safeLimit - records.length,
-        tableOffset,
+        name === position.entity ? position.id : undefined,
         selected,
       )) {
         const row = { ...originalRow };
@@ -251,13 +253,15 @@ export function exportAccountPage(
           tombstone: row["is_deleted"] === 1,
         });
       }
-      skipped += count;
+      position.id = "";
     }
-    const nextOffset = offset + records.length;
+    if (!reachedPosition)
+      throw new Error("Invalid account export cursor entity");
+    const last = records.at(-1);
     return {
       blobs: [...blobs.values()],
       done: records.length < safeLimit,
-      nextOffset,
+      nextCursor: last === undefined ? undefined : `${last.entity}:${last.id}`,
       records,
       revision,
     };

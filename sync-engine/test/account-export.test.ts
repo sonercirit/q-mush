@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
+import { createRunnerStore } from "../runner-store.ts";
 import {
   TEST_ATTACHMENT_DATA,
   TEST_ATTACHMENT_DIGEST,
@@ -56,11 +57,11 @@ describe("legacy account export", () => {
       const id = `p-${String(index).padStart(3, "0")}`;
       insert.run(id, id, id);
     }
-    const first = exportAccountPage(database, "u", 0);
+    const first = exportAccountPage(database, "u");
     expect(first.records).toHaveLength(100);
     expect(first.done).toBe(false);
     expect(
-      exportAccountPage(database, "u", first.nextOffset).records,
+      exportAccountPage(database, "u", first.nextCursor).records,
     ).toHaveLength(6);
   });
 
@@ -68,9 +69,11 @@ describe("legacy account export", () => {
     database = createUserDatabase();
     const originalQuery = database.$client.query.bind(database.$client);
     let largestRowLimit = 0;
+    let usedOffset = false;
     const boundedQueryImplementation = (sql: string) => {
       const statement = originalQuery(sql);
       if (!sql.includes("ORDER BY")) return statement;
+      usedOffset ||= sql.includes(" OFFSET ");
       const originalAll = statement.all.bind(statement);
       statement.all = (userId: string, limit: number, offset: number) => {
         largestRowLimit = Math.max(largestRowLimit, limit);
@@ -81,8 +84,9 @@ describe("legacy account export", () => {
     vi.spyOn(database.$client, "query").mockImplementation(
       boundedQueryImplementation,
     );
-    exportAccountPage(database, "u", 0);
+    exportAccountPage(database, "u");
     expect(largestRowLimit).toBeLessThanOrEqual(100);
+    expect(usedOffset).toBe(false);
   });
 
   test("reads the revision and page rows from one database snapshot", () => {
@@ -112,28 +116,55 @@ describe("legacy account export", () => {
       return originalQuery(sql);
     });
     try {
-      const page = exportAccountPage(database, "u", 0);
+      const page = exportAccountPage(database, "u");
       const prompt = page.records.find(({ id }) => id === "p");
       expect(wroteDuringPage).toBe(true);
       expect(prompt?.payload).toContain('"name":"before"');
-      expect(exportAccountPage(database, "u", 0).revision).not.toBe(
-        page.revision,
-      );
+      expect(exportAccountPage(database, "u").revision).not.toBe(page.revision);
     } finally {
       writer.close();
     }
   });
 
-  test("keeps the revision stable across runner presence heartbeats", () => {
+  test("keeps the revision and durable audit time stable across runner presence changes", () => {
     database = createUserDatabase();
     database.$client.run(
-      "INSERT INTO runners (id, user_id, token_hash, token_digest, last_seen_at, created_at, updated_at, created_by_id, updated_by_id, is_deleted, is_default, is_global) VALUES ('r', 'u', 'h', 'd', 1, 1, 1, 'u', 'u', 0, 0, 0)",
+      "INSERT INTO runners (id, user_id, token_hash, token_digest, machine_fingerprint, last_seen_at, created_at, updated_at, created_by_id, updated_by_id, is_deleted, is_default, is_global) VALUES ('r', 'u', 'h', 'd', 'machine', 1, 1, 1, 'u', 'u', 0, 0, 0)",
     );
-    const first = exportAccountPage(database, "u", 0, 1);
-    database.$client.run("UPDATE runners SET last_seen_at = 2 WHERE id = 'r'");
-    const second = exportAccountPage(database, "u", first.nextOffset, 1);
-    expect(second.revision).toBe(first.revision);
-    expect(second.records).toHaveLength(1);
+    const store = createRunnerStore(database);
+    const first = exportAccountPage(database, "u", undefined, 1);
+
+    store.setOnline("r", "u", 2, true);
+    const online = store.list("u", 2)[0];
+    expect(online).toMatchObject({ id: "r", lastSeenAt: 2, status: "online" });
+    expect(
+      database.$client
+        .query<{ updatedAt: number }, []>(
+          "SELECT updated_at AS updatedAt FROM runners WHERE id = 'r'",
+        )
+        .get(),
+    ).toEqual({ updatedAt: 1 });
+    expect(exportAccountPage(database, "u", first.nextCursor, 1).revision).toBe(
+      first.revision,
+    );
+
+    store.setOnline("r", "u", 3, false);
+    const offline = store.list("u", Number.MAX_SAFE_INTEGER)[0];
+    expect(offline).toMatchObject({
+      id: "r",
+      lastSeenAt: 0,
+      status: "offline",
+    });
+    expect(
+      database.$client
+        .query<{ updatedAt: number }, []>(
+          "SELECT updated_at AS updatedAt FROM runners WHERE id = 'r'",
+        )
+        .get(),
+    ).toEqual({ updatedAt: 1 });
+    expect(exportAccountPage(database, "u", first.nextCursor, 1).revision).toBe(
+      first.revision,
+    );
   });
 
   test("rejects malformed blob digests without querying the database", () => {
@@ -161,10 +192,12 @@ describe("legacy account export", () => {
     const blobClient = database.$client;
     const originalQuery = blobClient.query.bind(blobClient);
     let usedIterator = false;
+    let finalizedStatements = 0;
     vi.spyOn(blobClient, "query").mockImplementation((sql) => {
       const statement = originalQuery(sql);
       if (!sql.includes('AS value FROM "agent_messages"')) return statement;
       const originalIterate = statement.iterate.bind(statement);
+      const originalFinalize = statement.finalize.bind(statement);
       statement.all = () => {
         throw new Error("blob lookup materialized attachment rows");
       };
@@ -172,12 +205,17 @@ describe("legacy account export", () => {
         usedIterator = true;
         return originalIterate(userId);
       };
+      statement.finalize = () => {
+        finalizedStatements += 1;
+        originalFinalize();
+      };
       return statement;
     });
     expect(exportAccountBlob(database, "u", TEST_ATTACHMENT_DIGEST)?.size).toBe(
       3,
     );
     expect(usedIterator).toBe(true);
+    expect(finalizedStatements).toBeGreaterThan(0);
     expectDatabaseUsable(database);
   });
 
@@ -198,8 +236,8 @@ describe("legacy account export", () => {
       digest,
       size: 3,
     });
-    exportAccountPage(database, "u", 0, 1);
-    exportAccountPage(database, "u", 0, 1);
+    exportAccountPage(database, "u", undefined, 1);
+    exportAccountPage(database, "u", undefined, 1);
     expect(exportAccountBlob(database, "u", digest)?.data).toBe(data);
     expect(hasBlobCacheTable(database)).toBe(false);
   });
@@ -220,7 +258,7 @@ describe("legacy account export", () => {
     database.$client.run(
       "INSERT INTO sessions (id, user_id,  token, expires_at, created_at, updated_at, created_by_id, updated_by_id, is_deleted) VALUES ('s', 'u', 'LOGIN_CANARY', 9, 1, 1, 'u', 'u', 0)",
     );
-    const exported = exportAccountPage(database, "u", 0);
+    const exported = exportAccountPage(database, "u");
     const encoded = JSON.stringify(exported);
     expect(exported.records.find(({ id }) => id === "p")?.tombstone).toBe(true);
     expect(encoded).not.toContain("SECRET_CANARY");

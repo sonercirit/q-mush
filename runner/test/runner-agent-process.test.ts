@@ -140,7 +140,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
           ...completeAccountExportInventory(records, manifest),
           blobs: options.accountExport?.blobs ?? [],
           done: true,
-          nextOffset: records.length,
+          nextCursor: String(records.length),
           revision: "0".repeat(64),
         });
       }

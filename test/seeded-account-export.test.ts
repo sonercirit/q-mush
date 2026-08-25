@@ -20,13 +20,13 @@ function exportAccount(
 ): AccountExportInventory & { readonly blobs: readonly AccountExportBlob[] } {
   const records: AccountExportRecord[] = [];
   const blobs = new Map<string, AccountExportBlob>();
-  let offset = 0;
+  let cursor: string | undefined;
   let done = false;
   while (!done) {
-    const page = exportAccountPage(database, USER_ID, offset);
+    const page = exportAccountPage(database, USER_ID, cursor);
     records.push(...page.records);
     for (const blob of page.blobs) blobs.set(blob.digest, blob);
-    offset = page.nextOffset;
+    cursor = page.nextCursor;
     done = page.done;
   }
   const entries: AccountExportBlob[] = [...blobs.values()];

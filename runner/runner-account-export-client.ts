@@ -13,8 +13,8 @@ import {
 import { isRecord } from "../shared/validation.ts";
 import { catchUpRunnerReplica } from "./runner-replica-catch-up.ts";
 
-const MAX_EXPORT_RESTARTS = 3;
 const EXPORT_RESTART_BACKOFF_MILLISECONDS = 100;
+const MAX_EXPORT_RESTART_BACKOFF_MILLISECONDS = 1_000;
 
 function isExportRecord(value: unknown): value is AccountExportRecord {
   return (
@@ -45,13 +45,13 @@ export async function catchUpAccountExport(
   const authorization = `Bearer ${token}`;
   const records: AccountExportRecord[] = [];
   let manifest: Record<string, number> = {};
-  let offset = 0;
+  let cursor: string | undefined;
   let done = false;
   let revision: string | undefined;
   let restarts = 0;
   while (!done) {
     const response = await fetch(
-      `${serverOrigin}${RUNNER_ACCOUNT_EXPORT_PATH}?offset=${String(offset)}`,
+      `${serverOrigin}${RUNNER_ACCOUNT_EXPORT_PATH}${cursor === undefined ? "" : `?cursor=${encodeURIComponent(cursor)}`}`,
       { headers: { authorization } },
     );
     if (!response.ok)
@@ -70,32 +70,40 @@ export async function catchUpAccountExport(
       !page.blobs.every(isBlobEntry) ||
       !("done" in page) ||
       typeof page.done !== "boolean" ||
-      !("nextOffset" in page) ||
-      typeof page.nextOffset !== "number"
+      ("nextCursor" in page &&
+        typeof page.nextCursor !== "string" &&
+        page.nextCursor !== undefined) ||
+      (!page.done &&
+        (!("nextCursor" in page) || typeof page.nextCursor !== "string"))
     )
       throw new Error("The account export response is invalid");
     if (revision !== undefined && revision !== page.revision) {
       restarts += 1;
-      if (restarts > MAX_EXPORT_RESTARTS)
-        throw new Error(
-          `Replica catch-up did not stabilize after ${String(restarts)} revision changes (last offset ${String(offset)})`,
-        );
       records.length = 0;
       manifest = {};
-      offset = 0;
+      cursor = undefined;
       done = false;
       revision = undefined;
-      await Bun.sleep(EXPORT_RESTART_BACKOFF_MILLISECONDS * restarts);
+      await Bun.sleep(
+        Math.min(
+          MAX_EXPORT_RESTART_BACKOFF_MILLISECONDS,
+          EXPORT_RESTART_BACKOFF_MILLISECONDS * restarts,
+        ),
+      );
       continue;
     }
+    const nextCursor =
+      "nextCursor" in page && typeof page.nextCursor === "string"
+        ? page.nextCursor
+        : undefined;
     revision = page.revision;
     records.push(...page.records);
     for (const entry of page.blobs) manifest[entry.digest] = entry.size;
     done = page.done;
     if (done) continue;
-    if (page.nextOffset <= offset)
+    if (nextCursor === undefined || nextCursor === cursor)
       throw new Error("The account export cursor did not advance");
-    offset = page.nextOffset;
+    cursor = nextCursor;
   }
   const value: AccountExportInventory = completeAccountExportInventory(
     records,

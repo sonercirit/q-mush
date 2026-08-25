@@ -444,12 +444,9 @@ export function createRequestHandler(
     if (account === undefined)
       return new Response("Unauthorized", { status: 401 });
     if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
-      const offset = Number(
-        new URL(request.url).searchParams.get("offset") ?? "0",
-      );
-      if (!Number.isSafeInteger(offset) || offset < 0)
-        return new Response("Invalid offset", { status: 400 });
-      return Response.json(exportAccountPage(database, account.userId, offset));
+      const cursor =
+        new URL(request.url).searchParams.get("cursor") ?? undefined;
+      return Response.json(exportAccountPage(database, account.userId, cursor));
     }
     const digest = pathname.slice(RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1);
     return accountExportBlobResponse(

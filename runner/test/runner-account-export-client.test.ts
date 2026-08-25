@@ -60,13 +60,13 @@ test("restarts pagination when the account changes between pages", async () => {
     const url = new URL(request.url);
     const exportRequest = url.pathname === RUNNER_ACCOUNT_EXPORT_PATH;
     if (exportRequest) {
-      const offset = Number(url.searchParams.get("offset"));
+      const offset = Number(url.searchParams.get("cursor") ?? "0");
       offsets.push(offset);
       const revision = revisions.shift() ?? "2".repeat(64);
       return Response.json({
         blobs: offset === 0 ? [{ digest, size: bytes.length }] : [],
         done: revision === "2".repeat(64) && offset > 0,
-        nextOffset: offset + 1,
+        nextCursor: String(offset + 1),
         records: [
           {
             entity: "users",
@@ -85,33 +85,36 @@ test("restarts pagination when the account changes between pages", async () => {
   expect(offsets).toEqual([0, 1, 0, 1]);
 });
 
-test("bounds revision-change restarts with a progress diagnostic", async () => {
+test("converges after sustained revision changes during pagination", async () => {
   let requests = 0;
-  await expect(
-    runCatchUpServer("account-export-unstable-", (request) => {
-      if (requestPath(request) !== RUNNER_ACCOUNT_EXPORT_PATH)
-        return new Response("Not found", { status: 404 });
-      requests += 1;
-      const offset = Number(new URL(request.url).searchParams.get("offset"));
-      return Response.json({
-        blobs: [],
-        done: false,
-        nextOffset: offset + 1,
-        records: [
-          {
-            entity: "users",
-            id: String(requests),
-            payload: JSON.stringify({ id: String(requests) }),
-            tombstone: false,
-          },
-        ],
-        revision: String(requests).padStart(64, "0"),
-      });
-    }),
-  ).rejects.toThrow(
-    "Replica catch-up did not stabilize after 4 revision changes (last offset 1)",
-  );
-  expect(requests).toBe(8);
+  const offsets: number[] = [];
+  await runCatchUpServer("account-export-unstable-", (request) => {
+    if (requestPath(request) !== RUNNER_ACCOUNT_EXPORT_PATH)
+      return new Response("Not found", { status: 404 });
+    requests += 1;
+    const offset = Number(
+      new URL(request.url).searchParams.get("cursor") ?? "0",
+    );
+    offsets.push(offset);
+    const revisionNumber = Math.min(requests, 10);
+    return Response.json({
+      blobs: [],
+      done: revisionNumber === 10 && offset > 0,
+      nextCursor: String(offset + 1),
+      records: [
+        {
+          entity: "users",
+          id: `${String(revisionNumber)}-${String(offset)}`,
+          payload: JSON.stringify({ id: String(revisionNumber) }),
+          tombstone: false,
+        },
+      ],
+      revision: String(revisionNumber).padStart(64, "0"),
+    });
+  });
+  expect(requests).toBe(12);
+  expect(offsets.filter((offset) => offset === 0)).toHaveLength(6);
+  expect(offsets.at(-1)).toBe(1);
 });
 
 // Exercises fetch, HTTP Range, the persisted incoming file, and the shipped client.
@@ -136,7 +139,7 @@ test("account export client resumes a real HTTP blob transfer", async () => {
         return Response.json({
           blobs: inventory.manifest,
           done: true,
-          nextOffset: 0,
+          nextCursor: undefined,
           revision: "0".repeat(64),
           records: inventory.records,
         });
