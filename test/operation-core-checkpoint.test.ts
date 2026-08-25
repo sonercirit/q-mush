@@ -47,6 +47,8 @@ const applyAll = (
   state = arrayState(),
 ): OperationApplyState<readonly string[]> =>
   items.reduce((current, item) => applyOperation(current, item, append), state);
+const concurrentPair = () =>
+  [operation("a", 1n, {}, "a", 100), operation("b", 1n, {}, "b", 50)] as const;
 const sequentialOperation = (
   writer: string,
   sequence: number,
@@ -299,8 +301,7 @@ describe("operation checkpoints", () => {
   });
 
   test("accepts a concurrent earlier-clock operation and converges", () => {
-    const a1 = operation("a", 1n, {}, "a", 100);
-    const b1 = operation("b", 1n, {}, "b", 50);
+    const [a1, b1] = concurrentPair();
     const late = applyAll([b1], roundTrip(applyAll([a1])));
     const early = applyAll([b1, a1]);
     expect(late.projection).toEqual(early.projection);
@@ -308,8 +309,7 @@ describe("operation checkpoints", () => {
   });
 
   test("makes identical redelivery a no-op after reordering and checkpointing", () => {
-    const a1 = operation("a", 1n, {}, "a", 100);
-    const b1 = operation("b", 1n, {}, "b", 50);
+    const [a1, b1] = concurrentPair();
     const reordered = applyAll([a1, b1]);
     expect(applyOperation(reordered, a1, append)).toBe(reordered);
     const restored = roundTrip(reordered);
@@ -317,9 +317,8 @@ describe("operation checkpoints", () => {
   });
 
   test("round trips replay history and converges after out-of-order arrival", () => {
-    const a1 = operation("a", 1n, {}, "a", 100);
+    const [a1, b1] = concurrentPair();
     const a2 = operation("a", 2n, { a: 1n }, "a", 110);
-    const b1 = operation("b", 1n, {}, "b", 50);
     const beforeLate = applyAll([a1, a2]);
     const restored = applyOperation(roundTrip(beforeLate), b1, append);
     const continuous = applyOperation(beforeLate, b1, append);
