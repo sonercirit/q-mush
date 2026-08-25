@@ -1,24 +1,15 @@
 import { createHash, randomBytes } from "node:crypto";
-import {
-  existsSync,
-  readFileSync,
-  realpathSync,
-  statfsSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { isAccountExport } from "../shared/account-export.ts";
-import {
-  RUNNER_ACCOUNT_EXPORT_PATH,
-  RUNNER_REALTIME_PATH,
-} from "../shared/routes.ts";
+import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import {
   encodeRunnerActivationReceipt,
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { catchUpAccountExport } from "./runner-account-export-client.ts";
 import { createAnonymousRunnerIdentity } from "./runner-anonymous-identity.ts";
 import { createRunnerAppHandler } from "./runner-app-server.ts";
 import {
@@ -39,7 +30,6 @@ import {
   type RunnerContainerManager,
 } from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
-import { catchUpRunnerReplica } from "./runner-replica-catch-up.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
@@ -654,41 +644,11 @@ async function run(): Promise<void> {
   );
 
   const replicaDirectory = join(dirname(configurationPath), "replica");
-  const exportResponse = await fetch(
-    `${configuration.serverOrigin}${RUNNER_ACCOUNT_EXPORT_PATH}`,
-    { headers: { authorization: `Bearer ${configuration.token}` } },
-  );
-  if (!exportResponse.ok) {
-    throw new Error(
-      `Replica catch-up failed (${String(exportResponse.status)})`,
-    );
-  }
-  const accountExportValue: unknown = await exportResponse.json();
-  if (!isAccountExport(accountExportValue)) {
-    throw new Error("The account export response is invalid");
-  }
-  const accountExport = accountExportValue;
-  const filesystem = statfsSync(dirname(configurationPath));
-  await catchUpRunnerReplica(
+  await catchUpAccountExport(
     replicaDirectory,
-    {
-      inventory: () =>
-        Promise.resolve({
-          entities: accountExport.entities,
-          frontier: accountExport.frontier,
-          manifest: accountExport.manifest,
-          records: accountExport.records,
-        }),
-      blob: (digest) => {
-        const blob = accountExport.blobs.find(
-          (entry) => entry.digest === digest,
-        );
-        if (blob === undefined)
-          throw new Error("Replica blob is absent from export");
-        return Promise.resolve(Uint8Array.fromBase64(blob.data));
-      },
-    },
-    filesystem.bavail * filesystem.bsize,
+    configurationPath,
+    configuration.serverOrigin,
+    configuration.token,
   );
   const replica = createRunnerReplicaStore(replicaDirectory);
   const identity = createAnonymousRunnerIdentity(replicaDirectory);
