@@ -41,6 +41,7 @@ import { reportRunnerFatalError } from "./runner-fatal-error.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
+import { pendingSocketFailure } from "./runner-socket-failure.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
   addRunnerSocketFailureListeners,
@@ -417,28 +418,6 @@ async function installUpdateIfAvailable(
   } catch {
     console.warn("Could not check for a Q Mush runner update; retrying later…");
     return false;
-  }
-}
-
-async function pendingSocketFailure(
-  failure: Promise<Error>,
-  milliseconds: number,
-): Promise<Error | undefined> {
-  const controller = new AbortController();
-  try {
-    return await Promise.race([
-      setTimeout(milliseconds, undefined, {
-        signal: controller.signal,
-      }).catch((error: unknown) => {
-        if (!controller.signal.aborted) {
-          throw error;
-        }
-        return undefined;
-      }),
-      failure,
-    ]);
-  } finally {
-    controller.abort();
   }
 }
 

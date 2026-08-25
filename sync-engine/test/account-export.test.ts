@@ -43,6 +43,22 @@ function createAttachmentDatabase(): AppDatabase {
 function expectDatabaseUsable(database: AppDatabase): void {
   expect(database.$client.query("SELECT 1").get()).toEqual({ "1": 1 });
 }
+function bindDatabaseQuery(database: AppDatabase) {
+  return database.$client.query.bind(database.$client);
+}
+function instrumentDatabase(
+  implementation: (
+    originalQuery: AppDatabase["$client"]["query"],
+    sql: string,
+  ) => ReturnType<AppDatabase["$client"]["query"]>,
+): AppDatabase {
+  const result = createUserDatabase();
+  const originalQuery = bindDatabaseQuery(result);
+  vi.spyOn(result.$client, "query").mockImplementation((sql) =>
+    implementation(originalQuery, sql),
+  );
+  return result;
+}
 function expectPresenceDoesNotChangeRevision(
   database: AppDatabase,
   revision: string,
@@ -79,11 +95,12 @@ describe("legacy account export", () => {
   });
 
   test("uses bounded offset-free keyset row queries", () => {
-    database = createUserDatabase();
-    const originalQuery = database.$client.query.bind(database.$client);
     let largestRowLimit = 0;
     let usedOffset = false;
-    const boundedQueryImplementation = (sql: string) => {
+    const boundedQueryImplementation = (
+      originalQuery: AppDatabase["$client"]["query"],
+      sql: string,
+    ) => {
       const statement = originalQuery(sql);
       if (!sql.includes("ORDER BY")) return statement;
       usedOffset ||= sql.includes(" OFFSET ");
@@ -94,9 +111,7 @@ describe("legacy account export", () => {
       };
       return statement;
     };
-    vi.spyOn(database.$client, "query").mockImplementation(
-      boundedQueryImplementation,
-    );
+    database = instrumentDatabase(boundedQueryImplementation);
     exportAccountPage(database, "u");
     expect(largestRowLimit).toBeGreaterThan(0);
     expect(largestRowLimit).toBeLessThanOrEqual(100);
@@ -224,10 +239,8 @@ describe("legacy account export", () => {
   });
 
   test("reuses revision aggregates while the database is unchanged", () => {
-    database = createUserDatabase();
-    const originalQuery = database.$client.query.bind(database.$client);
     let aggregateQueries = 0;
-    vi.spyOn(database.$client, "query").mockImplementation((sql) => {
+    database = instrumentDatabase((originalQuery, sql) => {
       if (sql.includes("COUNT(*)")) aggregateQueries += 1;
       return originalQuery(sql);
     });

@@ -36,18 +36,21 @@ function isBlobEntry(value: unknown): value is ExportBlobEntry {
     typeof value["size"] === "number"
   );
 }
-export interface AccountExportRetryProgress {
+interface AccountExportRetryProgress {
   readonly elapsedMilliseconds: number;
   readonly previousRevision: string;
   readonly restartCount: number;
   readonly revision: string;
 }
+export type AccountExportRetryHandler = (
+  progress: AccountExportRetryProgress,
+) => void;
 export async function catchUpAccountExport(
   directory: string,
   configurationPath: string,
   serverOrigin: string,
   token: string,
-  onRetry?: (progress: AccountExportRetryProgress) => void,
+  onRetry?: AccountExportRetryHandler,
 ): Promise<void> {
   const startedAt = Date.now();
   const authorization = `Bearer ${token}`;

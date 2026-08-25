@@ -1,22 +1,16 @@
 # AGENTS.md
 
-Memory.
-
 ## Project Snapshot
 
-- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
-  the homepage, `/app` the app.
+- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`.
 
 ## Working Agreements
 
-- Call capabilities impossible only with excluding evidence; else record an open
-  question. Research provider docs via Brave and probe APIs; omit tunables
-  first, then prefer defaults and metadata/docs.
+- Call capabilities impossible only with excluding evidence; otherwise record an
+  open question. Research provider docs/API; prefer defaults and metadata/docs.
 - Preserve patterns; improve touched code. TDD: fail, implement, refactor green.
-  Keep one path; avoid premature abstraction.
-- Fix defects on sight, including pre-existing/out-of-scope; if harmful, codify
-  why in a test. Integrate each session capability with every protocol's native
-  control, recording gaps.
+- Fix defects on sight; codify harmful ones in tests. Integrate capabilities
+  with each protocol's native control, recording gaps.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
   decisions/lessons in the appropriate memory file: facts about provider
   discovery, requests, streaming, caching, retries, or model capability handling
@@ -24,7 +18,7 @@ Memory.
   credential and OAuth configuration, stays here. Repeated guidance means a
   missing rule. If evidence overturns a finding, fix code and stale records;
   act, don't ask. Never commit secrets, artifacts, or env files.
-- Keep workflows local-first: narrow checks, then broad, then failures.
+- Check narrow, then broad, then failures.
 
 ## Setup, Commands
 
