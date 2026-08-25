@@ -7,6 +7,7 @@ import { RUNNER_EXECUTABLE_SHA256_HEADER } from "../shared/routes.ts";
 import { readBuildArtifact } from "./build.ts";
 import { buildClientRelease } from "./client-assets.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
+import { renderRunnerAppPage } from "./pages.ts";
 import {
   isRunnerExecutableTarget,
   type RunnerExecutableTarget,
@@ -98,7 +99,7 @@ async function compileStandaloneExecutable(
         bytes.toBase64(),
       ]),
     ),
-    shell: `<!doctype html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/${stylesheet}"></head><body><div id="root"></div><script type="module" src="/${javaScript}"></script></body></html>`,
+    shell: await renderRunnerAppPage(javaScript, stylesheet),
   });
   const directory = await mkdtemp(join(tmpdir(), "q-mush-runner-build-"));
   const executablePath = join(directory, "q-mush-runner");

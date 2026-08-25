@@ -38,6 +38,17 @@ function renderDocument(title: string, body: JSX.Element[]): string {
   return `<!doctype html>${renderToString(() => document)}`;
 }
 
+export function renderRunnerAppPage(
+  javaScript: string,
+  stylesheet: string,
+): string {
+  return renderDocument("Q Mush", [
+    <link rel="stylesheet" href={`/${stylesheet}`} />,
+    <div id="root" />,
+    <script type="module" src={`/${javaScript}`} />,
+  ]);
+}
+
 export function renderHomePage(): string {
   return renderDocument("Q Mush", [
     <main class="relative isolate flex min-h-screen min-w-0 items-center overflow-x-clip px-4 py-10 sm:px-8 sm:py-14 lg:px-12 xl:px-16">
