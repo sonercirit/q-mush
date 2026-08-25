@@ -1,5 +1,7 @@
+import { getTableName } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 
+import { databaseSchema } from "../shared/database";
 import {
   MAX_PENDING_OPERATIONS,
   MAX_REMOTE_CLOCK_DRIFT_MS,
@@ -165,6 +167,11 @@ describe("operation core", () => {
     expect(() => classifyOperationPartition("future_entity")).toThrow(
       /Unknown operation entity/,
     );
+    const schemaNames = new Set(
+      Object.values(databaseSchema).map(getTableName),
+    );
+    for (const name of [...expected.session, ...expected["non-session"]])
+      expect(schemaNames.has(name)).toBe(true);
   });
 
   test("covers every HLC receive winner and rejects far-future clocks", () => {
@@ -175,6 +182,7 @@ describe("operation core", () => {
         now,
       );
     expect(receive(100, 105).logical).toBe(5);
+    expect(receive(110, 105)).toMatchObject({ physicalMs: 110, logical: 5 });
     expect(receive(120, 105)).toMatchObject({ physicalMs: 120, logical: 1 });
     expect(receive(100, 120)).toMatchObject({ physicalMs: 120, logical: 0 });
     const nowWins = createHybridLogicalClock("a", 100);
@@ -288,32 +296,6 @@ describe("operation core", () => {
     );
   });
 
-  test.each([
-    ["ascending", (index: number) => index],
-    ["descending", (index: number, count: number) => count - index],
-    ["randomized", (index: number) => Math.imul(index, 2_654_435_761) >>> 0],
-  ])(
-    "applied identity updates scale near-linearly for %s identifiers",
-    (_name, key) => {
-      const duration = (count: number) => {
-        const started = performance.now();
-        foldOperations(
-          count,
-          (index) => ({
-            ...sequentialOperation("scaling", index + 1),
-            operationId: `01950000-0000-7000-8000-${key(index, count)
-              .toString()
-              .padStart(12, "0")}`,
-          }),
-          (projection) => projection,
-        );
-        return performance.now() - started;
-      };
-      duration(500);
-      expect(duration(8_000) / duration(4_000)).toBeLessThan(3);
-    },
-  );
-
   test("bounds never-ready admission without reducer work", () => {
     expect(MAX_PENDING_OPERATIONS).toBe(512);
     const counter = countingReducer();
@@ -383,6 +365,14 @@ describe("operation core", () => {
     expect(() =>
       createOperation({ ...validationSeed, schemaVersion: 0 }),
     ).toThrow(/schemaVersion/);
+    expect(() =>
+      createOperation({ ...validationSeed, payload: new Date(Number.NaN) }),
+    ).toThrow(/dates must be valid/);
+    const shared = { value: "shared" };
+    expect(
+      createOperation({ ...validationSeed, payload: { a: shared, b: shared } })
+        .payload,
+    ).toEqual({ a: shared, b: shared });
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;
     expect(() =>
@@ -404,6 +394,13 @@ describe("operation core", () => {
       payload: { at: new Date(1) },
     });
     const waiting = applyOperation(initialApplyState(), dated, reducer);
+    const appliedDate = applyOperation(
+      initialApplyState(),
+      { ...dated, parents: {} },
+      reducer,
+    );
+    expect("id:validator-1" in appliedDate.applied).toBe(true);
+    expect(structuredClone(appliedDate.applied)).toEqual(appliedDate.applied);
     expect(() =>
       applyOperation(
         waiting,

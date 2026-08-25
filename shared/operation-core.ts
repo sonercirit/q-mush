@@ -30,14 +30,24 @@ export type FrontierComparison =
 
 export const operationEntityPartitions = {
   session: [
-    ...["agent_sessions", "agent_session_operations"],
-    ...["agent_session_turns", "agent_pending_inputs"],
-    ...["agent_question_requests", "agent_messages"],
+    "agent_sessions",
+    "agent_session_operations",
+    "agent_session_turns",
+    "agent_pending_inputs",
+    "agent_question_requests",
+    "agent_messages",
   ],
-  "non-session":
-    "users workspaces prompts provider_quota_settings provider_quota_reset_receipts provider_credential_workspaces attachment_fallbacks runner_workspaces tool_settings".split(
-      " ",
-    ),
+  "non-session": [
+    "users",
+    "workspaces",
+    "prompts",
+    "provider_quota_settings",
+    "provider_quota_reset_receipts",
+    "provider_credential_workspaces",
+    "attachment_fallbacks",
+    "runner_workspaces",
+    "tool_settings",
+  ],
 } as const;
 const sessionEntities: ReadonlySet<string> = new Set(
   operationEntityPartitions.session,
@@ -340,46 +350,17 @@ const setAppliedNode = (
   const next = { ...node, right: setAppliedNode(node.right, key, value) };
   return next.right.priority < next.priority ? rotateAppliedLeft(next) : next;
 };
-const getAppliedNode = (
-  node: AppliedNode | undefined,
-  key: string,
-): string | undefined => {
-  let current = node;
-  while (current !== undefined) {
-    if (key === current.key) return current.value;
-    current = compareText(key, current.key) < 0 ? current.left : current.right;
-  }
-  return undefined;
-};
-const appliedEntries = (
-  root: AppliedNode | undefined,
-): readonly [string, string][] => {
-  const entries: [string, string][] = [];
-  const visit = (node: AppliedNode | undefined): void => {
-    if (node === undefined) return;
-    visit(node.left);
-    entries.push([node.key, node.value]);
-    visit(node.right);
-  };
-  visit(root);
-  return entries;
-};
 const appliedRecord = (
   root: AppliedNode | undefined,
 ): Record<string, string> => {
-  const target: Record<string, string> = {};
-  const record = new Proxy(target, {
-    get: (_target, key) =>
-      typeof key === "string" ? getAppliedNode(root, key) : undefined,
-    ownKeys: () => appliedEntries(root).map(([key]) => key),
-    getOwnPropertyDescriptor: (_target, key) => {
-      const value =
-        typeof key === "string" ? getAppliedNode(root, key) : undefined;
-      return value === undefined
-        ? undefined
-        : { configurable: true, enumerable: true, value, writable: false };
-    },
-  });
+  const record: Record<string, string> = {};
+  const visit = (node: AppliedNode | undefined): void => {
+    if (node === undefined) return;
+    visit(node.left);
+    record[node.key] = node.value;
+    visit(node.right);
+  };
+  visit(root);
   appliedRoots.set(record, root);
   return record;
 };
@@ -418,13 +399,13 @@ export const applyOperation = <TProjection>(
   )
     throw new Error("Operation pending buffer is full");
 
-  let frontier = { ...state.frontier };
+  let frontier = state.frontier;
   let projection = state.projection;
   let replayHead = state.replayHead;
   let replayCount = state.replayCount;
   let replayLastClock = state.replayLastClock;
   const baseProjection = state.baseProjection;
-  const baseFrontier = { ...state.baseFrontier };
+  const baseFrontier = state.baseFrontier;
   let appliedRoot = writableApplied(state.applied);
   let remaining = [...state.pending, candidate];
 
@@ -444,7 +425,7 @@ export const applyOperation = <TProjection>(
         compareClocks(left.clock, right.clock),
       );
       projection = reduceOperations(baseProjection, replay, reducer);
-      frontier = advanceOperations({ ...baseFrontier }, replay);
+      frontier = advanceOperations(baseFrontier, replay);
       const appended = appendReplay(undefined, 0, replay);
       replayHead = appended.head;
       replayCount = appended.count;
@@ -472,5 +453,217 @@ export const applyOperation = <TProjection>(
     replayLastClock,
     baseProjection,
     baseFrontier,
+  };
+};
+
+type EncodedCheckpointValue = readonly [string, unknown];
+const checkpointObject = (value: unknown): Record<string, unknown> => {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Object.prototype
+  )
+    throw new Error("Invalid checkpoint object");
+  return value as Record<string, unknown>;
+};
+const exactCheckpointKeys = (
+  value: Record<string, unknown>,
+  keys: readonly string[],
+): void => {
+  const actual = Object.keys(value);
+  if (
+    actual.length !== keys.length ||
+    keys.some((key) => !Object.hasOwn(value, key))
+  )
+    throw new Error("Invalid checkpoint fields");
+};
+const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
+  validateValue(value);
+  if (value === undefined) return ["undefined", null];
+  if (typeof value === "bigint") return ["bigint", value.toString()];
+  if (value instanceof Date) return ["date", value.toISOString()];
+  if (Array.isArray(value)) return ["array", value.map(encodeCheckpointValue)];
+  if (value !== null && typeof value === "object")
+    return [
+      "object",
+      Object.entries(value).map(([key, item]) => [
+        key,
+        encodeCheckpointValue(item),
+      ]),
+    ];
+  return ["primitive", value];
+};
+const decodeCheckpointValue = (value: unknown): unknown => {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    typeof value[0] !== "string"
+  )
+    throw new Error("Invalid encoded checkpoint value");
+  const [tag, body] = value;
+  if (tag === "undefined" && body === null) return undefined;
+  if (
+    tag === "bigint" &&
+    typeof body === "string" &&
+    /^-?(0|[1-9]\d*)$/.test(body)
+  )
+    return BigInt(body);
+  if (tag === "date" && typeof body === "string") {
+    const date = new Date(body);
+    if (Number.isFinite(date.getTime()) && date.toISOString() === body)
+      return date;
+  }
+  if (tag === "array" && Array.isArray(body))
+    return body.map(decodeCheckpointValue);
+  if (tag === "object" && Array.isArray(body)) {
+    const result: Record<string, unknown> = {};
+    for (const entry of body) {
+      if (
+        !Array.isArray(entry) ||
+        entry.length !== 2 ||
+        typeof entry[0] !== "string" ||
+        Object.hasOwn(result, entry[0])
+      )
+        throw new Error("Invalid encoded checkpoint entry");
+      result[entry[0]] = decodeCheckpointValue(entry[1]);
+    }
+    return result;
+  }
+  if (
+    tag === "primitive" &&
+    (body === null ||
+      typeof body === "string" ||
+      typeof body === "boolean" ||
+      (typeof body === "number" && Number.isFinite(body)))
+  )
+    return body;
+  throw new Error("Invalid encoded checkpoint tag");
+};
+const checkpointRecord = <T extends string | bigint>(
+  value: unknown,
+  kind: "string" | "bigint",
+): Readonly<Record<string, T>> => {
+  const record = checkpointObject(value);
+  if (Object.values(record).some((item) => typeof item !== kind))
+    throw new Error("Invalid checkpoint record");
+  return record as Readonly<Record<string, T>>;
+};
+const decodeClock = (value: unknown): HybridTimestamp => {
+  const clock = checkpointObject(value);
+  exactCheckpointKeys(clock, ["physicalMs", "logical", "writerId"]);
+  if (
+    !Number.isFinite(clock["physicalMs"]) ||
+    !Number.isSafeInteger(clock["logical"]) ||
+    Number(clock["logical"]) < 0 ||
+    typeof clock["writerId"] !== "string"
+  )
+    throw new Error("Invalid checkpoint clock");
+  return {
+    physicalMs: Number(clock["physicalMs"]),
+    logical: Number(clock["logical"]),
+    writerId: clock["writerId"],
+  };
+};
+const decodeOperation = (value: unknown): Operation => {
+  const item = checkpointObject(value);
+  exactCheckpointKeys(item, [
+    "operationId",
+    "schemaVersion",
+    "partition",
+    "writerId",
+    "sequence",
+    "clock",
+    "parents",
+    "entity",
+    "kind",
+    "payload",
+  ]);
+  const entity = checkpointObject(item["entity"]);
+  const entityKeys = Object.hasOwn(entity, "workspaceId")
+    ? ["type", "id", "accountId", "workspaceId"]
+    : ["type", "id", "accountId"];
+  exactCheckpointKeys(entity, entityKeys);
+  if (
+    typeof item["operationId"] !== "string" ||
+    typeof item["writerId"] !== "string" ||
+    typeof item["sequence"] !== "bigint" ||
+    typeof item["kind"] !== "string" ||
+    typeof entity["type"] !== "string" ||
+    typeof entity["id"] !== "string" ||
+    typeof entity["accountId"] !== "string" ||
+    (Object.hasOwn(entity, "workspaceId") &&
+      typeof entity["workspaceId"] !== "string")
+  )
+    throw new Error("Invalid checkpoint operation");
+  const operation = createOperation({
+    operationId: item["operationId"],
+    schemaVersion: Number(item["schemaVersion"]),
+    writerId: item["writerId"],
+    sequence: item["sequence"],
+    clock: decodeClock(item["clock"]),
+    parents: checkpointRecord<bigint>(item["parents"], "bigint"),
+    entity: entity as unknown as OperationEntity,
+    kind: item["kind"],
+    payload: item["payload"],
+  });
+  if (item["partition"] !== operation.partition)
+    throw new Error("Invalid checkpoint partition");
+  return operation;
+};
+const decodeReplay = (value: unknown): ReplayEntry | undefined => {
+  if (value === undefined) return undefined;
+  const entry = checkpointObject(value);
+  exactCheckpointKeys(entry, ["operation", "previous"]);
+  return {
+    operation: decodeOperation(entry["operation"]),
+    previous: decodeReplay(entry["previous"]),
+  };
+};
+export const encodeOperationCheckpoint = <TProjection>(
+  state: OperationApplyState<TProjection>,
+): string => JSON.stringify(encodeCheckpointValue(state));
+export const decodeOperationCheckpoint = <TProjection>(
+  encoded: string,
+): OperationApplyState<TProjection> => {
+  let decoded: unknown;
+  try {
+    decoded = decodeCheckpointValue(JSON.parse(encoded));
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint", { cause: error });
+  }
+  const state = checkpointObject(decoded);
+  exactCheckpointKeys(state, [
+    "frontier",
+    "pending",
+    "projection",
+    "applied",
+    "replayHead",
+    "replayCount",
+    "replayLastClock",
+    "baseProjection",
+    "baseFrontier",
+  ]);
+  if (
+    !Array.isArray(state["pending"]) ||
+    !Number.isSafeInteger(state["replayCount"]) ||
+    Number(state["replayCount"]) < 0
+  )
+    throw new Error("Invalid operation checkpoint");
+  validateValue(state["projection"]);
+  validateValue(state["baseProjection"]);
+  return {
+    frontier: checkpointRecord<bigint>(state["frontier"], "bigint"),
+    pending: state["pending"].map(decodeOperation),
+    projection: state["projection"] as TProjection,
+    applied: checkpointRecord<string>(state["applied"], "string"),
+    replayHead: decodeReplay(state["replayHead"]),
+    replayCount: Number(state["replayCount"]),
+    replayLastClock:
+      state["replayLastClock"] === undefined
+        ? undefined
+        : decodeClock(state["replayLastClock"]),
+    baseProjection: state["baseProjection"] as TProjection,
+    baseFrontier: checkpointRecord<bigint>(state["baseFrontier"], "bigint"),
   };
 };

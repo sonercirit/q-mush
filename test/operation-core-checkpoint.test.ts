@@ -2,6 +2,8 @@ import { describe, expect, test } from "vitest";
 import {
   applyOperation,
   createOperation,
+  decodeOperationCheckpoint,
+  encodeOperationCheckpoint,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -61,233 +63,9 @@ const sequentialOperation = (
     "x",
     clock,
   );
-const parseBigintRecord = (
-  value: unknown,
-): Readonly<Record<string, bigint>> => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value) ||
-    Object.values(value).some((item) => typeof item !== "bigint")
-  )
-    throw new Error("Invalid bigint record");
-  return Object.fromEntries(Object.entries(value));
-};
-const parseStringRecord = (
-  value: unknown,
-): Readonly<Record<string, string>> => {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Object.prototype.toString.call(value) !== "[object Object]"
-  )
-    throw new Error("Invalid string record");
-  const entries = Object.entries(value);
-  if (entries.some((entry) => typeof entry[1] !== "string"))
-    throw new Error("Invalid string record");
-  return Object.fromEntries(entries.map(([key, item]) => [key, String(item)]));
-};
-const isStringArray = (value: unknown): value is string[] =>
-  Array.isArray(value) && value.every((item) => typeof item === "string");
-const checkpointField = (value: object, key: string): unknown =>
-  Object.entries(value).find((entry) => entry[0] === key)?.[1];
-const hasExactKeys = (value: object, keys: readonly string[]) => {
-  const actual = Object.keys(value).sort();
-  return (
-    actual.length === keys.length && keys.every((key) => actual.includes(key))
-  );
-};
-const encodeCheckpointValue = (value: unknown): unknown => {
-  if (value === undefined) return ["undefined", null];
-  if (typeof value === "bigint") return ["bigint", value.toString()];
-  if (Array.isArray(value))
-    return ["array", value.map((item) => encodeCheckpointValue(item))];
-  if (value !== null && typeof value === "object")
-    return [
-      "object",
-      Object.entries(value).map(([key, item]) => [
-        key,
-        encodeCheckpointValue(item),
-      ]),
-    ];
-  return ["primitive", value];
-};
-const decodeCheckpointValue = (value: unknown): unknown => {
-  if (
-    !Array.isArray(value) ||
-    value.length !== 2 ||
-    typeof value[0] !== "string"
-  )
-    throw new Error("Invalid encoded checkpoint value");
-  if (value[0] === "undefined" && value[1] === null) return undefined;
-  if (value[0] === "bigint" && typeof value[1] === "string")
-    return BigInt(value[1]);
-  if (value[0] === "array" && Array.isArray(value[1]))
-    return value[1].map(decodeCheckpointValue);
-  if (value[0] === "object" && Array.isArray(value[1]))
-    return Object.fromEntries(
-      value[1].map((entry) => {
-        if (
-          !Array.isArray(entry) ||
-          entry.length !== 2 ||
-          typeof entry[0] !== "string"
-        )
-          throw new Error("Invalid encoded checkpoint entry");
-        return [entry[0], decodeCheckpointValue(entry[1])];
-      }),
-    );
-  if (value[0] === "primitive") return value[1];
-  throw new Error("Invalid encoded checkpoint tag");
-};
-const roundTrip = (
-  state: OperationApplyState<readonly string[]>,
-  alter: (value: unknown) => unknown = (value) => value,
-): OperationApplyState<readonly string[]> => {
-  const parsed = alter(
-    decodeCheckpointValue(
-      JSON.parse(JSON.stringify(encodeCheckpointValue(state))),
-    ),
-  );
-  if (typeof parsed !== "object" || parsed === null)
-    throw new Error("Invalid checkpoint");
-  const checkpoint = parsed;
-  const field = (key: string) => checkpointField(checkpoint, key);
-  const checkpointKeys = [
-    "applied",
-    "baseFrontier",
-    "baseProjection",
-    "frontier",
-    "pending",
-    "projection",
-    "replayCount",
-    "replayHead",
-    "replayLastClock",
-  ];
-  const applied = parseStringRecord(field("applied"));
-  if (
-    !hasExactKeys(checkpoint, checkpointKeys) ||
-    !Array.isArray(field("pending")) ||
-    !isStringArray(field("projection")) ||
-    !isStringArray(field("baseProjection")) ||
-    typeof field("replayCount") !== "number" ||
-    !Number.isSafeInteger(field("replayCount")) ||
-    Number(field("replayCount")) < 0
-  )
-    throw new Error("Invalid checkpoint");
-  const pending = field("pending");
-  const projection = field("projection");
-  const baseProjection = field("baseProjection");
-  if (
-    !Array.isArray(pending) ||
-    !Array.isArray(projection) ||
-    !Array.isArray(baseProjection)
-  )
-    throw new Error("Invalid checkpoint");
-  return {
-    frontier: parseBigintRecord(field("frontier")),
-    pending: pending.map(parseOperation),
-    projection: projection.map(String),
-    applied,
-    replayHead: parseReplayEntry(field("replayHead")),
-    replayCount: Number(field("replayCount")),
-    replayLastClock:
-      field("replayLastClock") === undefined
-        ? undefined
-        : parseClock(field("replayLastClock")),
-    baseProjection: baseProjection.map(String),
-    baseFrontier: parseBigintRecord(field("baseFrontier")),
-  };
-};
-const parseReplayEntry = (
-  value: unknown,
-): OperationApplyState<unknown>["replayHead"] => {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== "object" || !("operation" in value))
-    throw new Error("Invalid replay entry");
-  return {
-    operation: parseOperation(value.operation),
-    previous: parseReplayEntry(
-      "previous" in value ? value.previous : undefined,
-    ),
-  };
-};
-const parseOperation = (value: unknown): Operation => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("operationId" in value) ||
-    typeof value.operationId !== "string" ||
-    !("schemaVersion" in value) ||
-    typeof value.schemaVersion !== "number" ||
-    !("writerId" in value) ||
-    typeof value.writerId !== "string" ||
-    !("sequence" in value) ||
-    typeof value.sequence !== "bigint" ||
-    !("clock" in value) ||
-    typeof value.clock !== "object" ||
-    value.clock === null ||
-    !("physicalMs" in value.clock) ||
-    typeof value.clock.physicalMs !== "number" ||
-    !("logical" in value.clock) ||
-    typeof value.clock.logical !== "number" ||
-    !("writerId" in value.clock) ||
-    typeof value.clock.writerId !== "string" ||
-    !("parents" in value) ||
-    typeof value.parents !== "object" ||
-    value.parents === null ||
-    !("entity" in value) ||
-    typeof value.entity !== "object" ||
-    value.entity === null ||
-    !("type" in value.entity) ||
-    typeof value.entity.type !== "string" ||
-    !("id" in value.entity) ||
-    typeof value.entity.id !== "string" ||
-    !("accountId" in value.entity) ||
-    typeof value.entity.accountId !== "string" ||
-    !("kind" in value) ||
-    typeof value.kind !== "string" ||
-    !("payload" in value)
-  )
-    throw new Error("Invalid replay operation");
-  return createOperation({
-    operationId: value.operationId,
-    schemaVersion: value.schemaVersion,
-    writerId: value.writerId,
-    sequence: value.sequence,
-    clock: {
-      physicalMs: value.clock.physicalMs,
-      logical: value.clock.logical,
-      writerId: value.clock.writerId,
-    },
-    parents: parseBigintRecord(value.parents),
-    entity: {
-      type: value.entity.type,
-      id: value.entity.id,
-      accountId: value.entity.accountId,
-    },
-    kind: value.kind,
-    payload: value.payload,
-  });
-};
-
-const parseClock = (value: unknown) => {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    !("physicalMs" in value) ||
-    !("logical" in value) ||
-    !("writerId" in value) ||
-    typeof value.physicalMs !== "number" ||
-    typeof value.logical !== "number" ||
-    typeof value.writerId !== "string"
-  )
-    throw new Error("Invalid clock");
-  return {
-    physicalMs: value.physicalMs,
-    logical: value.logical,
-    writerId: value.writerId,
-  };
-};
+type JsonTree = string | number | boolean | null | JsonTree[];
+const roundTrip = <T>(state: OperationApplyState<T>): OperationApplyState<T> =>
+  decodeOperationCheckpoint<T>(encodeOperationCheckpoint(state));
 
 describe("operation checkpoints", () => {
   test("serializes complete checkpoints and rejects resent equivocation", () => {
@@ -348,26 +126,56 @@ describe("operation checkpoints", () => {
     }
   });
 
-  test("rejects malformed checkpoint fields instead of normalizing them", () => {
+  test("rejects malformed and extra checkpoint fields at every level", () => {
     const state = applyAll([sequentialOperation("a", 1)]);
-    const replace = (value: unknown, field: string, replacement: unknown) => {
-      if (typeof value !== "object" || value === null)
-        throw new Error("Expected checkpoint object");
-      return {
-        ...Object.fromEntries(Object.entries(value)),
-        [field]: replacement,
-      };
-    };
-    const mutations: ((value: unknown) => unknown)[] = [
-      (value) => replace(value, "extra", true),
-      (value) => replace(value, "frontier", { a: "1" }),
-      (value) => replace(value, "applied", { key: 1n }),
-      (value) => replace(value, "pending", ["operation"]),
-      (value) => replace(value, "projection", [1n]),
-      (value) => replace(value, "baseProjection", [1n]),
+    const decoded = JSON.parse(encodeOperationCheckpoint(state)) as JsonTree[];
+    const objectEntries = decoded[1] as JsonTree[][];
+    const change = (field: string, replacement: unknown) => [
+      decoded[0],
+      objectEntries.map((entry: unknown[]) =>
+        entry[0] === field ? [field, replacement] : entry,
+      ),
     ];
-    for (const mutate of mutations)
-      expect(() => roundTrip(state, mutate)).toThrow(/Invalid/);
+    const encodedPrimitive = (value: unknown) => ["primitive", value];
+    const pendingState = applyOperation(
+      arrayState(),
+      sequentialOperation("a", 2),
+      append,
+    );
+    const pendingDecoded = JSON.parse(encodeOperationCheckpoint(pendingState)) as JsonTree[];
+    const mutations = [
+      [decoded[0], [...objectEntries, ["extra", encodedPrimitive(true)]]],
+      change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
+      change("applied", ["object", [["key", ["bigint", "1"]]]]),
+    ];
+    // Target nested records rather than only the operation itself.
+    for (const field of ["clock", "entity"] as const) {
+      const copy = structuredClone(pendingDecoded);
+      const rootEntries = copy[1] as JsonTree[][];
+      const pendingEntry = rootEntries.find((entry) => entry[0] === "pending");
+      if (pendingEntry === undefined) throw new Error("Missing pending fixture");
+      const operations = (pendingEntry[1] as JsonTree[])[1] as JsonTree[][];
+      const operationEntries = operations[0]?.[1] as JsonTree[][];
+      const nestedEntry = operationEntries.find((entry) => entry[0] === field);
+      if (nestedEntry === undefined) throw new Error("Missing nested fixture");
+      const nested = (nestedEntry[1] as JsonTree[])[1] as JsonTree[];
+      nested.push(["extra", encodedPrimitive(true)] as JsonTree[]);
+      mutations.push(copy);
+    }
+    for (const mutation of mutations)
+      expect(() => decodeOperationCheckpoint(JSON.stringify(mutation))).toThrow(
+        /Invalid/,
+      );
+  });
+
+  test("preserves Date payload fingerprints through production checkpoints", () => {
+    const item = {
+      ...sequentialOperation("a", 1),
+      payload: { at: new Date(5) },
+    };
+    const restored = roundTrip(applyOperation(arrayState(), item, append));
+    expect(restored.replayHead?.operation.payload).toEqual({ at: new Date(5) });
+    expect(applyOperation(restored, item, append)).toBe(restored);
   });
 
   test("round trips pending operations and releases them after restart", () => {
