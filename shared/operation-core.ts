@@ -210,6 +210,8 @@ export interface OperationApplyState<TProjection> {
   readonly replayHead: ReplayEntry | undefined;
   readonly replayCount: number;
   readonly replayLastClock: HybridTimestamp | undefined;
+  /** Operations older than this compacted HLC boundary cannot be admitted. */
+  readonly compactionWatermark: HybridTimestamp | undefined;
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
 }
@@ -227,6 +229,7 @@ export const compactOperationState = <TProjection>(
     replayHead: undefined,
     replayCount: 0,
     replayLastClock: undefined,
+    compactionWatermark: state.replayLastClock ?? state.compactionWatermark,
     baseProjection: state.projection,
     baseFrontier: { ...state.frontier },
   };
@@ -266,9 +269,16 @@ const identityIndex = (
 const isReady = (item: Operation, frontier: CausalFrontier): boolean =>
   frontierCovers(frontier, item.parents) &&
   item.sequence === frontierValue(frontier, item.writerId) + 1n;
-const addApplied = (applied: Record<string, string>, item: Operation): void => {
+const addApplied = (
+  root: AppliedNode | undefined,
+  item: Operation,
+): AppliedNode => {
   const fingerprint = canonical(item);
-  for (const key of identityKeys(item)) applied[key] = fingerprint;
+  let next = root;
+  for (const key of identityKeys(item))
+    next = setAppliedNode(next, key, fingerprint);
+  if (next === undefined) throw new Error("Applied identity update failed");
+  return next;
 };
 
 const orderedReady = (
@@ -297,14 +307,111 @@ const advanceOperations = (
   return advanced;
 };
 
-const ownedApplied = new WeakSet<object>();
+interface AppliedNode {
+  readonly key: string;
+  readonly value: string;
+  readonly priority: number;
+  readonly left: AppliedNode | undefined;
+  readonly right: AppliedNode | undefined;
+}
+const appliedRoots = new WeakMap<object, AppliedNode | undefined>();
+const appliedPriority = (key: string): number => {
+  let hash = 2_166_136_261;
+  for (let index = 0; index < key.length; index += 1) {
+    hash ^= key.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  return hash >>> 0;
+};
+const rotateAppliedLeft = (node: AppliedNode): AppliedNode => {
+  const right = node.right;
+  if (right === undefined) return node;
+  return {
+    ...right,
+    left: { ...node, right: right.left },
+  };
+};
+const rotateAppliedRight = (node: AppliedNode): AppliedNode => {
+  const left = node.left;
+  if (left === undefined) return node;
+  return {
+    ...left,
+    right: { ...node, left: left.right },
+  };
+};
+const setAppliedNode = (
+  node: AppliedNode | undefined,
+  key: string,
+  value: string,
+): AppliedNode => {
+  if (node === undefined)
+    return {
+      key,
+      value,
+      priority: appliedPriority(key),
+      left: undefined,
+      right: undefined,
+    };
+  if (key === node.key) return { ...node, value };
+  if (compareText(key, node.key) < 0) {
+    const next = { ...node, left: setAppliedNode(node.left, key, value) };
+    return next.left.priority < next.priority ? rotateAppliedRight(next) : next;
+  }
+  const next = { ...node, right: setAppliedNode(node.right, key, value) };
+  return next.right.priority < next.priority ? rotateAppliedLeft(next) : next;
+};
+const getAppliedNode = (
+  node: AppliedNode | undefined,
+  key: string,
+): string | undefined => {
+  let current = node;
+  while (current !== undefined) {
+    if (key === current.key) return current.value;
+    current = compareText(key, current.key) < 0 ? current.left : current.right;
+  }
+  return undefined;
+};
+const appliedEntries = (
+  root: AppliedNode | undefined,
+): readonly [string, string][] => {
+  const entries: [string, string][] = [];
+  const visit = (node: AppliedNode | undefined): void => {
+    if (node === undefined) return;
+    visit(node.left);
+    entries.push([node.key, node.value]);
+    visit(node.right);
+  };
+  visit(root);
+  return entries;
+};
+const appliedRecord = (
+  root: AppliedNode | undefined,
+): Record<string, string> => {
+  const target: Record<string, string> = {};
+  const record = new Proxy(target, {
+    get: (_target, key) =>
+      typeof key === "string" ? getAppliedNode(root, key) : undefined,
+    ownKeys: () => appliedEntries(root).map(([key]) => key),
+    getOwnPropertyDescriptor: (_target, key) => {
+      const value =
+        typeof key === "string" ? getAppliedNode(root, key) : undefined;
+      return value === undefined
+        ? undefined
+        : { configurable: true, enumerable: true, value, writable: false };
+    },
+  });
+  appliedRoots.set(record, root);
+  return record;
+};
 const writableApplied = (
   source: Readonly<Record<string, string>>,
-): Record<string, string> => {
-  if (ownedApplied.has(source)) return source;
-  const copy = { ...source };
-  ownedApplied.add(copy);
-  return copy;
+): AppliedNode | undefined => {
+  const known = appliedRoots.get(source);
+  if (known !== undefined || appliedRoots.has(source)) return known;
+  let root: AppliedNode | undefined;
+  for (const [key, value] of Object.entries(source))
+    root = setAppliedNode(root, key, value);
+  return root;
 };
 
 export const applyOperation = <TProjection>(
@@ -313,6 +420,11 @@ export const applyOperation = <TProjection>(
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
   validateValue(candidate);
+  if (
+    state.compactionWatermark !== undefined &&
+    compareClocks(candidate.clock, state.compactionWatermark) < 0
+  )
+    throw new Error("Operation clock precedes the compaction watermark");
   const fingerprint = canonical(candidate);
   const known = identityIndex(state, candidate);
   for (const key of identityKeys(candidate)) {
@@ -338,7 +450,7 @@ export const applyOperation = <TProjection>(
   let replayLastClock = state.replayLastClock;
   const baseProjection = state.baseProjection;
   const baseFrontier = { ...state.baseFrontier };
-  const applied = writableApplied(state.applied);
+  let appliedRoot = writableApplied(state.applied);
   let remaining = [...state.pending, candidate];
 
   let ready = orderedReady(remaining, frontier);
@@ -370,11 +482,7 @@ export const applyOperation = <TProjection>(
       replayCount = appended.count;
       replayLastClock = ready.at(-1)?.clock;
     }
-    for (const item of ready) {
-      addApplied(applied, item);
-      const itemFingerprint = canonical(item);
-      void itemFingerprint;
-    }
+    for (const item of ready) appliedRoot = addApplied(appliedRoot, item);
     const readyIds = new Set(ready.map((item) => item.operationId));
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
     ready = orderedReady(remaining, frontier);
@@ -383,10 +491,11 @@ export const applyOperation = <TProjection>(
     frontier,
     pending: remaining,
     projection,
-    applied,
+    applied: appliedRecord(appliedRoot),
     replayHead,
     replayCount,
     replayLastClock,
+    compactionWatermark: state.compactionWatermark,
     baseProjection,
     baseFrontier,
   };

@@ -16,18 +16,20 @@
   applied operations by HLC `(physicalMs, logical, writerId)`, so
   non-commutative updates converge across arrival order. Replay metadata is a
   mandatory part of every durable checkpoint and uses structural sharing.
-  `compactOperationState` discards replay history only when the protocol
-  supplies a genuinely stable frontier equal to the applied frontier and no
-  operations are pending; the projection at that boundary becomes the new replay
-  base. Identity fingerprints are plain enumerable checkpoint data, while
-  sequential steady-state admission remains amortized linear overall. Unready
-  operations have indexed identity checks and bounded admission (512 entries,
-  after which admission fails rather than silently wedging), while a ready
-  dependency may enter a full buffer to drain it; operation-ID and
-  writer-sequence equivocation is rejected. Durable checkpoints consist of
-  `frontier`, `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
-  `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
-  fields is optional. Operation values accept primitives, arrays, plain
+  Checkpoints therefore grow linearly with uncompacted replay history.
+  `compactOperationState` bounds that history only with no pending operations;
+  it records the last applied HLC as an enforced watermark, and later operations
+  below that boundary fail closed instead of risking divergent order. The
+  projection and frontier at that boundary become the new replay base. Identity
+  fingerprints are plain enumerable checkpoint data, while sequential
+  steady-state admission remains amortized linear overall. Unready operations
+  have indexed identity checks and bounded admission (512 entries, after which
+  admission fails rather than silently wedging), while a ready dependency may
+  enter a full buffer to drain it; operation-ID and writer-sequence equivocation
+  is rejected. Durable checkpoints consist of `frontier`, `pending`,
+  `projection`, `applied`, `replayHead`, `replayCount`, `replayLastClock`,
+  `compactionWatermark`, `baseProjection`, and `baseFrontier`; none of the
+  replay fields is optional. Operation values accept primitives, arrays, plain
   string-keyed objects, and valid Dates; other object prototypes, symbol keys,
   and cycles are rejected. The auth bearer-token `sessions`, encrypted
   `provider_credentials`, and setup-token-bearing `runners` tables are

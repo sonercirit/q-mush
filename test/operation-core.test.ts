@@ -71,6 +71,7 @@ const applyState = <T>(projection: T): OperationApplyState<T> => ({
   replayHead: undefined,
   replayCount: 0,
   replayLastClock: undefined,
+  compactionWatermark: undefined,
   baseProjection: projection,
   baseFrontier: {},
 });
@@ -426,7 +427,16 @@ describe("operation core", () => {
 
   test("preserves input states and resumes checkpoint-shaped durable state", () => {
     const original = initialApplyState();
-    applyOperation(original, operation("a", 1n, {}, "one"), reducer);
+    const first = applyOperation(
+      original,
+      operation("a", 1n, {}, "one"),
+      reducer,
+    );
+    const branchOperation = operation("b", 1n, {}, "two");
+    const branched = applyOperation(first, branchOperation, reducer);
+    expect(Object.keys(first.applied)).toHaveLength(2);
+    expect(applyOperation(first, branchOperation, reducer)).not.toBe(first);
+    expect(branched.frontier).toEqual({ a: 1n, b: 1n });
     expect(original).toEqual(initialApplyState());
     expect(() =>
       applyOperation(
@@ -454,6 +464,7 @@ describe("operation core", () => {
       replayHead: seeded.replayHead,
       replayCount: seeded.replayCount,
       replayLastClock: seeded.replayLastClock,
+      compactionWatermark: seeded.compactionWatermark,
       baseProjection: seeded.baseProjection,
       baseFrontier: seeded.baseFrontier,
     };
