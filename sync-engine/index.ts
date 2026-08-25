@@ -8,6 +8,7 @@ import {
   isDevelopmentRestartRequestMessage,
   RESTART_PROGRESS_INTERVAL_MS,
 } from "../shared/development-shutdown.ts";
+import { describeError } from "../shared/error.ts";
 import { createRestartDeadline } from "../shared/restart-deadline.ts";
 import { createGoogleAuthFromEnvironment } from "./auth.ts";
 import { createBraveSearchSkillFromEnvironment } from "./brave-search.ts";
@@ -204,13 +205,9 @@ if (usesOpenAiLoopbackCallback(Bun.env)) {
     console.log(`OpenAI OAuth callback is listening at ${callbackServer.url}`);
   } catch (error) {
     console.warn(
-      `OpenAI OAuth callback could not start: ${errorMessage(error)}`,
+      `OpenAI OAuth callback could not start: ${describeError(error)}`,
     );
   }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 const restartVisibleSessionIds: RestartProgressVisibilityCache = new Map();
@@ -307,7 +304,7 @@ const restartProgressReporting = (() => {
 const lifecycle = createDevelopmentRestartLifecycle({
   drainFailed: (error) => {
     console.warn(
-      `Q Mush development restart drain failed: ${errorMessage(error)}`,
+      `Q Mush development restart drain failed: ${describeError(error)}`,
     );
   },
   drainReady: () => {

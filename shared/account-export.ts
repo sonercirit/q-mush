@@ -74,17 +74,63 @@ function isManifestEntry(
     isNonnegativeInteger(value["size"])
   );
 }
+export function findAccountExportBlob(
+  blobs: readonly AccountExportBlob[] | undefined,
+  digest: string,
+): AccountExportBlob | undefined {
+  return blobs?.find((entry) => entry.digest === digest);
+}
+
+export function accountExportBlobResponse(
+  blob: AccountExportBlob | undefined,
+): Response {
+  return blob === undefined
+    ? new Response("Not found", { status: 404 })
+    : new Response(Uint8Array.fromBase64(blob.data), {
+        headers: {
+          "content-length": String(blob.size),
+          "content-type": "application/octet-stream",
+        },
+      });
+}
+
+export function accountExportEntityCounts(
+  records: readonly AccountExportRecord[],
+): Record<string, number> {
+  return Object.fromEntries(
+    ACCOUNT_EXPORT_ENTITIES.map((entity) => [
+      entity,
+      records.filter((record) => record.entity === entity).length,
+    ]),
+  );
+}
+
+export function createAccountExportInventory(
+  records: readonly AccountExportRecord[],
+  manifest: AccountExportInventory["manifest"],
+): Omit<AccountExportInventory, "frontier"> {
+  return {
+    entities: ACCOUNT_EXPORT_ENTITIES,
+    entityCounts: accountExportEntityCounts(records),
+    manifest,
+    records,
+  };
+}
+
+function accountExportInventoryFields(
+  inventory: Omit<AccountExportInventory, "frontier">,
+): Omit<AccountExportInventory, "frontier"> {
+  return {
+    entities: inventory.entities,
+    entityCounts: inventory.entityCounts,
+    manifest: inventory.manifest,
+    records: inventory.records,
+  };
+}
 export function accountExportFrontier(
   inventory: Omit<AccountExportInventory, "frontier">,
 ): string {
-  return sha256(
-    JSON.stringify({
-      entities: inventory.entities,
-      entityCounts: inventory.entityCounts,
-      manifest: inventory.manifest,
-      records: inventory.records,
-    }),
-  );
+  return sha256(JSON.stringify(accountExportInventoryFields(inventory)));
 }
 export function isAccountExportInventory(
   value: unknown,
@@ -115,24 +161,7 @@ export function isAccountExportInventory(
     records: value["records"],
   };
   return (
-    accountExportFrontier({
-      entities: inventory.entities,
-      entityCounts: inventory.entityCounts,
-      manifest: inventory.manifest,
-      records: inventory.records,
-    }) === inventory.frontier
-  );
-}
-export function isAccountExport(value: unknown): value is AccountExport {
-  return (
-    isAccountExportInventory(value) &&
-    "blobs" in value &&
-    Array.isArray(value.blobs) &&
-    value.blobs.every(
-      (blob) =>
-        isManifestEntry(blob) &&
-        "data" in blob &&
-        typeof blob.data === "string",
-    )
+    accountExportFrontier(accountExportInventoryFields(inventory)) ===
+    inventory.frontier
   );
 }

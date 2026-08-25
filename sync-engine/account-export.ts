@@ -24,8 +24,8 @@ import { parseSerializedArray } from "../shared/serialized-array.ts";
 import { sha256 } from "../shared/sha256.ts";
 
 import {
-  ACCOUNT_EXPORT_ENTITIES,
   accountExportFrontier,
+  createAccountExportInventory,
   type AccountExport,
   type AccountExportBlob,
   type AccountExportRecord,
@@ -174,18 +174,7 @@ export function exportAccount(
   const manifest = [...blobs.values()]
     .map(({ digest, size }) => ({ digest, size }))
     .sort((a, b) => a.digest.localeCompare(b.digest));
-  const entityCounts = Object.fromEntries(
-    ACCOUNT_EXPORT_ENTITIES.map((entity) => [
-      entity,
-      records.filter((record) => record.entity === entity).length,
-    ]),
-  );
-  const inventory = {
-    entities: ACCOUNT_EXPORT_ENTITIES,
-    entityCounts,
-    manifest,
-    records,
-  };
+  const inventory = createAccountExportInventory(records, manifest);
   return {
     ...inventory,
     blobs: [...blobs.values()],

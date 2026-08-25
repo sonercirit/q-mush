@@ -5,6 +5,7 @@ import { expect, test } from "vitest";
 import {
   ACCOUNT_EXPORT_ENTITIES,
   accountExportFrontier,
+  isAccountExportInventory,
   type AccountExport,
 } from "../../shared/account-export.ts";
 import { sha256 } from "../../shared/sha256.ts";
@@ -67,6 +68,22 @@ test("catch-up resumes missing blobs and becomes ready only after verified bytes
   expect(readFileSync(join(directory, "blobs", digest))).toEqual(
     Buffer.from(bytes),
   );
+});
+
+test("frontier checksum rejects a mutated inventory", () => {
+  expect(
+    isAccountExportInventory({
+      ...inventory,
+      records: [
+        {
+          entity: "agent_messages",
+          id: "changed",
+          payload: "{}",
+          tombstone: false,
+        },
+      ],
+    }),
+  ).toBe(false);
 });
 
 test("scoped or metadata-only inventory cannot become ready", async () => {

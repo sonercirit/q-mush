@@ -35,6 +35,10 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
+import {
+  activeViewResponse,
+  runnerExportResponse,
+} from "./account-export-http.ts";
 import { exportAccount } from "./account-export.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
@@ -437,6 +441,20 @@ export function createRequestHandler(
   const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
+  const runnerExport = (request: Request) => {
+    const account = runners.runnerAccount(request);
+    return account === undefined
+      ? new Response("Unauthorized", { status: 401 })
+      : exportAccount(database, account.userId);
+  };
+
+  const runnerExportRequest = (request: Request, pathname: string) => {
+    if (request.method !== "GET") return createMethodNotAllowedResponse("GET");
+    const exported = runnerExport(request);
+    return exported instanceof Response
+      ? exported
+      : runnerExportResponse(exported, pathname);
+  };
 
   return async (request) => {
     const { pathname } = new URL(request.url);
@@ -446,70 +464,18 @@ export function createRequestHandler(
         if (request.method !== "GET")
           return createMethodNotAllowedResponse("GET");
         const user = googleAuth.authenticatedUser(request);
-        if (user === null) return new Response("Unauthorized", { status: 401 });
-        const url = new URL(request.url);
-        const entity = url.searchParams.get("entity");
-        const parsedLimit = Number(url.searchParams.get("limit"));
-        if (
-          (entity !== "agent_messages" && entity !== "agent_sessions") ||
-          !Number.isSafeInteger(parsedLimit) ||
-          parsedLimit < 1 ||
-          parsedLimit > 100
-        ) {
-          return new Response("Invalid active view", { status: 400 });
-        }
-        const exported = exportAccount(database, user.id);
-        const sessionId = url.searchParams.get("sessionId");
-        const matching = exported.records
-          .filter((record) => record.entity === entity && !record.tombstone)
-          .map(
-            (record) => JSON.parse(record.payload) as Record<string, unknown>,
-          )
-          .filter(
-            (record) =>
-              sessionId === null || record["session_id"] === sessionId,
-          );
-        return Response.json({
-          complete: matching.length <= parsedLimit,
-          partial: true,
-          records: matching.slice(0, parsedLimit),
-        });
+        return user === null
+          ? new Response("Unauthorized", { status: 401 })
+          : activeViewResponse(
+              exportAccount(database, user.id),
+              new URL(request.url),
+            );
       }
-      if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
-        if (request.method !== "GET")
-          return createMethodNotAllowedResponse("GET");
-        const account = runners.runnerAccount(request);
-        if (account === undefined)
-          return new Response("Unauthorized", { status: 401 });
-        const exported = exportAccount(database, account.userId);
-        return Response.json({
-          entities: exported.entities,
-          entityCounts: exported.entityCounts,
-          frontier: exported.frontier,
-          manifest: exported.manifest,
-          records: exported.records,
-        });
-      }
-      if (pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)) {
-        if (request.method !== "GET")
-          return createMethodNotAllowedResponse("GET");
-        const account = runners.runnerAccount(request);
-        if (account === undefined)
-          return new Response("Unauthorized", { status: 401 });
-        const digest = pathname.slice(
-          RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1,
-        );
-        const blob = exportAccount(database, account.userId).blobs.find(
-          (entry) => entry.digest === digest,
-        );
-        return blob === undefined
-          ? new Response("Not found", { status: 404 })
-          : new Response(Uint8Array.fromBase64(blob.data), {
-              headers: {
-                "content-length": String(blob.size),
-                "content-type": "application/octet-stream",
-              },
-            });
+      if (
+        pathname === RUNNER_ACCOUNT_EXPORT_PATH ||
+        pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)
+      ) {
+        return runnerExportRequest(request, pathname);
       }
       if (pathname === AUTH_GOOGLE_PATH) {
         return googleAuth.begin(request);

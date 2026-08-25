@@ -2,6 +2,13 @@ import { describe, expect, test } from "vitest";
 import { createRunnerAppHandler } from "../../runner/runner-app-server.ts";
 import { sha256 } from "../../shared/sha256.ts";
 
+const pairing = {
+  browserGrant: "grant",
+  code: "code",
+  expiresAt: Number.MAX_SAFE_INTEGER,
+  transcript: "transcript",
+};
+
 const release = {
   files: {
     "app.abc.js": new TextEncoder().encode("console.log('app')"),
@@ -58,12 +65,7 @@ describe("runner app server", () => {
     const digest = sha256(bytes);
     const localOrigin = "http://127.0.0.1:43127";
     const handler = createRunnerAppHandler(release, localOrigin, {
-      pairing: {
-        browserGrant: "grant",
-        code: "code",
-        expiresAt: Number.MAX_SAFE_INTEGER,
-        transcript: "transcript",
-      },
+      pairing,
       views: {
         progress: () => ({ state: "ready" }),
         readBlob: (requested) => {
@@ -94,12 +96,7 @@ describe("runner app server", () => {
       }),
     };
     const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
-      pairing: {
-        browserGrant: "grant",
-        code: "code",
-        expiresAt: Number.MAX_SAFE_INTEGER,
-        transcript: "transcript",
-      },
+      pairing,
       views,
     });
     const headers = { cookie: "qm_browser=grant" };

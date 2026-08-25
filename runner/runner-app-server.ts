@@ -1,7 +1,9 @@
 import { timingSafeEqual } from "node:crypto";
 import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
+import { activeViewQuery } from "../shared/active-view-query.ts";
 import type { ActiveViewReader } from "../shared/active-view.ts";
 import { isSha256Digest } from "../shared/digest.ts";
+import type { AnonymousRunnerPairing } from "./runner-anonymous-identity.ts";
 
 export interface RunnerAppRelease {
   readonly files: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
@@ -17,12 +19,7 @@ function contentType(pathname: string): string {
   return "application/octet-stream";
 }
 
-export interface RunnerAppPairing {
-  readonly browserGrant: string;
-  readonly code: string;
-  readonly expiresAt: number;
-  readonly transcript: string;
-}
+export type RunnerAppPairing = AnonymousRunnerPairing;
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
@@ -137,8 +134,7 @@ export function createRunnerAppHandler(
       if (options?.views === undefined) {
         return Response.json({ error: "view_unavailable" }, { status: 404 });
       }
-      const entity = url.searchParams.get("entity");
-      const limit = Number(url.searchParams.get("limit"));
+      const { entity, limit } = activeViewQuery(url);
       if (entity === null || !isExportEntity(entity)) {
         return Response.json({ error: "invalid_view" }, { status: 400 });
       }

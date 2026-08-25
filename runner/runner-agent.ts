@@ -9,6 +9,7 @@ import {
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
+import { describeError } from "../shared/error.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import {
   encodeRunnerActivationReceipt,
@@ -36,6 +37,7 @@ import {
   type RunnerContainerManager,
 } from "./runner-container.ts";
 import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
+import { reportRunnerFatalError } from "./runner-fatal-error.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
@@ -592,9 +594,7 @@ async function run(): Promise<void> {
   mkdirSync(runnerDirectory, { recursive: true });
   const runnerRestartId = readRestartId();
   const startupRestart = createRunnerStartupRestart(runnerRestartId);
-  if (runnerRestartId !== undefined) {
-    runnerRestart.restore(runnerRestartId);
-  }
+  if (runnerRestartId !== undefined) runnerRestart.restore(runnerRestartId);
   const activationReceipt = readActivationReceipt();
   const activationReceiptPhase = readActivationReceiptPhase();
   if (activationReceipt === undefined && activationReceiptPhase !== undefined) {
@@ -609,9 +609,7 @@ async function run(): Promise<void> {
     );
   }
   const configuration =
-    configurationPath === undefined
-      ? undefined
-      : readConfiguration(configurationPath);
+    configurationPath && readConfiguration(configurationPath);
   const containers = createRunnerContainerManager({
     trackingPath: join(runnerDirectory, "owned-containers.json"),
   });
@@ -622,21 +620,18 @@ async function run(): Promise<void> {
   writeFileSync(
     join(runnerDirectory, "runner.pid"),
     `${String(process.pid)}\n`,
-    {
-      mode: 0o600,
-    },
+    { mode: 0o600 },
   );
 
   const replicaDirectory = join(runnerDirectory, "replica");
-  if (configuration !== undefined && configurationPath !== undefined) {
+  if (configuration && configurationPath) {
     void catchUpAccountExport(
       replicaDirectory,
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
     ).catch((error: unknown) => {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`Replica catch-up deferred: ${message}`);
+      console.error(`Replica catch-up deferred: ${describeError(error)}`);
     });
   }
   const replica = createRunnerReplicaStore(replicaDirectory);
@@ -667,12 +662,13 @@ async function run(): Promise<void> {
         ? requestedAppPort
         : 0,
   });
-  const appOrigin = `http://127.0.0.1:${String(app.port)}`;
-  console.log(`Q Mush local app listening at ${appOrigin}.`);
-  console.log(`Physical pairing transcript: ${identity.pairing.transcript}.`);
+  console.log(
+    `Local app at http://127.0.0.1:${String(app.port)}.`,
+  );
+  console.log(`Pairing transcript: ${identity.pairing.transcript}.`);
   await containers.recoverTracked();
   try {
-    if (configuration === undefined || configurationPath === undefined) {
+    if (!configuration || !configurationPath) {
       await new Promise<void>(() => undefined);
     } else {
       await maintainConnection(
@@ -687,10 +683,4 @@ async function run(): Promise<void> {
   }
 }
 
-function reportFatalError(error: unknown): void {
-  const message = error instanceof Error ? error.message : String(error);
-  console.error(`Q Mush runner stopped: ${message}`);
-  process.exitCode = 1;
-}
-
-await run().catch(reportFatalError);
+await run().catch(reportRunnerFatalError);

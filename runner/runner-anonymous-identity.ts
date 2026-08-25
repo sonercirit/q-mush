@@ -11,13 +11,14 @@ interface StoredDeviceIdentity {
   readonly signingPrivateKey: string;
   readonly signingPublicKey: string;
 }
+export interface AnonymousRunnerPairing {
+  readonly browserGrant: string;
+  readonly code: string;
+  readonly expiresAt: number;
+  readonly transcript: string;
+}
 export interface AnonymousRunnerIdentity {
-  readonly pairing: {
-    readonly browserGrant: string;
-    readonly code: string;
-    readonly expiresAt: number;
-    readonly transcript: string;
-  };
+  readonly pairing: AnonymousRunnerPairing;
   readonly publicIdentity: Pick<
     StoredDeviceIdentity,
     "accountId" | "deviceId" | "encryptionPublicKey" | "signingPublicKey"

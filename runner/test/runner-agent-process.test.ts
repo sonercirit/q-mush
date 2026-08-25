@@ -10,7 +10,10 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import {
   ACCOUNT_EXPORT_ENTITIES,
+  accountExportBlobResponse,
   accountExportFrontier,
+  createAccountExportInventory,
+  findAccountExportBlob,
   type AccountExport,
 } from "../../shared/account-export.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
@@ -131,18 +134,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
         const manifest = (options.accountExport?.blobs ?? []).map(
           ({ digest, size }) => ({ digest, size }),
         );
-        const entityCounts = Object.fromEntries(
-          ACCOUNT_EXPORT_ENTITIES.map((entity) => [
-            entity,
-            records.filter((record) => record.entity === entity).length,
-          ]),
-        );
-        const inventory = {
-          entities: ACCOUNT_EXPORT_ENTITIES,
-          entityCounts,
-          manifest,
-          records,
-        };
+        const inventory = createAccountExportInventory(records, manifest);
         return Response.json({
           ...inventory,
           frontier: accountExportFrontier(inventory),
@@ -152,12 +144,9 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
         const digest = pathname.slice(
           "/api/runner/account-export/blob/".length,
         );
-        const blob = options.accountExport?.blobs.find(
-          (entry) => entry.digest === digest,
+        return accountExportBlobResponse(
+          findAccountExportBlob(options.accountExport?.blobs, digest),
         );
-        return blob === undefined
-          ? new Response("Not found", { status: 404 })
-          : new Response(Uint8Array.fromBase64(blob.data));
       }
       if (pathname === "/api/runner/realtime") {
         return bunServer.upgrade(request, {

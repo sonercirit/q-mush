@@ -2,6 +2,7 @@ import { mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   ACCOUNT_EXPORT_ENTITIES,
+  accountExportEntityCounts,
   accountExportFrontier,
   type AccountExportInventory,
 } from "../shared/account-export.ts";
@@ -37,12 +38,7 @@ export async function catchUpRunnerReplica(
     const inventory = await source.inventory();
     store.begin({ availableBytes, requiredBytes: requiredCapacity(inventory) });
     const exportedEntities = new Set(inventory.entities);
-    const actualCounts = Object.fromEntries(
-      ACCOUNT_EXPORT_ENTITIES.map((entity) => [
-        entity,
-        inventory.records.filter((record) => record.entity === entity).length,
-      ]),
-    );
+    const actualCounts = accountExportEntityCounts(inventory.records);
     if (
       ACCOUNT_EXPORT_ENTITIES.some(
         (entity) =>
