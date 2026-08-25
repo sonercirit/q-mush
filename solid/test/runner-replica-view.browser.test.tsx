@@ -27,6 +27,12 @@ function completeView(records: readonly unknown[]): Response {
   return Response.json({ complete: true, records });
 }
 
+function sessionViewResponse(
+  records: readonly { readonly id: string; readonly title: string }[],
+): Promise<Response> {
+  return Promise.resolve(completeView(records));
+}
+
 function requestUrl(input: RequestInfo | URL): URL {
   const value =
     input instanceof Request
@@ -196,12 +202,10 @@ test("aborts the previous transcript read when another session is selected", asy
   let abortedSession: string | undefined;
   mockRunnerFetch((url, init) => {
     if (url.searchParams.get("entity") === "agent_sessions") {
-      return Promise.resolve(
-        completeView([
-          { id: "first", title: "First session" },
-          { id: "second", title: "Second session" },
-        ]),
-      );
+      return sessionViewResponse([
+        { id: "first", title: "First session" },
+        { id: "second", title: "Second session" },
+      ]);
     }
     const sessionId = url.searchParams.get("sessionId") ?? "";
     if (sessionId === "second") {
@@ -225,10 +229,9 @@ test("aborts an active transcript read when the view is disposed", async () => {
   let transcriptAborted = false;
   let transcriptRequests = 0;
   mockRunnerFetch((url, init) => {
-    if (url.searchParams.get("entity") === "agent_sessions") {
-      return Promise.resolve(
-        completeView([{ id: "first", title: "First session" }]),
-      );
+    const entity = url.searchParams.get("entity");
+    if (entity !== "agent_messages") {
+      return sessionViewResponse([{ id: "first", title: "First session" }]);
     }
     transcriptRequests += 1;
     return abortableResponse(init, () => {
