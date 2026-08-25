@@ -51,8 +51,10 @@ const requireEntry = (value: unknown, field: string): unknown[] => {
   if (!Array.isArray(entry)) throw new Error(`Missing ${field} fixture`);
   return entry;
 };
-const roundTrip = <T>(state: OperationApplyState<T>): OperationApplyState<T> =>
-  decodeOperationCheckpoint<T>(encodeOperationCheckpoint(state));
+const roundTrip = (
+  state: OperationApplyState<readonly string[]>,
+): OperationApplyState<readonly string[]> =>
+  decodeOperationCheckpoint(encodeOperationCheckpoint(state));
 
 describe("operation checkpoints", () => {
   test("serializes complete checkpoints and rejects resent equivocation", () => {
@@ -176,6 +178,8 @@ describe("operation checkpoints", () => {
       mutatePending("schemaVersion", encodedPrimitive(1e300)),
       mutatePending("physicalMs", encodedPrimitive("1"), true),
       mutatePending("logical", encodedPrimitive(-1), true),
+      mutatePending("logical", encodedPrimitive(1.5), true),
+      mutatePending("logical", encodedPrimitive(1e300), true),
       mutatePending("partition", encodedPrimitive("session")),
       mutatePending("payload", ["date", "2024-01-01"]),
       malformedClockWriter,
@@ -187,6 +191,15 @@ describe("operation checkpoints", () => {
       mutatePending("sequence", ["bigint", "01"]),
       mutatePending("sequence", ["date", "2024-01-01"]),
     ];
+    const wrongReplayKey = structuredClone(decoded);
+    const replayHead = requireEntry(
+      requireArray(requireArray(wrongReplayKey)[1]),
+      "replayHead",
+    );
+    const replayEntries = requireArray(requireArray(replayHead[1])[1]);
+    const previousEntry = requireEntry(replayEntries, "previous");
+    previousEntry[0] = "revious";
+    mutations.push(wrongReplayKey);
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {
       const copy = structuredClone(pendingDecoded);

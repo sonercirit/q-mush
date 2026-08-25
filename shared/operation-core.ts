@@ -281,9 +281,9 @@ const isReady = (item: Operation, frontier: CausalFrontier): boolean =>
   frontierCovers(frontier, item.parents) &&
   item.sequence === frontierValue(frontier, item.writerId) + 1n;
 const addApplied = (
-  root: AppliedNode | undefined,
+  root: AppliedIdentityNode | undefined,
   item: Operation,
-): AppliedNode => {
+): AppliedIdentityNode => {
   const fingerprint = canonical(item);
   let next = root;
   for (const key of identityKeys(item))
@@ -318,7 +318,6 @@ const advanceOperations = (
   return advanced;
 };
 
-type AppliedNode = AppliedIdentityNode;
 const appliedPriority = (key: string): number => {
   let hash = 2_166_136_261;
   for (let index = 0; index < key.length; index += 1) {
@@ -327,7 +326,7 @@ const appliedPriority = (key: string): number => {
   }
   return hash >>> 0;
 };
-const rotateAppliedLeft = (node: AppliedNode): AppliedNode => {
+const rotateAppliedLeft = (node: AppliedIdentityNode): AppliedIdentityNode => {
   const right = node.right;
   if (right === undefined) return node;
   return {
@@ -335,7 +334,7 @@ const rotateAppliedLeft = (node: AppliedNode): AppliedNode => {
     left: { ...node, right: right.left },
   };
 };
-const rotateAppliedRight = (node: AppliedNode): AppliedNode => {
+const rotateAppliedRight = (node: AppliedIdentityNode): AppliedIdentityNode => {
   const left = node.left;
   if (left === undefined) return node;
   return {
@@ -344,10 +343,10 @@ const rotateAppliedRight = (node: AppliedNode): AppliedNode => {
   };
 };
 const setAppliedNode = (
-  node: AppliedNode | undefined,
+  node: AppliedIdentityNode | undefined,
   key: string,
   value: string,
-): AppliedNode => {
+): AppliedIdentityNode => {
   if (node === undefined)
     return {
       key,
@@ -356,7 +355,6 @@ const setAppliedNode = (
       left: undefined,
       right: undefined,
     };
-  if (key === node.key) return { ...node, value };
   if (compareText(key, node.key) < 0) {
     const next = { ...node, left: setAppliedNode(node.left, key, value) };
     return next.left.priority < next.priority ? rotateAppliedRight(next) : next;
@@ -394,8 +392,8 @@ export const appliedIdentityDepth = (
       );
 const appliedFromRecord = (
   source: Readonly<Record<string, string>>,
-): AppliedNode | undefined => {
-  let root: AppliedNode | undefined;
+): AppliedIdentityNode | undefined => {
+  let root: AppliedIdentityNode | undefined;
   for (const [key, value] of Object.entries(source))
     root = setAppliedNode(root, key, value);
   return root;

@@ -196,8 +196,10 @@ const decodeReplay = (value: unknown): ReplayEntry | undefined => {
     previous: decodeReplay(entry["previous"]),
   };
 };
-export const encodeOperationCheckpoint = <TProjection>(
-  state: OperationApplyState<TProjection>,
+export type OperationCheckpointProjection = readonly string[];
+
+export const encodeOperationCheckpoint = (
+  state: OperationApplyState<OperationCheckpointProjection>,
 ): string =>
   JSON.stringify(
     encodeCheckpointValue({
@@ -205,9 +207,9 @@ export const encodeOperationCheckpoint = <TProjection>(
       applied: materializeApplied(state.applied),
     }),
   );
-export const decodeOperationCheckpoint = <TProjection>(
+export const decodeOperationCheckpoint = (
   encoded: string,
-): OperationApplyState<TProjection> => {
+): OperationApplyState<OperationCheckpointProjection> => {
   let decoded: unknown;
   try {
     decoded = decodeCheckpointValue(JSON.parse(encoded));
@@ -232,7 +234,9 @@ export const decodeOperationCheckpoint = <TProjection>(
     Number(state["replayCount"]) < 0
   )
     throw new Error("Invalid operation checkpoint");
-  const validProjection = (value: unknown): value is TProjection =>
+  const validProjection = (
+    value: unknown,
+  ): value is OperationCheckpointProjection =>
     Array.isArray(value) && value.every((item) => typeof item === "string");
   if (!validProjection(state["projection"]))
     throw new Error("Invalid operation checkpoint projection");
