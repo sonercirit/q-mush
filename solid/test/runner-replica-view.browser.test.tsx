@@ -6,9 +6,12 @@ import "../styles.css";
 const digest = "a".repeat(64);
 
 async function waitForText(root: HTMLElement, text: string): Promise<void> {
-  await vi.waitFor(() => {
-    if (!root.textContent.includes(text)) throw new Error(`Missing ${text}`);
-  });
+  await vi.waitFor(
+    () => {
+      if (!root.textContent.includes(text)) throw new Error(`Missing ${text}`);
+    },
+    { timeout: 2_500 },
+  );
 }
 
 test("real Chromium reads a complete runner replica and renders attachments read-only", async () => {
@@ -63,7 +66,7 @@ test("real Chromium reads a complete runner replica and renders attachments read
   });
   const root = document.createElement("div");
   document.body.append(root);
-  render(() => <RunnerReplicaView />, root);
+  const dispose = render(() => <RunnerReplicaView />, root);
 
   await waitForText(root, "Session from runner B");
   expect(root.textContent).toContain("Runner replica · Complete source");
@@ -85,7 +88,53 @@ test("real Chromium reads a complete runner replica and renders attachments read
     throw new Error("Missing disabled mutation control");
   }
   expect(getComputedStyle(mutation).cursor).toBe("not-allowed");
-  document.body.replaceChildren();
+  dispose();
+  root.remove();
+  meta.remove();
+  vi.restoreAllMocks();
+});
+
+test("serializes status polling and stops requests and updates after disposal", async () => {
+  const meta = document.createElement("meta");
+  meta.name = "q-mush-host";
+  meta.content = "runner";
+  document.head.append(meta);
+  let requests = 0;
+  let active = 0;
+  let maximumActive = 0;
+  let resolveStatus: ((response: Response) => void) | undefined;
+  vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+    requests += 1;
+    active += 1;
+    maximumActive = Math.max(maximumActive, active);
+    return new Promise<Response>((resolve, reject) => {
+      resolveStatus = (response) => {
+        active -= 1;
+        resolve(response);
+      };
+      init?.signal?.addEventListener("abort", () => {
+        active -= 1;
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    });
+  });
+  const root = document.createElement("div");
+  document.body.append(root);
+  const dispose = render(() => <RunnerReplicaView />, root);
+
+  await vi.waitFor(() => {
+    expect(requests).toBe(1);
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  expect(requests).toBe(1);
+  expect(maximumActive).toBe(1);
+  dispose();
+  root.remove();
+  resolveStatus?.(Response.json({ complete: true }));
+  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  expect(requests).toBe(1);
+  expect(root.textContent).toBe("");
+
   meta.remove();
   vi.restoreAllMocks();
 });

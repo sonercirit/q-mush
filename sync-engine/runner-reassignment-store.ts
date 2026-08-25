@@ -55,7 +55,7 @@ function affectedRunnerSessions(
     let result = 0;
     const visited = new Set<string>();
     while (current.parentSessionId !== null) {
-      if (visited.has(current.id)) throw new Error("Session lineage is cyclic");
+      if (visited.has(current.id)) return 0;
       visited.add(current.id);
       const parent = byId.get(current.parentSessionId);
       if (parent === undefined) break;

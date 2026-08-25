@@ -62,10 +62,13 @@ export function RunnerReplicaView(): JSX.Element {
       setViews((value) => ({ ...value, sessions })),
     );
   };
-  const loadStatus = async (): Promise<boolean> => {
-    const response = await fetch("/api/local/status");
+  const loadStatus = async (signal?: AbortSignal): Promise<boolean> => {
+    const response = await fetch("/api/local/status", {
+      ...(signal === undefined ? {} : { signal }),
+    });
     if (response.status === 401) return false;
     const status: unknown = await response.json();
+    if (signal?.aborted === true) return false;
     setReplicaComplete(isRecord(status) && status["complete"] === true);
     const progress = isRecord(status) ? status["retry"] : undefined;
     setRetry(
@@ -86,14 +89,26 @@ export function RunnerReplicaView(): JSX.Element {
     return true;
   };
   onMount(() => {
-    void loadStatus().then((authorized) => {
-      if (authorized) loadSessions();
-    });
-    const refresh = setInterval(() => {
-      void loadStatus();
-    }, 1_000);
+    let disposed = false;
+    let refresh: ReturnType<typeof setTimeout> | undefined;
+    let controller: AbortController | undefined;
+    const poll = (): void => {
+      controller = new AbortController();
+      void loadStatus(controller.signal)
+        .then((authorized) => {
+          if (authorized && !disposed) loadSessions();
+        })
+        .catch(() => undefined)
+        .finally(() => {
+          controller = undefined;
+          if (!disposed) refresh = setTimeout(poll, 1_000);
+        });
+    };
+    poll();
     onCleanup(() => {
-      clearInterval(refresh);
+      disposed = true;
+      if (refresh !== undefined) clearTimeout(refresh);
+      controller?.abort();
     });
   });
   const pair = async (): Promise<void> => {

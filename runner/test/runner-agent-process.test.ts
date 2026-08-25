@@ -57,6 +57,7 @@ interface RunnerTestServerOptions {
   readonly accountExport?: {
     readonly blobs: readonly AccountExportBlob[];
     readonly records: readonly AccountExportRecord[];
+    readonly revisions?: readonly string[];
   };
   readonly command?: RunnerToolCommand;
   readonly rejectRegistration?: boolean;
@@ -110,6 +111,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     { registrationId, type: "registration_operational" },
   ];
   let attempts = 0;
+  let exportRequests = 0;
   const connections: RunnerConnectRecord[] = [];
   const results: Readonly<Record<string, unknown>>[] = [];
   const sockets = new Set<Bun.ServerWebSocket<RunnerTestSocketData>>();
@@ -136,12 +138,17 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
         const manifest = (options.accountExport?.blobs ?? []).map(
           ({ digest, size }) => ({ digest, size }),
         );
+        const revisionIndex = exportRequests++;
+        const revisions = options.accountExport?.revisions;
         return Response.json({
           ...completeAccountExportInventory(records, manifest),
           blobs: options.accountExport?.blobs ?? [],
-          done: true,
+          done:
+            options.accountExport?.revisions === undefined || revisionIndex > 0,
           nextCursor: String(records.length),
-          revision: "0".repeat(64),
+          revision:
+            revisions?.[Math.min(revisionIndex, revisions.length - 1)] ??
+            "0".repeat(64),
         });
       }
       if (pathname.startsWith("/api/runner/account-export/blob/")) {
@@ -368,6 +375,7 @@ test("a paired client reads every exported entity and attachment after engine ki
     accountExport: {
       blobs: [{ data: attachment.toBase64(), digest, size: attachment.length }],
       records,
+      revisions: ["1".repeat(64), "2".repeat(64), "2".repeat(64)],
     },
   });
 
@@ -400,6 +408,24 @@ test("a paired client reads every exported entity and attachment after engine ki
           { headers: { cookie } },
         );
         return response.status === 200;
+      }, 7_000),
+    ).toBe(true);
+    expect(
+      await waitUntil(async () => {
+        const response = await fetch(
+          "http://127.0.0.1:43127/api/local/status",
+          { headers: { cookie } },
+        );
+        const status: unknown = await response.json();
+        return (
+          typeof status === "object" &&
+          status !== null &&
+          "retry" in status &&
+          typeof status.retry === "object" &&
+          status.retry !== null &&
+          "restartCount" in status.retry &&
+          status.retry.restartCount === 1
+        );
       }, 7_000),
     ).toBe(true);
     setup.server.stop();

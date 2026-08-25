@@ -5,8 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
-import { prompts } from "../../shared/database/schema.ts";
-import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
+import {
+  exportAccountBlob,
+  exportAccountPage,
+  exportedTables,
+} from "../account-export.ts";
 import { createRunnerStore } from "../runner-store.ts";
 import {
   TEST_ATTACHMENT_DATA,
@@ -255,17 +258,22 @@ describe("legacy account export", () => {
 
   test("keeps exported keyset indexes in schema declarations and migrations", () => {
     database = createUserDatabase();
-    const declared = getTableConfig(prompts).indexes.map(
-      ({ config }) => config.name,
+    const tableNames = exportedTables.map(
+      ({ table }) => getTableConfig(table).name,
     );
+    const declared = exportedTables.flatMap(({ table }) =>
+      getTableConfig(table)
+        .indexes.map(({ config }) => config.name)
+        .filter((name) => name.endsWith("_index")),
+    );
+    const placeholders = tableNames.map(() => "?").join(",");
     const migrated = database.$client
-      .query<{ name: string }, []>(
-        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'prompts'",
+      .query<{ name: string }, string[]>(
+        `SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name IN (${placeholders}) AND name LIKE '%_index'`,
       )
-      .all()
+      .all(...tableNames)
       .map(({ name }) => name);
-    expect(declared).toContain("prompts_user_id_index");
-    expect(migrated).toContain("prompts_user_id_index");
+    expect(new Set(migrated)).toEqual(new Set(declared));
   });
 
   test("uses owner and id indexes for exported keyset pages", () => {

@@ -27,6 +27,7 @@
 - Export revision caches invalidate on both same-connection total changes and
   cross-connection SQLite data-version changes. Every exported owner partition
   has an `(owner, id)` index so continuation pages remain keyset-bounded.
-- Replica retry progress is durable and exposed by the paired local status API.
+- Runner removal deterministically fences malformed cyclic session lineages
+  rather than allowing one cycle to abort reassignment of every valid session.
   The unauthenticated `/` and `/app` shell provides the physical pairing UI;
   replica APIs remain browser-grant protected.

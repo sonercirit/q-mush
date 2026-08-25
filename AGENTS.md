@@ -11,16 +11,16 @@
   first, then prefer defaults and metadata/docs.
 - Preserve patterns; improve touched code. Keep one path; avoid premature
   abstraction. TDD: fail, implement, refactor green.
-- Fix defects on sight; codify harmful ones in tests. Integrate capabilities
-  with each protocol's native control, recording gaps.
-- Never weaken checks, including pre-existing/out-of-scope checks, or claim
-  unperformed verification; disclose gaps. Record decisions/lessons in the
-  appropriate memory file: facts about provider discovery, requests, streaming,
-  caching, retries, or model capability handling belong in
-  `PROVIDER_PROTOCOLS.md`; everything else, including provider credential and
-  OAuth configuration, stays here. Repeated guidance means a missing rule. If
-  evidence overturns a finding, fix code and stale records; act, don't ask.
-  Never commit secrets, artifacts, or env files.
+- Fix defects on sight, including pre-existing/out-of-scope defects; codify
+  harmful ones in tests. Integrate capabilities with each protocol's native
+  control, recording gaps.
+- Never weaken checks or claim unperformed verification; disclose gaps. Record
+  decisions/lessons in the appropriate memory file: facts about provider
+  discovery, requests, streaming, caching, retries, or model capability handling
+  belong in `PROVIDER_PROTOCOLS.md`; everything else, including provider
+  credential and OAuth configuration, stays here. Repeated guidance means a
+  missing rule. If evidence overturns a finding, fix code and stale records;
+  act, don't ask. Never commit secrets, artifacts, or env files.
 - Keep workflows local-first: check narrow, then broad, then failures.
 
 ## Setup, Commands
