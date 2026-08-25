@@ -496,10 +496,7 @@ export function createRunnerStore(
     const lastSeenAt = online ? now : 0;
     database
       .update(runners)
-      .set({
-        lastSeenAt: new Date(lastSeenAt),
-        ...updatedAuditFields(userId, now),
-      })
+      .set({ lastSeenAt: new Date(lastSeenAt) })
       .where(activeRunnerCondition({ id, userId }))
       .run();
   }

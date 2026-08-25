@@ -165,20 +165,17 @@ export interface AccountExportPage {
   readonly revision: string;
 }
 function accountExportRevision(database: AppDatabase, userId: string): string {
-  const rows: string[] = [];
-  for (const { table, selected } of exportedTables) {
+  const states = exportedTables.map(({ table }) => {
     const name = getTableName(table);
-    for (const row of boundedRows(
-      database,
-      table,
-      userId,
-      Number.MAX_SAFE_INTEGER,
-      0,
-      selected,
-    ))
-      rows.push(`${name}:${JSON.stringify(row)}`);
-  }
-  return sha256(new TextEncoder().encode(rows.join("\n")));
+    const owner = name === "users" ? "id" : "user_id";
+    const state = database.$client
+      .query<{ count: number; updatedAt: number | null }, [string]>(
+        `SELECT COUNT(*) AS count, MAX("updated_at") AS updatedAt FROM "${name}" WHERE "${owner}" = ?`,
+      )
+      .get(userId);
+    return `${name}:${String(state?.count ?? 0)}:${String(state?.updatedAt ?? 0)}`;
+  });
+  return sha256(new TextEncoder().encode(states.join("\n")));
 }
 const exportedTables = [
   ...ordinaryTables
@@ -214,55 +211,57 @@ export function exportAccountPage(
   offset: number,
   limit = ACCOUNT_EXPORT_PAGE_LIMIT,
 ): AccountExportPage {
-  const revision = accountExportRevision(database, userId);
-  const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
-  const accumulator = createExportAccumulator();
-  const { blobs, records } = accumulator;
-  let skipped = 0;
-  for (const { table, selected } of exportedTables) {
-    if (records.length >= safeLimit) break;
-    const name = getTableName(table);
-    const ownershipColumn = name === "users" ? "id" : "user_id";
-    const count =
-      database.$client
-        .query<{ count: number }, [string]>(
-          `SELECT COUNT(*) AS count FROM "${name}" WHERE "${ownershipColumn}" = ?`,
-        )
-        .get(userId)?.count ?? 0;
-    if (offset >= skipped + count) {
+  return database.$client.transaction(() => {
+    const revision = accountExportRevision(database, userId);
+    const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
+    const accumulator = createExportAccumulator();
+    const { blobs, records } = accumulator;
+    let skipped = 0;
+    for (const { table, selected } of exportedTables) {
+      if (records.length >= safeLimit) break;
+      const name = getTableName(table);
+      const ownershipColumn = name === "users" ? "id" : "user_id";
+      const count =
+        database.$client
+          .query<{ count: number }, [string]>(
+            `SELECT COUNT(*) AS count FROM "${name}" WHERE "${ownershipColumn}" = ?`,
+          )
+          .get(userId)?.count ?? 0;
+      if (offset >= skipped + count) {
+        skipped += count;
+        continue;
+      }
+      const tableOffset = Math.max(0, offset - skipped);
+      for (const originalRow of boundedRows(
+        database,
+        table,
+        userId,
+        safeLimit - records.length,
+        tableOffset,
+        selected,
+      )) {
+        const row = { ...originalRow };
+        for (const field of ["images", "content"] as const)
+          if (field in row)
+            row[field] = rewriteAccountAttachments(row[field], blobs);
+        records.push({
+          entity: getTableName(table),
+          id: String(row["id"]),
+          payload: JSON.stringify(row),
+          tombstone: row["is_deleted"] === 1,
+        });
+      }
       skipped += count;
-      continue;
     }
-    const tableOffset = Math.max(0, offset - skipped);
-    for (const originalRow of boundedRows(
-      database,
-      table,
-      userId,
-      safeLimit - records.length,
-      tableOffset,
-      selected,
-    )) {
-      const row = { ...originalRow };
-      for (const field of ["images", "content"] as const)
-        if (field in row)
-          row[field] = rewriteAccountAttachments(row[field], blobs);
-      records.push({
-        entity: getTableName(table),
-        id: String(row["id"]),
-        payload: JSON.stringify(row),
-        tombstone: row["is_deleted"] === 1,
-      });
-    }
-    skipped += count;
-  }
-  const nextOffset = offset + records.length;
-  return {
-    blobs: [...blobs.values()],
-    done: records.length < safeLimit,
-    nextOffset,
-    records,
-    revision,
-  };
+    const nextOffset = offset + records.length;
+    return {
+      blobs: [...blobs.values()],
+      done: records.length < safeLimit,
+      nextOffset,
+      records,
+      revision,
+    };
+  })();
 }
 export function exportAccountBlob(
   database: AppDatabase,
@@ -281,7 +280,7 @@ export function exportAccountBlob(
       .query<Record<string, unknown>, [string]>(
         `SELECT "${column}" AS value FROM "${table}" WHERE "user_id" = ? AND "${column}" IS NOT NULL`,
       )
-      .all(userId);
+      .iterate(userId);
     for (const row of rows) {
       for (const item of parseSerializedArray(row["value"])) {
         if (typeof item !== "object" || item === null || !("data" in item))

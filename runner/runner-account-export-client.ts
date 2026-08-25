@@ -13,6 +13,9 @@ import {
 import { isRecord } from "../shared/validation.ts";
 import { catchUpRunnerReplica } from "./runner-replica-catch-up.ts";
 
+const MAX_EXPORT_RESTARTS = 3;
+const EXPORT_RESTART_BACKOFF_MILLISECONDS = 100;
+
 function isExportRecord(value: unknown): value is AccountExportRecord {
   return (
     isRecord(value) &&
@@ -45,6 +48,7 @@ export async function catchUpAccountExport(
   let offset = 0;
   let done = false;
   let revision: string | undefined;
+  let restarts = 0;
   while (!done) {
     const response = await fetch(
       `${serverOrigin}${RUNNER_ACCOUNT_EXPORT_PATH}?offset=${String(offset)}`,
@@ -71,11 +75,17 @@ export async function catchUpAccountExport(
     )
       throw new Error("The account export response is invalid");
     if (revision !== undefined && revision !== page.revision) {
+      restarts += 1;
+      if (restarts > MAX_EXPORT_RESTARTS)
+        throw new Error(
+          `Replica catch-up did not stabilize after ${String(restarts)} revision changes (last offset ${String(offset)})`,
+        );
       records.length = 0;
       manifest = {};
       offset = 0;
       done = false;
       revision = undefined;
+      await Bun.sleep(EXPORT_RESTART_BACKOFF_MILLISECONDS * restarts);
       continue;
     }
     revision = page.revision;
