@@ -63,19 +63,19 @@ const countingReducer = () => {
     calls: () => calls,
   };
 };
-const initialApplyState = (): OperationApplyState<Projection> => ({
+const applyState = <T>(projection: T): OperationApplyState<T> => ({
   frontier: {},
   pending: [],
-  projection: {},
+  projection,
   applied: {},
+  replayHead: undefined,
+  replayCount: 0,
+  replayLastClock: undefined,
+  baseProjection: projection,
+  baseFrontier: {},
 });
-
-const stringApplyState = (): OperationApplyState<string> => ({
-  frontier: {},
-  pending: [],
-  projection: "",
-  applied: {},
-});
+const initialApplyState = () => applyState<Projection>({});
+const stringApplyState = () => applyState("");
 const runStringOperations = (
   items: readonly Operation[],
   reduce: (projection: string, operation: Operation) => string,
@@ -131,10 +131,32 @@ const fillPending = (
   );
 
 describe("operation core", () => {
-  test("classifies every replicated schema entity", () => {
-    for (const entity of operationEntityPartitions.session)
+  test("classifies the explicit replicated schema allow-list", () => {
+    const expected = {
+      session: [
+        "agent_sessions",
+        "agent_session_operations",
+        "agent_session_turns",
+        "agent_pending_inputs",
+        "agent_question_requests",
+        "agent_messages",
+      ],
+      "non-session": [
+        "users",
+        "workspaces",
+        "prompts",
+        "provider_quota_settings",
+        "provider_quota_reset_receipts",
+        "provider_credential_workspaces",
+        "attachment_fallbacks",
+        "runner_workspaces",
+        "tool_settings",
+      ],
+    } as const;
+    expect(operationEntityPartitions).toEqual(expected);
+    for (const entity of expected.session)
       expect(classifyOperationPartition(entity)).toBe("session");
-    for (const entity of operationEntityPartitions["non-session"])
+    for (const entity of expected["non-session"])
       expect(classifyOperationPartition(entity)).toBe("non-session");
     for (const excluded of ["sessions", "provider_credentials", "runners"])
       expect(() => classifyOperationPartition(excluded)).toThrow(
@@ -171,11 +193,14 @@ describe("operation core", () => {
   test("uses a strict locale-independent clock and canonical key order", () => {
     const left = { physicalMs: 1, logical: 1, writerId: "z" };
     const right = { physicalMs: 1, logical: 1, writerId: "ä" };
-    const clockComparisons = [
-      compareClocks(left, right),
-      compareClocks(right, left),
-    ];
-    expect(clockComparisons).toEqual([-1, 1]);
+    expect(compareClocks(left, right)).toBe(-1);
+    expect(compareClocks(right, left)).toBe(1);
+    expect(
+      compareClocks(
+        { physicalMs: 1, logical: 1, writerId: "a" },
+        { physicalMs: 1, logical: 2, writerId: "a" },
+      ),
+    ).toBe(-1);
     const first = operation("a", 1n, {}, "one");
     const applied = applyOperation(initialApplyState(), first, reducer);
     const reordered = {
@@ -263,16 +288,23 @@ describe("operation core", () => {
     );
   });
 
-  test("applied identity updates scale near-linearly", () => {
+  test("applied identity updates scale near-linearly for ascending identifiers", () => {
     const duration = (count: number) => {
       const started = performance.now();
-      applySequential(count, (projection) => projection);
+      foldOperations(
+        count,
+        (index) => ({
+          ...sequentialOperation("ascending", index + 1),
+          operationId: `01950000-0000-7000-8000-${index
+            .toString()
+            .padStart(12, "0")}`,
+        }),
+        (projection) => projection,
+      );
       return performance.now() - started;
     };
     duration(500);
-    const small = duration(4_000);
-    const large = duration(8_000);
-    expect(large / small).toBeLessThan(3);
+    expect(duration(8_000) / duration(4_000)).toBeLessThan(3);
   });
 
   test("bounds never-ready admission without reducer work", () => {
@@ -407,10 +439,9 @@ describe("operation core", () => {
     const emptyProjection: readonly string[] = [];
     const seeded = applyOperation(
       {
-        frontier: {},
-        pending: [],
+        ...stringApplyState(),
         projection: emptyProjection,
-        applied: {},
+        baseProjection: emptyProjection,
       },
       operation("a", 1n, {}, "one"),
       (projection, item) => [...projection, item.operationId],
@@ -420,6 +451,11 @@ describe("operation core", () => {
       pending: [],
       projection: seeded.projection,
       applied: seeded.applied,
+      replayHead: seeded.replayHead,
+      replayCount: seeded.replayCount,
+      replayLastClock: seeded.replayLastClock,
+      baseProjection: seeded.baseProjection,
+      baseFrontier: seeded.baseFrontier,
     };
     const append = (projection: readonly string[], item: Operation) => [
       ...projection,

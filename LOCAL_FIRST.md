@@ -14,16 +14,20 @@
   uses contiguous per-writer sequences with causal frontiers. Newly ready
   operations retain the complete post-checkpoint replay set and order all
   applied operations by HLC `(physicalMs, logical, writerId)`, so
-  non-commutative updates converge across arrival order. Replay state uses
-  structural sharing and has no count limit that can wedge a replica; a future
-  explicit checkpoint may compact only a prefix known stable by the protocol.
-  Identity fingerprints likewise use structural sharing, making sequential
-  steady-state admission amortized linear overall. Unready operations have
-  indexed identity checks and bounded admission, while a ready dependency may
-  enter a full buffer to drain it; operation-ID and writer-sequence equivocation
-  is rejected. Durable checkpoints consist of `frontier`, `pending`,
-  `projection`, and `applied`; replay metadata is optional and may be compacted
-  at a causal boundary. Operation values accept primitives, arrays, plain
+  non-commutative updates converge across arrival order. Replay metadata is a
+  mandatory part of every durable checkpoint and uses structural sharing.
+  `compactOperationState` discards replay history only when the protocol
+  supplies a genuinely stable frontier equal to the applied frontier and no
+  operations are pending; the projection at that boundary becomes the new replay
+  base. Identity fingerprints are plain enumerable checkpoint data, while
+  sequential steady-state admission remains amortized linear overall. Unready
+  operations have indexed identity checks and bounded admission (512 entries,
+  after which admission fails rather than silently wedging), while a ready
+  dependency may enter a full buffer to drain it; operation-ID and
+  writer-sequence equivocation is rejected. Durable checkpoints consist of
+  `frontier`, `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
+  `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
+  fields is optional. Operation values accept primitives, arrays, plain
   string-keyed objects, and valid Dates; other object prototypes, symbol keys,
   and cycles are rejected. The auth bearer-token `sessions`, encrypted
   `provider_credentials`, and setup-token-bearing `runners` tables are
