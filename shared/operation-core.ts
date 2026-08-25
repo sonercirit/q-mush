@@ -216,6 +216,18 @@ const identityIndex = (
   return index;
 };
 
+const readyOperations = (
+  operations: readonly Operation[],
+  frontier: CausalFrontier,
+): Operation[] =>
+  operations
+    .filter(
+      (item) =>
+        frontierCovers(frontier, item.parents) &&
+        item.sequence === frontierValue(frontier, item.writerId) + 1n,
+    )
+    .sort((left, right) => compareClocks(left.clock, right.clock));
+
 export const applyOperation = <TProjection>(
   state: OperationApplyState<TProjection>,
   candidate: Operation,
@@ -244,13 +256,7 @@ export const applyOperation = <TProjection>(
   const applied: Record<string, string> = {};
   const history: Operation[] = [];
   let remaining = all;
-  let ready = remaining
-    .filter(
-      (item) =>
-        frontierCovers(frontier, item.parents) &&
-        item.sequence === frontierValue(frontier, item.writerId) + 1n,
-    )
-    .sort((left, right) => compareClocks(left.clock, right.clock));
+  let ready = readyOperations(remaining, frontier);
   while (ready.length > 0) {
     const readyIds = new Set(ready.map((item) => item.operationId));
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
@@ -261,13 +267,7 @@ export const applyOperation = <TProjection>(
       for (const key of identityKeys(item)) applied[key] = itemFingerprint;
       history.push(item);
     }
-    ready = remaining
-      .filter(
-        (item) =>
-          frontierCovers(frontier, item.parents) &&
-          item.sequence === frontierValue(frontier, item.writerId) + 1n,
-      )
-      .sort((left, right) => compareClocks(left.clock, right.clock));
+    ready = readyOperations(remaining, frontier);
   }
   // Both identity fingerprints intentionally remain until a durable replica checkpoint
   // replaces this state; forgetting either permits replay equivocation after compaction.

@@ -198,20 +198,14 @@ describe("operation core", () => {
         reducer,
       ),
     ).toBe(waiting);
-    expect(() =>
-      createOperation({
-        ...first,
-        operationId: "bad",
-        payload: { value: Number.NaN },
-      }),
-    ).toThrow(/finite/);
-    expect(() =>
-      createOperation({
-        ...first,
-        operationId: "bad",
-        payload: { value: Number.POSITIVE_INFINITY },
-      }),
-    ).toThrow(/finite/);
+    for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY])
+      expect(() =>
+        createOperation({
+          ...first,
+          operationId: "bad",
+          payload: { value: invalid },
+        }),
+      ).toThrow(/finite/);
   });
 
   test("compares, merges, advances, buffers, and rejects equivocation", () => {
