@@ -87,14 +87,30 @@ export function createRunnerReplicaStore(directory: string) {
     setFrontier: (frontier: string) => setState.run("frontier", frontier),
     setManifest: (entries: readonly ReplicaBlobManifestEntry[]) => {
       database.transaction(() => {
-        database.run("DELETE FROM replica_manifest");
+        const expected = new Set(entries.map(({ digest }) => digest));
+        const existing = database
+          .query<{ digest: string }, []>("SELECT digest FROM replica_manifest")
+          .all();
+        for (const { digest } of existing) {
+          if (!expected.has(digest)) {
+            database
+              .query("DELETE FROM replica_manifest WHERE digest = ?")
+              .run(digest);
+          }
+        }
         const insert = database.query(
-          "INSERT INTO replica_manifest (digest, size) VALUES (?, ?)",
+          "INSERT INTO replica_manifest (digest, size) VALUES (?, ?) ON CONFLICT (digest) DO UPDATE SET size = excluded.size",
         );
         for (const entry of entries) insert.run(entry.digest, entry.size);
         setState.run("manifest", "complete");
       })();
     },
+    missingBlobs: (): readonly ReplicaBlobManifestEntry[] =>
+      database
+        .query<ReplicaBlobManifestEntry, []>(
+          "SELECT digest, size FROM replica_manifest WHERE complete = 0 ORDER BY digest",
+        )
+        .all(),
     installBlob: async (path: string) => {
       const bytes = await Bun.file(path).bytes();
       const digest = createHash("sha256").update(bytes).digest("hex");
