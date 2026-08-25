@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { sha256 } from "../../shared/sha256.ts";
+import { isRecord } from "../../shared/validation.ts";
 import { createDrizzleAuthStore } from "../auth-store.ts";
 import { createSchemaCompatibleTestDatabase } from "./authenticated-integration-test-helpers.ts";
 import { createTestRequestHandler } from "./server.test.ts";
@@ -101,12 +102,13 @@ test("local active-view route authenticates, validates, and isolates transcripts
   expect(ownedBody).toMatchObject({
     records: [{ content: "owned transcript", id: "owned-session-message" }],
   });
-  const ownedRecord = (ownedBody as { records: Record<string, unknown>[] })
-    .records[0];
-  const images = JSON.parse(String(ownedRecord?.["images"])) as Record<
-    string,
-    unknown
-  >[];
+  if (!isRecord(ownedBody) || !Array.isArray(ownedBody["records"]))
+    throw new Error("Expected local view records");
+  const ownedRecord: unknown = ownedBody["records"][0];
+  if (!isRecord(ownedRecord)) throw new Error("Expected a local view record");
+  const parsedImages: unknown = JSON.parse(String(ownedRecord["images"]));
+  if (!Array.isArray(parsedImages)) throw new Error("Expected message images");
+  const images = parsedImages.filter(isRecord);
   const digest = sha256(Uint8Array.from([1, 2, 3]));
   expect(images).toEqual([{ digest, mediaType: "image/png" }]);
   expect(images[0]).not.toHaveProperty("data");

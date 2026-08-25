@@ -41,7 +41,7 @@ export async function catchUpAccountExport(
 ): Promise<void> {
   const authorization = `Bearer ${token}`;
   const records: AccountExportRecord[] = [];
-  const manifest: Record<string, number> = {};
+  let manifest: Record<string, number> = {};
   let offset = 0;
   let done = false;
   let revision: string | undefined;
@@ -72,7 +72,7 @@ export async function catchUpAccountExport(
       throw new Error("The account export response is invalid");
     if (revision !== undefined && revision !== page.revision) {
       records.length = 0;
-      for (const digest of Object.keys(manifest)) delete manifest[digest];
+      manifest = {};
       offset = 0;
       done = false;
       revision = undefined;
