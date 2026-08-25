@@ -171,11 +171,10 @@ Memory.
 
 - Stage-1 local replicas accept only schema-validated, entity-counted,
   checksum-bound account inventories; readiness rechecks manifests/blobs,
-  reserves SQLite/WAL plus incoming/install space. Legacy paged exports derive
-  revisions from per-table counts/max durable update times inside the page read
-  transaction; runner presence timestamps do not advance durable audit time.
-  Revision changes restart with bounded backoff and a progress diagnostic. Blob
-  lookup streams attachment rows and finalizes iterators on an early hit. Solid
+  reserves SQLite/WAL plus incoming/install space. Paged export revisions use
+  per-table counts/max durable update times in the page transaction; presence
+  does not advance audit time. Revision restarts have bounded backoff and a
+  diagnostic. Blob lookup streams rows and finalizes on an early hit. Solid
   selects its host from page metadata; both runner and authenticated
   migration-engine handlers serve bounded, read-only active views labeled with
   origin and completeness. Sensitive export tables use explicit public-column
