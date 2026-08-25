@@ -28,7 +28,7 @@ function exportAccount(
     offset = page.nextOffset;
     done = page.done;
   }
-  const entries = [...blobs.values()];
+  const entries: AccountExportBlob[] = [...blobs.values()];
   return {
     ...completeAccountExportInventory(
       records,

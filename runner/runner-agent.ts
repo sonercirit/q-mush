@@ -71,9 +71,7 @@ interface RunnerExecution {
   readonly commands: RunnerCommandExecutor;
   readonly containers: RunnerContainerManager;
 }
-
 let runnerExecution: RunnerExecution | undefined;
-
 function activeRunnerExecution(): RunnerExecution {
   if (runnerExecution === undefined) {
     throw new Error("The runner execution services are not initialized");
@@ -85,7 +83,6 @@ interface RunnerConfiguration {
   readonly serverOrigin: string;
   readonly token: string;
 }
-
 function readArgument(
   name:
     | "--activation-receipt"
@@ -104,7 +101,6 @@ function readArgument(
   const index = indexes[0];
   return index === undefined ? undefined : process.argv[index + 1];
 }
-
 function isArgumentName(value: string): boolean {
   return (
     value === "--activation-receipt" ||
