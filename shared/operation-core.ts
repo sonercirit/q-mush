@@ -359,6 +359,11 @@ const appliedRecord = (
   const record: Record<string, string> = {};
   const visit = (node: AppliedNode | undefined): void => {
     if (node === undefined) return;
+    if (
+      (node.left !== undefined && node.left.priority < node.priority) ||
+      (node.right !== undefined && node.right.priority < node.priority)
+    )
+      throw new Error("Applied identity index invariant failed");
     visit(node.left);
     record[node.key] = node.value;
     visit(node.right);
