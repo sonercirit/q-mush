@@ -87,6 +87,26 @@ describe("runner full replica store", () => {
         tombstone: false,
       },
       {
+        entity: "agent_messages",
+        id: "m2",
+        payload: JSON.stringify({
+          id: "m2",
+          session_id: "s1",
+          content: "goodbye",
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_messages",
+        id: "m3",
+        payload: JSON.stringify({
+          id: "m3",
+          session_id: "s2",
+          content: "another session",
+        }),
+        tombstone: false,
+      },
+      {
         entity: "agent_sessions",
         id: "s2",
         payload: JSON.stringify({ id: "s2", title: "Second" }),
@@ -109,6 +129,21 @@ describe("runner full replica store", () => {
       records: [{ id: "s1", title: "First", is_deleted: false }],
     });
     expect(store.readView("agent_messages", 10, "s1")).toMatchObject({
+      records: [
+        { id: "m1", content: "hello" },
+        { id: "m2", content: "goodbye" },
+      ],
+    });
+    store.applyRecords([
+      {
+        entity: "agent_messages",
+        id: "m4",
+        payload: "not-json-beyond-the-sql-bound",
+        tombstone: false,
+      },
+    ]);
+    expect(store.readView("agent_messages", 1, "s1")).toMatchObject({
+      complete: false,
       records: [{ id: "m1", content: "hello" }],
     });
     store.close();

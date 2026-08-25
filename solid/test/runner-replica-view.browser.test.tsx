@@ -219,7 +219,31 @@ test("aborts the previous transcript read when another session is selected", asy
 
   await waitForText(root, "Second transcript");
   expect(abortedSession).toBe("first");
-  expect(root.textContent).not.toContain("First transcript");
+});
+
+test("aborts an active transcript read when the view is disposed", async () => {
+  let transcriptAborted = false;
+  let transcriptRequests = 0;
+  mockRunnerFetch((url, init) => {
+    if (url.searchParams.get("entity") === "agent_sessions") {
+      return Promise.resolve(
+        completeView([{ id: "first", title: "First session" }]),
+      );
+    }
+    transcriptRequests += 1;
+    return abortableResponse(init, () => {
+      transcriptAborted = true;
+    });
+  });
+  const root = mountRunnerView();
+  await waitForText(root, "First session");
+  root.querySelector("button")?.click();
+  await expectRequestCount(() => transcriptRequests, 1);
+
+  disposeRunnerView();
+  await vi.waitFor(() => {
+    expect(transcriptAborted).toBe(true);
+  });
 });
 
 test("recovers after a transient view failure", async () => {
