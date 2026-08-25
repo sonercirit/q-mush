@@ -276,22 +276,24 @@ export function exportAccountBlob(
     ["agent_pending_inputs", "images"],
   ] as const;
   for (const [table, column] of attachmentColumns) {
-    const rows = database.$client
-      .query<Record<string, unknown>, [string]>(
-        `SELECT "${column}" AS value FROM "${table}" WHERE "user_id" = ? AND "${column}" IS NOT NULL`,
-      )
-      .iterate(userId);
-    for (const row of rows) {
-      for (const item of parseSerializedArray(row["value"])) {
-        if (typeof item !== "object" || item === null || !("data" in item))
-          continue;
-        const data = item.data;
-        if (typeof data !== "string") continue;
-        const bytes = decodeBase64(data);
-        if (bytes === undefined) continue;
-        if (sha256(bytes) === digest)
-          return { data, digest, size: bytes.length };
+    const statement = database.$client.query<Record<string, unknown>, [string]>(
+      `SELECT "${column}" AS value FROM "${table}" WHERE "user_id" = ? AND "${column}" IS NOT NULL`,
+    );
+    try {
+      for (const row of statement.iterate(userId)) {
+        for (const item of parseSerializedArray(row["value"])) {
+          if (typeof item !== "object" || item === null || !("data" in item))
+            continue;
+          const data = item.data;
+          if (typeof data !== "string") continue;
+          const bytes = decodeBase64(data);
+          if (bytes === undefined) continue;
+          if (sha256(bytes) === digest)
+            return { data, digest, size: bytes.length };
+        }
       }
+    } finally {
+      statement.finalize();
     }
   }
   return undefined;
