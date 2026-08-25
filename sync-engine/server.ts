@@ -34,8 +34,8 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import { runnerExportResponse } from "./account-export-http.ts";
-import { exportAccount } from "./account-export.ts";
+import { runnerExportBlobResponse } from "./account-export-http.ts";
+import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
@@ -437,19 +437,24 @@ export function createRequestHandler(
   const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
-  const runnerExport = (request: Request) => {
-    const account = runners.runnerAccount(request);
-    return account === undefined
-      ? new Response("Unauthorized", { status: 401 })
-      : exportAccount(database, account.userId);
-  };
-
   const runnerExportRequest = (request: Request, pathname: string) => {
     if (request.method !== "GET") return createMethodNotAllowedResponse("GET");
-    const exported = runnerExport(request);
-    return exported instanceof Response
-      ? exported
-      : runnerExportResponse(exported, pathname, request.headers.get("range"));
+    const account = runners.runnerAccount(request);
+    if (account === undefined)
+      return new Response("Unauthorized", { status: 401 });
+    if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
+      const offset = Number(
+        new URL(request.url).searchParams.get("offset") ?? "0",
+      );
+      if (!Number.isSafeInteger(offset) || offset < 0)
+        return new Response("Invalid offset", { status: 400 });
+      return Response.json(exportAccountPage(database, account.userId, offset));
+    }
+    const digest = pathname.slice(RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1);
+    return runnerExportBlobResponse(
+      exportAccountBlob(database, account.userId, digest),
+      request.headers.get("range"),
+    );
   };
 
   return async (request) => {

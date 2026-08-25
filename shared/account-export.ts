@@ -130,6 +130,16 @@ export function createAccountExportInventory(
     records,
   };
 }
+export function completeAccountExportInventory(
+  records: readonly AccountExportRecord[],
+  manifest: AccountExportInventory["manifest"],
+): AccountExportInventory {
+  const inventory = createAccountExportInventory(
+    records,
+    [...manifest].sort((a, b) => a.digest.localeCompare(b.digest)),
+  );
+  return { ...inventory, frontier: accountExportFrontier(inventory) };
+}
 
 function accountExportInventoryFields(
   inventory: Omit<AccountExportInventory, "frontier">,

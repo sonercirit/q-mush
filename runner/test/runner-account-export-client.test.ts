@@ -33,7 +33,12 @@ test("account export client resumes a real HTTP blob transfer", async () => {
     fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === RUNNER_ACCOUNT_EXPORT_PATH)
-        return Response.json(inventory);
+        return Response.json({
+          blobs: inventory.manifest,
+          done: true,
+          nextOffset: 0,
+          records: inventory.records,
+        });
       if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`) {
         receivedRange = request.headers.get("range");
         return accountExportBlobResponse(

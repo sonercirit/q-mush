@@ -621,8 +621,10 @@ async function run(): Promise<void> {
   };
   writeFileSync(
     join(runnerDirectory, "runner.pid"),
-    `${process.pid}\n`,
-    { mode: 0o600 },
+    `${String(process.pid)}\n`,
+    {
+      mode: 0o600,
+    },
   );
 
   const replicaDirectory = join(runnerDirectory, "replica");
@@ -664,7 +666,9 @@ async function run(): Promise<void> {
         ? requestedAppPort
         : 0,
   });
-  console.log(`App: http://127.0.0.1:${app.port}\nPairing code: ${identity.pairing.code}`);
+  console.log(
+    `App: http://127.0.0.1:${String(app.port)}\nPairing code: ${identity.pairing.code}`,
+  );
   await containers.recoverTracked();
   try {
     if (!configuration || !configurationPath) {

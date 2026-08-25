@@ -2,41 +2,36 @@ import {
   validActiveViewLimit,
   type ActiveView,
 } from "../shared/active-view.ts";
-import { ACTIVE_VIEWS_PATH } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
 
 export interface QueryHost {
-  readonly mutations: boolean;
-  readonly origin: "engine" | "runner";
+  readonly mutations: false;
+  readonly origin: "runner";
   readonly read: (
     entity: "agent_messages" | "agent_sessions",
     options: { readonly limit: number; readonly sessionId?: string },
   ) => Promise<ActiveView>;
 }
 
-function boundedLimit(limit: number): number {
-  if (!validActiveViewLimit(limit)) {
-    throw new Error("Active view limit must be between 1 and 100");
-  }
-  return limit;
-}
-
-function createQueryHost(origin: "engine" | "runner"): QueryHost {
+export function queryHostForDocument(document: {
+  readonly querySelector: (selectors: string) => unknown;
+}): QueryHost {
+  void document;
   return {
-    mutations: origin === "engine",
-    origin,
+    mutations: false,
+    origin: "runner",
     read: async (entity, options) => {
+      if (!validActiveViewLimit(options.limit))
+        throw new Error("Active view limit must be between 1 and 100");
       const parameters = new URLSearchParams({
         entity,
-        limit: String(boundedLimit(options.limit)),
+        limit: String(options.limit),
       });
       if (options.sessionId !== undefined)
         parameters.set("sessionId", options.sessionId);
-      const path =
-        origin === "runner"
-          ? `/api/local/view?${parameters.toString()}`
-          : `${ACTIVE_VIEWS_PATH}?${parameters.toString()}`;
-      const value: unknown = await requestJson(path);
+      const value: unknown = await requestJson(
+        `/api/local/view?${parameters.toString()}`,
+      );
       if (
         typeof value !== "object" ||
         value === null ||
@@ -44,30 +39,17 @@ function createQueryHost(origin: "engine" | "runner"): QueryHost {
         !Array.isArray(value.records) ||
         !("complete" in value) ||
         typeof value.complete !== "boolean"
-      ) {
+      )
         throw new Error("The host returned an invalid active view");
-      }
-      const records = value.records.filter(
-        (record): record is Record<string, unknown> =>
-          typeof record === "object" && record !== null,
-      );
       return {
         complete: value.complete,
-        origin,
+        origin: "runner",
         partial: true,
-        records,
+        records: value.records.filter(
+          (record): record is Record<string, unknown> =>
+            typeof record === "object" && record !== null,
+        ),
       };
     },
   };
-}
-
-export function queryHostForDocument(document: {
-  readonly querySelector: (selectors: string) => unknown;
-}): QueryHost {
-  return createQueryHost(
-    document.querySelector('meta[name="q-mush-host"][content="runner"]') ===
-      null
-      ? "engine"
-      : "runner",
-  );
 }

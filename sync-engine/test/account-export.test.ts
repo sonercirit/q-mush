@@ -3,12 +3,34 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
-import { exportAccount } from "../account-export.ts";
+import { exportAccount, exportAccountPage } from "../account-export.ts";
 
 let database: AppDatabase | undefined;
 afterEach(() => database?.$client.close());
 
 describe("legacy account export", () => {
+  test("bounds each database export page", () => {
+    database = createDatabase(
+      join(mkdtempSync(join(tmpdir(), "export-page-")), "db"),
+    );
+    database.$client.run(
+      "INSERT INTO users (id, google_subject, email, name, created_at, updated_at, created_by_id, updated_by_id, is_deleted) VALUES ('u', 'g', 'e', 'n', 1, 1, 'u', 'u', 0)",
+    );
+    const insert = database.$client.prepare(
+      "INSERT INTO prompts (id, user_id, name, normalized_name, body, revision, created_at, updated_at, created_by_id, updated_by_id, is_deleted) VALUES (?, 'u', ?, ?, 'body', 1, 1, 1, 'u', 'u', 0)",
+    );
+    for (let index = 0; index < 105; index += 1) {
+      const id = `p-${String(index).padStart(3, "0")}`;
+      insert.run(id, id, id);
+    }
+    const first = exportAccountPage(database, "u", 0);
+    expect(first.records).toHaveLength(100);
+    expect(first.done).toBe(false);
+    expect(
+      exportAccountPage(database, "u", first.nextOffset).records,
+    ).toHaveLength(6);
+  });
+
   test("exports tombstones while structurally excluding login and provider secrets", () => {
     database = createDatabase(
       join(mkdtempSync(join(tmpdir(), "export-")), "db"),
