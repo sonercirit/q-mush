@@ -71,13 +71,6 @@ function isManifestEntry(
     isNonnegativeInteger(value["size"])
   );
 }
-export function findAccountExportBlob(
-  blobs: readonly AccountExportBlob[] | undefined,
-  digest: string,
-): AccountExportBlob | undefined {
-  return blobs?.find((entry) => entry.digest === digest);
-}
-
 export function accountExportBlobResponse(
   blob: AccountExportBlob | undefined,
   range?: string | null,

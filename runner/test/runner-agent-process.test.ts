@@ -12,7 +12,6 @@ import {
   ACCOUNT_EXPORT_ENTITIES,
   accountExportBlobResponse,
   completeAccountExportInventory,
-  findAccountExportBlob,
   type AccountExportBlob,
   type AccountExportRecord,
 } from "../../shared/account-export.ts";
@@ -149,7 +148,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
           "/api/runner/account-export/blob/".length,
         );
         return accountExportBlobResponse(
-          findAccountExportBlob(options.accountExport?.blobs, digest),
+          options.accountExport?.blobs.find((entry) => entry.digest === digest),
         );
       }
       if (pathname === "/api/runner/realtime") {
