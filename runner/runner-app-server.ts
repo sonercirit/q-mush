@@ -1,5 +1,5 @@
 export interface RunnerAppRelease {
-  readonly files: Readonly<Record<string, Uint8Array>>;
+  readonly files: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
   readonly shell: string;
 }
 
@@ -47,19 +47,14 @@ export function createRunnerAppHandler(
     const name = url.pathname.slice(1);
     const bytes = release.files[name];
     if (bytes === undefined) return new Response("Not found", { status: 404 });
-    return new Response(
-      request.method === "HEAD"
-        ? null
-        : new Blob([bytes as Uint8Array<ArrayBuffer>]),
-      {
-        headers: {
-          "cache-control": HASHED_ASSET_PATTERN.test(name)
-            ? "public, max-age=31536000, immutable"
-            : "no-cache",
-          "content-type": contentType(name),
-          "x-content-type-options": "nosniff",
-        },
+    return new Response(request.method === "HEAD" ? null : new Blob([bytes]), {
+      headers: {
+        "cache-control": HASHED_ASSET_PATTERN.test(name)
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+        "content-type": contentType(name),
+        "x-content-type-options": "nosniff",
       },
-    );
+    });
   };
 }
