@@ -52,6 +52,14 @@ const initialApplyState = (): OperationApplyState<Projection> => ({
   applied: {},
 });
 
+const applyFirstOperation = (value: string) => {
+  const first = operation("writer-a", 1n, {}, value);
+  return {
+    first,
+    applied: applyOperation(initialApplyState(), first, reducer),
+  };
+};
+
 describe("operation core", () => {
   test("classifies the declared partition from the entity rather than trusting input", () => {
     expect(classifyOperationPartition("agent_messages")).toBe("session");
@@ -114,8 +122,7 @@ describe("operation core", () => {
   });
 
   test("rejects operation identity or writer-sequence equivocation", () => {
-    const first = operation("writer-a", 1n, {}, "one");
-    const applied = applyOperation(initialApplyState(), first, reducer);
+    const { first, applied } = applyFirstOperation("one");
     expect(() =>
       applyOperation(
         applied,
