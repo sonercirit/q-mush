@@ -71,7 +71,6 @@ const applyState = <T>(projection: T): OperationApplyState<T> => ({
   replayHead: undefined,
   replayCount: 0,
   replayLastClock: undefined,
-  compactionWatermark: undefined,
   baseProjection: projection,
   baseFrontier: {},
 });
@@ -289,24 +288,31 @@ describe("operation core", () => {
     );
   });
 
-  test("applied identity updates scale near-linearly for ascending identifiers", () => {
-    const duration = (count: number) => {
-      const started = performance.now();
-      foldOperations(
-        count,
-        (index) => ({
-          ...sequentialOperation("ascending", index + 1),
-          operationId: `01950000-0000-7000-8000-${index
-            .toString()
-            .padStart(12, "0")}`,
-        }),
-        (projection) => projection,
-      );
-      return performance.now() - started;
-    };
-    duration(500);
-    expect(duration(8_000) / duration(4_000)).toBeLessThan(3);
-  });
+  test.each([
+    ["ascending", (index: number) => index],
+    ["descending", (index: number, count: number) => count - index],
+    ["randomized", (index: number) => Math.imul(index, 2_654_435_761) >>> 0],
+  ])(
+    "applied identity updates scale near-linearly for %s identifiers",
+    (_name, key) => {
+      const duration = (count: number) => {
+        const started = performance.now();
+        foldOperations(
+          count,
+          (index) => ({
+            ...sequentialOperation("scaling", index + 1),
+            operationId: `01950000-0000-7000-8000-${key(index, count)
+              .toString()
+              .padStart(12, "0")}`,
+          }),
+          (projection) => projection,
+        );
+        return performance.now() - started;
+      };
+      duration(500);
+      expect(duration(8_000) / duration(4_000)).toBeLessThan(3);
+    },
+  );
 
   test("bounds never-ready admission without reducer work", () => {
     expect(MAX_PENDING_OPERATIONS).toBe(512);
@@ -464,7 +470,6 @@ describe("operation core", () => {
       replayHead: seeded.replayHead,
       replayCount: seeded.replayCount,
       replayLastClock: seeded.replayLastClock,
-      compactionWatermark: seeded.compactionWatermark,
       baseProjection: seeded.baseProjection,
       baseFrontier: seeded.baseFrontier,
     };

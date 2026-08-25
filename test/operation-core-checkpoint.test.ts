@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 import {
   applyOperation,
-  compactOperationState,
   createOperation,
   type Operation,
   type OperationApplyState,
@@ -35,7 +34,6 @@ const arrayState = (): OperationApplyState<readonly string[]> => {
     replayHead: undefined,
     replayCount: 0,
     replayLastClock: undefined,
-    compactionWatermark: undefined,
     baseProjection: projection,
     baseFrontier: {},
   };
@@ -62,17 +60,51 @@ const bigintRecord = (value: object): Readonly<Record<string, bigint>> =>
       (entry): entry is [string, bigint] => typeof entry[1] === "bigint",
     ),
   );
+const encodeCheckpointValue = (value: unknown): unknown => {
+  if (typeof value === "bigint") return ["bigint", value.toString()];
+  if (Array.isArray(value))
+    return ["array", value.map((item) => encodeCheckpointValue(item))];
+  if (value !== null && typeof value === "object")
+    return [
+      "object",
+      Object.entries(value).map(([key, item]) => [
+        key,
+        encodeCheckpointValue(item),
+      ]),
+    ];
+  return ["primitive", value];
+};
+const decodeCheckpointValue = (value: unknown): unknown => {
+  if (
+    !Array.isArray(value) ||
+    value.length !== 2 ||
+    typeof value[0] !== "string"
+  )
+    throw new Error("Invalid encoded checkpoint value");
+  if (value[0] === "bigint" && typeof value[1] === "string")
+    return BigInt(value[1]);
+  if (value[0] === "array" && Array.isArray(value[1]))
+    return value[1].map(decodeCheckpointValue);
+  if (value[0] === "object" && Array.isArray(value[1]))
+    return Object.fromEntries(
+      value[1].map((entry) => {
+        if (
+          !Array.isArray(entry) ||
+          entry.length !== 2 ||
+          typeof entry[0] !== "string"
+        )
+          throw new Error("Invalid encoded checkpoint entry");
+        return [entry[0], decodeCheckpointValue(entry[1])];
+      }),
+    );
+  if (value[0] === "primitive") return value[1];
+  throw new Error("Invalid encoded checkpoint tag");
+};
 const roundTrip = (
   state: OperationApplyState<readonly string[]>,
 ): OperationApplyState<readonly string[]> => {
-  const parsed: unknown = JSON.parse(
-    JSON.stringify(state, (_key, value: unknown) =>
-      typeof value === "bigint" ? `${value.toString()}n` : value,
-    ),
-    (_key, value: unknown) =>
-      typeof value === "string" && /^\d+n$/.test(value)
-        ? BigInt(value.slice(0, -1))
-        : value,
+  const parsed = decodeCheckpointValue(
+    JSON.parse(JSON.stringify(encodeCheckpointValue(state))),
   );
   if (
     typeof parsed !== "object" ||
@@ -90,14 +122,7 @@ const roundTrip = (
     !Array.isArray(parsed.projection) ||
     !Array.isArray(parsed.baseProjection) ||
     !(
-      parsed.replayHead === undefined ||
-      parsed.replayHead === null ||
-      typeof parsed.replayHead === "object"
-    ) ||
-    !(
-      !("compactionWatermark" in parsed) ||
-      parsed.compactionWatermark === undefined ||
-      typeof parsed.compactionWatermark === "object"
+      parsed.replayHead === undefined || typeof parsed.replayHead === "object"
     ) ||
     typeof parsed.frontier !== "object" ||
     parsed.frontier === null ||
@@ -123,11 +148,6 @@ const roundTrip = (
       parsed.replayLastClock === undefined
         ? undefined
         : parseClock(parsed.replayLastClock),
-    compactionWatermark:
-      "compactionWatermark" in parsed &&
-      parsed.compactionWatermark !== undefined
-        ? parseClock(parsed.compactionWatermark)
-        : undefined,
     baseProjection: parsed.baseProjection,
     baseFrontier: bigintRecord(parsed.baseFrontier),
   };
@@ -267,37 +287,40 @@ describe("operation checkpoints", () => {
     expect(c.projection).toEqual(["b-1", "c-1", "a-1"]);
   });
 
-  test("rejects operations older than a compacted watermark", () => {
-    let state = arrayState();
-    const stream = Array.from({ length: 100 }, (_, index) =>
-      sequentialOperation("a", index + 1, 1_000),
-    );
-    state = stream.reduce(
-      (current, item) => applyOperation(current, item, append),
-      state,
-    );
-    state = applyOperation(
-      state,
-      operation("a", 101n, { a: 100n }, "x", 900),
+  test("preserves bigint-looking payload strings through checkpoints", () => {
+    const item = operation("a", 1n, {}, "123n", 1);
+    const checkpoint = roundTrip(applyOperation(arrayState(), item, append));
+    expect(checkpoint.replayHead?.operation.payload).toEqual({ value: "123n" });
+  });
+
+  test("accepts a concurrent earlier-clock operation and converges", () => {
+    const a1 = operation("a", 1n, {}, "a", 100);
+    const b1 = operation("b", 1n, {}, "b", 50);
+    const late = applyOperation(
+      roundTrip(applyOperation(arrayState(), a1, append)),
+      b1,
       append,
     );
-    const pending = applyOperation(
-      state,
-      operation("c", 2n, { c: 1n }, "pending", 201),
+    const early = applyOperation(
+      applyOperation(arrayState(), b1, append),
+      a1,
       append,
     );
-    expect(() => compactOperationState(pending, pending.frontier)).toThrow(
-      /empty pending buffer/,
+    expect(late.projection).toEqual(early.projection);
+    expect(late.frontier).toEqual(early.frontier);
+  });
+
+  test("makes identical redelivery a no-op after reordering and checkpointing", () => {
+    const a1 = operation("a", 1n, {}, "a", 100);
+    const b1 = operation("b", 1n, {}, "b", 50);
+    const reordered = applyOperation(
+      applyOperation(arrayState(), a1, append),
+      b1,
+      append,
     );
-    const compacted = compactOperationState(state, state.frontier);
-    expect(compacted.replayCount).toBe(0);
-    expect(() => compactOperationState(state, { a: 100n })).toThrow(/equal/);
-    expect(compacted.baseProjection).toEqual(state.projection);
-    expect(compacted.baseFrontier).toEqual(state.frontier);
-    expect(compacted.compactionWatermark).toEqual(state.replayLastClock);
-    expect(() =>
-      applyOperation(compacted, operation("b", 1n, {}, "late", 1), append),
-    ).toThrow(/compaction watermark/);
+    expect(applyOperation(reordered, a1, append)).toBe(reordered);
+    const restored = roundTrip(reordered);
+    expect(applyOperation(restored, b1, append)).toBe(restored);
   });
 
   test("round trips replay history and converges after out-of-order arrival", () => {

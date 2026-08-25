@@ -210,30 +210,10 @@ export interface OperationApplyState<TProjection> {
   readonly replayHead: ReplayEntry | undefined;
   readonly replayCount: number;
   readonly replayLastClock: HybridTimestamp | undefined;
-  /** Operations older than this compacted HLC boundary cannot be admitted. */
-  readonly compactionWatermark: HybridTimestamp | undefined;
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
 }
 export const MAX_PENDING_OPERATIONS = 512;
-export const compactOperationState = <TProjection>(
-  state: OperationApplyState<TProjection>,
-  stableFrontier: CausalFrontier,
-): OperationApplyState<TProjection> => {
-  if (compareFrontiers(state.frontier, stableFrontier) !== "equal")
-    throw new Error("Compaction frontier must equal the applied frontier");
-  if (state.pending.length > 0)
-    throw new Error("Compaction requires an empty pending buffer");
-  return {
-    ...state,
-    replayHead: undefined,
-    replayCount: 0,
-    replayLastClock: undefined,
-    compactionWatermark: state.replayLastClock ?? state.compactionWatermark,
-    baseProjection: state.projection,
-    baseFrontier: { ...state.frontier },
-  };
-};
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
@@ -420,11 +400,6 @@ export const applyOperation = <TProjection>(
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
   validateValue(candidate);
-  if (
-    state.compactionWatermark !== undefined &&
-    compareClocks(candidate.clock, state.compactionWatermark) < 0
-  )
-    throw new Error("Operation clock precedes the compaction watermark");
   const fingerprint = canonical(candidate);
   const known = identityIndex(state, candidate);
   for (const key of identityKeys(candidate)) {
@@ -495,7 +470,6 @@ export const applyOperation = <TProjection>(
     replayHead,
     replayCount,
     replayLastClock,
-    compactionWatermark: state.compactionWatermark,
     baseProjection,
     baseFrontier,
   };
