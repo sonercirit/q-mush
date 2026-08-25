@@ -37,11 +37,11 @@ function waitForExit(
 }
 
 async function waitUntil(
-  condition: () => boolean,
+  condition: () => boolean | Promise<boolean>,
   milliseconds: number,
 ): Promise<boolean> {
   const deadline = Date.now() + milliseconds;
-  while (!condition() && Date.now() < deadline) {
+  while (!(await condition()) && Date.now() < deadline) {
     await Bun.sleep(POLL_INTERVAL_MILLISECONDS);
   }
   return condition();
