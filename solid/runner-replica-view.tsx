@@ -50,11 +50,6 @@ export function RunnerReplicaView(): JSX.Element {
     );
   };
   onMount(() => {
-    if (host.origin === "engine") {
-      setPaired(true);
-      loadSessions();
-      return;
-    }
     void fetch("/api/local/status").then(async (response) => {
       if (response.status === 401) return;
       const status: unknown = await response.json();
@@ -90,10 +85,8 @@ export function RunnerReplicaView(): JSX.Element {
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
       <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
         <p class="font-semibold">
-          {host.origin === "runner" ? "Runner replica" : "Migration engine"} ·{" "}
-          {host.origin === "engine" || replicaComplete()
-            ? "Complete source"
-            : "Joining copy"}
+          Runner replica ·{" "}
+          {replicaComplete() ? "Complete source" : "Joining copy"}
         </p>
         <p class="mt-1 text-sm">
           {viewComplete() ? "Complete active view" : "Partial active view"} ·

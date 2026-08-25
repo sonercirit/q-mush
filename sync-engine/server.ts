@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
+import { accountExportBlobResponse } from "../shared/account-export.ts";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -34,7 +35,6 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import { runnerExportBlobResponse } from "./account-export-http.ts";
 import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
 import { engineLocalResponse } from "./active-view.ts";
 import { readFavicon } from "./client-build.ts";
@@ -452,7 +452,7 @@ export function createRequestHandler(
       return Response.json(exportAccountPage(database, account.userId, offset));
     }
     const digest = pathname.slice(RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1);
-    return runnerExportBlobResponse(
+    return accountExportBlobResponse(
       exportAccountBlob(database, account.userId, digest),
       request.headers.get("range"),
     );

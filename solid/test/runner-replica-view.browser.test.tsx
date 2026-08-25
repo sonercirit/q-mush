@@ -5,7 +5,7 @@ import "../styles.css";
 
 const digest = "a".repeat(64);
 
-test("real Chromium pairs with a runner, reads sessions, and renders replica attachments read-only", async () => {
+test("real Chromium reads a complete runner replica and renders attachments read-only", async () => {
   const meta = document.createElement("meta");
   meta.name = "q-mush-host";
   meta.content = "runner";

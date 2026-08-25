@@ -31,6 +31,17 @@ describe("legacy account export", () => {
     ).toHaveLength(6);
   });
 
+  test("rejects malformed blob digests without querying the database", () => {
+    const inaccessible = new Proxy({} as AppDatabase, {
+      get: () => {
+        throw new Error("database accessed");
+      },
+    });
+    expect(
+      exportAccountBlob(inaccessible, "u", "not-a-digest"),
+    ).toBeUndefined();
+  });
+
   test("finds an attachment added after an earlier blob lookup", () => {
     database = createDatabase(":memory:");
     database.$client.run(

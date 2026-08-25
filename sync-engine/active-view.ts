@@ -4,7 +4,7 @@ import {
 } from "../shared/active-view.ts";
 import type { AppDatabase } from "../shared/database.ts";
 
-import { runnerExportBlobResponse } from "./account-export-http.ts";
+import { accountExportBlobResponse } from "../shared/account-export.ts";
 import { exportAccountBlob } from "./account-export.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 
@@ -18,7 +18,7 @@ export function engineLocalResponse(
     return new Response("Unauthorized", { status: 401 });
   const url = new URL(request.url);
   if (url.pathname.startsWith("/api/local/blob/"))
-    return runnerExportBlobResponse(
+    return accountExportBlobResponse(
       exportAccountBlob(database, userId, url.pathname.slice(16)),
       request.headers.get("range"),
     );
