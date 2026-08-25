@@ -225,19 +225,23 @@ export function createRunnerReplicaStore(directory: string) {
       if (progress().state !== "ready") {
         throw new Error("The runner replica is still joining");
       }
-      const stored = database
-        .query<{ payload: string }, [string]>(
-          "SELECT payload FROM replica_records WHERE entity = ? AND tombstone = 0 ORDER BY id",
-        )
-        .all(entity)
-        .map(({ payload }) => parsedRecord(payload))
-        .filter(
-          (record) =>
-            sessionId === undefined || record["session_id"] === sessionId,
-        );
-      const records = stored.slice(0, limit);
+      const rows =
+        sessionId === undefined
+          ? database
+              .query<{ payload: string }, [string, number]>(
+                "SELECT payload FROM replica_records WHERE entity = ? AND tombstone = 0 ORDER BY id LIMIT ?",
+              )
+              .all(entity, limit + 1)
+          : database
+              .query<{ payload: string }, [string, string, number]>(
+                "SELECT payload FROM replica_records WHERE entity = ? AND tombstone = 0 AND json_extract(payload, '$.session_id') = ? ORDER BY id LIMIT ?",
+              )
+              .all(entity, sessionId, limit + 1);
+      const records = rows
+        .slice(0, limit)
+        .map(({ payload }) => parsedRecord(payload));
       return {
-        complete: records.length === stored.length,
+        complete: rows.length <= limit,
         partial: true as const,
         records,
       };

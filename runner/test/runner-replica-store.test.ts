@@ -86,13 +86,25 @@ describe("runner full replica store", () => {
         }),
         tombstone: false,
       },
+      {
+        entity: "agent_sessions",
+        id: "s2",
+        payload: JSON.stringify({ id: "s2", title: "Second" }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_sessions",
+        id: "s3",
+        payload: "not-json-outside-the-bounded-read",
+        tombstone: false,
+      },
       { entity: "agent_sessions", id: "gone", payload: "{}", tombstone: true },
     ]);
     expect(() => store.readView("agent_sessions", 10)).toThrow("joining");
     store.setFrontier("frontier", "frontier");
     store.setManifest([]);
     expect(store.readView("agent_sessions", 1)).toEqual({
-      complete: true,
+      complete: false,
       partial: true,
       records: [{ id: "s1", title: "First", is_deleted: false }],
     });

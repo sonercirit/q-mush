@@ -25,8 +25,14 @@ const release = {
 
 describe("runner app server", () => {
   test("serves only loopback same-origin requests and immutable hashed assets", () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
-    const asset = handler(new Request("http://127.0.0.1:43127/app.abc.js"));
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing,
+    });
+    const asset = handler(
+      new Request("http://127.0.0.1:43127/app.abc.js", {
+        headers: { cookie: "qm_browser=grant" },
+      }),
+    );
     expect(asset.status).toBe(200);
     expect(asset.headers.get("cache-control")).toBe(
       "public, max-age=31536000, immutable",
@@ -44,7 +50,9 @@ describe("runner app server", () => {
   });
 
   test("rejects DNS-rebinding hosts and never grants cross-origin CORS", () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing,
+    });
     const rebound = handler(
       new Request("http://attacker.test:43127/app.abc.js", {
         headers: { host: "127.0.0.1:43127" },
@@ -73,6 +81,13 @@ describe("runner app server", () => {
     const shell = handler(new Request("http://127.0.0.1:43127/app"));
     expect(shell.status).toBe(200);
     expect(await shell.text()).toContain("Local Q Mush");
+    expect(
+      handler(
+        new Request("http://127.0.0.1:43127/api/local/view", {
+          method: "POST",
+        }),
+      ).status,
+    ).toBe(401);
     expect(
       handler(new Request("http://127.0.0.1:43127/api/local/status")).status,
     ).toBe(401);
@@ -224,9 +239,14 @@ describe("runner app server", () => {
     const handler = createRunnerAppHandler(
       { files, shell: release.shell },
       "http://127.0.0.1:43127",
+      { pairing },
     );
     expect(
-      handler(new Request("http://127.0.0.1:43127/__proto__")).status,
+      handler(
+        new Request("http://127.0.0.1:43127/__proto__", {
+          headers: { cookie: "qm_browser=grant" },
+        }),
+      ).status,
     ).toBe(404);
   });
 
@@ -243,13 +263,18 @@ describe("runner app server", () => {
     const handler = createRunnerAppHandler(
       hiddenApiRelease,
       "http://127.0.0.1:43127",
+      { pairing },
     );
     for (const path of [
       "/api/auth/session",
       "/api/replica/frontier",
       "/api/replica/ack",
     ]) {
-      const response = handler(new Request(`http://127.0.0.1:43127${path}`));
+      const response = handler(
+        new Request(`http://127.0.0.1:43127${path}`, {
+          headers: { cookie: "qm_browser=grant" },
+        }),
+      );
       expect(response.status).toBe(404);
       expect(await response.text()).toBe("Not found");
     }

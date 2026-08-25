@@ -30,4 +30,6 @@
 - Runner removal deterministically fences malformed cyclic session lineages
   rather than allowing one cycle to abort reassignment of every valid session.
   The unauthenticated `/` and `/app` shell provides the physical pairing UI;
-  replica APIs remain browser-grant protected.
+  replica APIs remain browser-grant protected. Unlike the engine active view,
+  the runner checks that grant before method handling, so an unpaired non-GET
+  `/api/local/*` request deliberately returns 401 rather than revealing 405.

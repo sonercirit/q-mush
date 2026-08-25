@@ -36,7 +36,7 @@ function isExportEntity(entity: string): boolean {
 export function createRunnerAppHandler(
   release: RunnerAppRelease,
   origin: string,
-  options?: {
+  options: {
     readonly pairing: RunnerAppPairing;
     readonly views?: RunnerAppViewSource;
   },
@@ -75,14 +75,9 @@ export function createRunnerAppHandler(
       return new Response("Forbidden", { status: 403 });
     }
     if (request.method === "GET" && url.pathname === "/api/local/pair") {
-      return options?.pairing === undefined
-        ? new Response("Not found", { status: 404 })
-        : Response.json({ transcript: options.pairing.transcript });
+      return Response.json({ transcript: options.pairing.transcript });
     }
     if (request.method === "POST" && url.pathname === "/api/local/pair") {
-      if (options?.pairing === undefined) {
-        return new Response("Not found", { status: 404 });
-      }
       const valid =
         !paired &&
         failedPairings < 5 &&
@@ -107,12 +102,10 @@ export function createRunnerAppHandler(
         status: 204,
       });
     }
-    const hasBrowserGrant =
-      options?.pairing === undefined ||
-      equalSecret(
-        browserCookie(request.headers.get("cookie")),
-        options.pairing.browserGrant,
-      );
+    const hasBrowserGrant = equalSecret(
+      browserCookie(request.headers.get("cookie")),
+      options.pairing.browserGrant,
+    );
     const browserShell =
       request.method === "GET" || request.method === "HEAD"
         ? url.pathname === "/" || url.pathname === "/app"
@@ -124,7 +117,7 @@ export function createRunnerAppHandler(
       request.method === "GET" &&
       url.pathname.startsWith("/api/local/blob/")
     ) {
-      if (options?.views?.readBlob === undefined) {
+      if (options.views?.readBlob === undefined) {
         return new Response("Not found", { status: 404 });
       }
       const digest = url.pathname.slice("/api/local/blob/".length);
@@ -143,7 +136,7 @@ export function createRunnerAppHandler(
       }
     }
     if (request.method === "GET" && url.pathname === "/api/local/view") {
-      if (options?.views === undefined) {
+      if (options.views === undefined) {
         return Response.json({ error: "view_unavailable" }, { status: 404 });
       }
       const { entity, limit } = activeViewQuery(url);
@@ -167,7 +160,7 @@ export function createRunnerAppHandler(
       }
     }
     if (request.method === "GET" && url.pathname === "/api/local/status") {
-      const progress = options?.views?.progress();
+      const progress = options.views?.progress();
       return Response.json({
         complete: progress?.state === "ready",
         ...(progress?.elapsedMilliseconds === undefined

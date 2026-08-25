@@ -192,6 +192,36 @@ test("serializes view polling and aborts its read on disposal", async () => {
   root.remove();
 });
 
+test("aborts the previous transcript read when another session is selected", async () => {
+  let abortedSession: string | undefined;
+  mockRunnerFetch((url, init) => {
+    if (url.searchParams.get("entity") === "agent_sessions") {
+      return Promise.resolve(
+        completeView([
+          { id: "first", title: "First session" },
+          { id: "second", title: "Second session" },
+        ]),
+      );
+    }
+    const sessionId = url.searchParams.get("sessionId") ?? "";
+    if (sessionId === "second") {
+      return Promise.resolve(completeView([{ content: "Second transcript" }]));
+    }
+    return abortableResponse(init, () => {
+      abortedSession = sessionId;
+    });
+  });
+  const root = mountRunnerView();
+  await waitForText(root, "Second session");
+  const buttons = root.querySelectorAll("button");
+  buttons[0]?.click();
+  buttons[1]?.click();
+
+  await waitForText(root, "Second transcript");
+  expect(abortedSession).toBe("first");
+  expect(root.textContent).not.toContain("First transcript");
+});
+
 test("recovers after a transient view failure", async () => {
   let viewRequests = 0;
   mockRunnerFetch(() => {

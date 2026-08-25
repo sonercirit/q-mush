@@ -134,13 +134,22 @@ export function RunnerReplicaView(): JSX.Element {
     await loadStatus();
     await loadSessions();
   };
+  let messageController: AbortController | undefined;
+  onCleanup(() => messageController?.abort());
   const select = (id: string): void => {
+    messageController?.abort();
+    const controller = new AbortController();
+    messageController = controller;
     setSelected(id);
     void load(
       "agent_messages",
       (messages) => setViews((value) => ({ ...value, messages })),
-      { sessionId: id },
-    ).catch(() => undefined);
+      { sessionId: id, signal: controller.signal },
+    )
+      .catch(() => undefined)
+      .finally(() => {
+        if (messageController === controller) messageController = undefined;
+      });
   };
   return (
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
