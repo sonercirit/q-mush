@@ -48,7 +48,9 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
     throw new Error("Missing session");
   session.click();
   await vi.waitFor(() => {
-    expect(root.textContent).toContain("Offline transcript");
+    if (!root.textContent.includes("Offline transcript")) {
+      throw new Error("Replica transcript did not load");
+    }
   });
   const image = root.querySelector("img");
   if (!(image instanceof HTMLImageElement))
