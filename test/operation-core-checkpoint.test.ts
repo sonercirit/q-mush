@@ -76,7 +76,11 @@ const parseBigintRecord = (
 const parseStringRecord = (
   value: unknown,
 ): Readonly<Record<string, string>> => {
-  if (Object.prototype.toString.call(value) !== "[object Object]")
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    Object.prototype.toString.call(value) !== "[object Object]"
+  )
     throw new Error("Invalid string record");
   const entries = Object.entries(value);
   if (entries.some((entry) => typeof entry[1] !== "string"))
