@@ -8,9 +8,11 @@ import {
 } from "./operation-core-test-support";
 
 import {
-  applyOperation,
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
+} from "../shared/operation-checkpoint";
+import {
+  applyOperation,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";

@@ -467,8 +467,3 @@ export const applyOperation = <TProjection>(
     baseFrontier,
   };
 };
-
-export {
-  decodeOperationCheckpoint,
-  encodeOperationCheckpoint,
-} from "./operation-checkpoint";
