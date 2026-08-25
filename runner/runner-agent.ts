@@ -630,7 +630,7 @@ async function run(): Promise<void> {
   try {
     await maintainConnection(configuration, configurationPath, startupRestart);
   } finally {
-    app.stop();
+    await app.stop();
     replica.close();
   }
 }
