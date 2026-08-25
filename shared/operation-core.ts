@@ -40,12 +40,10 @@ const nonSessionEntities = new Set([
   "users",
   "workspaces",
   "prompts",
-  "provider_credentials",
   "provider_quota_settings",
   "provider_quota_reset_receipts",
   "provider_credential_workspaces",
   "attachment_fallbacks",
-  "runners",
   "runner_workspaces",
   "tool_settings",
 ]);
@@ -189,17 +187,71 @@ export const advanceFrontier = (
   return { ...frontier, [writerId]: sequence };
 };
 
+interface ReplayEntry {
+  readonly operation: Operation;
+  readonly previous: ReplayEntry | undefined;
+}
+interface IdentityNode {
+  readonly key: string;
+  readonly value: string;
+  readonly priority: number;
+  readonly left: IdentityNode | undefined;
+  readonly right: IdentityNode | undefined;
+}
+const identityPriority = (key: string): number => {
+  let hash = 2_166_136_261;
+  for (const character of key)
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16_777_619);
+  return hash >>> 0;
+};
+const identityGet = (
+  node: IdentityNode | undefined,
+  key: string,
+): string | undefined => {
+  if (node === undefined) return undefined;
+  if (key === node.key) return node.value;
+  return identityGet(key < node.key ? node.left : node.right, key);
+};
+const identitySet = (
+  node: IdentityNode | undefined,
+  key: string,
+  value: string,
+): IdentityNode => {
+  if (node === undefined)
+    return {
+      key,
+      value,
+      priority: identityPriority(key),
+      left: undefined,
+      right: undefined,
+    };
+  if (key === node.key) return { ...node, value };
+  const child = identitySet(
+    key < node.key ? node.left : node.right,
+    key,
+    value,
+  );
+  const next =
+    key < node.key ? { ...node, left: child } : { ...node, right: child };
+  if (child.priority >= node.priority) return next;
+  return key < node.key
+    ? { ...child, right: { ...next, left: child.right } }
+    : { ...child, left: { ...next, right: child.left } };
+};
 export interface OperationApplyState<TProjection> {
   readonly frontier: CausalFrontier;
   readonly pending: readonly Operation[];
   readonly projection: TProjection;
   readonly applied: Readonly<Record<string, string>>;
+  readonly appliedIndex?: IdentityNode | undefined;
   readonly history?: readonly Operation[];
+  readonly replayHead?: ReplayEntry | undefined;
+  readonly replayCount?: number;
+  readonly replayLastClock?: HybridTimestamp | undefined;
   readonly baseProjection?: TProjection;
   readonly baseFrontier?: CausalFrontier;
 }
 export const MAX_PENDING_OPERATIONS = 512;
-const MAX_REPLAY_OPERATIONS = 512;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
@@ -219,8 +271,13 @@ const identityKeys = (candidate: Operation): readonly string[] => [
 ];
 const identityIndex = (
   state: OperationApplyState<unknown>,
+  candidate: Operation,
 ): Map<string, string> => {
-  const index = new Map(Object.entries(state.applied));
+  const index = new Map<string, string>();
+  for (const key of identityKeys(candidate)) {
+    const fingerprint = state.applied[key];
+    if (fingerprint !== undefined) index.set(key, fingerprint);
+  }
   for (const item of state.pending) {
     const fingerprint = canonical(item);
     for (const key of identityKeys(item)) index.set(key, fingerprint);
@@ -265,7 +322,7 @@ export const applyOperation = <TProjection>(
 ): OperationApplyState<TProjection> => {
   validateValue(candidate);
   const fingerprint = canonical(candidate);
-  const known = identityIndex(state);
+  const known = identityIndex(state, candidate);
   for (const key of identityKeys(candidate)) {
     const existing = known.get(key);
     if (existing !== undefined && existing !== fingerprint)
@@ -284,51 +341,84 @@ export const applyOperation = <TProjection>(
 
   let frontier = { ...state.frontier };
   let projection = state.projection;
-  let history = [...(state.history ?? [])];
-  let baseProjection = state.baseProjection ?? state.projection;
-  let baseFrontier = { ...(state.baseFrontier ?? state.frontier) };
-  const applied = { ...state.applied };
+  const legacyHistory = state.history ?? [];
+  let replayHead = state.replayHead;
+  let replayCount = state.replayCount ?? 0;
+  let replayLastClock = state.replayLastClock;
+  for (const item of legacyHistory) {
+    replayHead = { operation: item, previous: replayHead };
+    replayCount += 1;
+    replayLastClock = item.clock;
+  }
+  const baseProjection = state.baseProjection ?? state.projection;
+  const baseFrontier = { ...(state.baseFrontier ?? state.frontier) };
+  let appliedIndex = state.appliedIndex;
+  if (appliedIndex === undefined)
+    for (const [key, value] of Object.entries(state.applied))
+      appliedIndex = identitySet(appliedIndex, key, value);
+  const appliedTarget: Record<string, string> = {};
+  const applied: Record<string, string> = new Proxy(appliedTarget, {
+    get: (target, key): unknown => {
+      if (typeof key !== "string") return undefined;
+      return Object.hasOwn(target, key)
+        ? target[key]
+        : identityGet(appliedIndex, key);
+    },
+  });
   let remaining = [...state.pending, candidate];
 
-  if (
-    isReady(candidate, frontier) &&
-    frontierCovers(candidate.parents, frontier)
-  ) {
-    history = [];
-    baseProjection = projection;
-    baseFrontier = { ...frontier };
-  }
   let ready = orderedReady(remaining, frontier);
   while (ready.length > 0) {
     const earliest = ready[0];
     if (earliest === undefined) break;
-    if (history.some((item) => compareClocks(earliest.clock, item.clock) < 0)) {
+    if (
+      replayLastClock !== undefined &&
+      compareClocks(earliest.clock, replayLastClock) < 0
+    ) {
+      const history: Operation[] = [];
+      for (let entry = replayHead; entry !== undefined; entry = entry.previous)
+        history.push(entry.operation);
+      history.reverse();
       const replay = [...history, ...ready].sort((left, right) =>
         compareClocks(left.clock, right.clock),
       );
-      if (replay.length > MAX_REPLAY_OPERATIONS)
-        throw new Error("Operation replay history is full");
       projection = reduceOperations(baseProjection, replay, reducer);
       frontier = advanceOperations({ ...baseFrontier }, replay);
-      history = replay;
+      replayHead = undefined;
+      replayCount = 0;
+      for (const item of replay) {
+        replayHead = { operation: item, previous: replayHead };
+        replayCount += 1;
+      }
+      replayLastClock = replay.at(-1)?.clock;
     } else {
       projection = reduceOperations(projection, ready, reducer);
       frontier = advanceOperations(frontier, ready);
-      history.push(...ready);
+      for (const item of ready) {
+        replayHead = { operation: item, previous: replayHead };
+        replayCount += 1;
+      }
+      replayLastClock = ready.at(-1)?.clock;
     }
-    for (const item of ready) addApplied(applied, item);
+    for (const item of ready) {
+      addApplied(applied, item);
+      const itemFingerprint = canonical(item);
+      for (const key of identityKeys(item))
+        appliedIndex = identitySet(appliedIndex, key, itemFingerprint);
+    }
     const readyIds = new Set(ready.map((item) => item.operationId));
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
     ready = orderedReady(remaining, frontier);
   }
-  if (history.length > MAX_REPLAY_OPERATIONS)
-    throw new Error("Operation replay history is full");
   return {
     frontier,
     pending: remaining,
     projection,
     applied,
-    history,
+    appliedIndex,
+    replayHead,
+    replayCount,
+    replayLastClock,
     baseProjection,
     baseFrontier,
   };

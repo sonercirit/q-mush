@@ -94,25 +94,25 @@ describe("operation core", () => {
       "users",
       "workspaces",
       "prompts",
-      "provider_credentials",
       "provider_quota_settings",
       "provider_quota_reset_receipts",
       "provider_credential_workspaces",
       "attachment_fallbacks",
-      "runners",
       "runner_workspaces",
       "tool_settings",
     ])
       expect(classifyOperationPartition(entity)).toBe("non-session");
-    expect(() => classifyOperationPartition("sessions")).toThrow(
-      /Unknown operation entity/,
-    );
+    for (const excluded of ["sessions", "provider_credentials", "runners"])
+      expect(() => classifyOperationPartition(excluded)).toThrow(
+        /Unknown operation entity/,
+      );
     expect(() => classifyOperationPartition("future_entity")).toThrow(
       /Unknown operation entity/,
     );
   });
 
   test("covers every HLC receive winner and rejects far-future clocks", () => {
+    expect(MAX_REMOTE_CLOCK_DRIFT_MS).toBe(300_000);
     const remoteWins = createHybridLogicalClock("a", 100);
     expect(
       remoteWins.receive({ physicalMs: 110, logical: 4, writerId: "b" }, 105)
@@ -182,6 +182,87 @@ describe("operation core", () => {
     expect(run([x, y]).projection).toBe("Y");
   });
 
+  test("converges causal chains and concurrent writers across arrival permutations", () => {
+    const setName = (_projection: string, item: Operation) => item.operationId;
+    const items = [
+      operation("a", 1n, {}, "a1", 100),
+      operation("a", 2n, { a: 1n }, "a2", 200),
+      operation("b", 1n, {}, "b1", 50),
+    ];
+    const permutations = <T>(values: readonly T[]): T[][] =>
+      values.length === 0
+        ? [[]]
+        : values.flatMap((value, index) =>
+            permutations(
+              values.filter((_, itemIndex) => itemIndex !== index),
+            ).map((tail) => [value, ...tail]),
+          );
+    const run = (ordered: readonly Operation[]) =>
+      ordered.reduce<OperationApplyState<string>>(
+        (state, item) => applyOperation(state, item, setName),
+        { frontier: {}, pending: [], projection: "", applied: {} },
+      );
+    for (const ordered of permutations(items)) {
+      const result = run(ordered);
+      expect(result.projection).toBe("a-2");
+      expect(result.frontier).toEqual({ a: 2n, b: 1n });
+    }
+  });
+
+  test("does not wedge after the former replay limit", () => {
+    let state = initialApplyState();
+    for (let index = 1; index <= 600; index += 1) {
+      const sequence = BigInt(Math.ceil(index / 2));
+      const writer = index % 2 === 0 ? "b" : "a";
+      state = applyOperation(
+        state,
+        operation(
+          writer,
+          sequence,
+          sequence === 1n ? {} : { [writer]: sequence - 1n },
+          "x",
+          index,
+        ),
+        reducer,
+      );
+    }
+    expect(state.frontier).toEqual({ a: 300n, b: 300n });
+  });
+
+  test("distinguishes bigint and number operation fingerprints", () => {
+    const first = createOperation({
+      ...operation("a", 1n, { ghost: 1n }, "x"),
+      payload: { value: 1n },
+    });
+    const waiting = applyOperation(initialApplyState(), first, reducer);
+    expect(() =>
+      applyOperation(waiting, { ...first, payload: { value: 1 } }, reducer),
+    ).toThrow(/equivocation/);
+  });
+
+  test("applied identity updates scale near-linearly", () => {
+    const duration = (count: number) => {
+      let state = initialApplyState();
+      const started = performance.now();
+      for (let index = 1; index <= count; index += 1)
+        state = applyOperation(
+          state,
+          operation(
+            "a",
+            BigInt(index),
+            index === 1 ? {} : { a: BigInt(index - 1) },
+            "x",
+          ),
+          reducer,
+        );
+      return performance.now() - started;
+    };
+    duration(200);
+    const small = duration(1_000);
+    const large = duration(2_000);
+    expect(large / small).toBeLessThan(3.5);
+  });
+
   test("bounds never-ready admission without reducer work", () => {
     const counter = countingReducer();
     const state = fillPending(1n, { ghost: 9n }, counter.reduce);
@@ -210,7 +291,7 @@ describe("operation core", () => {
         counter.reduce,
       );
     expect(counter.calls()).toBe(800);
-    expect(state.history?.length).toBe(1);
+    expect(state.replayCount).toBe(800);
   });
 
   test("admits a ready dependency into a full pending buffer and drains it", () => {
