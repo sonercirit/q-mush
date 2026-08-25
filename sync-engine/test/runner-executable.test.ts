@@ -186,6 +186,76 @@ describe("runner executable downloads", () => {
     }
   }, 150_000);
 
+  test("starts anonymously and serves embedded hashed assets without engine traffic", async () => {
+    const provider = await buildRunnerExecutableProvider();
+    const executable = await provider.compile(
+      localRunnerTarget(),
+      fileURLToPath(new URL("../../runner/runner-agent.ts", import.meta.url)),
+    );
+    const directory = mkdtempSync(join(tmpdir(), "q-mush-anonymous-build-"));
+    const executablePath = join(directory, "q-mush-runner");
+    let engineRequests = 0;
+    const engine = Bun.serve({
+      fetch: () => {
+        engineRequests += 1;
+        return new Response("unexpected");
+      },
+      hostname: "127.0.0.1",
+      port: 0,
+    });
+    writeFileSync(executablePath, await executable.bytes(), { mode: 0o755 });
+    const runner = Bun.spawn([executablePath], {
+      cwd: directory,
+      env: {
+        HOME: directory,
+        PATH: "",
+        Q_MUSH_ENGINE_ORIGIN: `http://127.0.0.1:${String(engine.port)}`,
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    });
+
+    try {
+      const reader = runner.stdout.getReader();
+      let startup = "";
+      while (!startup.includes("Physical browser pairing code:")) {
+        const output = await reader.read();
+        if (output.done) break;
+        startup += new TextDecoder().decode(output.value);
+      }
+      const code = /pairing code: ([A-Za-z\d_-]+)/u.exec(startup)?.[1];
+      expect(code).toBeDefined();
+      const pair = await fetch("http://127.0.0.1:43127/api/local/pair", {
+        headers: { "x-q-mush-pairing-code": code ?? "" },
+        method: "POST",
+      });
+      const cookie = pair.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+      const shell = await fetch("http://127.0.0.1:43127/app", {
+        headers: { cookie },
+      }).then((response) => response.text());
+      const assets = [
+        ...shell.matchAll(
+          /(?:href|src)="\/([^"/]+\.[a-f\d]{3,64}\.(?:css|js))"/gu,
+        ),
+      ].map((match) => match[1] ?? "");
+      expect(assets).toHaveLength(2);
+      for (const asset of assets) {
+        const response = await fetch(`http://127.0.0.1:43127/${asset}`, {
+          headers: { cookie },
+        });
+        expect(response.status).toBe(200);
+        expect((await response.arrayBuffer()).byteLength).toBeGreaterThan(0);
+      }
+      expect(engineRequests).toBe(0);
+      expect(runner.exitCode).toBeNull();
+    } finally {
+      runner.kill();
+      await runner.exited;
+      void engine.stop(true);
+      removeTemporaryDirectory(directory);
+    }
+  }, 120_000);
+
   test("builds a runnable executable that does not need Bun on PATH", async () => {
     const provider = await buildRunnerExecutableProvider();
     const response = await provider.serve(

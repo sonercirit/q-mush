@@ -1,5 +1,11 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -145,10 +151,10 @@ function readActivationReceiptPhase(): "finalized" | "prepared" | undefined {
   return phase;
 }
 
-function readConfigurationPath(): string {
+function readConfigurationPath(): string | undefined {
   const path = readArgument("--config");
 
-  if (path === undefined || isArgumentName(path) || path.length === 0) {
+  if (path !== undefined && (isArgumentName(path) || path.length === 0)) {
     throw new Error("Start the Q Mush runner with --config <path>");
   }
 
@@ -609,6 +615,11 @@ async function run(): Promise<void> {
   }
 
   const configurationPath = readConfigurationPath();
+  const runnerDirectory =
+    configurationPath === undefined
+      ? join(process.env["HOME"] ?? process.cwd(), ".q-mush", "runner")
+      : dirname(configurationPath);
+  mkdirSync(runnerDirectory, { recursive: true });
   const runnerRestartId = readRestartId();
   const startupRestart = createRunnerStartupRestart(runnerRestartId);
   if (runnerRestartId !== undefined) {
@@ -627,29 +638,34 @@ async function run(): Promise<void> {
       activationReceiptPhase ?? "finalized",
     );
   }
-  const configuration = readConfiguration(configurationPath);
+  const configuration =
+    configurationPath === undefined
+      ? undefined
+      : readConfiguration(configurationPath);
   const containers = createRunnerContainerManager({
-    trackingPath: join(dirname(configurationPath), "owned-containers.json"),
+    trackingPath: join(runnerDirectory, "owned-containers.json"),
   });
   runnerExecution = {
     commands: createRunnerCommandExecutor(containers),
     containers,
   };
   writeFileSync(
-    join(dirname(configurationPath), "runner.pid"),
+    join(runnerDirectory, "runner.pid"),
     `${String(process.pid)}\n`,
     {
       mode: 0o600,
     },
   );
 
-  const replicaDirectory = join(dirname(configurationPath), "replica");
-  await catchUpAccountExport(
-    replicaDirectory,
-    configurationPath,
-    configuration.serverOrigin,
-    configuration.token,
-  );
+  const replicaDirectory = join(runnerDirectory, "replica");
+  if (configuration !== undefined && configurationPath !== undefined) {
+    await catchUpAccountExport(
+      replicaDirectory,
+      configurationPath,
+      configuration.serverOrigin,
+      configuration.token,
+    );
+  }
   const replica = createRunnerReplicaStore(replicaDirectory);
   const identity = createAnonymousRunnerIdentity(replicaDirectory);
   const appOrigin = "http://127.0.0.1:43127";
@@ -665,7 +681,15 @@ async function run(): Promise<void> {
   console.log(`Physical browser pairing code: ${identity.pairing.code}`);
   await containers.recoverTracked();
   try {
-    await maintainConnection(configuration, configurationPath, startupRestart);
+    if (configuration === undefined || configurationPath === undefined) {
+      await new Promise<void>(() => undefined);
+    } else {
+      await maintainConnection(
+        configuration,
+        configurationPath,
+        startupRestart,
+      );
+    }
   } finally {
     await app.stop();
     replica.close();

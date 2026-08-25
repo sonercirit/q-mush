@@ -17,12 +17,17 @@ export interface RunnerAppPairing {
   readonly code: string;
 }
 
+import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
 import type { ActiveViewReader } from "../shared/active-view.ts";
 import { isSha256Digest } from "../shared/digest.ts";
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
   readonly readBlob?: (digest: string) => Blob;
+}
+
+function isExportEntity(entity: string): boolean {
+  return ACCOUNT_EXPORT_ENTITIES.some((candidate) => candidate === entity);
 }
 
 export function createRunnerAppHandler(
@@ -100,10 +105,7 @@ export function createRunnerAppHandler(
       }
       const entity = url.searchParams.get("entity");
       const limit = Number(url.searchParams.get("limit"));
-      if (
-        entity === null ||
-        !["agent_sessions", "agent_messages"].includes(entity)
-      ) {
+      if (entity === null || !isExportEntity(entity)) {
         return Response.json({ error: "invalid_view" }, { status: 400 });
       }
       try {

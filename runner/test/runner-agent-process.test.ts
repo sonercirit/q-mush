@@ -14,6 +14,7 @@ import {
   runnerRegistrationRejectedMessage,
   runnerSupersededMessage,
 } from "../../shared/runner-realtime-protocol.ts";
+import { sha256 } from "../../shared/sha256.ts";
 
 const RUNNER_VERSION = "a".repeat(64);
 const POLL_INTERVAL_MILLISECONDS = 10;
@@ -47,6 +48,19 @@ interface RunnerTestSocketData {
 }
 
 interface RunnerTestServerOptions {
+  readonly accountExport?: Readonly<{
+    readonly blobs: readonly {
+      readonly data: string;
+      readonly digest: string;
+      readonly size: number;
+    }[];
+    readonly records: readonly {
+      readonly entity: string;
+      readonly id: string;
+      readonly payload: string;
+      readonly tombstone: boolean;
+    }[];
+  }>;
   readonly command?: RunnerToolCommand;
   readonly rejectRegistration?: boolean;
   readonly transientRegistrationFailures?: number;
@@ -121,13 +135,27 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     fetch: (request, bunServer) => {
       const pathname = new URL(request.url).pathname;
       if (pathname === "/api/runner/account-export") {
-        return Response.json({
-          blobs: [],
-          entities: ACCOUNT_EXPORT_ENTITIES,
-          frontier: "process-frontier",
-          manifest: [],
-          records: [],
-        });
+        return Response.json(
+          options.accountExport === undefined
+            ? {
+                blobs: [],
+                entities: ACCOUNT_EXPORT_ENTITIES,
+                frontier: "process-frontier",
+                manifest: [],
+                records: [],
+              }
+            : {
+                ...options.accountExport,
+                entities: ACCOUNT_EXPORT_ENTITIES,
+                frontier: "process-frontier",
+                manifest: options.accountExport.blobs.map(
+                  ({ digest, size }) => ({
+                    digest,
+                    size,
+                  }),
+                ),
+              },
+        );
       }
       if (pathname === "/api/runner/realtime") {
         return bunServer.upgrade(request, {
@@ -307,6 +335,83 @@ async function expectChildFailure(
   expect(await waitForExit(setup.child, 900)).toBe(1);
   expect(await childStderr(setup)).toContain(message);
 }
+
+test("a paired client reads every exported entity and attachment after engine kill", async () => {
+  const attachment = new TextEncoder().encode("byte-complete attachment");
+  const digest = sha256(attachment);
+  const records = ACCOUNT_EXPORT_ENTITIES.flatMap((entity, index) => [
+    {
+      entity,
+      id: `${entity}-live`,
+      payload: JSON.stringify({
+        executor_id:
+          entity === "agent_sessions"
+            ? `executor-${String(index % 2)}`
+            : undefined,
+        id: `${entity}-live`,
+        session_id: "agent_sessions-live",
+      }),
+      tombstone: false,
+    },
+    {
+      entity,
+      id: `${entity}-deleted`,
+      payload: JSON.stringify({ id: `${entity}-deleted` }),
+      tombstone: true,
+    },
+  ]);
+  const setup = processTestSetup({
+    accountExport: {
+      blobs: [{ data: attachment.toBase64(), digest, size: attachment.length }],
+      records,
+    },
+  });
+
+  try {
+    await expectRegistered(setup.server);
+    expect(
+      await waitUntil(
+        () =>
+          existsSync(join(setup.directory, "replica", "device-identity.json")),
+        7_000,
+      ),
+    ).toBe(true);
+    setup.server.stop();
+    const reader = setup.child.stdout.getReader();
+    let output = "";
+    while (!output.includes("Physical browser pairing code:")) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      output += new TextDecoder().decode(chunk.value);
+    }
+    const code = /pairing code: ([A-Za-z\d_-]+)/u.exec(output)?.[1];
+    expect(code).toBeDefined();
+    const pair = await fetch("http://127.0.0.1:43127/api/local/pair", {
+      headers: { "x-q-mush-pairing-code": code ?? "" },
+      method: "POST",
+    });
+    const cookie = pair.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+    for (const entity of ACCOUNT_EXPORT_ENTITIES) {
+      const response = await fetch(
+        `http://127.0.0.1:43127/api/local/view?entity=${entity}&limit=100`,
+        { headers: { cookie } },
+      );
+      const view: unknown = await response.json();
+      expect(view).toMatchObject({
+        records: [expect.objectContaining({ id: `${entity}-live` })],
+      });
+    }
+    const blob = await fetch(
+      `http://127.0.0.1:43127/api/local/blob/${digest}`,
+      {
+        headers: { cookie },
+      },
+    );
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(attachment);
+  } finally {
+    await cleanupProcessTest(setup);
+  }
+});
 
 test("a command executes once and reports through the reconnected socket", async () => {
   const directory = mkdtempSync(join(tmpdir(), "q-mush-runner-blip-test-"));
