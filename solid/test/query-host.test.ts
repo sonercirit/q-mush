@@ -29,7 +29,7 @@ describe("Solid query host", () => {
     const engineResponse = Response.json({ complete: false, records: [] });
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => engineResponse),
+      vi.fn(() => Promise.resolve(engineResponse)),
     );
     const host = queryHostForDocument({ querySelector: () => null });
     expect(host.origin).toBe("engine");
