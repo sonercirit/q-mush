@@ -484,9 +484,12 @@ export function createRunnerIntegration(
       : { connection, userId: connection.userId };
   }
 
-  function runnerAccount(request: Request): { readonly userId: string } | undefined {
+  function runnerAccount(
+    request: Request,
+  ): { readonly userId: string } | undefined {
     const token = readBearerToken(request);
-    const connection = token === undefined ? undefined : store.authenticate(token);
+    const connection =
+      token === undefined ? undefined : store.authenticate(token);
     return connection === undefined ? undefined : { userId: connection.userId };
   }
 

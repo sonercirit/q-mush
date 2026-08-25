@@ -8,6 +8,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
+import { ACCOUNT_EXPORT_ENTITIES } from "../../shared/account-export.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import {
   runnerRegistrationRejectedMessage,
@@ -122,6 +123,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
       if (pathname === "/api/runner/account-export") {
         return Response.json({
           blobs: [],
+          entities: ACCOUNT_EXPORT_ENTITIES,
           frontier: "process-frontier",
           manifest: [],
           records: [],

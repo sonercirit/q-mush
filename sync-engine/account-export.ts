@@ -1,6 +1,5 @@
 import { getTableColumns, getTableName } from "drizzle-orm";
 import type { AnySQLiteTable } from "drizzle-orm/sqlite-core";
-import { sha256 } from "../shared/sha256.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
   agentMessages,
@@ -21,12 +20,14 @@ import {
   users,
   workspaces,
 } from "../shared/database/schema.ts";
+import { sha256 } from "../shared/sha256.ts";
 
 import type {
   AccountExport,
   AccountExportBlob,
   AccountExportRecord,
 } from "../shared/account-export.ts";
+import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
 
 const ordinaryTables = [
   users,
@@ -131,5 +132,11 @@ export function exportAccount(
   const frontier = sha256(
     `${JSON.stringify(records)}${JSON.stringify(manifest)}`,
   );
-  return { blobs: [...blobs.values()], frontier, manifest, records };
+  return {
+    blobs: [...blobs.values()],
+    entities: ACCOUNT_EXPORT_ENTITIES,
+    frontier,
+    manifest,
+    records,
+  };
 }

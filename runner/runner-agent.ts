@@ -1,10 +1,19 @@
 import { createHash, randomBytes } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, statfsSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  realpathSync,
+  statfsSync,
+  writeFileSync,
+} from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout } from "node:timers/promises";
 import { isAccountExport } from "../shared/account-export.ts";
-import { RUNNER_ACCOUNT_EXPORT_PATH, RUNNER_REALTIME_PATH } from "../shared/routes.ts";
+import {
+  RUNNER_ACCOUNT_EXPORT_PATH,
+  RUNNER_REALTIME_PATH,
+} from "../shared/routes.ts";
 import {
   encodeRunnerActivationReceipt,
   runnerConnectMessage,
@@ -650,7 +659,9 @@ async function run(): Promise<void> {
     { headers: { authorization: `Bearer ${configuration.token}` } },
   );
   if (!exportResponse.ok) {
-    throw new Error(`Replica catch-up failed (${String(exportResponse.status)})`);
+    throw new Error(
+      `Replica catch-up failed (${String(exportResponse.status)})`,
+    );
   }
   const accountExportValue: unknown = await exportResponse.json();
   if (!isAccountExport(accountExportValue)) {
@@ -661,14 +672,19 @@ async function run(): Promise<void> {
   await catchUpRunnerReplica(
     replicaDirectory,
     {
-      inventory: () => Promise.resolve({
-        frontier: accountExport.frontier,
-        manifest: accountExport.manifest,
-        records: accountExport.records,
-      }),
+      inventory: () =>
+        Promise.resolve({
+          entities: accountExport.entities,
+          frontier: accountExport.frontier,
+          manifest: accountExport.manifest,
+          records: accountExport.records,
+        }),
       blob: (digest) => {
-        const blob = accountExport.blobs.find((entry) => entry.digest === digest);
-        if (blob === undefined) throw new Error("Replica blob is absent from export");
+        const blob = accountExport.blobs.find(
+          (entry) => entry.digest === digest,
+        );
+        if (blob === undefined)
+          throw new Error("Replica blob is absent from export");
         return Promise.resolve(Uint8Array.fromBase64(blob.data));
       },
     },

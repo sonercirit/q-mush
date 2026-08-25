@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AccountExport } from "../shared/account-export.ts";
+import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 
 export interface CatchUpSource {
@@ -21,6 +22,12 @@ export async function catchUpRunnerReplica(
       0,
     );
     store.begin({ availableBytes, requiredBytes });
+    const exportedEntities = new Set(inventory.entities);
+    if (
+      ACCOUNT_EXPORT_ENTITIES.some((entity) => !exportedEntities.has(entity))
+    ) {
+      throw new Error("Replica inventory is scoped or metadata-only");
+    }
     store.applyRecords(inventory.records);
     store.setManifest(inventory.manifest);
     mkdirSync(join(directory, "incoming"), { recursive: true });
