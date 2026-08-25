@@ -3,9 +3,10 @@ import { queryHostForLocation } from "./query-host.ts";
 
 export function RunnerReplicaView(): JSX.Element {
   const host = queryHostForLocation(window.location);
+  const emptyRecords: readonly Record<string, unknown>[] = [];
   const [views, setViews] = createSignal({
-    messages: [] as readonly Record<string, unknown>[],
-    sessions: [] as readonly Record<string, unknown>[],
+    messages: emptyRecords,
+    sessions: emptyRecords,
   });
   const [selected, setSelected] = createSignal<string>();
   const [failed, setFailed] = createSignal(false);
@@ -16,7 +17,9 @@ export function RunnerReplicaView(): JSX.Element {
   ): void => {
     void host
       .read(entity, { limit: 100, ...(sessionId && { sessionId }) })
-      .then((view) => apply(view.records))
+      .then((view) => {
+        apply(view.records);
+      })
       .catch(() => setFailed(true));
   };
   onMount(() => {
@@ -53,7 +56,9 @@ export function RunnerReplicaView(): JSX.Element {
             return (
               <button
                 class="rounded-xl border border-white/10 p-4 text-left"
-                onClick={() => select(id)}
+                onClick={() => {
+                  select(id);
+                }}
                 type="button"
               >
                 {typeof value === "string" ? value : id}
