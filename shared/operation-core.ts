@@ -49,8 +49,12 @@ export const operationEntityPartitions = {
     "tool_settings",
   ],
 } as const;
-const sessionEntities = new Set(operationEntityPartitions.session);
-const nonSessionEntities = new Set(operationEntityPartitions["non-session"]);
+const sessionEntities: ReadonlySet<string> = new Set(
+  operationEntityPartitions.session,
+);
+const nonSessionEntities: ReadonlySet<string> = new Set(
+  operationEntityPartitions["non-session"],
+);
 export const classifyOperationPartition = (
   entityType: string,
 ): OperationPartition => {

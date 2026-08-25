@@ -95,7 +95,9 @@ const expectEquivocation = (
   state: OperationApplyState<Projection>,
   candidate: Operation,
   pattern: RegExp,
-) => expect(() => applyOperation(state, candidate, reducer)).toThrow(pattern);
+) => {
+  expect(() => applyOperation(state, candidate, reducer)).toThrow(pattern);
+};
 
 const foldOperations = (
   count: number,
@@ -264,16 +266,17 @@ describe("operation core", () => {
   test("applied identity updates scale near-linearly", () => {
     const duration = (count: number) => {
       const started = performance.now();
-      applySequential(count, reducer);
+      applySequential(count, (projection) => projection);
       return performance.now() - started;
     };
-    duration(200);
-    const small = duration(1_000);
-    const large = duration(2_000);
-    expect(large / small).toBeLessThan(3.5);
+    duration(500);
+    const small = duration(4_000);
+    const large = duration(8_000);
+    expect(large / small).toBeLessThan(3);
   });
 
   test("bounds never-ready admission without reducer work", () => {
+    expect(MAX_PENDING_OPERATIONS).toBe(512);
     const counter = countingReducer();
     const state = fillPending(1n, { ghost: 9n }, counter.reduce);
     expect(counter.calls()).toBe(0);
