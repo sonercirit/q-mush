@@ -24,7 +24,7 @@ const release = {
 };
 
 function pairedHandler(
-  selectedRelease = release,
+  selectedRelease: Parameters<typeof createRunnerAppHandler>[0] = release,
 ): ReturnType<typeof createRunnerAppHandler> {
   return createRunnerAppHandler(selectedRelease, "http://127.0.0.1:43127", {
     pairing,
