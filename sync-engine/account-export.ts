@@ -131,14 +131,26 @@ function rows(
     )
     .all(userId);
 }
-function attachments(value: unknown): readonly string[] {
-  return parseSerializedArray(value).flatMap((item: unknown) => {
-    if (typeof item !== "object" || item === null || !("data" in item)) {
-      return [];
-    }
-    const data = item.data;
-    return typeof data === "string" ? [data] : [];
-  });
+function rewriteAttachments(
+  value: unknown,
+  blobs: Map<string, AccountExportBlob>,
+) {
+  const parsed = parseSerializedArray(value);
+  if (parsed.length === 0) return value;
+  return JSON.stringify(
+    parsed.map((item) => {
+      if (typeof item !== "object" || item === null || !("data" in item))
+        return item;
+      const data = item.data;
+      if (typeof data !== "string") return item;
+      const bytes = Uint8Array.fromBase64(data);
+      const digest = sha256(bytes);
+      blobs.set(digest, { data, digest, size: bytes.length });
+      const { data: omitted, ...metadata } = item;
+      void omitted;
+      return { ...metadata, digest };
+    }),
+  );
 }
 export function exportAccount(
   database: AppDatabase,
@@ -151,14 +163,10 @@ export function exportAccount(
     selected?: ReturnType<typeof getTableColumns>,
   ) => {
     const entity = getTableName(table);
-    for (const row of rows(database, table, userId, selected)) {
-      for (const data of [
-        ...attachments(row["images"]),
-        ...attachments(row["content"]),
-      ]) {
-        const bytes = Uint8Array.fromBase64(data);
-        const digest = sha256(bytes);
-        blobs.set(digest, { data, digest, size: bytes.length });
+    for (const originalRow of rows(database, table, userId, selected)) {
+      const row = { ...originalRow };
+      for (const field of ["images", "content"] as const) {
+        if (field in row) row[field] = rewriteAttachments(row[field], blobs);
       }
       records.push({
         entity,

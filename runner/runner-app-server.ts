@@ -71,6 +71,11 @@ export function createRunnerAppHandler(
     if (requestOrigin !== null && requestOrigin !== expected.origin) {
       return new Response("Forbidden", { status: 403 });
     }
+    if (request.method === "GET" && url.pathname === "/api/local/pair") {
+      return options?.pairing === undefined
+        ? new Response("Not found", { status: 404 })
+        : Response.json({ transcript: options.pairing.transcript });
+    }
     if (request.method === "POST" && url.pathname === "/api/local/pair") {
       if (options?.pairing === undefined) {
         return new Response("Not found", { status: 404 });
@@ -177,6 +182,8 @@ export function createRunnerAppHandler(
       });
     }
     const name = url.pathname.slice(1);
+    if (!Object.hasOwn(release.files, name))
+      return new Response("Not found", { status: 404 });
     const bytes = release.files[name];
     if (bytes === undefined) return new Response("Not found", { status: 404 });
     return new Response(request.method === "HEAD" ? null : new Blob([bytes]), {

@@ -61,13 +61,13 @@ function createQueryHost(origin: "engine" | "runner"): QueryHost {
   };
 }
 
-export function queryHostForLocation(
-  location: Pick<Location, "hostname" | "port">,
+export function queryHostForDocument(
+  document: Pick<Document, "querySelector">,
 ): QueryHost {
   return createQueryHost(
-    (location.hostname === "127.0.0.1" || location.hostname === "[::1]") &&
-      location.port === "43127"
-      ? "runner"
-      : "engine",
+    document.querySelector('meta[name="q-mush-host"][content="runner"]') ===
+      null
+      ? "engine"
+      : "runner",
   );
 }

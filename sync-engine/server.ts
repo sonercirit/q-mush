@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import {
-  ACTIVE_VIEWS_PATH,
   API_BASE_PATH,
   APP_PATH,
   APP_SCRIPT_PATH,
@@ -35,10 +34,7 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
-import {
-  activeViewResponse,
-  runnerExportResponse,
-} from "./account-export-http.ts";
+import { runnerExportResponse } from "./account-export-http.ts";
 import { exportAccount } from "./account-export.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
@@ -453,24 +449,13 @@ export function createRequestHandler(
     const exported = runnerExport(request);
     return exported instanceof Response
       ? exported
-      : runnerExportResponse(exported, pathname);
+      : runnerExportResponse(exported, pathname, request.headers.get("range"));
   };
 
   return async (request) => {
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
-      if (pathname === ACTIVE_VIEWS_PATH) {
-        if (request.method !== "GET")
-          return createMethodNotAllowedResponse("GET");
-        const user = googleAuth.authenticatedUser(request);
-        return user === null
-          ? new Response("Unauthorized", { status: 401 })
-          : activeViewResponse(
-              exportAccount(database, user.id),
-              new URL(request.url),
-            );
-      }
       if (
         pathname === RUNNER_ACCOUNT_EXPORT_PATH ||
         pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)

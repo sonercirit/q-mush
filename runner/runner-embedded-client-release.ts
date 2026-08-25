@@ -1,3 +1,6 @@
+import { isRecord } from "../shared/auth-model.ts";
+import { isSha256Digest } from "../shared/digest.ts";
+import { sha256 } from "../shared/sha256.ts";
 import type { RunnerAppRelease } from "./runner-app-server.ts";
 
 export function embeddedClientRelease(
@@ -11,24 +14,38 @@ export function embeddedClientRelease(
     typeof parsed !== "object" ||
     parsed === null ||
     !("files" in parsed) ||
-    typeof parsed.files !== "object" ||
-    parsed.files === null ||
+    !isRecord(parsed.files) ||
     !("shell" in parsed) ||
     typeof parsed.shell !== "string"
   ) {
     throw new Error("The embedded browser release is invalid");
   }
   const files = Object.entries(parsed.files);
-  if (files.some((entry) => typeof entry[1] !== "string")) {
-    throw new Error("The embedded browser release file is invalid");
+  const manifestEncoded = parsed.files["manifest.json"];
+  if (typeof manifestEncoded !== "string")
+    throw new Error("The embedded browser release manifest is missing");
+  const decoded = Object.fromEntries(
+    files.map(([name, encoded]) => [
+      name,
+      Uint8Array.fromBase64(String(encoded)),
+    ]),
+  );
+  const manifest: unknown = JSON.parse(
+    new TextDecoder().decode(decoded["manifest.json"]),
+  );
+  if (!isRecord(manifest) || !isRecord(manifest["files"]))
+    throw new Error("The embedded browser release manifest is invalid");
+  for (const [name, digest] of Object.entries(manifest["files"])) {
+    const bytes = decoded[name];
+    if (
+      !isSha256Digest(digest) ||
+      bytes === undefined ||
+      sha256(bytes) !== digest
+    )
+      throw new Error("The embedded browser release checksum is invalid");
   }
   return {
-    files: Object.fromEntries(
-      files.map(([name, encoded]) => [
-        name,
-        Uint8Array.fromBase64(String(encoded)),
-      ]),
-    ),
+    files: decoded,
     shell: parsed.shell,
   };
 }

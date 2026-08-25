@@ -1,4 +1,4 @@
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
   ACCOUNT_EXPORT_ENTITIES,
@@ -10,7 +10,7 @@ import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 
 export interface CatchUpSource {
   readonly inventory: () => Promise<AccountExportInventory>;
-  readonly blob: (digest: string) => Promise<Uint8Array>;
+  readonly blob: (digest: string, offset: number) => Promise<Uint8Array>;
 }
 
 function requiredCapacity(inventory: AccountExportInventory): number {
@@ -57,7 +57,9 @@ export async function catchUpRunnerReplica(
     mkdirSync(incoming, { recursive: true });
     for (const entry of store.missingBlobs()) {
       const path = join(incoming, entry.digest);
-      writeFileSync(path, await source.blob(entry.digest));
+      const offset = existsSync(path) ? statSync(path).size : 0;
+      if (offset > entry.size) throw new Error("Replica blob size is invalid");
+      appendFileSync(path, await source.blob(entry.digest, offset));
       if (statSync(path).size !== entry.size)
         throw new Error("Replica blob size is invalid");
       await store.installBlob(path);

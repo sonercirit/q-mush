@@ -2,7 +2,8 @@ import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import { isSha256Digest } from "../shared/digest.ts";
 import { parseSerializedArray } from "../shared/serialized-array.ts";
-import { queryHostForLocation } from "./query-host.ts";
+import { requestJson } from "./browser-http.ts";
+import { queryHostForDocument } from "./query-host.ts";
 
 function replicaImageDigests(value: unknown): readonly string[] {
   const digests: string[] = [];
@@ -15,7 +16,7 @@ function replicaImageDigests(value: unknown): readonly string[] {
 }
 
 export function RunnerReplicaView(): JSX.Element {
-  const host = queryHostForLocation(window.location);
+  const host = queryHostForDocument(document);
   const emptyRecords: readonly Record<string, unknown>[] = [];
   const [views, setViews] = createSignal({
     messages: emptyRecords,
@@ -23,6 +24,9 @@ export function RunnerReplicaView(): JSX.Element {
   });
   const [selected, setSelected] = createSignal<string>();
   const [failed, setFailed] = createSignal(false);
+  const [complete, setComplete] = createSignal(false);
+  const [paired, setPaired] = createSignal(false);
+  const [pairingCode, setPairingCode] = createSignal("");
   const load = (
     entity: "agent_messages" | "agent_sessions",
     apply: (records: readonly Record<string, unknown>[]) => void,
@@ -31,15 +35,37 @@ export function RunnerReplicaView(): JSX.Element {
     void host
       .read(entity, { limit: 100, ...(sessionId && { sessionId }) })
       .then((view) => {
+        setComplete(view.complete);
         apply(view.records);
       })
       .catch(() => setFailed(true));
   };
   onMount(() => {
+    void fetch("/api/local/status").then((response) => {
+      if (response.status === 401) return;
+      setPaired(true);
+      load("agent_sessions", (sessions) =>
+        setViews((value) => ({ ...value, sessions })),
+      );
+    });
+  });
+  const pair = async (): Promise<void> => {
+    const challenge: unknown = await requestJson("/api/local/pair");
+    if (!isRecord(challenge) || typeof challenge["transcript"] !== "string")
+      throw new Error("The runner pairing challenge is invalid");
+    const response = await fetch("/api/local/pair", {
+      headers: {
+        "x-q-mush-pairing-code": pairingCode(),
+        "x-q-mush-pairing-transcript": challenge["transcript"],
+      },
+      method: "POST",
+    });
+    if (!response.ok) throw new Error("Pairing rejected");
+    setPaired(true);
     load("agent_sessions", (sessions) =>
       setViews((value) => ({ ...value, sessions })),
     );
-  });
+  };
   const select = (id: string): void => {
     setSelected(id);
     load(
@@ -51,66 +77,100 @@ export function RunnerReplicaView(): JSX.Element {
   return (
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
       <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
-        <p class="font-semibold">Runner replica · Complete copy</p>
-        <p class="mt-1 text-sm">Partial active view · Read only</p>
+        <p class="font-semibold">
+          Runner replica · {complete() ? "Complete copy" : "Joining copy"}
+        </p>
+        <p class="mt-1 text-sm">
+          {complete() ? "Complete active view" : "Partial active view"} · Read
+          only
+        </p>
         <p class="mt-2 text-sm">
           Mutations are disabled because this page is reading from the runner
           replica.
         </p>
       </div>
       <Show
-        when={!failed()}
-        fallback={<p role="alert">The runner replica is not ready.</p>}
+        when={paired()}
+        fallback={
+          <form
+            class="rounded-xl border border-white/10 p-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void pair().catch(() => setFailed(true));
+            }}
+          >
+            <label for="runner-pairing-code">
+              Runner terminal pairing code
+            </label>
+            <input
+              id="runner-pairing-code"
+              class="mt-2 block rounded bg-slate-950 p-2"
+              onInput={(event) => setPairingCode(event.currentTarget.value)}
+              required
+            />
+            <button
+              class="mt-2 rounded bg-cyan-300 px-4 py-2 text-slate-950"
+              type="submit"
+            >
+              Pair this browser
+            </button>
+          </form>
+        }
       >
-        <For each={views().sessions}>
-          {(record) => {
-            const id = String(record["id"]);
-            const value = record["title"];
-            return (
-              <button
-                class="rounded-xl border border-white/10 p-4 text-left"
-                onClick={() => {
-                  select(id);
-                }}
-                type="button"
-              >
-                {typeof value === "string" ? value : id}
-              </button>
-            );
-          }}
-        </For>
-        <Show when={selected()}>
-          <div class="rounded-xl border border-white/10 p-4">
-            <For each={views().messages}>
-              {(message) => {
-                const content = message["content"];
-                return (
-                  <div>
-                    <p class="whitespace-pre-wrap">
-                      {typeof content === "string" ? content : ""}
-                    </p>
-                    <For each={replicaImageDigests(message["images"])}>
-                      {(digest) => (
-                        <img
-                          alt="Session attachment"
-                          class="mt-3 max-h-64 rounded-lg"
-                          src={`/api/local/blob/${digest}`}
-                        />
-                      )}
-                    </For>
-                  </div>
-                );
-              }}
-            </For>
-          </div>
-        </Show>
-        <button
-          class="cursor-not-allowed rounded-full border border-white/10 px-5 py-2 text-slate-500"
-          disabled
-          type="button"
+        <Show
+          when={!failed()}
+          fallback={<p role="alert">The runner replica is not ready.</p>}
         >
-          New session unavailable in read-only replica
-        </button>
+          <For each={views().sessions}>
+            {(record) => {
+              const id = String(record["id"]);
+              const value = record["title"];
+              return (
+                <button
+                  class="rounded-xl border border-white/10 p-4 text-left"
+                  onClick={() => {
+                    select(id);
+                  }}
+                  type="button"
+                >
+                  {typeof value === "string" ? value : id}
+                </button>
+              );
+            }}
+          </For>
+          <Show when={selected()}>
+            <div class="rounded-xl border border-white/10 p-4">
+              <For each={views().messages}>
+                {(message) => {
+                  const content = message["content"];
+                  return (
+                    <div>
+                      <p class="whitespace-pre-wrap">
+                        {typeof content === "string" ? content : ""}
+                      </p>
+                      <For each={replicaImageDigests(message["images"])}>
+                        {(digest) => (
+                          <img
+                            alt="Session attachment"
+                            class="mt-3 max-h-64 rounded-lg"
+                            src={`/api/local/blob/${digest}`}
+                          />
+                        )}
+                      </For>
+                    </div>
+                  );
+                }}
+              </For>
+            </div>
+          </Show>
+          <button
+            class="cursor-not-allowed rounded-full border border-white/10 px-5 py-2 text-slate-500"
+            disabled
+            type="button"
+          >
+            New session unavailable in read-only replica
+          </button>
+        </Show>
       </Show>
     </section>
   );

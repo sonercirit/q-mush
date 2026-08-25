@@ -1,5 +1,5 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 import { validActiveViewLimit } from "../shared/active-view.ts";
@@ -51,7 +51,30 @@ export function createRunnerReplicaStore(directory: string) {
   );
   const count = (sql: string): number =>
     database.query<{ count: number }, []>(sql).all()[0]?.count ?? 0;
+  const verifyBlobs = (): number => {
+    const entries = database
+      .query<ReplicaBlobManifestEntry, []>(
+        "SELECT digest, size FROM replica_manifest WHERE complete = 1",
+      )
+      .all();
+    let invalid = 0;
+    for (const entry of entries) {
+      const path = join(directory, "blobs", entry.digest);
+      const valid =
+        existsSync(path) &&
+        Bun.file(path).size === entry.size &&
+        sha256(readFileSync(path)) === entry.digest;
+      if (!valid) {
+        database
+          .query("UPDATE replica_manifest SET complete = 0 WHERE digest = ?")
+          .run(entry.digest);
+        invalid += 1;
+      }
+    }
+    return invalid;
+  };
   const progress = (): ReplicaProgress => {
+    verifyBlobs();
     const records = count("SELECT COUNT(*) AS count FROM replica_records");
     const tombstones = count(
       "SELECT COUNT(*) AS count FROM replica_records WHERE tombstone = 1",
@@ -149,7 +172,15 @@ export function createRunnerReplicaStore(directory: string) {
         )
         .get(digest);
       const file = Bun.file(join(directory, "blobs", digest));
-      if (entry?.complete !== 1 || file.size !== entry.size) {
+      const bytes = readFileSync(join(directory, "blobs", digest));
+      if (
+        entry?.complete !== 1 ||
+        bytes.byteLength !== entry.size ||
+        sha256(bytes) !== digest
+      ) {
+        database
+          .query("UPDATE replica_manifest SET complete = 0 WHERE digest = ?")
+          .run(digest);
         throw new Error("Replica blob is unavailable");
       }
       return file;

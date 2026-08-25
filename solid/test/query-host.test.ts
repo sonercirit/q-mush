@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { queryHostForLocation } from "../query-host.ts";
+import { queryHostForDocument } from "../query-host.ts";
 
 describe("Solid query host", () => {
   test("selects the loopback runner and returns a labeled bounded partial view", async () => {
@@ -11,7 +11,9 @@ describe("Solid query host", () => {
         ),
       ),
     );
-    const host = queryHostForLocation({ hostname: "127.0.0.1", port: "43127" });
+    const host = queryHostForDocument({
+      querySelector: () => document.createElement("meta"),
+    });
     expect(host.mutations).toBe(false);
     const view = await host.read("agent_sessions", { limit: 20 });
     expect(view.origin).toBe("runner");
@@ -29,7 +31,7 @@ describe("Solid query host", () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     await expect(
-      queryHostForLocation({ hostname: "engine.test", port: "443" }).read(
+      queryHostForDocument({ querySelector: () => null }).read(
         "agent_sessions",
         {
           limit: 101,

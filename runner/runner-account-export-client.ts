@@ -26,15 +26,22 @@ export async function catchUpAccountExport(
     directory,
     {
       inventory: () => Promise.resolve(value),
-      blob: async (digest) => {
+      blob: async (digest, offset) => {
         const blobResponse = await fetch(
           `${serverOrigin}${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`,
-          { headers: { authorization } },
+          {
+            headers: {
+              authorization,
+              ...(offset > 0 && { range: `bytes=${String(offset)}-` }),
+            },
+          },
         );
         if (!blobResponse.ok)
           throw new Error(
             `Replica blob download failed (${String(blobResponse.status)})`,
           );
+        if (offset > 0 && blobResponse.status !== 206)
+          throw new Error("Replica blob server did not honor the resume range");
         return new Uint8Array(await blobResponse.arrayBuffer());
       },
     },

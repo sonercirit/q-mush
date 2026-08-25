@@ -41,6 +41,7 @@ export function activeViewResponse(
 export function runnerExportResponse(
   exported: AccountExport,
   pathname: string,
+  range?: string | null,
 ): Response {
   if (pathname === RUNNER_ACCOUNT_EXPORT_PATH)
     return Response.json({
@@ -53,5 +54,6 @@ export function runnerExportResponse(
   const digest = pathname.slice(RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1);
   return accountExportBlobResponse(
     findAccountExportBlob(exported.blobs, digest),
+    range,
   );
 }

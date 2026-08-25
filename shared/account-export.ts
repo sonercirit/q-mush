@@ -83,15 +83,29 @@ export function findAccountExportBlob(
 
 export function accountExportBlobResponse(
   blob: AccountExportBlob | undefined,
+  range?: string | null,
 ): Response {
-  return blob === undefined
-    ? new Response("Not found", { status: 404 })
-    : new Response(Uint8Array.fromBase64(blob.data), {
-        headers: {
-          "content-length": String(blob.size),
-          "content-type": "application/octet-stream",
-        },
-      });
+  if (blob === undefined) return new Response("Not found", { status: 404 });
+  const bytes = Uint8Array.fromBase64(blob.data);
+  const match = range?.match(/^bytes=(\d+)-$/u);
+  const offset = match === null || match === undefined ? 0 : Number(match[1]);
+  if (!Number.isSafeInteger(offset) || offset < 0 || offset >= bytes.length)
+    return new Response("Range not satisfiable", {
+      headers: { "content-range": `bytes */${String(bytes.length)}` },
+      status: 416,
+    });
+  const body = bytes.slice(offset);
+  return new Response(body, {
+    headers: {
+      "accept-ranges": "bytes",
+      "content-length": String(body.length),
+      "content-type": "application/octet-stream",
+      ...(offset > 0 && {
+        "content-range": `bytes ${String(offset)}-${String(bytes.length - 1)}/${String(bytes.length)}`,
+      }),
+    },
+    status: offset > 0 ? 206 : 200,
+  });
 }
 
 export function accountExportEntityCounts(

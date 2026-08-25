@@ -31,7 +31,7 @@ import {
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
 import { createProviderController } from "./provider-controller.ts";
-import { queryHostForLocation } from "./query-host.ts";
+import { queryHostForDocument } from "./query-host.ts";
 import {
   createRealtimeConnection,
   type RealtimeConnection,
@@ -523,7 +523,7 @@ function App(): JSX.Element {
               )}
             </For>
             <Show
-              when={queryHostForLocation(window.location).origin === "runner"}
+              when={queryHostForDocument(document).origin === "runner"}
               fallback={
                 <Show
                   fallback={<AppLoadingCard />}

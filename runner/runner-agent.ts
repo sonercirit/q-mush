@@ -609,7 +609,9 @@ async function run(): Promise<void> {
     );
   }
   const configuration =
-    configurationPath && readConfiguration(configurationPath);
+    configurationPath === undefined
+      ? undefined
+      : readConfiguration(configurationPath);
   const containers = createRunnerContainerManager({
     trackingPath: join(runnerDirectory, "owned-containers.json"),
   });
@@ -663,7 +665,7 @@ async function run(): Promise<void> {
         : 0,
   });
   console.log(`Local app at http://127.0.0.1:${String(app.port)}.`);
-  console.log(`Pairing transcript: ${identity.pairing.transcript}.`);
+  console.log(`Browser pairing code: ${identity.pairing.code}.`);
   await containers.recoverTracked();
   try {
     if (!configuration || !configurationPath) {
