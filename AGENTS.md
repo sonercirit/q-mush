@@ -180,10 +180,10 @@ Memory.
   priming, duplicated blob table, or process cache. Engine active views rewrite
   inline attachments to the digest references Solid consumes; runner views use
   replicated references and its blob store. Runner catch-up is
-  background/non-fatal; its loopback
-  app uses an ephemeral collision-free port unless configured. Physical pairing
-  is transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
-  the browser grant and pairing transcript are never logged.
+  background/non-fatal; its loopback app uses an ephemeral collision-free port
+  unless configured. Physical pairing is transcript-bound, five-minute,
+  one-use/rate-limited, constant-time checked; the browser grant and pairing
+  transcript are never logged.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,

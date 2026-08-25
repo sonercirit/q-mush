@@ -5,8 +5,8 @@ import {
 import type { AppDatabase } from "../shared/database.ts";
 
 import {
-  type AccountExportBlob,
   accountExportBlobResponse,
+  type AccountExportBlob,
 } from "../shared/account-export.ts";
 import {
   exportAccountBlob,
