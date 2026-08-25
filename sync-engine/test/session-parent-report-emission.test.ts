@@ -205,7 +205,7 @@ testReportedGenerationVariants("tool update", (terminal) => {
   expectToolUpdateReported(terminal);
 });
 
-testReportedGenerationVariants("runner removal", ({ setup }) => {
+testReportedGenerationVariants("runner removal", ({ child, setup }) => {
   const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
   if (runnerId === undefined)
     throw new Error("The child runner is unavailable");
@@ -217,6 +217,19 @@ testReportedGenerationVariants("runner removal", ({ setup }) => {
       setup.reportParent,
     ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
+  expect(
+    setup.database
+      .select({
+        execution: agentSessions.executionGeneration,
+        reported: agentSessions.parentReportedGeneration,
+      })
+      .from(agentSessions)
+      .where(eq(agentSessions.id, child.id))
+      .get(),
+  ).toMatchObject({
+    execution: child.generation + 1,
+    reported: child.generation + 1,
+  });
 });
 
 function startCurrent(

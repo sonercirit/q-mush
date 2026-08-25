@@ -215,16 +215,28 @@ describe("runner app server", () => {
     ).toBe(404);
   });
 
-  test("does not expose authentication or replica membership endpoints", () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
+  test("does not expose authentication or replica membership endpoints", async () => {
+    const hiddenApiRelease = {
+      ...release,
+      files: {
+        ...release.files,
+        "api/auth/session": new TextEncoder().encode("asset canary"),
+        "api/replica/ack": new TextEncoder().encode("asset canary"),
+        "api/replica/frontier": new TextEncoder().encode("asset canary"),
+      },
+    };
+    const handler = createRunnerAppHandler(
+      hiddenApiRelease,
+      "http://127.0.0.1:43127",
+    );
     for (const path of [
       "/api/auth/session",
       "/api/replica/frontier",
       "/api/replica/ack",
     ]) {
-      expect(handler(new Request(`http://127.0.0.1:43127${path}`)).status).toBe(
-        404,
-      );
+      const response = handler(new Request(`http://127.0.0.1:43127${path}`));
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe("Not found");
     }
   });
 });

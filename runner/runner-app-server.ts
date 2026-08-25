@@ -185,6 +185,9 @@ export function createRunnerAppHandler(
         partial: true,
       });
     }
+    if (url.pathname.startsWith("/api/")) {
+      return new Response("Not found", { status: 404 });
+    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });
     }

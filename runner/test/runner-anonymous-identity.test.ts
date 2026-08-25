@@ -74,7 +74,20 @@ describe("anonymous runner genesis and browser pairing", () => {
     const directory = mkdtempSync(join(tmpdir(), "q-mush-canary-"));
     const identity = createAnonymousRunnerIdentity(directory);
     const disk = readFileSync(join(directory, "device-identity.json"), "utf8");
-    const handler = pairedHandler(identity);
+    const hiddenApiRelease = {
+      ...release,
+      files: Object.fromEntries(
+        [
+          "api/replica/frontier",
+          "api/replica/ack",
+          "api/replica/readiness",
+          "api/auth/session",
+        ].map((name) => [name, new TextEncoder().encode("secret canary")]),
+      ),
+    };
+    const handler = createRunnerAppHandler(hiddenApiRelease, appOrigin, {
+      pairing: identity.pairing,
+    });
     for (const path of [
       "/api/replica/frontier",
       "/api/replica/ack",

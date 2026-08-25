@@ -2,7 +2,7 @@ import { expect, test, vi } from "vitest";
 import type { AccountExportRetryProgress } from "../runner-account-export-client.ts";
 import { recordReplicaRetry } from "../runner-replica-retry.ts";
 
-test("runner catch-up persists and logs retry progress", () => {
+test("runner catch-up forwards and logs retry progress", () => {
   const recordRetry = vi.fn<(retry: AccountExportRetryProgress) => void>();
   const log = vi.fn<(message: string) => void>();
   const progress: AccountExportRetryProgress = {
