@@ -4,7 +4,8 @@ import { join } from "node:path";
 
 import { validActiveViewLimit } from "../shared/active-view.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import { isSha256Digest, sha256 } from "../shared/sha256.ts";
+import { isSha256Digest } from "../shared/digest.ts";
+import { sha256 } from "../shared/sha256.ts";
 
 import type { AccountExportRecord } from "../shared/account-export.ts";
 

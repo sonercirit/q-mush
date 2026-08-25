@@ -18,7 +18,7 @@ export interface RunnerAppPairing {
 }
 
 import type { ActiveViewReader } from "../shared/active-view.ts";
-import { isSha256Digest } from "../shared/sha256.ts";
+import { isSha256Digest } from "../shared/digest.ts";
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };

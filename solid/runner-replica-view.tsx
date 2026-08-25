@@ -1,7 +1,7 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
+import { isSha256Digest } from "../shared/digest.ts";
 import { parseSerializedArray } from "../shared/serialized-array.ts";
-import { isSha256Digest } from "../shared/sha256.ts";
 import { queryHostForLocation } from "./query-host.ts";
 
 function replicaImageDigests(value: unknown): readonly string[] {
