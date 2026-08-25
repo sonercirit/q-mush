@@ -140,16 +140,18 @@ describe("operation checkpoints", () => {
       const operations = requireArray(requireArray(pendingEntry[1])[1]);
       return requireArray(requireArray(operations[0])[1]);
     };
-    const mutatePendingField = (field: string, replacement: unknown) => {
-      const copy = structuredClone(pendingDecoded);
-      requireEntry(pendingOperationEntries(copy), field)[1] = replacement;
-      return copy;
-    };
-    const mutatePendingClockField = (field: string, replacement: unknown) => {
-      const copy = structuredClone(pendingDecoded);
-      const clock = requireEntry(pendingOperationEntries(copy), "clock");
-      requireEntry(requireArray(requireArray(clock[1])[1]), field)[1] =
-        replacement;
+    const pendingCopy = (): unknown => structuredClone(pendingDecoded);
+    const mutatePending = (
+      field: string,
+      replacement: unknown,
+      nested = false,
+    ) => {
+      const copy = pendingCopy();
+      const entries = pendingOperationEntries(copy);
+      const target = nested
+        ? requireArray(requireArray(requireEntry(entries, "clock")[1])[1])
+        : entries;
+      requireEntry(target, field)[1] = replacement;
       return copy;
     };
     const malformedClockWriter = structuredClone(pendingDecoded);
@@ -169,21 +171,21 @@ describe("operation checkpoints", () => {
       change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
       change("applied", ["object", [["key", ["bigint", "1"]]]]),
       change("projection", ["array", [["primitive", 42]]]),
-      mutatePendingField("schemaVersion", encodedPrimitive("1")),
-      mutatePendingField("schemaVersion", encodedPrimitive(true)),
-      mutatePendingField("schemaVersion", encodedPrimitive(1e300)),
-      mutatePendingClockField("physicalMs", encodedPrimitive("1")),
-      mutatePendingClockField("logical", encodedPrimitive(-1)),
-      mutatePendingField("partition", encodedPrimitive("session")),
-      mutatePendingField("payload", ["date", "2024-01-01"]),
+      mutatePending("schemaVersion", encodedPrimitive("1")),
+      mutatePending("schemaVersion", encodedPrimitive(true)),
+      mutatePending("schemaVersion", encodedPrimitive(1e300)),
+      mutatePending("physicalMs", encodedPrimitive("1"), true),
+      mutatePending("logical", encodedPrimitive(-1), true),
+      mutatePending("partition", encodedPrimitive("session")),
+      mutatePending("payload", ["date", "2024-01-01"]),
       malformedClockWriter,
       duplicateObjectKey,
       wrongStateKeys,
       change("pending", encodedPrimitive(null)),
       change("replayCount", encodedPrimitive(-1)),
       change("replayCount", encodedPrimitive(1e300)),
-      mutatePendingField("sequence", ["bigint", "01"]),
-      mutatePendingField("sequence", ["date", "2024-01-01"]),
+      mutatePending("sequence", ["bigint", "01"]),
+      mutatePending("sequence", ["date", "2024-01-01"]),
     ];
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {
