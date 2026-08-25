@@ -7,8 +7,12 @@ describe("browser release", () => {
     const release = await buildClientRelease();
     const names = Object.keys(release.files);
     expect(names).toContain("manifest.json");
-    expect(names.some((name) => /^app\.[a-f\d]{64}\.js$/u.test(name))).toBe(true);
-    expect(names.some((name) => /^styles\.[a-f\d]{64}\.css$/u.test(name))).toBe(true);
+    expect(names.some((name) => /^app\.[a-f\d]{64}\.js$/u.test(name))).toBe(
+      true,
+    );
+    expect(names.some((name) => /^styles\.[a-f\d]{64}\.css$/u.test(name))).toBe(
+      true,
+    );
     expect(release.manifest.files).toEqual(
       Object.fromEntries(
         Object.entries(release.files)

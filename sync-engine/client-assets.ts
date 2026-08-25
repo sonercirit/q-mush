@@ -58,7 +58,9 @@ function readViteClientAssets(
     }
   }
   if (javaScript === undefined || stylesheet === undefined) {
-    throw new Error("The Vite browser build did not produce JavaScript and CSS");
+    throw new Error(
+      "The Vite browser build did not produce JavaScript and CSS",
+    );
   }
   return { javaScript, stylesheet };
 }
