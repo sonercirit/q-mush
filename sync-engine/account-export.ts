@@ -20,6 +20,7 @@ import {
   users,
   workspaces,
 } from "../shared/database/schema.ts";
+import { parseSerializedArray } from "../shared/serialized-array.ts";
 import { sha256 } from "../shared/sha256.ts";
 
 import {
@@ -79,21 +80,13 @@ function rows(
     .all(userId);
 }
 function attachments(value: unknown): readonly string[] {
-  if (typeof value !== "string") return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return Array.isArray(parsed)
-      ? parsed.flatMap((item: unknown) => {
-          if (typeof item !== "object" || item === null || !("data" in item)) {
-            return [];
-          }
-          const data = item.data;
-          return typeof data === "string" ? [data] : [];
-        })
-      : [];
-  } catch {
-    return [];
-  }
+  return parseSerializedArray(value).flatMap((item: unknown) => {
+    if (typeof item !== "object" || item === null || !("data" in item)) {
+      return [];
+    }
+    const data = item.data;
+    return typeof data === "string" ? [data] : [];
+  });
 }
 export function exportAccount(
   database: AppDatabase,

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { validActiveViewLimit } from "../shared/active-view.ts";
 import { isRecord } from "../shared/auth-model.ts";
-import { sha256 } from "../shared/sha256.ts";
+import { isSha256Digest, sha256 } from "../shared/sha256.ts";
 
 import type { AccountExportRecord } from "../shared/account-export.ts";
 
@@ -135,7 +135,7 @@ export function createRunnerReplicaStore(directory: string) {
         .run(digest);
     },
     readBlob: (digest: string) => {
-      if (!/^[a-f\d]{64}$/u.test(digest) || progress().state !== "ready") {
+      if (!isSha256Digest(digest) || progress().state !== "ready") {
         throw new Error("Replica blob is unavailable");
       }
       const entry = database

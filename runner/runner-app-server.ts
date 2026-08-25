@@ -18,6 +18,7 @@ export interface RunnerAppPairing {
 }
 
 import type { ActiveViewReader } from "../shared/active-view.ts";
+import { isSha256Digest } from "../shared/sha256.ts";
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
@@ -79,7 +80,7 @@ export function createRunnerAppHandler(
         return new Response("Not found", { status: 404 });
       }
       const digest = url.pathname.slice("/api/local/blob/".length);
-      if (!/^[a-f\d]{64}$/u.test(digest)) {
+      if (!isSha256Digest(digest)) {
         return new Response("Invalid blob digest", { status: 400 });
       }
       try {

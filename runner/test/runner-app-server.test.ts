@@ -56,7 +56,8 @@ describe("runner app server", () => {
   test("serves paired replica blobs without cross-origin CORS", async () => {
     const bytes = new TextEncoder().encode("replica attachment");
     const digest = sha256(bytes);
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+    const localOrigin = "http://127.0.0.1:43127";
+    const handler = createRunnerAppHandler(release, localOrigin, {
       pairing: { browserGrant: "grant", code: "code" },
       views: {
         progress: () => ({ state: "ready" }),

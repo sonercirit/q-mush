@@ -1,14 +1,9 @@
 import { render } from "solid-js/web";
-import { afterEach, expect, test, vi } from "vitest";
+import { expect, test, vi } from "vitest";
 import { RunnerReplicaView } from "../runner-replica-view.tsx";
 import "../styles.css";
 
 const digest = "a".repeat(64);
-
-afterEach(() => {
-  document.body.replaceChildren();
-  vi.restoreAllMocks();
-});
 
 test("real Chromium reads sessions and renders replica attachments read-only", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
@@ -45,16 +40,16 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
   document.body.append(root);
   render(() => <RunnerReplicaView />, root);
 
-  await vi.waitFor(() => {
-    expect(root.textContent).toContain("Session from runner B");
-  });
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain("Session from runner B"),
+  );
   const session = root.querySelector("button:not([disabled])");
   if (!(session instanceof HTMLButtonElement))
     throw new Error("Missing session");
   session.click();
-  await vi.waitFor(() => {
-    expect(root.textContent).toContain("Offline transcript");
-  });
+  await vi.waitFor(() =>
+    expect(root.textContent).toContain("Offline transcript"),
+  );
   const image = root.querySelector("img");
   if (!(image instanceof HTMLImageElement))
     throw new Error("Missing attachment");
@@ -65,4 +60,6 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
     throw new Error("Missing disabled mutation control");
   }
   expect(getComputedStyle(mutation).cursor).toBe("not-allowed");
+  document.body.replaceChildren();
+  vi.restoreAllMocks();
 });

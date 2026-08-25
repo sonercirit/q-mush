@@ -1,22 +1,17 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
+import { parseSerializedArray } from "../shared/serialized-array.ts";
+import { isSha256Digest } from "../shared/sha256.ts";
 import { queryHostForLocation } from "./query-host.ts";
 
 function replicaImageDigests(value: unknown): readonly string[] {
-  if (typeof value !== "string") return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item: unknown) =>
-      isRecord(item) &&
-      typeof item["digest"] === "string" &&
-      /^[a-f\d]{64}$/u.test(item["digest"])
-        ? [item["digest"]]
-        : [],
-    );
-  } catch {
-    return [];
+  const digests: string[] = [];
+  for (const item of parseSerializedArray(value)) {
+    if (isRecord(item) && isSha256Digest(item["digest"])) {
+      digests.push(item["digest"]);
+    }
   }
+  return digests;
 }
 
 export function RunnerReplicaView(): JSX.Element {
