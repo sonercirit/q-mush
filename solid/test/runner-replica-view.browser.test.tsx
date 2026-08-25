@@ -13,7 +13,11 @@ afterEach(() => {
 test("real Chromium reads sessions and renders replica attachments read-only", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = new URL(
-      input instanceof Request ? input.url : input instanceof URL ? input.href : input,
+      input instanceof Request
+        ? input.url
+        : input instanceof URL
+          ? input.href
+          : input,
       location.origin,
     );
     const entity = url.searchParams.get("entity");
@@ -28,12 +32,14 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
               session_id: "other-executor",
             },
           ];
-    return Promise.resolve(Response.json({
-      complete: true,
-      origin: "runner",
-      partial: true,
-      records,
-    }));
+    return Promise.resolve(
+      Response.json({
+        complete: true,
+        origin: "runner",
+        partial: true,
+        records,
+      }),
+    );
   });
   const root = document.createElement("div");
   document.body.append(root);
@@ -43,13 +49,15 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
     expect(root.textContent).toContain("Session from runner B");
   });
   const session = root.querySelector("button:not([disabled])");
-  if (!(session instanceof HTMLButtonElement)) throw new Error("Missing session");
+  if (!(session instanceof HTMLButtonElement))
+    throw new Error("Missing session");
   session.click();
   await vi.waitFor(() => {
     expect(root.textContent).toContain("Offline transcript");
   });
   const image = root.querySelector("img");
-  if (!(image instanceof HTMLImageElement)) throw new Error("Missing attachment");
+  if (!(image instanceof HTMLImageElement))
+    throw new Error("Missing attachment");
   expect(image.getAttribute("src")).toBe(`/api/local/blob/${digest}`);
   expect(image.getBoundingClientRect().width).toBeGreaterThan(0);
   const mutation = root.querySelector("button[disabled]");

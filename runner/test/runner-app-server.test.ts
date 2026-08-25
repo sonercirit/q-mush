@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
-import { sha256 } from "../../shared/sha256.ts";
 import { createRunnerAppHandler } from "../../runner/runner-app-server.ts";
+import { sha256 } from "../../shared/sha256.ts";
 
 const release = {
   files: {

@@ -71,7 +71,10 @@ export function createRunnerAppHandler(
     ) {
       return new Response("Pairing required", { status: 401 });
     }
-    if (request.method === "GET" && url.pathname.startsWith("/api/local/blob/")) {
+    if (
+      request.method === "GET" &&
+      url.pathname.startsWith("/api/local/blob/")
+    ) {
       if (options?.views?.readBlob === undefined) {
         return new Response("Not found", { status: 404 });
       }
