@@ -1,6 +1,6 @@
 import { getTableColumns, getTableName } from "drizzle-orm";
 import type { AnySQLiteTable } from "drizzle-orm/sqlite-core";
-import { createHash } from "node:crypto";
+import { sha256 } from "../shared/sha256.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
   agentMessages,
@@ -111,7 +111,7 @@ export function exportAccount(
         ...attachments(row["content"]),
       ]) {
         const bytes = Uint8Array.fromBase64(data);
-        const digest = createHash("sha256").update(bytes).digest("hex");
+        const digest = sha256(bytes);
         blobs.set(digest, { data, digest, size: bytes.length });
       }
       records.push({
@@ -128,9 +128,8 @@ export function exportAccount(
   const manifest = [...blobs.values()]
     .map(({ digest, size }) => ({ digest, size }))
     .sort((a, b) => a.digest.localeCompare(b.digest));
-  const frontier = createHash("sha256")
-    .update(JSON.stringify(records))
-    .update(JSON.stringify(manifest))
-    .digest("hex");
+  const frontier = sha256(
+    `${JSON.stringify(records)}${JSON.stringify(manifest)}`,
+  );
   return { blobs: [...blobs.values()], frontier, manifest, records };
 }

@@ -1,7 +1,8 @@
 import { Database } from "bun:sqlite";
-import { createHash } from "node:crypto";
 import { mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
+
+import { sha256 } from "../shared/sha256.ts";
 
 import type {
   AccountExportRecord as ReplicaRecord,
@@ -108,7 +109,7 @@ export function createRunnerReplicaStore(directory: string) {
         .all(),
     installBlob: async (path: string) => {
       const bytes = await Bun.file(path).bytes();
-      const digest = createHash("sha256").update(bytes).digest("hex");
+      const digest = sha256(bytes);
       const expected = database
         .query<{ size: number }, [string]>(
           "SELECT size FROM replica_manifest WHERE digest = ?",

@@ -1,13 +1,13 @@
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import type { AccountExport } from "../../shared/account-export.ts";
-import { catchUpRunnerReplica } from "../runner-replica-catch-up.ts";
+import { sha256 } from "../../shared/sha256.ts";
+import { catchUpRunnerReplica, type CatchUpSource } from "../runner-replica-catch-up.ts";
 
 const bytes = new TextEncoder().encode("attachment bytes");
-const digest = createHash("sha256").update(bytes).digest("hex");
+const digest = sha256(bytes);
 const inventory: Omit<AccountExport, "blobs"> = {
   frontier: "complete-frontier",
   manifest: [{ digest, size: bytes.length }],
@@ -16,48 +16,46 @@ const inventory: Omit<AccountExport, "blobs"> = {
   ],
 };
 
+function createDirectory(): string {
+  return mkdtempSync(join(tmpdir(), "catch-up-"));
+}
+
+function createSource(blob: CatchUpSource["blob"]): CatchUpSource {
+  return { blob, inventory: () => Promise.resolve(inventory) };
+}
+
+async function catchUp(
+  directory: string,
+  source: CatchUpSource,
+  availableBytes = 100,
+) {
+  return catchUpRunnerReplica(directory, source, availableBytes);
+}
+
 test("catch-up resumes missing blobs and becomes ready only after verified bytes", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "catch-up-"));
+  const directory = createDirectory();
   let interrupted = true;
-  await expect(
-    catchUpRunnerReplica(
-      directory,
-      {
-        inventory: () => Promise.resolve(inventory),
-        blob: () => {
-          if (interrupted) return Promise.reject(new Error("interrupted"));
-          return Promise.resolve(bytes);
-        },
-      },
-      100,
-    ),
-  ).rejects.toThrow("interrupted");
+  const resumableSource = createSource(() => {
+    if (interrupted) return Promise.reject(new Error("interrupted"));
+    return Promise.resolve(bytes);
+  });
+
+  await expect(catchUp(directory, resumableSource)).rejects.toThrow(
+    "interrupted",
+  );
   interrupted = false;
-  await expect(
-    catchUpRunnerReplica(
-      directory,
-      {
-        inventory: () => Promise.resolve(inventory),
-        blob: () => Promise.resolve(bytes),
-      },
-      100,
-    ),
-  ).resolves.toMatchObject({ state: "ready" });
+  await expect(catchUp(directory, resumableSource)).resolves.toMatchObject({
+    state: "ready",
+  });
   expect(readFileSync(join(directory, "blobs", digest))).toEqual(
     Buffer.from(bytes),
   );
 });
 
 test("low disk rejects without claiming readiness", async () => {
-  const directory = mkdtempSync(join(tmpdir(), "catch-up-"));
-  await expect(
-    catchUpRunnerReplica(
-      directory,
-      {
-        inventory: () => Promise.resolve(inventory),
-        blob: () => Promise.resolve(bytes),
-      },
-      bytes.length - 1,
-    ),
-  ).rejects.toThrow("Insufficient replica capacity");
+  const source = createSource(() => Promise.resolve(bytes));
+
+  await expect(catchUp(createDirectory(), source, bytes.length - 1)).rejects.toThrow(
+    "Insufficient replica capacity",
+  );
 });

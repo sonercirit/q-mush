@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { build } from "vite";
+import { sha256 } from "../shared/sha256.ts";
 import {
   clientBuildConfiguration,
   createClientPlugins,
@@ -77,22 +77,18 @@ function buildClientAssets(): Promise<ViteClientAssets> {
   return clientAssets;
 }
 
-function digest(bytes: Uint8Array): string {
-  return createHash("sha256").update(bytes).digest("hex");
-}
-
 export async function buildClientRelease(): Promise<ClientRelease> {
   const assets = await buildClientAssets();
   const encoder = new TextEncoder();
   const javaScript = encoder.encode(assets.javaScript);
   const stylesheet = encoder.encode(assets.stylesheet);
   const assetFiles = {
-    [`app.${digest(javaScript)}.js`]: javaScript,
-    [`styles.${digest(stylesheet)}.css`]: stylesheet,
+    [`app.${sha256(javaScript)}.js`]: javaScript,
+    [`styles.${sha256(stylesheet)}.css`]: stylesheet,
   };
   const manifest: ClientReleaseManifest = {
     files: Object.fromEntries(
-      Object.entries(assetFiles).map(([name, bytes]) => [name, digest(bytes)]),
+      Object.entries(assetFiles).map(([name, bytes]) => [name, sha256(bytes)]),
     ),
     version: 1,
   };
