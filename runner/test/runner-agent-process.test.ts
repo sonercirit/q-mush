@@ -141,6 +141,7 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
           blobs: options.accountExport?.blobs ?? [],
           done: true,
           nextOffset: records.length,
+          revision: "0".repeat(64),
         });
       }
       if (pathname.startsWith("/api/runner/account-export/blob/")) {
@@ -379,7 +380,6 @@ test("a paired client reads every exported entity and attachment after engine ki
         7_000,
       ),
     ).toBe(true);
-    setup.server.stop();
     const pairHeaders = new Headers({
       "x-q-mush-pairing-code": "process-pairing-code",
       "x-q-mush-pairing-transcript": "process-transcript",
@@ -393,6 +393,16 @@ test("a paired client reads every exported entity and attachment after engine ki
     );
     const setCookie = pair.headers.get("set-cookie") ?? "";
     const cookie = setCookie.substring(0, setCookie.indexOf(";"));
+    expect(
+      await waitUntil(async () => {
+        const response = await fetch(
+          "http://127.0.0.1:43127/api/local/view?entity=users&limit=1",
+          { headers: { cookie } },
+        );
+        return response.status === 200;
+      }, 7_000),
+    ).toBe(true);
+    setup.server.stop();
     for (const entity of ACCOUNT_EXPORT_ENTITIES) {
       const response = await fetch(
         `http://127.0.0.1:43127/api/local/view?entity=${entity}&limit=100`,
