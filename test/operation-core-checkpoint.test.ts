@@ -133,10 +133,38 @@ describe("operation checkpoints", () => {
     const pendingDecoded: unknown = JSON.parse(
       encodeOperationCheckpoint(pendingState),
     );
+    const pendingOperationEntries = (value: unknown): unknown[] => {
+      const rootEntries = requireArray(requireArray(value)[1]);
+      const pendingEntry = requireEntry(rootEntries, "pending");
+      const operations = requireArray(requireArray(pendingEntry[1])[1]);
+      return requireArray(requireArray(operations[0])[1]);
+    };
+    const mutatePendingField = (field: string, replacement: unknown) => {
+      const copy = structuredClone(pendingDecoded);
+      requireEntry(pendingOperationEntries(copy), field)[1] = replacement;
+      return copy;
+    };
+    const malformedClockWriter = structuredClone(pendingDecoded);
+    const clockEntry = requireEntry(
+      pendingOperationEntries(malformedClockWriter),
+      "clock",
+    );
+    requireEntry(requireArray(requireArray(clockEntry[1])[1]), "writerId")[1] =
+      encodedPrimitive(42);
+    const duplicateObjectKey = structuredClone(decoded);
+    requireArray(requireArray(duplicateObjectKey)[1]).push(objectEntries[0]);
     const mutations: unknown[] = [
       [decodedArray[0], [...objectEntries, ["extra", encodedPrimitive(true)]]],
       change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
       change("applied", ["object", [["key", ["bigint", "1"]]]]),
+      change("projection", ["array", [["primitive", 42]]]),
+      mutatePendingField("schemaVersion", encodedPrimitive("1")),
+      mutatePendingField("schemaVersion", encodedPrimitive(true)),
+      mutatePendingField("partition", encodedPrimitive("session")),
+      malformedClockWriter,
+      duplicateObjectKey,
+      ["bigint", "01"],
+      ["date", "2024-01-01"],
     ];
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {

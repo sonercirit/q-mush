@@ -227,22 +227,13 @@ export interface OperationApplyState<TProjection> {
   readonly baseFrontier: CausalFrontier;
 }
 export const MAX_PENDING_OPERATIONS = 512;
-export const operationObjectEntries = (value: object): [string, unknown][] =>
-  Object.entries(value);
-export const mapOperationArray = <T>(
-  value: readonly unknown[],
-  transform: (item: unknown) => T,
-): T[] => value.map(transform);
-export const isOperationObject = (value: unknown): value is object =>
-  value !== null && typeof value === "object";
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
   if (value instanceof Date) return `date:${value.toISOString()}`;
-  if (Array.isArray(value))
-    return `[${mapOperationArray(value, canonical).join(",")}]`;
-  if (isOperationObject(value))
-    return `{${operationObjectEntries(value)
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (value !== null && typeof value === "object")
+    return `{${Object.entries(value)
       .filter(([, item]) => item !== undefined)
       .sort(([left], [right]) => compareText(left, right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)

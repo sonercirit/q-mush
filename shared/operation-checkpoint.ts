@@ -1,8 +1,5 @@
 import {
   createOperation,
-  isOperationObject,
-  mapOperationArray,
-  operationObjectEntries,
   validateOperationValue,
   type HybridTimestamp,
   type Operation,
@@ -37,12 +34,11 @@ const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
   if (value === undefined) return ["undefined", null];
   if (typeof value === "bigint") return ["bigint", value.toString()];
   if (value instanceof Date) return ["date", value.toISOString()];
-  if (Array.isArray(value))
-    return ["array", mapOperationArray(value, encodeCheckpointValue)];
-  if (isOperationObject(value))
+  if (Array.isArray(value)) return ["array", value.map(encodeCheckpointValue)];
+  if (value !== null && typeof value === "object")
     return [
       "object",
-      operationObjectEntries(value).map(([key, item]) => [
+      Object.entries(value).map(([key, item]) => [
         key,
         encodeCheckpointValue(item),
       ]),
@@ -98,14 +94,12 @@ const typedCheckpointRecord = <T extends string | bigint>(
   value: unknown,
   valid: (item: unknown) => item is T,
 ): Readonly<Record<string, T>> => {
-  const record = checkpointObject(value);
-  if (Object.values(record).some((item) => !valid(item)))
-    throw new Error("Invalid checkpoint record");
-  return Object.fromEntries(
-    Object.entries(record).filter((entry): entry is [string, T] =>
-      valid(entry[1]),
-    ),
-  );
+  const entries: [string, T][] = [];
+  for (const entry of Object.entries(checkpointObject(value))) {
+    if (!valid(entry[1])) throw new Error("Invalid checkpoint record");
+    entries.push(entry as [string, T]);
+  }
+  return Object.fromEntries(entries);
 };
 const stringCheckpointRecord = (
   value: unknown,
@@ -159,6 +153,8 @@ const decodeOperation = (value: unknown): Operation => {
   const workspaceId = entity["workspaceId"];
   if (
     typeof item["operationId"] !== "string" ||
+    typeof item["schemaVersion"] !== "number" ||
+    !Number.isSafeInteger(item["schemaVersion"]) ||
     typeof item["writerId"] !== "string" ||
     typeof item["sequence"] !== "bigint" ||
     typeof item["kind"] !== "string" ||
@@ -176,7 +172,7 @@ const decodeOperation = (value: unknown): Operation => {
   };
   const operation = createOperation({
     operationId: item["operationId"],
-    schemaVersion: Number(item["schemaVersion"]),
+    schemaVersion: item["schemaVersion"],
     writerId: item["writerId"],
     sequence: item["sequence"],
     clock: decodeClock(item["clock"]),
@@ -230,7 +226,9 @@ export const decodeOperationCheckpoint = <TProjection>(
     throw new Error("Invalid operation checkpoint");
   const validProjection = (value: unknown): value is TProjection => {
     validateOperationValue(value);
-    return true;
+    return (
+      Array.isArray(value) && value.every((item) => typeof item === "string")
+    );
   };
   if (!validProjection(state["projection"]))
     throw new Error("Invalid operation checkpoint projection");

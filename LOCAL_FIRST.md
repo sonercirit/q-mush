@@ -18,26 +18,28 @@
   mandatory part of every durable checkpoint and uses structural sharing.
   Checkpoints therefore grow linearly with replay history and the `applied`
   identity index. With 2,000 sequential operations and a minimal
-  `{ value: "x" }` payload and identifiers `writerId: "a"`, `accountId: "a"`,
-  `entity.id: "w"`, and operation IDs `a-<sequence>`, plain JSON with decimal
-  bigint strings measures 2,099,540 bytes (1,049.77 bytes/operation, 2.002 MiB
-  total); the production tagged checkpoint encoding measures 2,783,735 bytes
-  (1,391.87 bytes/operation, 2.655 MiB total). Sizes use bytes per operation and
-  binary MiB (1 MiB = 1,048,576 bytes). No safe compaction exists yet because a
-  local replica cannot know whether a peer may later send a valid earlier-clock
-  operation. Unbounded history is an explicit known gap; bounded compaction is
-  deferred to stage 2 anti-entropy and durable subscriber receipts, which can
-  establish a stable boundary. Identity fingerprints are plain enumerable
-  checkpoint data, while sequential steady-state admission remains amortized
-  linear overall. Unready operations have indexed identity checks and bounded
-  admission (512 entries, after which admission fails rather than silently
-  wedging), while a ready dependency may enter a full buffer to drain it;
-  operation-ID and writer-sequence equivocation is rejected. Durable checkpoints
-  consist of `frontier`, `pending`, `projection`, `applied`, `replayHead`,
-  `replayCount`, `replayLastClock`, `baseProjection`, and `baseFrontier`; none
-  of the replay fields is optional. Operation values accept primitives, arrays,
-  plain string-keyed objects, and valid Dates; other object prototypes, symbol
-  keys, and cycles are rejected. The auth bearer-token `sessions`, encrypted
+  `{ value: "x" }` payload, a `readonly string[]` projection containing each
+  operation ID, `entity.type: "workspaces"`, `kind: "x"`, and identifiers
+  `writerId: "a"`, `accountId: "a"`, `entity.id: "w"`, and operation IDs
+  `a-<sequence>`, plain JSON with decimal bigint strings measures 2,099,540
+  bytes (1,049.77 bytes/operation, 2.002 MiB total); the production tagged
+  checkpoint encoding measures 2,783,735 bytes (1,391.87 bytes/operation, 2.655
+  MiB total). Sizes use bytes per operation and binary MiB (1 MiB = 1,048,576
+  bytes). No safe compaction exists yet because a local replica cannot know
+  whether a peer may later send a valid earlier-clock operation. Unbounded
+  history is an explicit known gap; bounded compaction is deferred to stage 2
+  anti-entropy and durable subscriber receipts, which can establish a stable
+  boundary. Identity fingerprints are plain enumerable checkpoint data, while
+  sequential steady-state admission remains amortized linear overall. Unready
+  operations have indexed identity checks and bounded admission (512 entries,
+  after which admission fails rather than silently wedging), while a ready
+  dependency may enter a full buffer to drain it; operation-ID and
+  writer-sequence equivocation is rejected. Durable checkpoints consist of
+  `frontier`, `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
+  `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
+  fields is optional. Operation values accept primitives, arrays, plain
+  string-keyed objects, and valid Dates; other object prototypes, symbol keys,
+  and cycles are rejected. The auth bearer-token `sessions`, encrypted
   `provider_credentials`, and setup-token-bearing `runners` tables are
   deliberately absent from operation replication because ordinary frames contain
   no secrets. The remaining closed allow-list was audited against schema
