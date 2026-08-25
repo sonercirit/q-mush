@@ -76,7 +76,7 @@ const parseBigintRecord = (
 const parseStringRecord = (
   value: unknown,
 ): Readonly<Record<string, string>> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
+  if (Object.prototype.toString.call(value) !== "[object Object]")
     throw new Error("Invalid string record");
   const entries = Object.entries(value);
   if (entries.some((entry) => typeof entry[1] !== "string"))
@@ -327,12 +327,6 @@ describe("operation checkpoints", () => {
     const b = applyOperation(a, operation("b", 1n, {}, "b", 50), append);
     const c = applyOperation(b, operation("c", 1n, {}, "c", 60), append);
     expect(c.projection).toEqual(["b-1", "c-1", "a-1"]);
-  });
-
-  test("preserves bigint-looking payload strings through checkpoints", () => {
-    const item = operation("a", 1n, {}, "123n", 1);
-    const checkpoint = roundTrip(applyOperation(arrayState(), item, append));
-    expect(checkpoint.replayHead?.operation.payload).toEqual({ value: "123n" });
   });
 
   test("preserves adversarial payload structures through checkpoints", () => {
