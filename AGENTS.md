@@ -7,7 +7,8 @@
 ## Working Agreements
 
 - Call capabilities impossible only with excluding evidence; otherwise record an
-  open question. Research provider docs/API; prefer defaults and metadata/docs.
+  open question. Research provider docs via Brave and probe APIs; omit tunables
+  first, then prefer defaults and metadata/docs.
 - Preserve patterns; improve touched code. Keep one path; avoid premature
   abstraction. TDD: fail, implement, refactor green.
 - Fix defects on sight; codify harmful ones in tests. Integrate capabilities
@@ -20,7 +21,7 @@
   OAuth configuration, stays here. Repeated guidance means a missing rule. If
   evidence overturns a finding, fix code and stale records; act, don't ask.
   Never commit secrets, artifacts, or env files.
-- Check narrow, then broad, then failures.
+- Keep workflows local-first: check narrow, then broad, then failures.
 
 ## Setup, Commands
 

@@ -39,6 +39,7 @@ import {
 import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
 import { reportRunnerFatalError } from "./runner-fatal-error.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
+import { recordReplicaRetry } from "./runner-replica-retry.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { pendingSocketFailure } from "./runner-socket-failure.ts";
@@ -577,18 +578,7 @@ async function run(): Promise<void> {
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
-      (retry) => {
-        replica.recordRetry(retry);
-        const {
-          elapsedMilliseconds,
-          previousRevision,
-          restartCount,
-          revision,
-        } = retry;
-        console.warn(
-          `Replica catch-up joining: revision changed ${previousRevision} -> ${revision}; restart ${String(restartCount)}, elapsed ${String(elapsedMilliseconds)}ms`,
-        );
-      },
+      (retry) => recordReplicaRetry(replica, retry),
     ).catch((error: unknown) => {
       console.error(`Replica catch-up deferred: ${describeError(error)}`);
     });

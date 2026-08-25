@@ -31,7 +31,7 @@ function affectedRunnerSessions(
   userId: string,
   runnerId: string,
 ): readonly StoredSessionSnapshot[] {
-  return readStoredSessionSnapshots(
+  const sessions = readStoredSessionSnapshots(
     database,
     and(
       storedSessionCondition({
@@ -48,13 +48,23 @@ function affectedRunnerSessions(
       }),
       eq(agentSessions.runnerId, runnerId),
     ),
-  ).toSorted((left, right) =>
-    left.parentSessionId === right.id
-      ? -1
-      : right.parentSessionId === left.id
-        ? 1
-        : 0,
   );
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const depth = (session: StoredSessionSnapshot): number => {
+    let current = session;
+    let result = 0;
+    const visited = new Set<string>();
+    while (current.parentSessionId !== null) {
+      if (visited.has(current.id)) throw new Error("Session lineage is cyclic");
+      visited.add(current.id);
+      const parent = byId.get(current.parentSessionId);
+      if (parent === undefined) break;
+      result += 1;
+      current = parent;
+    }
+    return result;
+  };
+  return sessions.toSorted((left, right) => depth(right) - depth(left));
 }
 
 function fenceAssignedSession(

@@ -218,12 +218,7 @@ function accountExportRevision(
     return `${name}:${String(state?.count ?? 0)}:${String(state?.updatedAt ?? 0)}`;
   });
   const revision = sha256(new TextEncoder().encode(states.join("\n")));
-  const current = exportChangeCounters(database);
-  if (
-    current.dataVersion === dataVersion &&
-    current.totalChanges === totalChanges
-  )
-    databaseCache.set(userId, { dataVersion, revision, totalChanges });
+  databaseCache.set(userId, { dataVersion, revision, totalChanges });
   return revision;
 }
 const exportedTables = [

@@ -1,9 +1,11 @@
 import { Database } from "bun:sqlite";
+import { getTableConfig } from "drizzle-orm/sqlite-core";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
+import { prompts } from "../../shared/database/schema.ts";
 import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
 import { createRunnerStore } from "../runner-store.ts";
 import {
@@ -249,6 +251,21 @@ describe("legacy account export", () => {
     expect(
       exportAccountPage(database, "u", first.nextCursor, 1).revision,
     ).not.toBe(first.revision);
+  });
+
+  test("keeps exported keyset indexes in schema declarations and migrations", () => {
+    database = createUserDatabase();
+    const declared = getTableConfig(prompts).indexes.map(
+      ({ config }) => config.name,
+    );
+    const migrated = database.$client
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'prompts'",
+      )
+      .all()
+      .map(({ name }) => name);
+    expect(declared).toContain("prompts_user_id_index");
+    expect(migrated).toContain("prompts_user_id_index");
   });
 
   test("uses owner and id indexes for exported keyset pages", () => {

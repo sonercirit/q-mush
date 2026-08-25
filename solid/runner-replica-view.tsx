@@ -1,4 +1,11 @@
-import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import {
+  createSignal,
+  For,
+  onCleanup,
+  onMount,
+  Show,
+  type JSX,
+} from "solid-js";
 import { isRecord } from "../shared/auth-model.ts";
 import { isSha256Digest } from "../shared/digest.ts";
 import { parseSerializedArray } from "../shared/serialized-array.ts";
@@ -26,6 +33,12 @@ export function RunnerReplicaView(): JSX.Element {
   const [failed, setFailed] = createSignal(false);
   const [viewComplete, setViewComplete] = createSignal(false);
   const [replicaComplete, setReplicaComplete] = createSignal(false);
+  const [retry, setRetry] = createSignal<{
+    elapsedMilliseconds: number;
+    previousRevision: string;
+    restartCount: number;
+    revision: string;
+  }>();
   const [paired, setPaired] = createSignal(false);
   const [pairingCode, setPairingCode] = createSignal("");
   const load = (
@@ -49,14 +62,35 @@ export function RunnerReplicaView(): JSX.Element {
       setViews((value) => ({ ...value, sessions })),
     );
   };
+  const loadStatus = async (): Promise<boolean> => {
+    const response = await fetch("/api/local/status");
+    if (response.status === 401) return false;
+    const status: unknown = await response.json();
+    setReplicaComplete(isRecord(status) && status["complete"] === true);
+    const progress = isRecord(status) ? status["retry"] : undefined;
+    setRetry(
+      isRecord(progress) &&
+        typeof progress["elapsedMilliseconds"] === "number" &&
+        typeof progress["previousRevision"] === "string" &&
+        typeof progress["restartCount"] === "number" &&
+        typeof progress["revision"] === "string"
+        ? {
+            elapsedMilliseconds: progress["elapsedMilliseconds"],
+            previousRevision: progress["previousRevision"],
+            restartCount: progress["restartCount"],
+            revision: progress["revision"],
+          }
+        : undefined,
+    );
+    setPaired(true);
+    return true;
+  };
   onMount(() => {
-    void fetch("/api/local/status").then(async (response) => {
-      if (response.status === 401) return;
-      const status: unknown = await response.json();
-      setReplicaComplete(isRecord(status) && status["complete"] === true);
-      setPaired(true);
-      loadSessions();
+    void loadStatus().then((authorized) => {
+      if (authorized) loadSessions();
     });
+    const refresh = setInterval(() => void loadStatus(), 1_000);
+    onCleanup(() => clearInterval(refresh));
   });
   const pair = async (): Promise<void> => {
     const challenge: unknown = await requestJson("/api/local/pair");
@@ -71,6 +105,7 @@ export function RunnerReplicaView(): JSX.Element {
     });
     if (!response.ok) throw new Error("Pairing rejected");
     setPaired(true);
+    await loadStatus();
     loadSessions();
   };
   const select = (id: string): void => {
@@ -92,6 +127,14 @@ export function RunnerReplicaView(): JSX.Element {
           {viewComplete() ? "Complete active view" : "Partial active view"} ·
           Read only
         </p>
+        <Show when={retry()}>
+          {(progress) => (
+            <p class="mt-2 text-sm" role="status">
+              Retry {progress().restartCount}: {progress().previousRevision} →{" "}
+              {progress().revision} after {progress().elapsedMilliseconds}ms
+            </p>
+          )}
+        </Show>
         <p class="mt-2 text-sm">
           Mutations are disabled because this page is reading a bounded{" "}
           {host.origin} active view.

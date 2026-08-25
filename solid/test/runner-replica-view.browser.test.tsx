@@ -10,6 +10,7 @@ test("real Chromium reads a complete runner replica and renders attachments read
   meta.name = "q-mush-host";
   meta.content = "runner";
   document.head.append(meta);
+  let statusRequests = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = new URL(
       input instanceof Request
@@ -19,8 +20,20 @@ test("real Chromium reads a complete runner replica and renders attachments read
           : input,
       location.origin,
     );
-    if (url.pathname === "/api/local/status")
-      return Promise.resolve(Response.json({ complete: true }));
+    if (url.pathname === "/api/local/status") {
+      statusRequests += 1;
+      return Promise.resolve(
+        Response.json({
+          complete: true,
+          retry: {
+            elapsedMilliseconds: statusRequests === 1 ? 123 : 456,
+            previousRevision: "old",
+            restartCount: statusRequests,
+            revision: statusRequests === 1 ? "new" : "newer",
+          },
+        }),
+      );
+    }
     const entity = url.searchParams.get("entity");
     const records =
       entity === "agent_sessions"
@@ -50,6 +63,13 @@ test("real Chromium reads a complete runner replica and renders attachments read
     expect(root.textContent).toContain("Session from runner B");
   });
   expect(root.textContent).toContain("Runner replica · Complete source");
+  expect(root.textContent).toContain("Retry 1: old → new after 123ms");
+  await vi.waitFor(
+    () => {
+      expect(root.textContent).toContain("Retry 2: old → newer after 456ms");
+    },
+    { timeout: 2_000 },
+  );
   expect(root.textContent).not.toContain("Runner terminal pairing code");
   const session = root.querySelector("button:not([disabled])");
   if (!(session instanceof HTMLButtonElement))

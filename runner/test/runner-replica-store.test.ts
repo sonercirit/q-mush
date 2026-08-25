@@ -45,6 +45,23 @@ describe("runner full replica store", () => {
     reopened.close();
   });
 
+  test("persists retry progress across reopening the replica", async () => {
+    const directory = await createTemporaryDirectory();
+    const retry = {
+      elapsedMilliseconds: 123,
+      previousRevision: "old",
+      restartCount: 2,
+      revision: "new",
+    };
+    const store = createRunnerReplicaStore(directory);
+    store.recordRetry(retry);
+    expect(store.progress()).toMatchObject({ state: "joining", ...retry });
+    store.close();
+    const reopened = createRunnerReplicaStore(directory);
+    expect(reopened.progress()).toMatchObject({ state: "joining", ...retry });
+    reopened.close();
+  });
+
   test("serves bounded active views only after the full replica is ready", async () => {
     const store = createRunnerReplicaStore(await createTemporaryDirectory());
     store.applyRecords([

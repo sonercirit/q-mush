@@ -25,7 +25,14 @@ import {
   addReplacementRunner,
   closeSessionStoreTestSetup,
 } from "./session-store-reassignment-helpers.ts";
-import { spawnedChildSetup } from "./session-store-spawn-test-helpers.ts";
+import {
+  spawnedChildSetup,
+  terminalRecordedMessage,
+} from "./session-store-spawn-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
 
 function setupWithReporter() {
   const setup = spawnedChildSetup();
@@ -210,6 +217,52 @@ testReportedGenerationVariants("runner removal", ({ setup }) => {
       setup.reportParent,
     ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
+});
+
+test("runner removal fences a three-level lineage descendants first", () => {
+  const setup = createStore();
+  const reportParent = vi.fn();
+  const parent = createTestSession(setup.store);
+  expect(
+    setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 1),
+  ).toBe(true);
+  const child = createTestSession(setup.store, TEST_NOW + 2, {
+    parentGeneration: parent.generation,
+    parentSessionId: parent.id,
+  });
+  expect(setup.store.transitionCurrent(child.id, "running", TEST_NOW + 3)).toBe(
+    true,
+  );
+  const grandchild = createTestSession(setup.store, TEST_NOW + 4, {
+    parentGeneration: child.generation,
+    parentSessionId: child.id,
+  });
+  expect(
+    setup.store.transitionCurrent(grandchild.id, "running", TEST_NOW + 5),
+  ).toBe(true);
+  setup.store.commitRuntimeTerminal(
+    grandchild.id,
+    [terminalRecordedMessage("Grandchild terminal response")],
+    TEST_NOW + 6,
+    grandchild.generation,
+    null,
+  );
+  const runnerId = setup.store.get(TEST_USER_ID, grandchild.id)?.runnerId;
+  if (runnerId === undefined) throw new Error("The runner is unavailable");
+  expect(
+    createRunnerStore(
+      setup.database,
+      setup.generateId,
+      undefined,
+      reportParent,
+    ).remove(TEST_USER_ID, runnerId, TEST_NOW + 7),
+  ).toBe(true);
+  expect(reportParent).toHaveBeenCalledOnce();
+  expect(reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
+    disposition: "promoted",
+    parentId: child.id,
+  });
+  closeSessionStoreTestSetup(setup);
 });
 
 function setupAdvancedRunningChild(): ChildSetup {
