@@ -61,10 +61,11 @@ function createQueryHost(origin: "engine" | "runner"): QueryHost {
 }
 
 export function queryHostForLocation(
-  location: Pick<Location, "hostname">,
+  location: Pick<Location, "hostname" | "port">,
 ): QueryHost {
   return createQueryHost(
-    location.hostname === "127.0.0.1" || location.hostname === "[::1]"
+    (location.hostname === "127.0.0.1" || location.hostname === "[::1]") &&
+      location.port === "43127"
       ? "runner"
       : "engine",
   );
