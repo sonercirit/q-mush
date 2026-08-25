@@ -1,7 +1,17 @@
 import { Window } from "happy-dom";
 import { expect, test } from "vitest";
 import { FAVICON_PATH } from "../../shared/routes.ts";
-import { renderAppPage, renderHomePage } from "../../solid/pages.tsx";
+import {
+  renderAppPage,
+  renderHomePage,
+  renderRunnerAppPage,
+} from "../../solid/pages.tsx";
+import { isRunnerDocument } from "../query-host.ts";
+
+function parsePage(html: string) {
+  const parser = new Window().DOMParser;
+  return new parser().parseFromString(html, "text/html");
+}
 
 function expectFaviconMetadata(html: string, pageUrl: string): void {
   const window = new Window({ url: pageUrl });
@@ -28,6 +38,23 @@ test("does not put session identities in public server-rendered shells", () => {
     expect(html).not.toContain("Session ID:");
     expect(html).not.toContain("data-session-identity");
   }
+});
+
+test("marks the engine app without selecting the runner-only mount", () => {
+  const document = parsePage(renderAppPage());
+  expect(
+    document.querySelector('meta[name="q-mush-host"]')?.getAttribute("content"),
+  ).toBe("engine");
+  expect(isRunnerDocument(document)).toBe(false);
+});
+
+test("renders the standalone runner shell at the shared client mount", () => {
+  const document = parsePage(
+    renderRunnerAppPage("client.hash.js", "styles.hash.css"),
+  );
+
+  expect(document.getElementById("app")).not.toBeNull();
+  expect(isRunnerDocument(document)).toBe(true);
 });
 
 test("renders every server page through Solid with absolute favicon metadata", () => {

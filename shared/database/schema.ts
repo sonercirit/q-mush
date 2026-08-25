@@ -70,6 +70,7 @@ export const providerQuotaSettings = sqliteTable(
     autoResetThresholdPercent: threshold(),
   },
   (table) => [
+    index("provider_quota_settings_user_id_index").on(table.userId, table.id),
     index("provider_quota_settings_user_deletion_index").on(
       table.userId,
       table.isDeleted,
@@ -93,6 +94,10 @@ export const providerQuotaResetReceipts = sqliteTable(
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
   },
   (table) => [
+    index("provider_quota_reset_receipts_user_id_index").on(
+      table.userId,
+      table.id,
+    ),
     index("provider_quota_reset_receipts_user_deletion_index").on(
       table.userId,
       table.isDeleted,
@@ -123,6 +128,10 @@ export const providerCredentialWorkspaces = sqliteTable(
     workspaceId: workspaceIdColumn(),
   },
   (table) => [
+    index("provider_credential_workspaces_user_id_index").on(
+      table.userId,
+      table.id,
+    ),
     index("provider_credential_workspaces_user_deletion_index").on(
       table.userId,
       table.isDeleted,
@@ -146,6 +155,7 @@ export const attachmentFallbacks = sqliteTable(
     openRouterProviderTag: text("openrouter_provider_tag"),
   },
   (table) => [
+    index("attachment_fallbacks_user_id_index").on(table.userId, table.id),
     index("attachment_fallbacks_user_deletion_index").on(
       table.userId,
       table.isDeleted,
@@ -195,6 +205,7 @@ export const runners = sqliteTable(
     ...connectionColumns(),
   },
   (table) => [
+    index("runners_user_id_index").on(table.userId, table.id),
     index("runners_user_deletion_index").on(table.userId, table.isDeleted),
     uniqueIndex("runners_active_machine_unique")
       .on(table.machineFingerprint)
@@ -249,6 +260,7 @@ export const runnerWorkspaces = sqliteTable(
     workspaceId: workspaceIdColumn(),
   },
   (table) => [
+    index("runner_workspaces_user_id_index").on(table.userId, table.id),
     index("runner_workspaces_user_deletion_index").on(
       table.userId,
       table.isDeleted,
@@ -330,6 +342,7 @@ export const agentSessions = sqliteTable(
     status: text("status", { enum: AGENT_SESSION_STATUSES }).notNull(),
   },
   (table) => [
+    index("agent_sessions_user_id_index").on(table.userId, table.id),
     check(
       "agent_sessions_current_segment_nonnegative_check",
       sql`${table.currentSegment} >= 0`,
@@ -377,6 +390,7 @@ export const agentPendingInputs = sqliteTable(
     sequence: integer("sequence").notNull(),
   },
   (table) => [
+    index("agent_pending_inputs_user_id_index").on(table.userId, table.id),
     index("agent_pending_inputs_session_deletion_sequence_index").on(
       table.sessionId,
       table.isDeleted,
@@ -404,6 +418,7 @@ export const agentQuestionRequests = sqliteTable(
     answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
   },
   (table) => [
+    index("agent_question_requests_user_id_index").on(table.userId, table.id),
     index("agent_question_requests_session_deletion_index").on(
       table.sessionId,
       table.isDeleted,
@@ -444,6 +459,7 @@ export const agentMessages = sqliteTable(
     ...tokenUsageColumns(),
   },
   (table) => [
+    index("agent_messages_user_id_index").on(table.userId, table.id),
     index("agent_messages_session_deletion_creation_index").on(
       table.sessionId,
       table.isDeleted,

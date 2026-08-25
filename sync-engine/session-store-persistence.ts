@@ -129,6 +129,7 @@ export interface StoredSessionSnapshot extends StoredSessionTiming {
   readonly executionGeneration: number;
   readonly id: string;
   readonly interruptedHandoff: string | null;
+  readonly parentSessionId: string | null;
   readonly restartHandoff: string | null;
   readonly status: AgentSessionStatus;
   readonly userId: string;
@@ -139,6 +140,7 @@ const STORED_SESSION_SNAPSHOT_SELECTION = {
   executionGeneration: agentSessions.executionGeneration,
   id: agentSessions.id,
   interruptedHandoff: agentSessions.interruptedHandoff,
+  parentSessionId: agentSessions.parentSessionId,
   restartHandoff: agentSessions.restartHandoff,
   status: agentSessions.status,
   userId: agentSessions.userId,

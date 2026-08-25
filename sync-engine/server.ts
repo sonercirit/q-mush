@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
+import { accountExportBlobResponse } from "../shared/account-export.ts";
 import {
   API_BASE_PATH,
   APP_PATH,
@@ -19,6 +20,8 @@ import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
   PROMPTS_PATH,
+  RUNNER_ACCOUNT_EXPORT_BLOB_PATH,
+  RUNNER_ACCOUNT_EXPORT_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
@@ -32,6 +35,8 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
+import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
+import { engineLocalResponse } from "./active-view.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
@@ -422,7 +427,7 @@ export function createRequestHandler(
   pages: RenderedPages,
   integrations: RequestHandlerIntegrations,
 ): (request: Request) => Promise<Response> {
-  const { braveSearch, generic, googleAuth, openAi } = integrations;
+  const { braveSearch, database, generic, googleAuth, openAi } = integrations;
   const { openRouter, prompts, runnerExecutables, runners } = integrations;
   const { sessions, toolSettings, workspaces } = integrations;
   const appPage = prepareBody(pages.app);
@@ -433,11 +438,40 @@ export function createRequestHandler(
   const homePage = prepareBody(pages.home);
   const notFound = prepareBody("Not found");
   const styles = prepareBody(stylesheet);
+  const runnerExportRequest = (request: Request, pathname: string) => {
+    if (request.method !== "GET") return createMethodNotAllowedResponse("GET");
+    const account = runners.runnerAccount(request);
+    if (account === undefined)
+      return new Response("Unauthorized", { status: 401 });
+    if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
+      const cursor =
+        new URL(request.url).searchParams.get("cursor") ?? undefined;
+      return Response.json(exportAccountPage(database, account.userId, cursor));
+    }
+    const digest = pathname.slice(RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1);
+    return accountExportBlobResponse(
+      exportAccountBlob(database, account.userId, digest),
+      request.headers.get("range"),
+    );
+  };
 
   return async (request) => {
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (
+        pathname === `${API_BASE_PATH}/local/view` ||
+        pathname.startsWith(`${API_BASE_PATH}/local/blob/`)
+      ) {
+        const user = googleAuth.authenticatedUser(request);
+        return engineLocalResponse(database, request, user?.id);
+      }
+      if (
+        pathname === RUNNER_ACCOUNT_EXPORT_PATH ||
+        pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)
+      ) {
+        return runnerExportRequest(request, pathname);
+      }
       if (pathname === AUTH_GOOGLE_PATH) {
         return googleAuth.begin(request);
       }

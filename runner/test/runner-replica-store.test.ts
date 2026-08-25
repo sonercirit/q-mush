@@ -1,0 +1,163 @@
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { describe, expect, test } from "vitest";
+import { createRunnerReplicaStore } from "../../runner/runner-replica-store.ts";
+import { useTemporaryDirectories } from "./temporary-directories.ts";
+
+const createTemporaryDirectory = useTemporaryDirectories("q-mush-replica-");
+
+describe("runner full replica store", () => {
+  test("requires all records, tombstones, manifest, and blobs before ready", async () => {
+    const directory = await createTemporaryDirectory();
+    const store = createRunnerReplicaStore(directory);
+    const bytes = new TextEncoder().encode("attachment bytes");
+    store.begin({
+      availableBytes: 1_000,
+      requiredBytes: bytes.byteLength,
+    });
+    store.applyRecords([
+      { entity: "agent_sessions", id: "s1", payload: "{}", tombstone: false },
+    ]);
+    store.setFrontier("frontier-1", "frontier-1");
+    store.setManifest([
+      {
+        digest: Bun.CryptoHasher.hash("sha256", bytes, "hex"),
+        size: bytes.byteLength,
+      },
+    ]);
+    expect(store.progress().state).toBe("joining");
+    writeFileSync(join(directory, "incoming"), bytes);
+    await store.installBlob(join(directory, "incoming"));
+    expect(store.progress()).toMatchObject({
+      state: "ready",
+      records: 1,
+      tombstones: 0,
+    });
+    const corrupt = bytes.slice();
+    corrupt[0] = (corrupt[0] ?? 0) === 0 ? 1 : (corrupt[0] ?? 0) - 1;
+    writeFileSync(
+      join(directory, "blobs", Bun.CryptoHasher.hash("sha256", bytes, "hex")),
+      corrupt,
+    );
+    store.close();
+    const reopened = createRunnerReplicaStore(directory);
+    expect(reopened.progress().state).toBe("joining");
+    reopened.close();
+  });
+
+  test("persists retry progress across reopening the replica", async () => {
+    const directory = await createTemporaryDirectory();
+    const retry = {
+      elapsedMilliseconds: 123,
+      previousRevision: "old",
+      restartCount: 2,
+      revision: "new",
+    };
+    const store = createRunnerReplicaStore(directory);
+    store.recordRetry(retry);
+    expect(store.progress()).toMatchObject({ state: "joining", ...retry });
+    store.close();
+    const persisted = createRunnerReplicaStore(directory);
+    const persistedProgress = persisted.progress();
+    expect(persistedProgress).toMatchObject({ state: "joining", ...retry });
+    persisted.close();
+  });
+
+  test("serves bounded active views only after the full replica is ready", async () => {
+    const store = createRunnerReplicaStore(await createTemporaryDirectory());
+    store.applyRecords([
+      {
+        entity: "agent_sessions",
+        id: "s1",
+        payload: JSON.stringify({
+          id: "s1",
+          title: "First",
+          is_deleted: false,
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_messages",
+        id: "m1",
+        payload: JSON.stringify({
+          id: "m1",
+          session_id: "s1",
+          content: "hello",
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_messages",
+        id: "m2",
+        payload: JSON.stringify({
+          id: "m2",
+          session_id: "s1",
+          content: "goodbye",
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_messages",
+        id: "m3",
+        payload: JSON.stringify({
+          id: "m3",
+          session_id: "s2",
+          content: "another session",
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_sessions",
+        id: "s2",
+        payload: JSON.stringify({ id: "s2", title: "Second" }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_sessions",
+        id: "s3",
+        payload: "not-json-outside-the-bounded-read",
+        tombstone: false,
+      },
+      { entity: "agent_sessions", id: "gone", payload: "{}", tombstone: true },
+    ]);
+    expect(() => store.readView("agent_sessions", 10)).toThrow("joining");
+    store.setFrontier("frontier", "frontier");
+    store.setManifest([]);
+    expect(store.readView("agent_sessions", 1)).toEqual({
+      complete: false,
+      partial: true,
+      records: [{ id: "s1", title: "First", is_deleted: false }],
+    });
+    expect(store.readView("agent_messages", 10, "s1")).toMatchObject({
+      records: [
+        { id: "m1", content: "hello" },
+        { id: "m2", content: "goodbye" },
+      ],
+    });
+    // Keep this malformed row after m1: ORDER BY id plus LIMIT proves SQL bounds
+    // the row count before payload parsing, rather than parsing an extra row.
+    store.applyRecords([
+      {
+        entity: "agent_messages",
+        id: "m4",
+        payload: "not-json-beyond-the-sql-bound",
+        tombstone: false,
+      },
+    ]);
+    expect(store.readView("agent_messages", 1, "s1")).toMatchObject({
+      complete: false,
+      records: [{ id: "m1", content: "hello" }],
+    });
+    store.close();
+  });
+
+  test("rejects catch-up when capacity reserve is insufficient", async () => {
+    const directory = await createTemporaryDirectory();
+    mkdirSync(directory, { recursive: true });
+    const store = createRunnerReplicaStore(directory);
+    expect(() => {
+      store.begin({ availableBytes: 9, requiredBytes: 10 });
+    }).toThrow("capacity");
+    store.close();
+  });
+});

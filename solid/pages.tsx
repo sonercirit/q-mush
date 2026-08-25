@@ -38,6 +38,18 @@ function renderDocument(title: string, body: JSX.Element[]): string {
   return `<!doctype html>${renderToString(() => document)}`;
 }
 
+export function renderRunnerAppPage(
+  javaScript: string,
+  stylesheet: string,
+): string {
+  return renderDocument("Q Mush", [
+    <link rel="stylesheet" href={`/${stylesheet}`} />,
+    <meta name="q-mush-host" content="runner" />,
+    <div id="app" />,
+    <script type="module" src={`/${javaScript}`} />,
+  ]);
+}
+
 export function renderHomePage(): string {
   return renderDocument("Q Mush", [
     <main class="relative isolate flex min-h-screen min-w-0 items-center overflow-x-clip px-4 py-10 sm:px-8 sm:py-14 lg:px-12 xl:px-16">
@@ -129,6 +141,7 @@ export function renderHomePage(): string {
 
 export function renderAppPage(): string {
   return renderDocument("Q Mush App", [
+    <meta name="q-mush-host" content="engine" />,
     <main id="app" class="min-h-screen" />,
     <script src={APP_SCRIPT_PATH} type="module" />,
     <noscript>

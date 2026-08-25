@@ -1,3 +1,4 @@
+import type { AppDatabase } from "../shared/database.ts";
 import type { GoogleAuth } from "./auth.ts";
 import type { BraveSearchSkill } from "./brave-search.ts";
 import type { GenericProviderIntegration } from "./generic-provider.ts";
@@ -12,6 +13,7 @@ import type { WorkspaceIntegration } from "./workspaces.ts";
 
 export interface RequestHandlerIntegrations {
   readonly braveSearch: BraveSearchSkill;
+  readonly database: AppDatabase;
   readonly googleAuth: GoogleAuth;
   readonly openAi: OpenAiIntegration;
   readonly openRouter: OpenRouterIntegration;

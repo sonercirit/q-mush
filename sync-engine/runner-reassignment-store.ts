@@ -31,7 +31,7 @@ function affectedRunnerSessions(
   userId: string,
   runnerId: string,
 ): readonly StoredSessionSnapshot[] {
-  return readStoredSessionSnapshots(
+  const sessions = readStoredSessionSnapshots(
     database,
     and(
       storedSessionCondition({
@@ -49,6 +49,22 @@ function affectedRunnerSessions(
       eq(agentSessions.runnerId, runnerId),
     ),
   );
+  const byId = new Map(sessions.map((session) => [session.id, session]));
+  const depth = (session: StoredSessionSnapshot): number => {
+    let current = session;
+    let result = 0;
+    const visited = new Set<string>();
+    while (current.parentSessionId !== null) {
+      if (visited.has(current.id)) return 0;
+      visited.add(current.id);
+      const parent = byId.get(current.parentSessionId);
+      if (parent === undefined) break;
+      result += 1;
+      current = parent;
+    }
+    return result;
+  };
+  return sessions.toSorted((left, right) => depth(right) - depth(left));
 }
 
 function fenceAssignedSession(
@@ -106,14 +122,24 @@ export function requireRunnerReassignment(
   const affected = affectedRunnerSessions(database, userId, runnerId);
   const reports: Required<RunnerReassignmentResult>[] = [];
   for (const session of affected) {
-    const result = fenceAssignedSession(
+    const current = readStoredSessionSnapshots(
       database,
-      session,
-      userId,
-      runnerId,
-      generateId,
-      now,
-    );
+      and(
+        storedSessionCondition({ id: session.id, userId }),
+        eq(agentSessions.runnerId, runnerId),
+      ),
+    )[0];
+    const result =
+      current === undefined
+        ? undefined
+        : fenceAssignedSession(
+            database,
+            current,
+            userId,
+            runnerId,
+            generateId,
+            now,
+          );
     if (result === undefined) {
       throw new Error("An assigned session changed during runner removal");
     }

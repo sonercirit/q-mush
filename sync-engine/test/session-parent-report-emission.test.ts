@@ -25,7 +25,14 @@ import {
   addReplacementRunner,
   closeSessionStoreTestSetup,
 } from "./session-store-reassignment-helpers.ts";
-import { spawnedChildSetup } from "./session-store-spawn-test-helpers.ts";
+import {
+  spawnedChildSetup,
+  terminalRecordedMessage,
+} from "./session-store-spawn-test-helpers.ts";
+import {
+  createStore,
+  createTestSession,
+} from "./session-store-test-fixtures.ts";
 
 function setupWithReporter() {
   const setup = spawnedChildSetup();
@@ -198,7 +205,7 @@ testReportedGenerationVariants("tool update", (terminal) => {
   expectToolUpdateReported(terminal);
 });
 
-testReportedGenerationVariants("runner removal", ({ setup }) => {
+testReportedGenerationVariants("runner removal", ({ child, setup }) => {
   const runnerId = setup.store.get(TEST_USER_ID, setup.childId)?.runnerId;
   if (runnerId === undefined)
     throw new Error("The child runner is unavailable");
@@ -210,6 +217,67 @@ testReportedGenerationVariants("runner removal", ({ setup }) => {
       setup.reportParent,
     ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
+  const generationFence = setup.database.$client
+    .query<
+      { executionGeneration: number; parentReportedGeneration: number },
+      [string]
+    >(
+      "SELECT execution_generation AS executionGeneration, parent_reported_generation AS parentReportedGeneration FROM agent_sessions WHERE id = ?",
+    )
+    .get(child.id);
+  expect(generationFence).toEqual({
+    executionGeneration: child.generation + 1,
+    parentReportedGeneration: child.generation + 1,
+  });
+});
+
+function startCurrent(
+  setup: ReturnType<typeof createStore>,
+  sessionId: string,
+  now: number,
+): void {
+  expect(setup.store.transitionCurrent(sessionId, "running", now)).toBe(true);
+}
+
+test("runner removal fences a three-level lineage descendants first", () => {
+  const setup = createStore();
+  const reportParent = vi.fn();
+  const parent = createTestSession(setup.store);
+  startCurrent(setup, parent.id, TEST_NOW + 1);
+  const childInput = {
+    parentGeneration: parent.generation,
+    parentSessionId: parent.id,
+  };
+  const child = createTestSession(setup.store, TEST_NOW + 2, childInput);
+  startCurrent(setup, child.id, TEST_NOW + 3);
+  const grandchild = createTestSession(setup.store, TEST_NOW + 4, {
+    parentGeneration: child.generation,
+    parentSessionId: child.id,
+  });
+  startCurrent(setup, grandchild.id, TEST_NOW + 5);
+  setup.store.commitRuntimeTerminal(
+    grandchild.id,
+    [terminalRecordedMessage("Grandchild terminal response")],
+    TEST_NOW + 6,
+    grandchild.generation,
+    null,
+  );
+  const runnerId = setup.store.get(TEST_USER_ID, grandchild.id)?.runnerId;
+  if (runnerId === undefined) throw new Error("The runner is unavailable");
+  expect(
+    createRunnerStore(
+      setup.database,
+      setup.generateId,
+      undefined,
+      reportParent,
+    ).remove(TEST_USER_ID, runnerId, TEST_NOW + 7),
+  ).toBe(true);
+  expect(reportParent).toHaveBeenCalledOnce();
+  expect(reportParent).toHaveBeenCalledWith(TEST_USER_ID, {
+    disposition: "promoted",
+    parentId: child.id,
+  });
+  closeSessionStoreTestSetup(setup);
 });
 
 function setupAdvancedRunningChild(): ChildSetup {

@@ -10,9 +10,10 @@ export interface RenderedPages {
 interface PageModule {
   renderAppPage(): string;
   renderHomePage(): string;
+  renderRunnerAppPage(javaScript: string, stylesheet: string): string;
 }
 
-export async function renderPages(): Promise<RenderedPages> {
+async function loadPageModule(): Promise<PageModule> {
   const entrypoint = fileURLToPath(
     new URL("../solid/pages.tsx", import.meta.url),
   );
@@ -22,6 +23,18 @@ export async function renderPages(): Promise<RenderedPages> {
     plugins: [solid({ hot: false, solid: { hydratable: false }, ssr: true })],
     root: fileURLToPath(new URL("..", import.meta.url)),
   });
+  return module;
+}
+
+export async function renderRunnerAppPage(
+  javaScript: string,
+  stylesheet: string,
+): Promise<string> {
+  return (await loadPageModule()).renderRunnerAppPage(javaScript, stylesheet);
+}
+
+export async function renderPages(): Promise<RenderedPages> {
+  const module = await loadPageModule();
 
   return {
     app: module.renderAppPage(),

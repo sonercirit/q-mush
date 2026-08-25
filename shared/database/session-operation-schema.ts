@@ -42,6 +42,7 @@ export function agentSessionTables(
         .default(DEFAULT_TOOL_SETTINGS.outputLimitCharacters),
     },
     (table) => [
+      index("agent_session_turns_user_id_index").on(table.userId, table.id),
       index("agent_session_turns_session_segment_start_index").on(
         table.sessionId,
         table.segment,
@@ -83,6 +84,10 @@ export function agentSessionTables(
       executionGeneration: executionGenerationColumn(),
     },
     (table) => [
+      index("agent_session_operations_user_id_index").on(
+        table.userId,
+        table.id,
+      ),
       uniqueIndex("agent_session_operations_active_generation_unique")
         .on(table.sessionId, table.executionGeneration)
         .where(sql`NOT ${table.isDeleted}`),

@@ -40,6 +40,7 @@ export function identityAndCredentialTables() {
       ...auditColumns(),
     },
     (table) => [
+      index("workspaces_user_id_index").on(table.userId, table.id),
       index("workspaces_user_deletion_index").on(table.userId, table.isDeleted),
       uniqueIndex("workspaces_user_active_name_unique")
         .on(table.userId, table.name)
@@ -57,6 +58,7 @@ export function identityAndCredentialTables() {
       revision: integer("revision").notNull().default(1),
     },
     (table) => [
+      index("prompts_user_id_index").on(table.userId, table.id),
       index("prompts_user_deletion_update_index").on(
         table.userId,
         table.isDeleted,
@@ -88,6 +90,7 @@ export function identityAndCredentialTables() {
       ...connectionColumns(),
     },
     (table) => [
+      index("provider_credentials_user_id_index").on(table.userId, table.id),
       index("provider_credentials_user_provider_deletion_index").on(
         table.userId,
         table.provider,

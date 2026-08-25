@@ -1,21 +1,18 @@
 # AGENTS.md
 
-Memory.
-
 ## Project Snapshot
 
-- Strict TypeScript ESM Bun/SolidJS; tests live under `test/`, no `src`. `/` is
-  the homepage, `/app` the app.
+- Strict TypeScript ESM Bun/SolidJS; tests are under `test/`, no `src`.
 
 ## Working Agreements
 
-- Call capabilities impossible only with excluding evidence; else record an open
-  question. Research provider docs via Brave and probe APIs; omit tunables
+- Call capabilities impossible only with excluding evidence; otherwise record an
+  open question. Research provider docs via Brave and probe APIs; omit tunables
   first, then prefer defaults and metadata/docs.
-- Preserve patterns; improve touched code. TDD: fail, implement, refactor green.
-  Keep one path; avoid premature abstraction.
-- Fix defects on sight, including pre-existing/out-of-scope; if harmful, codify
-  why in a test. Integrate each session capability with every protocol's native
+- Preserve patterns; improve touched code. Keep one path; avoid premature
+  abstraction. TDD: fail, implement, refactor green.
+- Fix defects on sight, including pre-existing/out-of-scope defects; codify
+  harmful ones in tests. Integrate capabilities with each protocol's native
   control, recording gaps.
 - Never weaken checks or claim unperformed verification; disclose gaps. Record
   decisions/lessons in the appropriate memory file: facts about provider
@@ -24,7 +21,7 @@ Memory.
   credential and OAuth configuration, stays here. Repeated guidance means a
   missing rule. If evidence overturns a finding, fix code and stale records;
   act, don't ask. Never commit secrets, artifacts, or env files.
-- Keep workflows local-first: narrow checks, then broad, then failures.
+- Keep workflows local-first: check narrow, then broad, then failures.
 
 ## Setup, Commands
 
@@ -61,10 +58,11 @@ Memory.
   promotes runner handoffs to server markers and fences live markers from
   liveness scans. Text handlers precompress with zstd/Brotli/gzip/deflate;
   `/favicon.svg` revalidates by ETag.
-- `solid/pages.tsx` SSR-renders shells; `sync-engine/pages.ts` loads it with
-  Vite SSR. App mounts at `solid/client.tsx`; routes in `shared/routes.ts`.
-  Browser tests use real Chromium/Tailwind mutations, not synthetic layout/CSS
-  assertions; CI rejects `.only`/zero tests.
+- `/` is the homepage and `/app` the app. `solid/pages.tsx` SSR-renders shells;
+  `sync-engine/pages.ts` loads it with Vite SSR. App mounts at
+  `solid/client.tsx`; routes in `shared/routes.ts`. Browser tests use real
+  Chromium/Tailwind mutations, not synthetic layout/CSS assertions; CI rejects
+  `.only`/zero tests.
 - `sync-engine/auth.ts` does Google OIDC (code + PKCE) with HttpOnly
   state/verifier cookies; it fetches/discards provider tokens.
   `sync-engine/auth-store.ts` uses Bun SQLite/Drizzle to upsert users and
@@ -169,6 +167,8 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
+- Local-first replica, pairing, export, and active-view architecture lives in
+  `LOCAL_FIRST.md`; read it before changing those paths.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,

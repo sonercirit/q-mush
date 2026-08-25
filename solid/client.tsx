@@ -20,6 +20,7 @@ import {
   HOME_PATH,
 } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
+import { AppLoadingCard } from "./app-loading-card.tsx";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
 import { createPromptController } from "./prompt-controller.ts";
@@ -30,6 +31,7 @@ import {
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
 import { createProviderController } from "./provider-controller.ts";
+import { isRunnerDocument } from "./query-host.ts";
 import {
   createRealtimeConnection,
   type RealtimeConnection,
@@ -45,6 +47,7 @@ import {
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
 import { createRunnerController } from "./runner-controller.ts";
+import { RunnerReplicaView } from "./runner-replica-view.tsx";
 import {
   createSessionController,
   type SessionController,
@@ -166,23 +169,6 @@ function Header(props: {
         </span>
       </div>
     </header>
-  );
-}
-
-function LoadingCard(): JSX.Element {
-  return (
-    <div
-      class="mt-8 rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:mt-12 sm:p-8"
-      role="status"
-    >
-      <div class="flex items-center gap-4">
-        <span
-          aria-hidden="true"
-          class="size-3 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.8)]"
-        />
-        <p class="font-medium text-slate-200">Checking your session…</p>
-      </div>
-    </div>
   );
 }
 
@@ -537,45 +523,54 @@ function App(): JSX.Element {
               )}
             </For>
             <Show
-              fallback={<LoadingCard />}
-              when={loadFailed() || session() !== undefined}
-            >
-              <Show
-                fallback={<SessionError onRetry={() => void loadSession()} />}
-                when={!loadFailed()}
-              >
-                <Show when={session()}>
-                  {(authenticated) => (
-                    <Show
-                      fallback={
-                        <SignIn
-                          googleLoginAvailable={
-                            authenticated().googleLoginAvailable
+              when={isRunnerDocument(document)}
+              fallback={
+                <Show
+                  fallback={<AppLoadingCard />}
+                  when={loadFailed() || session() !== undefined}
+                >
+                  <Show
+                    fallback={
+                      <SessionError onRetry={() => void loadSession()} />
+                    }
+                    when={!loadFailed()}
+                  >
+                    <Show when={session()}>
+                      {(authenticated) => (
+                        <Show
+                          fallback={
+                            <SignIn
+                              googleLoginAvailable={
+                                authenticated().googleLoginAvailable
+                              }
+                            />
                           }
-                        />
-                      }
-                      when={authenticated().user}
-                    >
-                      {(user) => (
-                        <Workspace
-                          agentSessions={agentSessions}
-                          braveSearch={braveSearch}
-                          generic={generic}
-                          logout={logout}
-                          logoutPending={logoutPending()}
-                          openAi={openAi}
-                          openRouter={openRouter}
-                          prompts={prompts}
-                          runners={runners}
-                          toolSettings={toolSettings}
-                          user={user()}
-                          workspaces={workspaces}
-                        />
+                          when={authenticated().user}
+                        >
+                          {(user) => (
+                            <Workspace
+                              agentSessions={agentSessions}
+                              braveSearch={braveSearch}
+                              generic={generic}
+                              logout={logout}
+                              logoutPending={logoutPending()}
+                              openAi={openAi}
+                              openRouter={openRouter}
+                              prompts={prompts}
+                              runners={runners}
+                              toolSettings={toolSettings}
+                              user={user()}
+                              workspaces={workspaces}
+                            />
+                          )}
+                        </Show>
                       )}
                     </Show>
-                  )}
+                  </Show>
                 </Show>
-              </Show>
+              }
+            >
+              <RunnerReplicaView />
             </Show>
             <a
               class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"

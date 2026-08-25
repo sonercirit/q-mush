@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNNER_EXECUTABLE_SHA256_HEADER } from "../shared/routes.ts";
 import { readBuildArtifact } from "./build.ts";
+import { buildClientRelease } from "./client-assets.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
+import { renderRunnerAppPage } from "./pages.ts";
 import {
   isRunnerExecutableTarget,
   type RunnerExecutableTarget,
@@ -55,11 +57,13 @@ function runnerBuildConfiguration(
   version: string,
   target: string,
   entrypoint = RUNNER_ENTRYPOINT,
+  clientRelease = "{}",
 ): Bun.BuildConfig {
   return {
     define: {
       [TARGET_GLOBAL]: JSON.stringify(target),
       [VERSION_GLOBAL]: JSON.stringify(version),
+      Q_MUSH_CLIENT_RELEASE: JSON.stringify(clientRelease),
     },
     entrypoints: [entrypoint],
     format: "esm",
@@ -81,12 +85,28 @@ async function compileStandaloneExecutable(
   version: string,
   entrypoint = RUNNER_ENTRYPOINT,
 ): Promise<Blob> {
+  const clientRelease = await buildClientRelease();
+  const names = Object.keys(clientRelease.manifest.files);
+  const javaScript = names.find((name) => name.endsWith(".js"));
+  const stylesheet = names.find((name) => name.endsWith(".css"));
+  if (javaScript === undefined || stylesheet === undefined) {
+    throw new Error("The browser release is incomplete");
+  }
+  const payload = JSON.stringify({
+    files: Object.fromEntries(
+      Object.entries(clientRelease.files).map(([name, bytes]) => [
+        name,
+        bytes.toBase64(),
+      ]),
+    ),
+    shell: await renderRunnerAppPage(javaScript, stylesheet),
+  });
   const directory = await mkdtemp(join(tmpdir(), "q-mush-runner-build-"));
   const executablePath = join(directory, "q-mush-runner");
 
   try {
     const result = await Bun.build({
-      ...runnerBuildConfiguration(version, target, entrypoint),
+      ...runnerBuildConfiguration(version, target, entrypoint, payload),
       compile: {
         autoloadBunfig: false,
         autoloadDotenv: false,
@@ -114,6 +134,11 @@ async function compileStandaloneExecutable(
 
 async function runnerVersion(): Promise<string> {
   const source = await bundleRunnerSource();
+  const clientRelease = await buildClientRelease();
+  const releaseManifest = clientRelease.files["manifest.json"];
+  if (releaseManifest === undefined) {
+    throw new Error("The browser release manifest is missing");
+  }
   return createHash("sha256")
     .update("q-mush-standalone-runner-v1\0")
     .update(Bun.version)
@@ -121,6 +146,8 @@ async function runnerVersion(): Promise<string> {
     .update(Bun.revision)
     .update("\0")
     .update(new Uint8Array(await source.arrayBuffer()))
+    .update("\0")
+    .update(releaseManifest)
     .digest("hex");
 }
 
