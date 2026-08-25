@@ -28,7 +28,7 @@ import {
 const MIGRATIONS_DIRECTORY = fileURLToPath(
   new URL("../drizzle", import.meta.url),
 );
-export const databaseSchema = {
+const databaseSchema = {
   agentMessages,
   agentPendingInputs,
   agentQuestionRequests,

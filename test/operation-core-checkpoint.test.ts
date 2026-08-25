@@ -1,54 +1,28 @@
 import { describe, expect, test } from "vitest";
+
+import {
+  appendOperationId,
+  applyOperationList,
+  testApplyState,
+  testOperation,
+} from "./operation-core-test-support";
+
 import {
   applyOperation,
-  createOperation,
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
 
-const operation = (
-  writerId: string,
-  sequence: bigint,
-  parents: Readonly<Record<string, bigint>>,
-  value: string,
-  physicalMs: number,
-) =>
-  createOperation({
-    operationId: `${writerId}-${sequence.toString()}`,
-    schemaVersion: 1,
-    writerId,
-    sequence,
-    clock: { physicalMs, logical: 0, writerId },
-    parents,
-    entity: { type: "workspaces", id: "w", accountId: "a" },
-    kind: "workspace.name.set",
-    payload: { value },
-  });
-const arrayState = (): OperationApplyState<readonly string[]> => {
-  const projection: readonly string[] = [];
-  return {
-    frontier: {},
-    pending: [],
-    projection,
-    applied: {},
-    replayHead: undefined,
-    replayCount: 0,
-    replayLastClock: undefined,
-    baseProjection: projection,
-    baseFrontier: {},
-  };
-};
-const append = (projection: readonly string[], item: Operation) => [
-  ...projection,
-  item.operationId,
-];
+const operation = testOperation;
+const arrayState = () => testApplyState<readonly string[]>([]);
+const append = appendOperationId;
 const applyAll = (
   items: readonly Operation[],
   state = arrayState(),
 ): OperationApplyState<readonly string[]> =>
-  items.reduce((current, item) => applyOperation(current, item, append), state);
+  applyOperationList(items, state, append);
 const concurrentPair = () =>
   [operation("a", 1n, {}, "a", 100), operation("b", 1n, {}, "b", 50)] as const;
 const sequentialOperation = (
@@ -198,8 +172,11 @@ describe("operation checkpoints", () => {
     const restored = roundTrip(waiting);
     expect(restored.pending).toEqual([a3]);
     const complete = applyAll([a1, a2], restored);
-    expect(complete.projection).toEqual(["a-1", "a-2", "a-3"]);
-    expect(complete.frontier).toEqual({ a: 3n });
+    const expectedProjection = ["a-1", "a-2", "a-3"];
+    expect(complete).toMatchObject({
+      projection: expectedProjection,
+      frontier: { a: 3n },
+    });
     expect(applyOperation(complete, a3, append)).toBe(complete);
   });
 

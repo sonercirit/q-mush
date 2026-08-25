@@ -1,10 +1,27 @@
 import { getTableName } from "drizzle-orm";
 import { describe, expect, test } from "vitest";
 
-import { databaseSchema } from "../shared/database";
+import { testApplyState, testOperation } from "./operation-core-test-support";
+
 import {
-  MAX_PENDING_OPERATIONS,
-  MAX_REMOTE_CLOCK_DRIFT_MS,
+  agentMessages,
+  agentPendingInputs,
+  agentQuestionRequests,
+  agentSessionOperations,
+  agentSessions,
+  agentSessionTurns,
+  attachmentFallbacks,
+  prompts,
+  providerCredentialWorkspaces,
+  providerQuotaResetReceipts,
+  providerQuotaSettings,
+  runnerWorkspaces,
+  toolSettings,
+  users,
+  workspaces,
+} from "../shared/database/schema";
+
+import {
   advanceFrontier,
   applyOperation,
   classifyOperationPartition,
@@ -13,11 +30,31 @@ import {
   createHybridLogicalClock,
   createOperation,
   frontierCovers,
+  MAX_PENDING_OPERATIONS,
+  MAX_REMOTE_CLOCK_DRIFT_MS,
   mergeFrontiers,
   operationEntityPartitions,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
+
+const replicatedTables = [
+  agentMessages,
+  agentPendingInputs,
+  agentQuestionRequests,
+  agentSessionOperations,
+  agentSessions,
+  agentSessionTurns,
+  attachmentFallbacks,
+  prompts,
+  providerCredentialWorkspaces,
+  providerQuotaResetReceipts,
+  providerQuotaSettings,
+  runnerWorkspaces,
+  toolSettings,
+  users,
+  workspaces,
+];
 
 type Projection = Readonly<Record<string, string>>;
 
@@ -26,24 +63,7 @@ const workspaceEntity = () => ({
   id: "workspace-1",
   accountId: "account-1",
 });
-const operation = (
-  writerId: string,
-  sequence: bigint,
-  parents: Readonly<Record<string, bigint>>,
-  value: string,
-  physicalMs = Number(sequence),
-) =>
-  createOperation({
-    operationId: `${writerId}-${sequence.toString()}`,
-    schemaVersion: 1,
-    writerId,
-    sequence,
-    clock: { physicalMs, logical: 0, writerId },
-    parents,
-    entity: workspaceEntity(),
-    kind: "workspace.name.set",
-    payload: { value },
-  });
+const operation = testOperation;
 
 const reducer = (projection: Projection, candidate: Operation): Projection => ({
   ...projection,
@@ -65,17 +85,8 @@ const countingReducer = () => {
     calls: () => calls,
   };
 };
-const applyState = <T>(projection: T): OperationApplyState<T> => ({
-  frontier: {},
-  pending: [],
-  projection,
-  applied: {},
-  replayHead: undefined,
-  replayCount: 0,
-  replayLastClock: undefined,
-  baseProjection: projection,
-  baseFrontier: {},
-});
+const applyState = testApplyState;
+
 const initialApplyState = () => applyState<Projection>({});
 const stringApplyState = () => applyState("");
 const runStringOperations = (
@@ -134,32 +145,29 @@ const fillPending = (
 
 describe("operation core", () => {
   test("classifies the explicit replicated schema allow-list", () => {
-    const expected = {
-      session: [
-        "agent_sessions",
-        "agent_session_operations",
-        "agent_session_turns",
-        "agent_pending_inputs",
-        "agent_question_requests",
-        "agent_messages",
-      ],
-      "non-session": [
-        "users",
-        "workspaces",
-        "prompts",
-        "provider_quota_settings",
-        "provider_quota_reset_receipts",
-        "provider_credential_workspaces",
-        "attachment_fallbacks",
-        "runner_workspaces",
-        "tool_settings",
-      ],
-    } as const;
-    expect(operationEntityPartitions).toEqual(expected);
-    for (const entity of expected.session)
-      expect(classifyOperationPartition(entity)).toBe("session");
-    for (const entity of expected["non-session"])
-      expect(classifyOperationPartition(entity)).toBe("non-session");
+    const expectedEntities = [
+      ["agent_sessions", "session"],
+      ["agent_session_operations", "session"],
+      ["agent_session_turns", "session"],
+      ["agent_pending_inputs", "session"],
+      ["agent_question_requests", "session"],
+      ["agent_messages", "session"],
+      ["users", "non-session"],
+      ["workspaces", "non-session"],
+      ["prompts", "non-session"],
+      ["provider_quota_settings", "non-session"],
+      ["provider_quota_reset_receipts", "non-session"],
+      ["provider_credential_workspaces", "non-session"],
+      ["attachment_fallbacks", "non-session"],
+      ["runner_workspaces", "non-session"],
+      ["tool_settings", "non-session"],
+    ] as const;
+    expect(operationEntityPartitions.session).toHaveLength(6);
+    expect(operationEntityPartitions["non-session"]).toHaveLength(9);
+    for (const [entity, partition] of expectedEntities) {
+      expect(classifyOperationPartition(entity)).toBe(partition);
+      expect(operationEntityPartitions[partition]).toContain(entity);
+    }
     for (const excluded of ["sessions", "provider_credentials", "runners"])
       expect(() => classifyOperationPartition(excluded)).toThrow(
         /Unknown operation entity/,
@@ -167,10 +175,8 @@ describe("operation core", () => {
     expect(() => classifyOperationPartition("future_entity")).toThrow(
       /Unknown operation entity/,
     );
-    const schemaNames = new Set(
-      Object.values(databaseSchema).map(getTableName),
-    );
-    for (const name of [...expected.session, ...expected["non-session"]])
+    const schemaNames = new Set(replicatedTables.map(getTableName));
+    for (const name of expectedEntities.map(([entity]) => entity))
       expect(schemaNames.has(name)).toBe(true);
   });
 
@@ -365,9 +371,15 @@ describe("operation core", () => {
     expect(() =>
       createOperation({ ...validationSeed, schemaVersion: 0 }),
     ).toThrow(/schemaVersion/);
-    expect(() =>
-      createOperation({ ...validationSeed, payload: new Date(Number.NaN) }),
-    ).toThrow(/dates must be valid/);
+    const invalidPayloads = [
+      [new Date(Number.NaN), /dates must be valid/],
+      [new Map(), /must be plain/],
+      [{ value: "x", [Symbol("x")]: "y" }, /string-keyed/],
+    ] as const;
+    for (const [payload, message] of invalidPayloads)
+      expect(() => createOperation({ ...validationSeed, payload })).toThrow(
+        message,
+      );
     const shared = { value: "shared" };
     expect(
       createOperation({ ...validationSeed, payload: { a: shared, b: shared } })
@@ -382,13 +394,6 @@ describe("operation core", () => {
       expect(() =>
         createOperation({ ...validationSeed, payload: unsupported }),
       ).toThrow(/Unsupported operation value/);
-    expect(() =>
-      createOperation({ ...validationSeed, payload: new Map() }),
-    ).toThrow(/must be plain/);
-    const symbolObject = { value: "x", [Symbol("x")]: "y" };
-    expect(() =>
-      createOperation({ ...validationSeed, payload: symbolObject }),
-    ).toThrow(/string-keyed/);
     const dated = createOperation({
       ...validationSeed,
       payload: { at: new Date(1) },
