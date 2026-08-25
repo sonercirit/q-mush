@@ -8,7 +8,10 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
-import { ACCOUNT_EXPORT_ENTITIES } from "../../shared/account-export.ts";
+import {
+  ACCOUNT_EXPORT_ENTITIES,
+  type AccountExport,
+} from "../../shared/account-export.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import {
   runnerRegistrationRejectedMessage,
@@ -48,19 +51,7 @@ interface RunnerTestSocketData {
 }
 
 interface RunnerTestServerOptions {
-  readonly accountExport?: Readonly<{
-    readonly blobs: readonly {
-      readonly data: string;
-      readonly digest: string;
-      readonly size: number;
-    }[];
-    readonly records: readonly {
-      readonly entity: string;
-      readonly id: string;
-      readonly payload: string;
-      readonly tombstone: boolean;
-    }[];
-  }>;
+  readonly accountExport?: Pick<AccountExport, "blobs" | "records">;
   readonly command?: RunnerToolCommand;
   readonly rejectRegistration?: boolean;
   readonly transientRegistrationFailures?: number;
@@ -386,11 +377,18 @@ test("a paired client reads every exported entity and attachment after engine ki
     }
     const code = /pairing code: ([A-Za-z\d_-]+)/u.exec(output)?.[1];
     expect(code).toBeDefined();
-    const pair = await fetch("http://127.0.0.1:43127/api/local/pair", {
-      headers: { "x-q-mush-pairing-code": code ?? "" },
-      method: "POST",
+    const pairHeaders = new Headers({
+      "x-q-mush-pairing-code": code ?? "",
     });
-    const cookie = pair.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
+    const pair = await fetch(
+      new URL("/api/local/pair", "http://127.0.0.1:43127"),
+      {
+        headers: pairHeaders,
+        method: "POST",
+      },
+    );
+    const setCookie = pair.headers.get("set-cookie") ?? "";
+    const cookie = setCookie.substring(0, setCookie.indexOf(";"));
     for (const entity of ACCOUNT_EXPORT_ENTITIES) {
       const response = await fetch(
         `http://127.0.0.1:43127/api/local/view?entity=${entity}&limit=100`,
