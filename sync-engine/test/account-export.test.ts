@@ -68,7 +68,7 @@ describe("legacy account export", () => {
     database = createUserDatabase();
     const originalQuery = database.$client.query.bind(database.$client);
     let largestRowLimit = 0;
-    vi.spyOn(database.$client, "query").mockImplementation((sql) => {
+    const boundedQueryImplementation = (sql: string) => {
       const statement = originalQuery(sql);
       if (!sql.includes("ORDER BY")) return statement;
       const originalAll = statement.all.bind(statement);
@@ -77,7 +77,10 @@ describe("legacy account export", () => {
         return originalAll(userId, limit, offset);
       };
       return statement;
-    });
+    };
+    vi.spyOn(database.$client, "query").mockImplementation(
+      boundedQueryImplementation,
+    );
     exportAccountPage(database, "u", 0);
     expect(largestRowLimit).toBeLessThanOrEqual(100);
   });
@@ -155,9 +158,10 @@ describe("legacy account export", () => {
         JSON.stringify([{ data: "not-base64!" }]),
       ],
     );
-    const originalQuery = database.$client.query.bind(database.$client);
+    const blobClient = database.$client;
+    const originalQuery = blobClient.query.bind(blobClient);
     let usedIterator = false;
-    vi.spyOn(database.$client, "query").mockImplementation((sql) => {
+    vi.spyOn(blobClient, "query").mockImplementation((sql) => {
       const statement = originalQuery(sql);
       if (!sql.includes('AS value FROM "agent_messages"')) return statement;
       const originalIterate = statement.iterate.bind(statement);
