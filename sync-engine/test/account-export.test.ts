@@ -9,6 +9,16 @@ import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
 let database: AppDatabase | undefined;
 afterEach(() => database?.$client.close());
 
+function hasBlobCacheTable(database: AppDatabase): boolean {
+  return (
+    database.$client
+      .query<{ name: string }, []>(
+        "SELECT name FROM sqlite_master WHERE name = 'account_export_blobs'",
+      )
+      .get() !== null
+  );
+}
+
 describe("legacy account export", () => {
   test("bounds each database export page", () => {
     database = createDatabase(
@@ -35,13 +45,8 @@ describe("legacy account export", () => {
   test("rejects malformed blob digests without querying the database", () => {
     database = createDatabase(":memory:");
     expect(exportAccountBlob(database, "u", "not-a-digest")).toBeUndefined();
-    expect(
-      database.$client
-        .query<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE name = 'account_export_blobs'",
-        )
-        .get(),
-    ).toBeNull();
+    expect(hasBlobCacheTable(database)).toBe(false);
+    expect(database.$client.query("SELECT 1").get()).toEqual({ "1": 1 });
   });
 
   test("finds an attachment added after an earlier blob lookup", () => {
@@ -68,13 +73,7 @@ describe("legacy account export", () => {
     exportAccountPage(database, "u", 0, 1);
     exportAccountPage(database, "u", 0, 1);
     expect(exportAccountBlob(database, "u", digest)?.data).toBe(data);
-    expect(
-      database.$client
-        .query<{ name: string }, []>(
-          "SELECT name FROM sqlite_master WHERE name = 'account_export_blobs'",
-        )
-        .get(),
-    ).toBeNull();
+    expect(hasBlobCacheTable(database)).toBe(false);
   });
 
   test("exports tombstones while structurally excluding login and provider secrets", () => {
