@@ -150,7 +150,7 @@ function rewriteAttachments(
       blobs.set(digest, blob);
       ensureBlobIndex(database);
       database.$client
-        .query<void, [string, string, string, number]>(
+        .query<never, [string, string, string, number]>(
           "INSERT INTO account_export_blobs (user_id, digest, data, size) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, digest) DO UPDATE SET data = excluded.data, size = excluded.size",
         )
         .run(userId, digest, data, bytes.length);
@@ -212,7 +212,7 @@ export function exportAccountPage(
   if (offset === 0) {
     ensureBlobIndex(database);
     database.$client
-      .query<void, [string]>(
+      .query<never, [string]>(
         "DELETE FROM account_export_blobs WHERE user_id = ?",
       )
       .run(userId);

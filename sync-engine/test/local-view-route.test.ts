@@ -114,8 +114,8 @@ test("local blob route authenticates, scopes blobs, validates methods, and resum
         googleSubject: subject,
         name: subject,
       },
-      Date.now() + 60_000,
-      Date.now(),
+      9_000_000_000_000,
+      1,
     );
   database.$client.run("PRAGMA foreign_keys = OFF");
   const bytes = Uint8Array.from([1, 2, 3]);

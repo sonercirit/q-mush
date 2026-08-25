@@ -32,14 +32,15 @@ describe("legacy account export", () => {
   });
 
   test("rejects malformed blob digests without querying the database", () => {
-    const inaccessible = new Proxy({} as AppDatabase, {
-      get: () => {
-        throw new Error("database accessed");
-      },
-    });
+    database = createDatabase(":memory:");
+    expect(exportAccountBlob(database, "u", "not-a-digest")).toBeUndefined();
     expect(
-      exportAccountBlob(inaccessible, "u", "not-a-digest"),
-    ).toBeUndefined();
+      database.$client
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE name = 'account_export_blobs'",
+        )
+        .get(),
+    ).toBeNull();
   });
 
   test("finds an attachment added after an earlier blob lookup", () => {
