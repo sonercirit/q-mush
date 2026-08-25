@@ -597,6 +597,11 @@ async function run(): Promise<void> {
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
+      ({ elapsedMilliseconds, previousRevision, restartCount, revision }) => {
+        console.warn(
+          `Replica catch-up joining: revision changed ${previousRevision} -> ${revision}; restart ${String(restartCount)}, elapsed ${String(elapsedMilliseconds)}ms`,
+        );
+      },
     ).catch((error: unknown) => {
       console.error(`Replica catch-up deferred: ${describeError(error)}`);
     });

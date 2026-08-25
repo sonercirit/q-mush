@@ -36,12 +36,20 @@ function isBlobEntry(value: unknown): value is ExportBlobEntry {
     typeof value["size"] === "number"
   );
 }
+export interface AccountExportRetryProgress {
+  readonly elapsedMilliseconds: number;
+  readonly previousRevision: string;
+  readonly restartCount: number;
+  readonly revision: string;
+}
 export async function catchUpAccountExport(
   directory: string,
   configurationPath: string,
   serverOrigin: string,
   token: string,
+  onRetry?: (progress: AccountExportRetryProgress) => void,
 ): Promise<void> {
+  const startedAt = Date.now();
   const authorization = `Bearer ${token}`;
   const records: AccountExportRecord[] = [];
   let manifest: Record<string, number> = {};
@@ -78,7 +86,14 @@ export async function catchUpAccountExport(
     )
       throw new Error("The account export response is invalid");
     if (revision !== undefined && revision !== page.revision) {
+      const previousRevision = revision;
       restarts += 1;
+      onRetry?.({
+        elapsedMilliseconds: Date.now() - startedAt,
+        previousRevision,
+        restartCount: restarts,
+        revision: page.revision,
+      });
       records.length = 0;
       manifest = {};
       cursor = undefined;

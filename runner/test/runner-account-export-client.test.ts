@@ -12,12 +12,16 @@ import {
   RUNNER_ACCOUNT_EXPORT_PATH,
 } from "../../shared/routes.ts";
 import { sha256 } from "../../shared/sha256.ts";
-import { catchUpAccountExport } from "../runner-account-export-client.ts";
+import {
+  catchUpAccountExport,
+  type AccountExportRetryProgress,
+} from "../runner-account-export-client.ts";
 
 async function runCatchUpServer(
   prefix: string,
   fetch: (request: Request) => Response,
   prepare?: (directory: string) => void,
+  onRetry?: (progress: AccountExportRetryProgress) => void,
 ): Promise<void> {
   const server = Bun.serve({ fetch, port: 0 });
   const directory = mkdtempSync(join(tmpdir(), prefix));
@@ -30,6 +34,7 @@ async function runCatchUpServer(
       configurationPath,
       server.url.origin,
       "token",
+      onRetry,
     );
   } finally {
     void server.stop(true);
@@ -85,6 +90,40 @@ test("restarts pagination when the account changes between pages", async () => {
     return new Response("Not found", { status: 404 });
   });
   expect(offsets).toEqual([0, 1, 0, 1]);
+});
+
+test("reports every revision restart with cumulative progress", async () => {
+  const progress: AccountExportRetryProgress[] = [];
+  let requests = 0;
+  await runCatchUpServer(
+    "account-export-progress-",
+    (request) => {
+      if (requestPath(request) !== RUNNER_ACCOUNT_EXPORT_PATH)
+        return new Response("Not found", { status: 404 });
+      requests += 1;
+      const cursor = new URL(request.url).searchParams.get("cursor");
+      const revisionNumber = Math.min(Math.ceil(requests / 2), 3);
+      const done = cursor !== null && revisionNumber === 3;
+      return Response.json({
+        blobs: [],
+        done,
+        ...(!done && { nextCursor: `next-${String(requests)}` }),
+        records: [exportRecord(String(requests))],
+        revision: String(revisionNumber).padStart(64, "0"),
+      });
+    },
+    undefined,
+    (event) => progress.push(event),
+  );
+  expect(progress).toHaveLength(2);
+  expect(progress.map(({ restartCount }) => restartCount)).toEqual([1, 2]);
+  expect(progress[0]).toMatchObject({
+    previousRevision: "1".padStart(64, "0"),
+    revision: "2".padStart(64, "0"),
+  });
+  expect(progress[1]?.elapsedMilliseconds).toBeGreaterThanOrEqual(
+    progress[0]?.elapsedMilliseconds ?? 0,
+  );
 });
 
 test("converges after sustained revision changes during pagination", async () => {

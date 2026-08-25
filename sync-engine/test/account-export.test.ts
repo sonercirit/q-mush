@@ -78,7 +78,7 @@ describe("legacy account export", () => {
     ).toHaveLength(6);
   });
 
-  test("bounds revision work independently of account payload size", () => {
+  test("uses bounded offset-free keyset row queries", () => {
     database = createUserDatabase();
     const originalQuery = database.$client.query.bind(database.$client);
     let largestRowLimit = 0;
@@ -88,9 +88,9 @@ describe("legacy account export", () => {
       if (!sql.includes("ORDER BY")) return statement;
       usedOffset ||= sql.includes(" OFFSET ");
       const originalAll = statement.all.bind(statement);
-      statement.all = (userId: string, limit: number, offset: number) => {
+      statement.all = (userId: string, afterId: string, limit: number) => {
         largestRowLimit = Math.max(largestRowLimit, limit);
-        return originalAll(userId, limit, offset);
+        return originalAll(userId, afterId, limit);
       };
       return statement;
     };
@@ -98,6 +98,7 @@ describe("legacy account export", () => {
       boundedQueryImplementation,
     );
     exportAccountPage(database, "u");
+    expect(largestRowLimit).toBeGreaterThan(0);
     expect(largestRowLimit).toBeLessThanOrEqual(100);
     expect(usedOffset).toBe(false);
   });
@@ -220,6 +221,24 @@ describe("legacy account export", () => {
     expect(usedIterator).toBe(true);
     expect(finalizedStatements).toBeGreaterThan(0);
     expectDatabaseUsable(database);
+  });
+
+  test("reuses revision aggregates while the database is unchanged", () => {
+    database = createUserDatabase();
+    const originalQuery = database.$client.query.bind(database.$client);
+    let aggregateQueries = 0;
+    vi.spyOn(database.$client, "query").mockImplementation((sql) => {
+      if (sql.includes("COUNT(*)")) aggregateQueries += 1;
+      return originalQuery(sql);
+    });
+    const first = exportAccountPage(database, "u", undefined, 1);
+    const initialQueries = aggregateQueries;
+    expect(initialQueries).toBeGreaterThan(0);
+    exportAccountPage(database, "u", first.nextCursor, 1);
+    expect(aggregateQueries).toBe(initialQueries);
+    database.$client.run("UPDATE users SET updated_at = 2 WHERE id = 'u'");
+    exportAccountPage(database, "u", undefined, 1);
+    expect(aggregateQueries).toBeGreaterThan(initialQueries);
   });
 
   test("finds an attachment added after an earlier blob lookup", () => {

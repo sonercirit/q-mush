@@ -171,10 +171,13 @@ Memory.
 
 - Stage-1 replicas accept only schema-validated, entity-counted, checksum-bound
   account inventories; readiness rechecks manifests/blobs, reserves SQLite/WAL
-  plus incoming/install space. Paged exports use keyset cursors and per-table
-  counts/max durable update times in one page transaction; presence does not
-  advance audit time. Revision changes use capped backoff with no retry cap,
-  allowing catch-up during writes. Blob lookup streams rows and finalizes on an
+  plus incoming/install space. Paged exports use keyset cursors and cache exact
+  per-table count/max-audit-time revisions until SQLite change counters move;
+  hard deletes are forbidden, so inserts cannot hide behind a cursor while
+  preserving that revision. Presence does not advance audit time. Revision
+  changes retry indefinitely with capped backoff and log each restart's count,
+  elapsed time, and revisions. Stage 1 catches up only at runner startup;
+  continuous post-ready synchronization is required by stage 2. Blob lookup
   early hit. Solid selects its host from page metadata; both runner and
   authenticated migration-engine handlers serve bounded, read-only active views
   labeled with origin and completeness. Sensitive export tables use explicit

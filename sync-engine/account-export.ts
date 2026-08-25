@@ -164,7 +164,47 @@ export interface AccountExportPage {
   readonly records: readonly AccountExportRecord[];
   readonly revision: string;
 }
-function accountExportRevision(database: AppDatabase, userId: string): string {
+interface ExportRevisionCacheEntry {
+  readonly dataVersion: number;
+  readonly revision: string;
+  readonly totalChanges: number;
+}
+const exportRevisionCache = new WeakMap<
+  AppDatabase,
+  Map<string, ExportRevisionCacheEntry>
+>();
+function exportChangeCounters(database: AppDatabase) {
+  return {
+    dataVersion:
+      database.$client
+        .query<{ dataVersion: number }, []>("PRAGMA data_version")
+        .get()?.dataVersion ?? 0,
+    totalChanges:
+      database.$client
+        .query<{ totalChanges: number }, []>(
+          "SELECT total_changes() AS totalChanges",
+        )
+        .get()?.totalChanges ?? 0,
+  };
+}
+function accountExportRevision(
+  database: AppDatabase,
+  userId: string,
+  dataVersion: number,
+  totalChanges: number,
+  useCache: boolean,
+): string {
+  const databaseCache =
+    exportRevisionCache.get(database) ??
+    new Map<string, ExportRevisionCacheEntry>();
+  exportRevisionCache.set(database, databaseCache);
+  const cached = databaseCache.get(userId);
+  if (
+    useCache &&
+    cached?.dataVersion === dataVersion &&
+    cached.totalChanges === totalChanges
+  )
+    return cached.revision;
   const states = exportedTables.map(({ table }) => {
     const name = getTableName(table);
     const owner = name === "users" ? "id" : "user_id";
@@ -175,7 +215,14 @@ function accountExportRevision(database: AppDatabase, userId: string): string {
       .get(userId);
     return `${name}:${String(state?.count ?? 0)}:${String(state?.updatedAt ?? 0)}`;
   });
-  return sha256(new TextEncoder().encode(states.join("\n")));
+  const revision = sha256(new TextEncoder().encode(states.join("\n")));
+  const current = exportChangeCounters(database);
+  if (
+    current.dataVersion === dataVersion &&
+    current.totalChanges === totalChanges
+  )
+    databaseCache.set(userId, { dataVersion, revision, totalChanges });
+  return revision;
 }
 const exportedTables = [
   ...ordinaryTables
@@ -221,7 +268,14 @@ export function exportAccountPage(
   limit = ACCOUNT_EXPORT_PAGE_LIMIT,
 ): AccountExportPage {
   return database.$client.transaction(() => {
-    const revision = accountExportRevision(database, userId);
+    const { dataVersion, totalChanges } = exportChangeCounters(database);
+    const revision = accountExportRevision(
+      database,
+      userId,
+      dataVersion,
+      totalChanges,
+      cursor !== undefined,
+    );
     const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
     const accumulator = createExportAccumulator();
     const { blobs, records } = accumulator;
@@ -258,6 +312,12 @@ export function exportAccountPage(
     if (!reachedPosition)
       throw new Error("Invalid account export cursor entity");
     const last = records.at(-1);
+    const ending = exportChangeCounters(database);
+    if (
+      ending.dataVersion !== dataVersion ||
+      ending.totalChanges !== totalChanges
+    )
+      exportRevisionCache.get(database)?.delete(userId);
     return {
       blobs: [...blobs.values()],
       done: records.length < safeLimit,
