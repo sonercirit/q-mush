@@ -9,6 +9,7 @@ import {
   completeAccountExportInventory,
   type AccountExportBlob,
   type AccountExportInventory,
+  type AccountExportRecord,
 } from "../shared/account-export.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { createDatabase } from "../shared/database.ts";
@@ -17,8 +18,8 @@ import { exportAccountPage } from "../sync-engine/account-export.ts";
 function exportAccount(
   database: ReturnType<typeof createDatabase>,
 ): AccountExportInventory & { readonly blobs: readonly AccountExportBlob[] } {
-  const records = [];
-  const blobs = new Map();
+  const records: AccountExportRecord[] = [];
+  const blobs = new Map<string, AccountExportBlob>();
   let offset = 0;
   let done = false;
   while (!done) {

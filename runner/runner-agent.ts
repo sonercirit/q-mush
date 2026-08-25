@@ -78,7 +78,6 @@ function activeRunnerExecution(): RunnerExecution {
   }
   return runnerExecution;
 }
-
 interface RunnerConfiguration {
   readonly serverOrigin: string;
   readonly token: string;
@@ -109,7 +108,6 @@ function isArgumentName(value: string): boolean {
     value === "--restart-id"
   );
 }
-
 function readRestartId(): string | undefined {
   const restartId = readArgument("--restart-id");
   if (restartId === undefined) {
@@ -124,7 +122,6 @@ function readRestartId(): string | undefined {
   }
   return restartId;
 }
-
 function readActivationReceipt(): string | undefined {
   const receipt = readArgument("--activation-receipt");
   if (
@@ -135,7 +132,6 @@ function readActivationReceipt(): string | undefined {
   }
   return receipt;
 }
-
 function readActivationReceiptPhase(): "finalized" | "prepared" | undefined {
   const phase = readArgument("--activation-receipt-phase");
   if (phase === undefined) {
@@ -146,45 +142,34 @@ function readActivationReceiptPhase(): "finalized" | "prepared" | undefined {
   }
   return phase;
 }
-
 function readConfigurationPath(): string | undefined {
   const path = readArgument("--config");
-
   if (path !== undefined && (isArgumentName(path) || path.length === 0)) {
     throw new Error("Start the Q Mush runner with --config <path>");
   }
-
   return path;
 }
-
 function readConfiguration(path: string): RunnerConfiguration {
   const [serverValue, tokenValue] = readFileSync(path, "utf8").split(/\r?\n/u);
-
   if (serverValue === undefined || tokenValue === undefined) {
     throw new Error("The Q Mush runner configuration is incomplete");
   }
-
   const server = new URL(serverValue);
-
   if (
     (server.protocol !== "http:" && server.protocol !== "https:") ||
     server.origin !== serverValue
   ) {
     throw new Error("The Q Mush runner server must be an HTTP(S) origin");
   }
-
   if (!TOKEN_PATTERN.test(tokenValue)) {
     throw new Error("The Q Mush runner setup token is invalid");
   }
-
   return { serverOrigin: server.origin, token: tokenValue };
 }
-
 function readOperatingSystemMachineId(): string | undefined {
   if (platform() === "linux") {
     try {
       const machineId = readFileSync("/etc/machine-id", "utf8").trim();
-
       if (machineId.length > 0) {
         return machineId;
       }
@@ -192,7 +177,6 @@ function readOperatingSystemMachineId(): string | undefined {
       // Fall back to stable network hardware below.
     }
   }
-
   const hardwareAddresses = Object.values(networkInterfaces())
     .flatMap((addresses) => addresses ?? [])
     .filter(({ internal, mac }) => !internal && mac !== "00:00:00:00:00:00")
@@ -200,19 +184,15 @@ function readOperatingSystemMachineId(): string | undefined {
     .sort();
   return hardwareAddresses[0];
 }
-
 function readFallbackMachineId(configurationPath: string): string {
   const path = join(dirname(configurationPath), "machine-id");
-
   if (existsSync(path)) {
     return readFileSync(path, "utf8").trim();
   }
-
   const id = randomBytes(32).toString("base64url");
   writeFileSync(path, `${id}\n`, { mode: 0o600 });
   return id;
 }
-
 function machineFingerprint(configurationPath: string): string {
   const machineId =
     readOperatingSystemMachineId() ?? readFallbackMachineId(configurationPath);
@@ -220,7 +200,6 @@ function machineFingerprint(configurationPath: string): string {
     .update(`${platform()}:${machineId}`)
     .digest("hex");
 }
-
 function machineName(): string {
   const normalized = hostname()
     .replaceAll(/[^A-Za-z\d._ -]/gu, "-")
@@ -228,13 +207,11 @@ function machineName(): string {
     .trim();
   return normalized.length === 0 ? "Q Mush runner" : normalized;
 }
-
 function runnerWebSocketUrl(configuration: RunnerConfiguration): string {
   const url = new URL(RUNNER_REALTIME_PATH, configuration.serverOrigin);
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   return url.toString();
 }
-
 function runnerWebSocket(configuration: RunnerConfiguration): WebSocket {
   return createServerWebSocket(
     runnerWebSocketUrl(configuration),
@@ -242,7 +219,6 @@ function runnerWebSocket(configuration: RunnerConfiguration): WebSocket {
     "The runtime does not support runner WebSockets",
   );
 }
-
 function waitForSocket(socket: WebSocket): Promise<void> {
   return new Promise((resolve, reject) => {
     const { settle } = createRunnerConnectionSettlement(resolve, reject);
@@ -259,7 +235,6 @@ function waitForSocket(socket: WebSocket): Promise<void> {
     });
   });
 }
-
 function bindOperationalSocket(
   connected: WebSocket,
   active: RunnerCommandExecutions,
@@ -269,13 +244,11 @@ function bindOperationalSocket(
       connected.close(1003, "Text messages required");
       return;
     }
-
     const message = parseSocketJsonRecord(event.data);
     if (message === undefined) {
       connected.close(1003, "Invalid server message");
       return;
     }
-
     if (message["type"] === "superseded") {
       return;
     }
@@ -299,7 +272,6 @@ function bindOperationalSocket(
     }
   });
 }
-
 async function connectRunner(
   configuration: RunnerConfiguration,
   configurationPath: string,
@@ -313,13 +285,11 @@ async function connectRunner(
     name: machineName(),
     platform: platform(),
   };
-
   for (;;) {
     const socket = runnerWebSocket(configuration);
     const startupConnection = runnerRestart.connectionContext(
       startupRestart.connection(),
     );
-
     try {
       await waitForSocket(socket);
       try {
