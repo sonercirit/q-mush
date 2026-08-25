@@ -57,9 +57,10 @@ describe("runner full replica store", () => {
     store.recordRetry(retry);
     expect(store.progress()).toMatchObject({ state: "joining", ...retry });
     store.close();
-    const reopened = createRunnerReplicaStore(directory);
-    expect(reopened.progress()).toMatchObject({ state: "joining", ...retry });
-    reopened.close();
+    const persisted = createRunnerReplicaStore(directory);
+    const persistedProgress = persisted.progress();
+    expect(persistedProgress).toMatchObject({ state: "joining", ...retry });
+    persisted.close();
   });
 
   test("serves bounded active views only after the full replica is ready", async () => {

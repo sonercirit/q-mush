@@ -5,6 +5,12 @@ import "../styles.css";
 
 const digest = "a".repeat(64);
 
+async function waitForText(root: HTMLElement, text: string): Promise<void> {
+  await vi.waitFor(() => {
+    if (!root.textContent.includes(text)) throw new Error(`Missing ${text}`);
+  });
+}
+
 test("real Chromium reads a complete runner replica and renders attachments read-only", async () => {
   const meta = document.createElement("meta");
   meta.name = "q-mush-host";
@@ -59,27 +65,16 @@ test("real Chromium reads a complete runner replica and renders attachments read
   document.body.append(root);
   render(() => <RunnerReplicaView />, root);
 
-  await vi.waitFor(() => {
-    expect(root.textContent).toContain("Session from runner B");
-  });
+  await waitForText(root, "Session from runner B");
   expect(root.textContent).toContain("Runner replica · Complete source");
   expect(root.textContent).toContain("Retry 1: old → new after 123ms");
-  await vi.waitFor(
-    () => {
-      expect(root.textContent).toContain("Retry 2: old → newer after 456ms");
-    },
-    { timeout: 2_000 },
-  );
+  await waitForText(root, "Retry 2: old → newer after 456ms");
   expect(root.textContent).not.toContain("Runner terminal pairing code");
   const session = root.querySelector("button:not([disabled])");
   if (!(session instanceof HTMLButtonElement))
     throw new Error("Missing session");
   session.click();
-  await vi.waitFor(() => {
-    if (!root.textContent.includes("Offline transcript")) {
-      throw new Error("Replica transcript did not load");
-    }
-  });
+  await waitForText(root, "Offline transcript");
   const image = root.querySelector("img");
   if (!(image instanceof HTMLImageElement))
     throw new Error("Missing attachment");

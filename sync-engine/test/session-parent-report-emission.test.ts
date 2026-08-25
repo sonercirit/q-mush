@@ -219,27 +219,30 @@ testReportedGenerationVariants("runner removal", ({ setup }) => {
   ).toBe(true);
 });
 
+function startCurrent(
+  setup: ReturnType<typeof createStore>,
+  sessionId: string,
+  now: number,
+): void {
+  expect(setup.store.transitionCurrent(sessionId, "running", now)).toBe(true);
+}
+
 test("runner removal fences a three-level lineage descendants first", () => {
   const setup = createStore();
   const reportParent = vi.fn();
   const parent = createTestSession(setup.store);
-  expect(
-    setup.store.transitionCurrent(parent.id, "running", TEST_NOW + 1),
-  ).toBe(true);
-  const child = createTestSession(setup.store, TEST_NOW + 2, {
+  startCurrent(setup, parent.id, TEST_NOW + 1);
+  const childInput = {
     parentGeneration: parent.generation,
     parentSessionId: parent.id,
-  });
-  expect(setup.store.transitionCurrent(child.id, "running", TEST_NOW + 3)).toBe(
-    true,
-  );
+  };
+  const child = createTestSession(setup.store, TEST_NOW + 2, childInput);
+  startCurrent(setup, child.id, TEST_NOW + 3);
   const grandchild = createTestSession(setup.store, TEST_NOW + 4, {
     parentGeneration: child.generation,
     parentSessionId: child.id,
   });
-  expect(
-    setup.store.transitionCurrent(grandchild.id, "running", TEST_NOW + 5),
-  ).toBe(true);
+  startCurrent(setup, grandchild.id, TEST_NOW + 5);
   setup.store.commitRuntimeTerminal(
     grandchild.id,
     [terminalRecordedMessage("Grandchild terminal response")],
