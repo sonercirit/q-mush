@@ -89,7 +89,9 @@ export function RunnerReplicaView(): JSX.Element {
     void loadStatus().then((authorized) => {
       if (authorized) loadSessions();
     });
-    const refresh = setInterval(() => void loadStatus(), 1_000);
+    const refresh = setInterval(() => {
+      void loadStatus();
+    }, 1_000);
     onCleanup(() => clearInterval(refresh));
   });
   const pair = async (): Promise<void> => {
