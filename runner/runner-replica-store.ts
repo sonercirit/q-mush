@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
+import { validActiveViewLimit } from "../shared/active-view.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { sha256 } from "../shared/sha256.ts";
 
@@ -134,7 +135,7 @@ export function createRunnerReplicaStore(directory: string) {
         .run(digest);
     },
     readView: (entity: string, limit: number, sessionId?: string) => {
-      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      if (!validActiveViewLimit(limit)) {
         throw new Error("Replica view limit must be between 1 and 100");
       }
       if (progress().state !== "ready") {

@@ -1,11 +1,10 @@
+import {
+  validActiveViewLimit,
+  type ActiveView,
+} from "../shared/active-view.ts";
 import { requestJson } from "./browser-http.ts";
 
-export interface ActiveView {
-  readonly complete: boolean;
-  readonly origin: "engine" | "runner";
-  readonly partial: true;
-  readonly records: readonly Record<string, unknown>[];
-}
+export type { ActiveView } from "../shared/active-view.ts";
 
 export interface QueryHost {
   readonly mutations: boolean;
@@ -17,7 +16,7 @@ export interface QueryHost {
 }
 
 function boundedLimit(limit: number): number {
-  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+  if (!validActiveViewLimit(limit)) {
     throw new Error("Active view limit must be between 1 and 100");
   }
   return limit;

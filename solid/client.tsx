@@ -296,28 +296,34 @@ function dispatchRealtimeEvent<Type extends RealtimeClientEvent["type"]>(
 
 function RunnerReplicaView(): JSX.Element {
   const host = queryHostForLocation(window.location);
-  const [sessions, setSessions] = createSignal<
-    readonly Record<string, unknown>[]
-  >([]);
-  const [messages, setMessages] = createSignal<
-    readonly Record<string, unknown>[]
-  >([]);
+  const [views, setViews] = createSignal({
+    messages: [] as readonly Record<string, unknown>[],
+    sessions: [] as readonly Record<string, unknown>[],
+  });
   const [selected, setSelected] = createSignal<string>();
   const [failed, setFailed] = createSignal(false);
-  onMount(() => {
+  const load = (
+    entity: "agent_messages" | "agent_sessions",
+    apply: (records: readonly Record<string, unknown>[]) => void,
+    sessionId?: string,
+  ): void => {
     void host
-      .read("agent_sessions", { limit: 100 })
-      .then((view) => setSessions(view.records))
+      .read(entity, { limit: 100, ...(sessionId && { sessionId }) })
+      .then((view) => apply(view.records))
       .catch(() => setFailed(true));
+  };
+  onMount(() => {
+    load("agent_sessions", (sessions) =>
+      setViews((value) => ({ ...value, sessions })),
+    );
   });
   const select = (id: string): void => {
     setSelected(id);
-    void host
-      .read("agent_messages", {
-        limit: 100,
-        sessionId: id,
-      })
-      .then((view) => setMessages(view.records));
+    load(
+      "agent_messages",
+      (messages) => setViews((value) => ({ ...value, messages })),
+      id,
+    );
   };
   return (
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
@@ -333,7 +339,7 @@ function RunnerReplicaView(): JSX.Element {
         when={!failed()}
         fallback={<p role="alert">The runner replica is not ready.</p>}
       >
-        <For each={sessions()}>
+        <For each={views().sessions}>
           {(sessionRecord) => {
             const id = String(sessionRecord["id"]);
             const value = sessionRecord["title"];
@@ -353,7 +359,7 @@ function RunnerReplicaView(): JSX.Element {
         </For>
         <Show when={selected()}>
           <div class="rounded-xl border border-white/10 p-4">
-            <For each={messages()}>
+            <For each={views().messages}>
               {(message) => {
                 const content = message["content"];
                 return (

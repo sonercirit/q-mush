@@ -13,12 +13,11 @@ describe("Solid query host", () => {
     );
     const host = queryHostForLocation({ hostname: "127.0.0.1" });
     expect(host.mutations).toBe(false);
-    await expect(host.read("agent_sessions", { limit: 20 })).resolves.toEqual({
-      complete: true,
-      origin: "runner",
-      partial: true,
-      records: [{ id: "session-1" }],
-    });
+    const view = await host.read("agent_sessions", { limit: 20 });
+    expect(view.origin).toBe("runner");
+    expect(view.complete).toBe(true);
+    expect(view.partial).toBe(true);
+    expect(view.records).toEqual([{ id: "session-1" }]);
     expect(fetch).toHaveBeenCalledWith(
       "/api/local/view?entity=agent_sessions&limit=20",
       expect.anything(),

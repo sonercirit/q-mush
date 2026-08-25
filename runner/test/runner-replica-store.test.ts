@@ -37,8 +37,7 @@ describe("runner full replica store", () => {
   });
 
   test("serves bounded active views only after the full replica is ready", async () => {
-    const directory = await createTemporaryDirectory();
-    const store = createRunnerReplicaStore(directory);
+    const store = createRunnerReplicaStore(await createTemporaryDirectory());
     store.applyRecords([
       {
         entity: "agent_sessions",

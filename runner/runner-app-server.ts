@@ -17,17 +17,10 @@ export interface RunnerAppPairing {
   readonly code: string;
 }
 
-export interface RunnerAppViewSource {
+import type { ActiveViewReader } from "../shared/active-view.ts";
+
+export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
-  readonly readView: (
-    entity: string,
-    limit: number,
-    sessionId?: string,
-  ) => {
-    readonly complete: true;
-    readonly partial: true;
-    readonly records: readonly Record<string, unknown>[];
-  };
 }
 
 export function createRunnerAppHandler(
