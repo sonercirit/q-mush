@@ -656,6 +656,7 @@ async function run(): Promise<void> {
   const app = Bun.serve({
     fetch: createRunnerAppHandler(embeddedClientRelease(), appOrigin, {
       pairing: identity.pairing,
+      views: replica,
     }),
     hostname: "127.0.0.1",
     port: 43127,

@@ -17,10 +17,26 @@ export interface RunnerAppPairing {
   readonly code: string;
 }
 
+export interface RunnerAppViewSource {
+  readonly progress: () => { readonly state: "joining" | "ready" };
+  readonly readView: (
+    entity: string,
+    limit: number,
+    sessionId?: string,
+  ) => {
+    readonly complete: true;
+    readonly partial: true;
+    readonly records: readonly Record<string, unknown>[];
+  };
+}
+
 export function createRunnerAppHandler(
   release: RunnerAppRelease,
   origin: string,
-  options?: { readonly pairing: RunnerAppPairing },
+  options?: {
+    readonly pairing: RunnerAppPairing;
+    readonly views?: RunnerAppViewSource;
+  },
 ): (request: Request) => Response {
   const expected = new URL(origin);
   if (
@@ -60,6 +76,42 @@ export function createRunnerAppHandler(
         `qm_browser=${options.pairing.browserGrant}`
     ) {
       return new Response("Pairing required", { status: 401 });
+    }
+    if (request.method === "GET" && url.pathname === "/api/local/view") {
+      if (options?.views === undefined) {
+        return Response.json({ error: "view_unavailable" }, { status: 404 });
+      }
+      const entity = url.searchParams.get("entity");
+      const limit = Number(url.searchParams.get("limit"));
+      if (
+        entity === null ||
+        !["agent_sessions", "agent_messages"].includes(entity)
+      ) {
+        return Response.json({ error: "invalid_view" }, { status: 400 });
+      }
+      try {
+        return Response.json({
+          origin: "runner",
+          ...options.views.readView(
+            entity,
+            limit,
+            url.searchParams.get("sessionId") ?? undefined,
+          ),
+        });
+      } catch (error) {
+        return Response.json(
+          { error: error instanceof Error ? error.message : "view_failed" },
+          { status: options.views.progress().state === "ready" ? 400 : 503 },
+        );
+      }
+    }
+    if (request.method === "GET" && url.pathname === "/api/local/status") {
+      return Response.json({
+        complete: options?.views?.progress().state === "ready",
+        mutations: false,
+        origin: "runner",
+        partial: true,
+      });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });

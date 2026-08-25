@@ -29,6 +29,39 @@ describe("runner app server", () => {
     ).toBe(403);
   });
 
+  test("serves bounded read-only views without replica control endpoints", async () => {
+    const views = {
+      progress: () => ({ state: "ready" as const }),
+      readView: () => ({
+        complete: true as const,
+        partial: true as const,
+        records: [{ id: "session-1" }],
+      }),
+    };
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing: { browserGrant: "grant", code: "code" },
+      views,
+    });
+    const headers = { cookie: "qm_browser=grant" };
+    const response = handler(
+      new Request(
+        "http://127.0.0.1:43127/api/local/view?entity=agent_sessions&limit=10",
+        { headers },
+      ),
+    );
+    expect(await response.json()).toEqual({
+      complete: true,
+      origin: "runner",
+      partial: true,
+      records: [{ id: "session-1" }],
+    });
+    expect(
+      handler(
+        new Request("http://127.0.0.1:43127/api/replica/ack", { headers }),
+      ).status,
+    ).toBe(404);
+  });
+
   test("does not expose authentication or replica membership endpoints", () => {
     const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
     for (const path of [

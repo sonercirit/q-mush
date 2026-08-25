@@ -30,6 +30,7 @@ import {
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
 import { createProviderController } from "./provider-controller.ts";
+import { queryHostForLocation } from "./query-host.ts";
 import {
   createRealtimeConnection,
   type RealtimeConnection,
@@ -293,6 +294,89 @@ function dispatchRealtimeEvent<Type extends RealtimeClientEvent["type"]>(
   handlers[expectedType](event);
 }
 
+function RunnerReplicaView(): JSX.Element {
+  const host = queryHostForLocation(window.location);
+  const [sessions, setSessions] = createSignal<
+    readonly Record<string, unknown>[]
+  >([]);
+  const [messages, setMessages] = createSignal<
+    readonly Record<string, unknown>[]
+  >([]);
+  const [selected, setSelected] = createSignal<string>();
+  const [failed, setFailed] = createSignal(false);
+  onMount(() => {
+    void host
+      .read("agent_sessions", { limit: 100 })
+      .then((view) => setSessions(view.records))
+      .catch(() => setFailed(true));
+  });
+  const select = (id: string): void => {
+    setSelected(id);
+    void host
+      .read("agent_messages", {
+        limit: 100,
+        sessionId: id,
+      })
+      .then((view) => setMessages(view.records));
+  };
+  return (
+    <section class="mt-8 grid gap-4" aria-label="Runner replica view">
+      <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
+        <p class="font-semibold">Runner replica · Complete copy</p>
+        <p class="mt-1 text-sm">Partial active view · Read only</p>
+        <p class="mt-2 text-sm">
+          Mutations are disabled because this page is reading from the runner
+          replica.
+        </p>
+      </div>
+      <Show
+        when={!failed()}
+        fallback={<p role="alert">The runner replica is not ready.</p>}
+      >
+        <For each={sessions()}>
+          {(sessionRecord) => {
+            const id = String(sessionRecord["id"]);
+            const value = sessionRecord["title"];
+            const title = typeof value === "string" ? value : id;
+            return (
+              <button
+                class="rounded-xl border border-white/10 p-4 text-left"
+                onClick={() => {
+                  select(id);
+                }}
+                type="button"
+              >
+                {title}
+              </button>
+            );
+          }}
+        </For>
+        <Show when={selected()}>
+          <div class="rounded-xl border border-white/10 p-4">
+            <For each={messages()}>
+              {(message) => {
+                const content = message["content"];
+                return (
+                  <p class="whitespace-pre-wrap">
+                    {typeof content === "string" ? content : ""}
+                  </p>
+                );
+              }}
+            </For>
+          </div>
+        </Show>
+        <button
+          class="cursor-not-allowed rounded-full border border-white/10 px-5 py-2 text-slate-500"
+          disabled
+          type="button"
+        >
+          New session unavailable in read-only replica
+        </button>
+      </Show>
+    </section>
+  );
+}
+
 function App(): JSX.Element {
   const [loadFailed, setLoadFailed] = createSignal(false);
   const [logoutPending, setLogoutPending] = createSignal(false);
@@ -537,45 +621,54 @@ function App(): JSX.Element {
               )}
             </For>
             <Show
-              fallback={<LoadingCard />}
-              when={loadFailed() || session() !== undefined}
-            >
-              <Show
-                fallback={<SessionError onRetry={() => void loadSession()} />}
-                when={!loadFailed()}
-              >
-                <Show when={session()}>
-                  {(authenticated) => (
-                    <Show
-                      fallback={
-                        <SignIn
-                          googleLoginAvailable={
-                            authenticated().googleLoginAvailable
+              when={queryHostForLocation(window.location).origin === "runner"}
+              fallback={
+                <Show
+                  fallback={<LoadingCard />}
+                  when={loadFailed() || session() !== undefined}
+                >
+                  <Show
+                    fallback={
+                      <SessionError onRetry={() => void loadSession()} />
+                    }
+                    when={!loadFailed()}
+                  >
+                    <Show when={session()}>
+                      {(authenticated) => (
+                        <Show
+                          fallback={
+                            <SignIn
+                              googleLoginAvailable={
+                                authenticated().googleLoginAvailable
+                              }
+                            />
                           }
-                        />
-                      }
-                      when={authenticated().user}
-                    >
-                      {(user) => (
-                        <Workspace
-                          agentSessions={agentSessions}
-                          braveSearch={braveSearch}
-                          generic={generic}
-                          logout={logout}
-                          logoutPending={logoutPending()}
-                          openAi={openAi}
-                          openRouter={openRouter}
-                          prompts={prompts}
-                          runners={runners}
-                          toolSettings={toolSettings}
-                          user={user()}
-                          workspaces={workspaces}
-                        />
+                          when={authenticated().user}
+                        >
+                          {(user) => (
+                            <Workspace
+                              agentSessions={agentSessions}
+                              braveSearch={braveSearch}
+                              generic={generic}
+                              logout={logout}
+                              logoutPending={logoutPending()}
+                              openAi={openAi}
+                              openRouter={openRouter}
+                              prompts={prompts}
+                              runners={runners}
+                              toolSettings={toolSettings}
+                              user={user()}
+                              workspaces={workspaces}
+                            />
+                          )}
+                        </Show>
                       )}
                     </Show>
-                  )}
+                  </Show>
                 </Show>
-              </Show>
+              }
+            >
+              <RunnerReplicaView />
             </Show>
             <a
               class="mt-10 inline-flex items-center gap-2 text-sm font-medium text-slate-400 transition hover:text-emerald-200 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-emerald-300"

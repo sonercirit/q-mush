@@ -36,6 +36,46 @@ describe("runner full replica store", () => {
     store.close();
   });
 
+  test("serves bounded active views only after the full replica is ready", async () => {
+    const directory = await createTemporaryDirectory();
+    const store = createRunnerReplicaStore(directory);
+    store.applyRecords([
+      {
+        entity: "agent_sessions",
+        id: "s1",
+        payload: JSON.stringify({
+          id: "s1",
+          title: "First",
+          is_deleted: false,
+        }),
+        tombstone: false,
+      },
+      {
+        entity: "agent_messages",
+        id: "m1",
+        payload: JSON.stringify({
+          id: "m1",
+          session_id: "s1",
+          content: "hello",
+        }),
+        tombstone: false,
+      },
+      { entity: "agent_sessions", id: "gone", payload: "{}", tombstone: true },
+    ]);
+    expect(() => store.readView("agent_sessions", 10)).toThrow("joining");
+    store.setFrontier("frontier");
+    store.setManifest([]);
+    expect(store.readView("agent_sessions", 1)).toEqual({
+      complete: true,
+      partial: true,
+      records: [{ id: "s1", title: "First", is_deleted: false }],
+    });
+    expect(store.readView("agent_messages", 10, "s1")).toMatchObject({
+      records: [{ id: "m1", content: "hello" }],
+    });
+    store.close();
+  });
+
   test("rejects catch-up when capacity reserve is insufficient", async () => {
     const directory = await createTemporaryDirectory();
     mkdirSync(directory, { recursive: true });

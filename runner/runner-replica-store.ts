@@ -2,6 +2,7 @@ import { Database } from "bun:sqlite";
 import { mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
+import { isRecord } from "../shared/auth-model.ts";
 import { sha256 } from "../shared/sha256.ts";
 
 import type { AccountExportRecord } from "../shared/account-export.ts";
@@ -17,6 +18,14 @@ export interface ReplicaProgress {
   readonly records: number;
   readonly state: "joining" | "ready";
   readonly tombstones: number;
+}
+
+function parsedRecord(payload: string): Record<string, unknown> {
+  const value: unknown = JSON.parse(payload);
+  if (!isRecord(value)) {
+    throw new Error("The replica record payload is invalid");
+  }
+  return value;
 }
 
 export function createRunnerReplicaStore(directory: string) {
@@ -123,6 +132,29 @@ export function createRunnerReplicaStore(directory: string) {
       database
         .query("UPDATE replica_manifest SET complete = 1 WHERE digest = ?")
         .run(digest);
+    },
+    readView: (entity: string, limit: number, sessionId?: string) => {
+      if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+        throw new Error("Replica view limit must be between 1 and 100");
+      }
+      if (progress().state !== "ready") {
+        throw new Error("The runner replica is still joining");
+      }
+      const stored = database
+        .query<{ payload: string }, [string]>(
+          "SELECT payload FROM replica_records WHERE entity = ? AND tombstone = 0 ORDER BY id",
+        )
+        .all(entity)
+        .map(({ payload }) => parsedRecord(payload))
+        .filter(
+          (record) =>
+            sessionId === undefined || record["session_id"] === sessionId,
+        );
+      return {
+        complete: true as const,
+        partial: true as const,
+        records: stored.slice(0, limit),
+      };
     },
     progress,
     close: () => {
