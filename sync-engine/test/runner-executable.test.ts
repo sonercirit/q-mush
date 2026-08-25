@@ -204,12 +204,15 @@ describe("runner executable downloads", () => {
       port: 0,
     });
     writeFileSync(executablePath, await executable.bytes(), { mode: 0o755 });
+    const pairingCode = "standalone-runner-pairing-code";
     const runner = Bun.spawn([executablePath], {
       cwd: directory,
       env: {
         HOME: directory,
         PATH: "",
         Q_MUSH_ENGINE_ORIGIN: `http://127.0.0.1:${String(engine.port)}`,
+        Q_MUSH_PAIRING_CODE: pairingCode,
+        Q_MUSH_PAIRING_TRANSCRIPT: "standalone-runner-test",
       },
       stderr: "pipe",
       stdout: "pipe",
@@ -218,19 +221,24 @@ describe("runner executable downloads", () => {
     try {
       const reader = runner.stdout.getReader();
       let startup = "";
-      while (!startup.includes("Physical browser pairing code:")) {
+      while (!startup.includes("Local app at ")) {
         const output = await reader.read();
         if (output.done) break;
         startup += new TextDecoder().decode(output.value);
       }
-      const code = /pairing code: ([A-Za-z\d_-]+)/u.exec(startup)?.[1];
-      expect(code).toBeDefined();
-      const pair = await fetch("http://127.0.0.1:43127/api/local/pair", {
-        headers: { "x-q-mush-pairing-code": code ?? "" },
+      const appOrigin = /Local app at (http:\/\/127\.0\.0\.1:\d+)\./u.exec(
+        startup,
+      )?.[1];
+      expect(appOrigin).toBeDefined();
+      const pair = await fetch(new URL("/api/local/pair", appOrigin), {
+        headers: {
+          "x-q-mush-pairing-code": pairingCode,
+          "x-q-mush-pairing-transcript": "standalone-runner-test",
+        },
         method: "POST",
       });
       const cookie = pair.headers.get("set-cookie")?.split(";", 1)[0] ?? "";
-      const shell = await fetch("http://127.0.0.1:43127/app", {
+      const shell = await fetch(new URL("/app", appOrigin), {
         headers: { cookie },
       }).then((response) => response.text());
       const assets = [
@@ -240,7 +248,7 @@ describe("runner executable downloads", () => {
       ].map((match) => match[1] ?? "");
       expect(assets).toHaveLength(2);
       for (const asset of assets) {
-        const response = await fetch(`http://127.0.0.1:43127/${asset}`, {
+        const response = await fetch(new URL(`/${asset}`, appOrigin), {
           headers: { cookie },
         });
         expect(response.status).toBe(200);
