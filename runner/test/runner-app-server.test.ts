@@ -119,6 +119,53 @@ describe("runner app server", () => {
     ).toBe(404);
   });
 
+  test("expires pairing challenges and locks out after five failures", () => {
+    const expired = { ...pairing, expiresAt: Date.now() - 1 };
+    expect(
+      createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+        pairing: expired,
+      })(
+        new Request("http://127.0.0.1:43127/api/local/pair", {
+          headers: {
+            "x-q-mush-pairing-code": pairing.code,
+            "x-q-mush-pairing-transcript": pairing.transcript,
+          },
+          method: "POST",
+        }),
+      ).status,
+    ).toBe(403);
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing,
+    });
+    const attempt = (code: string) =>
+      handler(
+        new Request("http://127.0.0.1:43127/api/local/pair", {
+          headers: {
+            "x-q-mush-pairing-code": code,
+            "x-q-mush-pairing-transcript": pairing.transcript,
+          },
+          method: "POST",
+        }),
+      );
+    for (let index = 0; index < 5; index += 1)
+      expect(attempt("wrong").status).toBe(403);
+    expect(attempt(pairing.code).status).toBe(403);
+  });
+
+  test("rejects prototype-key release files", () => {
+    const files: Record<string, Uint8Array<ArrayBuffer>> = {
+      ["__proto__"]: new TextEncoder().encode("unsafe"),
+    };
+    Object.setPrototypeOf(files, null);
+    const handler = createRunnerAppHandler(
+      { files, shell: release.shell },
+      "http://127.0.0.1:43127",
+    );
+    expect(
+      handler(new Request("http://127.0.0.1:43127/__proto__")).status,
+    ).toBe(404);
+  });
+
   test("does not expose authentication or replica membership endpoints", () => {
     const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
     for (const path of [

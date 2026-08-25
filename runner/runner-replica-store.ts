@@ -73,8 +73,12 @@ export function createRunnerReplicaStore(directory: string) {
     }
     return invalid;
   };
+  let blobsVerified = false;
   const progress = (): ReplicaProgress => {
-    verifyBlobs();
+    if (!blobsVerified) {
+      verifyBlobs();
+      blobsVerified = true;
+    }
     const records = count("SELECT COUNT(*) AS count FROM replica_records");
     const tombstones = count(
       "SELECT COUNT(*) AS count FROM replica_records WHERE tombstone = 1",
@@ -122,6 +126,7 @@ export function createRunnerReplicaStore(directory: string) {
       setState.run("frontier", frontier);
     },
     setManifest: (entries: readonly ReplicaBlobManifestEntry[]) => {
+      blobsVerified = false;
       database.transaction(() => {
         const expected = new Set(entries.map(({ digest }) => digest));
         const existing = database
@@ -157,6 +162,7 @@ export function createRunnerReplicaStore(directory: string) {
         .get(digest);
       if (expected?.size !== bytes.byteLength)
         throw new Error("Blob checksum is not in the replica manifest");
+      blobsVerified = false;
       renameSync(path, join(directory, "blobs", digest));
       database
         .query("UPDATE replica_manifest SET complete = 1 WHERE digest = ?")

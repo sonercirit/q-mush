@@ -24,7 +24,8 @@ export function RunnerReplicaView(): JSX.Element {
   });
   const [selected, setSelected] = createSignal<string>();
   const [failed, setFailed] = createSignal(false);
-  const [complete, setComplete] = createSignal(false);
+  const [viewComplete, setViewComplete] = createSignal(false);
+  const [replicaComplete, setReplicaComplete] = createSignal(false);
   const [paired, setPaired] = createSignal(false);
   const [pairingCode, setPairingCode] = createSignal("");
   const load = (
@@ -33,9 +34,12 @@ export function RunnerReplicaView(): JSX.Element {
     sessionId?: string,
   ): void => {
     void host
-      .read(entity, { limit: 100, ...(sessionId && { sessionId }) })
+      .read(entity, {
+        limit: 100,
+        ...(sessionId !== undefined && { sessionId }),
+      })
       .then((view) => {
-        setComplete(view.complete);
+        setViewComplete(view.complete);
         apply(view.records);
       })
       .catch(() => setFailed(true));
@@ -46,8 +50,10 @@ export function RunnerReplicaView(): JSX.Element {
     );
   };
   onMount(() => {
-    void fetch("/api/local/status").then((response) => {
+    void fetch("/api/local/status").then(async (response) => {
       if (response.status === 401) return;
+      const status: unknown = await response.json();
+      setReplicaComplete(isRecord(status) && status["complete"] === true);
       setPaired(true);
       loadSessions();
     });
@@ -79,11 +85,12 @@ export function RunnerReplicaView(): JSX.Element {
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
       <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
         <p class="font-semibold">
-          Runner replica · {complete() ? "Complete copy" : "Joining copy"}
+          Runner replica ·{" "}
+          {replicaComplete() ? "Complete copy" : "Joining copy"}
         </p>
         <p class="mt-1 text-sm">
-          {complete() ? "Complete active view" : "Partial active view"} · Read
-          only
+          {viewComplete() ? "Complete active view" : "Partial active view"} ·
+          Read only
         </p>
         <p class="mt-2 text-sm">
           Mutations are disabled because this page is reading from the runner

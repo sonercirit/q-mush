@@ -33,7 +33,16 @@ describe("runner full replica store", () => {
       records: 1,
       tombstones: 0,
     });
+    const corrupt = bytes.slice();
+    corrupt[0] = (corrupt[0] ?? 0) === 0 ? 1 : (corrupt[0] ?? 0) - 1;
+    writeFileSync(
+      join(directory, "blobs", Bun.CryptoHasher.hash("sha256", bytes, "hex")),
+      corrupt,
+    );
     store.close();
+    const reopened = createRunnerReplicaStore(directory);
+    expect(reopened.progress().state).toBe("joining");
+    reopened.close();
   });
 
   test("serves bounded active views only after the full replica is ready", async () => {

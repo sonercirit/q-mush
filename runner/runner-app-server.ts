@@ -182,7 +182,12 @@ export function createRunnerAppHandler(
       });
     }
     const name = url.pathname.slice(1);
-    if (!Object.hasOwn(release.files, name))
+    if (
+      name === "__proto__" ||
+      name === "constructor" ||
+      name === "prototype" ||
+      !Object.hasOwn(release.files, name)
+    )
       return new Response("Not found", { status: 404 });
     const bytes = release.files[name];
     if (bytes === undefined) return new Response("Not found", { status: 404 });

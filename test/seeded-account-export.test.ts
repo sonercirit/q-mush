@@ -31,6 +31,12 @@ const requiredText: Readonly<Record<string, string>> = {
   working_directory: "/seed",
 };
 
+function parsedPayload(payload: string): Record<string, unknown> {
+  const parsed: unknown = JSON.parse(payload);
+  if (!isRecord(parsed)) throw new Error("invalid exported payload");
+  return parsed;
+}
+
 function seedTable(database: Database, table: string, ordinal: number): void {
   const columns = database
     .query<
@@ -99,6 +105,30 @@ test("a seeded engine export catches up byte-completely across executors", async
       ]),
     );
     expect(exported.entityCounts).toEqual(expectedEntityCounts);
+    const expectedRunnerColumns = engine.$client
+      .query<{ name: string }, []>(
+        "SELECT name FROM pragma_table_info('runners')",
+      )
+      .all()
+      .map(({ name }) => name)
+      .filter(
+        (name) =>
+          ![
+            "setup_token_hash",
+            "setup_token_expires_at",
+            "token_digest",
+            "token_hash",
+            "is_global",
+          ].includes(name),
+      )
+      .sort();
+    const runnerPayloads = exported.records
+      .filter(({ entity }) => entity === "runners")
+      .map(({ payload }) => Object.keys(parsedPayload(payload)).sort());
+    expect(runnerPayloads).toEqual([
+      expectedRunnerColumns,
+      expectedRunnerColumns,
+    ]);
     const replicaDirectory = join(root, "replica");
     await catchUpRunnerReplica(
       replicaDirectory,
@@ -131,10 +161,7 @@ test("a seeded engine export catches up byte-completely across executors", async
     expect(actual).toEqual(expected);
     const executorIds = exported.records
       .filter(({ entity }) => entity === "agent_sessions")
-      .map(({ payload }) => {
-        const parsed: unknown = JSON.parse(payload);
-        return isRecord(parsed) ? parsed["runner_id"] : undefined;
-      });
+      .map(({ payload }) => parsedPayload(payload)["runner_id"]);
     expect(new Set(executorIds)).toEqual(new Set(["runners-1", "runners-2"]));
     for (const blob of exported.blobs) {
       expect(
