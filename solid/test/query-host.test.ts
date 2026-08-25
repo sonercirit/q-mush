@@ -11,9 +11,7 @@ describe("Solid query host", () => {
         ),
       ),
     );
-    const host = queryHostForDocument({
-      querySelector: () => document.createElement("meta"),
-    });
+    const host = queryHostForDocument({ querySelector: () => ({}) });
     expect(host.mutations).toBe(false);
     const view = await host.read("agent_sessions", { limit: 20 });
     expect(view.origin).toBe("runner");

@@ -61,9 +61,9 @@ function createQueryHost(origin: "engine" | "runner"): QueryHost {
   };
 }
 
-export function queryHostForDocument(
-  document: Pick<Document, "querySelector">,
-): QueryHost {
+export function queryHostForDocument(document: {
+  readonly querySelector: (selectors: string) => unknown;
+}): QueryHost {
   return createQueryHost(
     document.querySelector('meta[name="q-mush-host"][content="runner"]') ===
       null

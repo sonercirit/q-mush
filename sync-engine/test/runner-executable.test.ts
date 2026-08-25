@@ -221,14 +221,12 @@ describe("runner executable downloads", () => {
     try {
       const reader = runner.stdout.getReader();
       let startup = "";
-      while (!startup.includes("Local app at ")) {
+      while (!startup.includes("App: ")) {
         const output = await reader.read();
         if (output.done) break;
         startup += new TextDecoder().decode(output.value);
       }
-      const appOrigin = /Local app at (http:\/\/127\.0\.0\.1:\d+)\./u.exec(
-        startup,
-      )?.[1];
+      const appOrigin = /App: (http:\/\/127\.0\.0\.1:\d+)/u.exec(startup)?.[1];
       expect(appOrigin).toBeDefined();
       const pair = await fetch(new URL("/api/local/pair", appOrigin), {
         headers: {
