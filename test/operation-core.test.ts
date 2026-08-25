@@ -45,6 +45,13 @@ const reducer = (projection: Projection, candidate: Operation): Projection => ({
       : "invalid",
 });
 
+const initialApplyState = (): OperationApplyState<Projection> => ({
+  frontier: {},
+  pending: [],
+  projection: {},
+  applied: {},
+});
+
 describe("operation core", () => {
   test("classifies the declared partition from the entity rather than trusting input", () => {
     expect(classifyOperationPartition("agent_messages")).toBe("session");
@@ -92,13 +99,7 @@ describe("operation core", () => {
   test("buffers out-of-order arrivals and applies each operation exactly once", () => {
     const first = operation("writer-a", 1n, {}, "one");
     const second = operation("writer-a", 2n, { "writer-a": 1n }, "two");
-    const initial: OperationApplyState<Projection> = {
-      frontier: {},
-      pending: [],
-      projection: {},
-      applied: {},
-    };
-    const waiting = applyOperation(initial, second, reducer);
+    const waiting = applyOperation(initialApplyState(), second, reducer);
     expect(waiting.projection).toEqual({});
     expect(waiting.pending).toEqual([second]);
 
@@ -114,13 +115,7 @@ describe("operation core", () => {
 
   test("rejects operation identity or writer-sequence equivocation", () => {
     const first = operation("writer-a", 1n, {}, "one");
-    const initial: OperationApplyState<Projection> = {
-      frontier: {},
-      pending: [],
-      projection: {},
-      applied: {},
-    };
-    const applied = applyOperation(initial, first, reducer);
+    const applied = applyOperation(initialApplyState(), first, reducer);
     expect(() =>
       applyOperation(
         applied,
