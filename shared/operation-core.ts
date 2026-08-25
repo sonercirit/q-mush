@@ -215,11 +215,18 @@ const appendReplay = (
   }
   return { head: nextHead, count: nextCount };
 };
+export interface AppliedIdentityNode {
+  readonly key: string;
+  readonly value: string;
+  readonly priority: number;
+  readonly left: AppliedIdentityNode | undefined;
+  readonly right: AppliedIdentityNode | undefined;
+}
 export interface OperationApplyState<TProjection> {
   readonly frontier: CausalFrontier;
   readonly pending: readonly Operation[];
   readonly projection: TProjection;
-  readonly applied: Readonly<Record<string, string>>;
+  readonly applied: AppliedIdentityNode | undefined;
   readonly replayHead: ReplayEntry | undefined;
   readonly replayCount: number;
   readonly replayLastClock: HybridTimestamp | undefined;
@@ -244,13 +251,24 @@ const identityKeys = (candidate: Operation): readonly string[] => [
   `id:${candidate.operationId}`,
   `writer:${candidate.writerId}:${candidate.sequence.toString()}`,
 ];
+const findApplied = (
+  root: AppliedIdentityNode | undefined,
+  key: string,
+): string | undefined => {
+  let node = root;
+  while (node !== undefined) {
+    if (key === node.key) return node.value;
+    node = compareText(key, node.key) < 0 ? node.left : node.right;
+  }
+  return undefined;
+};
 const identityIndex = (
   state: OperationApplyState<unknown>,
   candidate: Operation,
 ): Map<string, string> => {
   const index = new Map<string, string>();
   for (const key of identityKeys(candidate)) {
-    const fingerprint = state.applied[key];
+    const fingerprint = findApplied(state.applied, key);
     if (fingerprint !== undefined) index.set(key, fingerprint);
   }
   for (const item of state.pending) {
@@ -300,14 +318,7 @@ const advanceOperations = (
   return advanced;
 };
 
-interface AppliedNode {
-  readonly key: string;
-  readonly value: string;
-  readonly priority: number;
-  readonly left: AppliedNode | undefined;
-  readonly right: AppliedNode | undefined;
-}
-const appliedRoots = new WeakMap<object, AppliedNode | undefined>();
+interface AppliedNode extends AppliedIdentityNode {}
 const appliedPriority = (key: string): number => {
   let hash = 2_166_136_261;
   for (let index = 0; index < key.length; index += 1) {
@@ -353,11 +364,11 @@ const setAppliedNode = (
   const next = { ...node, right: setAppliedNode(node.right, key, value) };
   return next.right.priority < next.priority ? rotateAppliedLeft(next) : next;
 };
-const appliedRecord = (
-  root: AppliedNode | undefined,
-): Record<string, string> => {
+export const materializeApplied = (
+  root: AppliedIdentityNode | undefined,
+): Readonly<Record<string, string>> => {
   const record: Record<string, string> = {};
-  const visit = (node: AppliedNode | undefined): void => {
+  const visit = (node: AppliedIdentityNode | undefined): void => {
     if (node === undefined) return;
     if (
       (node.left !== undefined && node.left.priority < node.priority) ||
@@ -369,19 +380,27 @@ const appliedRecord = (
     visit(node.right);
   };
   visit(root);
-  appliedRoots.set(record, root);
   return record;
 };
-const writableApplied = (
+export const appliedIdentityDepth = (
+  root: AppliedIdentityNode | undefined,
+): number =>
+  root === undefined
+    ? 0
+    : 1 +
+      Math.max(
+        appliedIdentityDepth(root.left),
+        appliedIdentityDepth(root.right),
+      );
+const appliedFromRecord = (
   source: Readonly<Record<string, string>>,
 ): AppliedNode | undefined => {
-  const known = appliedRoots.get(source);
-  if (known !== undefined || appliedRoots.has(source)) return known;
   let root: AppliedNode | undefined;
   for (const [key, value] of Object.entries(source))
     root = setAppliedNode(root, key, value);
   return root;
 };
+export const restoreAppliedIdentityIndex = appliedFromRecord;
 
 export const applyOperation = <TProjection>(
   state: OperationApplyState<TProjection>,
@@ -397,7 +416,9 @@ export const applyOperation = <TProjection>(
       throw new Error(`Operation equivocation: ${key}`);
   }
   if (
-    identityKeys(candidate).some((key) => state.applied[key] === fingerprint) ||
+    identityKeys(candidate).some(
+      (key) => findApplied(state.applied, key) === fingerprint,
+    ) ||
     state.pending.some((item) => item.operationId === candidate.operationId)
   )
     return state;
@@ -414,7 +435,7 @@ export const applyOperation = <TProjection>(
   let replayLastClock = state.replayLastClock;
   const baseProjection = state.baseProjection;
   const baseFrontier = state.baseFrontier;
-  let appliedRoot = writableApplied(state.applied);
+  let appliedRoot = state.applied;
   let remaining = [...state.pending, candidate];
 
   let ready = orderedReady(remaining, frontier);
@@ -455,7 +476,7 @@ export const applyOperation = <TProjection>(
     frontier,
     pending: remaining,
     projection,
-    applied: appliedRecord(appliedRoot),
+    applied: appliedRoot,
     replayHead,
     replayCount,
     replayLastClock,

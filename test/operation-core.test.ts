@@ -23,6 +23,7 @@ import {
 
 import {
   advanceFrontier,
+  appliedIdentityDepth,
   applyOperation,
   classifyOperationPartition,
   compareClocks,
@@ -30,6 +31,7 @@ import {
   createHybridLogicalClock,
   createOperation,
   frontierCovers,
+  materializeApplied,
   MAX_PENDING_OPERATIONS,
   MAX_REMOTE_CLOCK_DRIFT_MS,
   mergeFrontiers,
@@ -404,7 +406,8 @@ describe("operation core", () => {
       { ...dated, parents: {} },
       reducer,
     );
-    expect("id:validator-1" in appliedDate.applied).toBe(true);
+    const applied = materializeApplied(appliedDate.applied);
+    expect("id:validator-1" in applied).toBe(true);
     expect(structuredClone(appliedDate.applied)).toEqual(appliedDate.applied);
     expect(() =>
       applyOperation(
@@ -433,6 +436,28 @@ describe("operation core", () => {
     ).toThrow(/equivocation/);
   });
 
+  test("keeps sequential admission below quadratic scaling", () => {
+    const measure = (count: number): number => {
+      let state = testApplyState(0);
+      const started = performance.now();
+      for (let sequence = 1; sequence <= count; sequence += 1) {
+        const item = operation(
+          "scale",
+          BigInt(sequence),
+          sequence === 1 ? {} : { scale: BigInt(sequence - 1) },
+          "x",
+        );
+        state = applyOperation(state, item, (value) => value + 1);
+      }
+      expect(state.projection).toBe(count);
+      return performance.now() - started;
+    };
+    measure(500);
+    const smaller = measure(4_000);
+    const larger = measure(8_000);
+    expect(larger / smaller).toBeLessThan(3.2);
+  }, 20_000);
+
   test("retains every applied identity through treap rotations", () => {
     let state = initialApplyState();
     const operations = Array.from({ length: 40 }, (_, index) => {
@@ -440,7 +465,7 @@ describe("operation core", () => {
       return operation(`writer-${suffix}`, 1n, {}, `value-${suffix}`);
     });
     for (const item of operations) state = applyOperation(state, item, reducer);
-    expect(Object.keys(state.applied).sort()).toEqual(
+    expect(Object.keys(materializeApplied(state.applied)).sort()).toEqual(
       operations
         .flatMap((item) => [
           `id:${item.operationId}`,
@@ -448,6 +473,7 @@ describe("operation core", () => {
         ])
         .sort(),
     );
+    expect(appliedIdentityDepth(state.applied)).toBeLessThan(20);
     const original = operations[0];
     if (original === undefined) throw new Error("Missing operation fixture");
     expect(applyOperation(state, original, reducer)).toBe(state);
@@ -466,7 +492,7 @@ describe("operation core", () => {
     );
     const branchOperation = operation("b", 1n, {}, "two");
     const branched = applyOperation(first, branchOperation, reducer);
-    expect(Object.keys(first.applied)).toHaveLength(2);
+    expect(Object.keys(materializeApplied(first.applied))).toHaveLength(2);
     expect(applyOperation(first, branchOperation, reducer)).not.toBe(first);
     expect(branched.frontier).toEqual({ a: 1n, b: 1n });
     expect(original).toEqual(initialApplyState());

@@ -28,7 +28,7 @@ export const testApplyState = <T>(projection: T): OperationApplyState<T> => ({
   frontier: {},
   pending: [],
   projection,
-  applied: {},
+  applied: undefined,
   replayHead: undefined,
   replayCount: 0,
   replayLastClock: undefined,

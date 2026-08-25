@@ -1,5 +1,7 @@
 import {
   createOperation,
+  materializeApplied,
+  restoreAppliedIdentityIndex,
   validateOperationValue,
   type HybridTimestamp,
   type Operation,
@@ -10,10 +12,7 @@ import {
 
 type EncodedCheckpointValue = readonly [string, unknown];
 const isCheckpointObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  Object.getPrototypeOf(value) === Object.prototype;
+  value !== null && typeof value === "object" && !Array.isArray(value);
 const checkpointObject = (value: unknown): Record<string, unknown> => {
   if (!isCheckpointObject(value)) throw new Error("Invalid checkpoint object");
   return value;
@@ -199,7 +198,13 @@ const decodeReplay = (value: unknown): ReplayEntry | undefined => {
 };
 export const encodeOperationCheckpoint = <TProjection>(
   state: OperationApplyState<TProjection>,
-): string => JSON.stringify(encodeCheckpointValue(state));
+): string =>
+  JSON.stringify(
+    encodeCheckpointValue({
+      ...state,
+      applied: materializeApplied(state.applied),
+    }),
+  );
 export const decodeOperationCheckpoint = <TProjection>(
   encoded: string,
 ): OperationApplyState<TProjection> => {
@@ -227,12 +232,8 @@ export const decodeOperationCheckpoint = <TProjection>(
     Number(state["replayCount"]) < 0
   )
     throw new Error("Invalid operation checkpoint");
-  const validProjection = (value: unknown): value is TProjection => {
-    validateOperationValue(value);
-    return (
-      Array.isArray(value) && value.every((item) => typeof item === "string")
-    );
-  };
+  const validProjection = (value: unknown): value is TProjection =>
+    Array.isArray(value) && value.every((item) => typeof item === "string");
   if (!validProjection(state["projection"]))
     throw new Error("Invalid operation checkpoint projection");
   if (!validProjection(state["baseProjection"]))
@@ -241,7 +242,9 @@ export const decodeOperationCheckpoint = <TProjection>(
     frontier: bigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map(decodeOperation),
     projection: state["projection"],
-    applied: stringCheckpointRecord(state["applied"]),
+    applied: restoreAppliedIdentityIndex(
+      stringCheckpointRecord(state["applied"]),
+    ),
     replayHead: decodeReplay(state["replayHead"]),
     replayCount: Number(state["replayCount"]),
     replayLastClock:

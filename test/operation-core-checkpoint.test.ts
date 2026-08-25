@@ -13,6 +13,7 @@ import {
 } from "../shared/operation-checkpoint";
 import {
   applyOperation,
+  materializeApplied,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -59,7 +60,7 @@ describe("operation checkpoints", () => {
     for (let sequence = 1; sequence <= 3; sequence += 1)
       state = applyOperation(state, sequentialOperation("a", sequence), append);
     const checkpoint = roundTrip(state);
-    expect(Object.keys(checkpoint.applied)).toHaveLength(6);
+    expect(Object.keys(materializeApplied(checkpoint.applied))).toHaveLength(6);
     expect(
       applyOperation(checkpoint, sequentialOperation("a", 1), append),
     ).toBe(checkpoint);
@@ -144,6 +145,13 @@ describe("operation checkpoints", () => {
       requireEntry(pendingOperationEntries(copy), field)[1] = replacement;
       return copy;
     };
+    const mutatePendingClockField = (field: string, replacement: unknown) => {
+      const copy = structuredClone(pendingDecoded);
+      const clock = requireEntry(pendingOperationEntries(copy), "clock");
+      requireEntry(requireArray(requireArray(clock[1])[1]), field)[1] =
+        replacement;
+      return copy;
+    };
     const malformedClockWriter = structuredClone(pendingDecoded);
     const clockEntry = requireEntry(
       pendingOperationEntries(malformedClockWriter),
@@ -153,6 +161,9 @@ describe("operation checkpoints", () => {
       encodedPrimitive(42);
     const duplicateObjectKey = structuredClone(decoded);
     requireArray(requireArray(duplicateObjectKey)[1]).push(objectEntries[0]);
+    const wrongStateKeys = structuredClone(decoded);
+    const wrongEntries = requireArray(requireArray(wrongStateKeys)[1]);
+    wrongEntries.splice(0, 1, ["unexpected", encodedPrimitive(true)]);
     const mutations: unknown[] = [
       [decodedArray[0], [...objectEntries, ["extra", encodedPrimitive(true)]]],
       change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
@@ -160,12 +171,19 @@ describe("operation checkpoints", () => {
       change("projection", ["array", [["primitive", 42]]]),
       mutatePendingField("schemaVersion", encodedPrimitive("1")),
       mutatePendingField("schemaVersion", encodedPrimitive(true)),
+      mutatePendingField("schemaVersion", encodedPrimitive(1e300)),
+      mutatePendingClockField("physicalMs", encodedPrimitive("1")),
+      mutatePendingClockField("logical", encodedPrimitive(-1)),
       mutatePendingField("partition", encodedPrimitive("session")),
       mutatePendingField("payload", ["date", "2024-01-01"]),
       malformedClockWriter,
       duplicateObjectKey,
-      ["bigint", "01"],
-      ["date", "2024-01-01"],
+      wrongStateKeys,
+      change("pending", encodedPrimitive(null)),
+      change("replayCount", encodedPrimitive(-1)),
+      change("replayCount", encodedPrimitive(1e300)),
+      mutatePendingField("sequence", ["bigint", "01"]),
+      mutatePendingField("sequence", ["date", "2024-01-01"]),
     ];
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {
