@@ -267,8 +267,18 @@ describe("operation core", () => {
     ).toThrow(/schemaVersion/);
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;
-    for (const payload of [cyclic, () => undefined, Symbol("x"), new Map()])
-      expect(() => createOperation({ ...validationSeed, payload })).toThrow();
+    expect(() =>
+      createOperation({ ...validationSeed, payload: cyclic }),
+    ).toThrow(/must not be cyclic/);
+    expect(() =>
+      createOperation({ ...validationSeed, payload: () => undefined }),
+    ).toThrow(/Unsupported operation value/);
+    expect(() =>
+      createOperation({ ...validationSeed, payload: Symbol("x") }),
+    ).toThrow(/Unsupported operation value/);
+    expect(() =>
+      createOperation({ ...validationSeed, payload: new Map() }),
+    ).toThrow(/must be plain/);
     const symbolObject = { value: "x", [Symbol("x")]: "y" };
     expect(() =>
       createOperation({ ...validationSeed, payload: symbolObject }),
