@@ -20,6 +20,7 @@ import {
   HOME_PATH,
 } from "../shared/routes.ts";
 import { GLOBAL_WORKSPACE_ID } from "../shared/workspace-model.ts";
+import { AppLoadingCard } from "./app-loading-card.tsx";
 import { requestJson } from "./browser-http.ts";
 import { providerNotice } from "./client-notices.ts";
 import { createPromptController } from "./prompt-controller.ts";
@@ -46,6 +47,7 @@ import {
 } from "./render-debug.tsx";
 import { restartProgressNotice } from "./restart-progress.ts";
 import { createRunnerController } from "./runner-controller.ts";
+import { RunnerReplicaView } from "./runner-replica-view.tsx";
 import {
   createSessionController,
   type SessionController,
@@ -170,23 +172,6 @@ function Header(props: {
   );
 }
 
-function LoadingCard(): JSX.Element {
-  return (
-    <div
-      class="mt-8 rounded-3xl border border-white/10 bg-white/[0.06] p-5 shadow-2xl shadow-emerald-950/30 backdrop-blur-xl sm:mt-12 sm:p-8"
-      role="status"
-    >
-      <div class="flex items-center gap-4">
-        <span
-          aria-hidden="true"
-          class="size-3 animate-pulse rounded-full bg-emerald-300 shadow-[0_0_18px_rgba(110,231,183,0.8)]"
-        />
-        <p class="font-medium text-slate-200">Checking your session…</p>
-      </div>
-    </div>
-  );
-}
-
 function SessionError(props: { readonly onRetry: () => void }): JSX.Element {
   return (
     <div
@@ -292,95 +277,6 @@ function dispatchRealtimeEvent<Type extends RealtimeClientEvent["type"]>(
   },
 ): void {
   handlers[expectedType](event);
-}
-
-function RunnerReplicaView(): JSX.Element {
-  const host = queryHostForLocation(window.location);
-  const [views, setViews] = createSignal({
-    messages: [] as readonly Record<string, unknown>[],
-    sessions: [] as readonly Record<string, unknown>[],
-  });
-  const [selected, setSelected] = createSignal<string>();
-  const [failed, setFailed] = createSignal(false);
-  const load = (
-    entity: "agent_messages" | "agent_sessions",
-    apply: (records: readonly Record<string, unknown>[]) => void,
-    sessionId?: string,
-  ): void => {
-    void host
-      .read(entity, { limit: 100, ...(sessionId && { sessionId }) })
-      .then((view) => apply(view.records))
-      .catch(() => setFailed(true));
-  };
-  onMount(() => {
-    load("agent_sessions", (sessions) =>
-      setViews((value) => ({ ...value, sessions })),
-    );
-  });
-  const select = (id: string): void => {
-    setSelected(id);
-    load(
-      "agent_messages",
-      (messages) => setViews((value) => ({ ...value, messages })),
-      id,
-    );
-  };
-  return (
-    <section class="mt-8 grid gap-4" aria-label="Runner replica view">
-      <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
-        <p class="font-semibold">Runner replica · Complete copy</p>
-        <p class="mt-1 text-sm">Partial active view · Read only</p>
-        <p class="mt-2 text-sm">
-          Mutations are disabled because this page is reading from the runner
-          replica.
-        </p>
-      </div>
-      <Show
-        when={!failed()}
-        fallback={<p role="alert">The runner replica is not ready.</p>}
-      >
-        <For each={views().sessions}>
-          {(sessionRecord) => {
-            const id = String(sessionRecord["id"]);
-            const value = sessionRecord["title"];
-            const title = typeof value === "string" ? value : id;
-            return (
-              <button
-                class="rounded-xl border border-white/10 p-4 text-left"
-                onClick={() => {
-                  select(id);
-                }}
-                type="button"
-              >
-                {title}
-              </button>
-            );
-          }}
-        </For>
-        <Show when={selected()}>
-          <div class="rounded-xl border border-white/10 p-4">
-            <For each={views().messages}>
-              {(message) => {
-                const content = message["content"];
-                return (
-                  <p class="whitespace-pre-wrap">
-                    {typeof content === "string" ? content : ""}
-                  </p>
-                );
-              }}
-            </For>
-          </div>
-        </Show>
-        <button
-          class="cursor-not-allowed rounded-full border border-white/10 px-5 py-2 text-slate-500"
-          disabled
-          type="button"
-        >
-          New session unavailable in read-only replica
-        </button>
-      </Show>
-    </section>
-  );
 }
 
 function App(): JSX.Element {
@@ -630,7 +526,7 @@ function App(): JSX.Element {
               when={queryHostForLocation(window.location).origin === "runner"}
               fallback={
                 <Show
-                  fallback={<LoadingCard />}
+                  fallback={<AppLoadingCard />}
                   when={loadFailed() || session() !== undefined}
                 >
                   <Show

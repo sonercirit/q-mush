@@ -4,8 +4,6 @@ import {
 } from "../shared/active-view.ts";
 import { requestJson } from "./browser-http.ts";
 
-export type { ActiveView } from "../shared/active-view.ts";
-
 export interface QueryHost {
   readonly mutations: boolean;
   readonly origin: "engine" | "runner";
@@ -22,7 +20,7 @@ function boundedLimit(limit: number): number {
   return limit;
 }
 
-export function createQueryHost(origin: "engine" | "runner"): QueryHost {
+function createQueryHost(origin: "engine" | "runner"): QueryHost {
   return {
     mutations: origin === "engine",
     origin,

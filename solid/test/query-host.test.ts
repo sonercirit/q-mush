@@ -1,5 +1,5 @@
 import { describe, expect, test, vi } from "vitest";
-import { createQueryHost, queryHostForLocation } from "../query-host.ts";
+import { queryHostForLocation } from "../query-host.ts";
 
 describe("Solid query host", () => {
   test("selects the loopback runner and returns a labeled bounded partial view", async () => {
@@ -29,7 +29,9 @@ describe("Solid query host", () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     await expect(
-      createQueryHost("engine").read("agent_sessions", { limit: 101 }),
+      queryHostForLocation({ hostname: "engine.test" }).read("agent_sessions", {
+        limit: 101,
+      }),
     ).rejects.toThrow("between 1 and 100");
     expect(fetcher).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
