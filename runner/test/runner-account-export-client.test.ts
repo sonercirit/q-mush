@@ -40,6 +40,15 @@ function requestPath(request: Request): string {
   return new URL(request.url).pathname;
 }
 
+function exportRecord(id: string, payloadId = id) {
+  return {
+    entity: "users",
+    id,
+    payload: JSON.stringify({ id: payloadId }),
+    tombstone: false,
+  };
+}
+
 function blobTransferResponse(
   request: Request,
   bytes: Uint8Array,
@@ -65,16 +74,9 @@ test("restarts pagination when the account changes between pages", async () => {
       const revision = revisions.shift() ?? "2".repeat(64);
       return Response.json({
         blobs: offset === 0 ? [{ digest, size: bytes.length }] : [],
-        done: revision === "2".repeat(64) && offset > 0,
         nextCursor: String(offset + 1),
-        records: [
-          {
-            entity: "users",
-            id: `${revision}-${String(offset)}`,
-            payload: JSON.stringify({ id: `${revision}-${String(offset)}` }),
-            tombstone: false,
-          },
-        ],
+        done: revision.endsWith("2") && offset > 0,
+        records: [exportRecord(`${revision}-${String(offset)}`)],
         revision,
       });
     }
@@ -99,15 +101,13 @@ test("converges after sustained revision changes during pagination", async () =>
     const revisionNumber = Math.min(requests, 10);
     return Response.json({
       blobs: [],
-      done: revisionNumber === 10 && offset > 0,
-      nextCursor: String(offset + 1),
+      nextCursor: `${String(offset + 1)}`,
+      done: offset > 0 && revisionNumber >= 10,
       records: [
-        {
-          entity: "users",
-          id: `${String(revisionNumber)}-${String(offset)}`,
-          payload: JSON.stringify({ id: String(revisionNumber) }),
-          tombstone: false,
-        },
+        exportRecord(
+          `${String(revisionNumber)}-${String(offset)}`,
+          String(revisionNumber),
+        ),
       ],
       revision: String(revisionNumber).padStart(64, "0"),
     });

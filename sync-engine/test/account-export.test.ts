@@ -43,6 +43,19 @@ function createAttachmentDatabase(): AppDatabase {
 function expectDatabaseUsable(database: AppDatabase): void {
   expect(database.$client.query("SELECT 1").get()).toEqual({ "1": 1 });
 }
+function expectPresenceDoesNotChangeRevision(
+  database: AppDatabase,
+  revision: string,
+  cursor: string | undefined,
+): void {
+  const updatedAt = database.$client
+    .query<{ updatedAt: number }, []>(
+      "SELECT updated_at AS updatedAt FROM runners WHERE id = 'r'",
+    )
+    .get()?.updatedAt;
+  expect(updatedAt).toBe(1);
+  expect(exportAccountPage(database, "u", cursor, 1).revision).toBe(revision);
+}
 
 describe("legacy account export", () => {
   test("bounds each database export page", () => {
@@ -137,15 +150,10 @@ describe("legacy account export", () => {
     store.setOnline("r", "u", 2, true);
     const online = store.list("u", 2)[0];
     expect(online).toMatchObject({ id: "r", lastSeenAt: 2, status: "online" });
-    expect(
-      database.$client
-        .query<{ updatedAt: number }, []>(
-          "SELECT updated_at AS updatedAt FROM runners WHERE id = 'r'",
-        )
-        .get(),
-    ).toEqual({ updatedAt: 1 });
-    expect(exportAccountPage(database, "u", first.nextCursor, 1).revision).toBe(
+    expectPresenceDoesNotChangeRevision(
+      database,
       first.revision,
+      first.nextCursor,
     );
 
     store.setOnline("r", "u", 3, false);
@@ -155,15 +163,10 @@ describe("legacy account export", () => {
       lastSeenAt: 0,
       status: "offline",
     });
-    expect(
-      database.$client
-        .query<{ updatedAt: number }, []>(
-          "SELECT updated_at AS updatedAt FROM runners WHERE id = 'r'",
-        )
-        .get(),
-    ).toEqual({ updatedAt: 1 });
-    expect(exportAccountPage(database, "u", first.nextCursor, 1).revision).toBe(
+    expectPresenceDoesNotChangeRevision(
+      database,
       first.revision,
+      first.nextCursor,
     );
   });
 
