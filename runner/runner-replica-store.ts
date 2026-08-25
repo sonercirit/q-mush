@@ -17,7 +17,11 @@ export interface ReplicaBlobManifestEntry {
 }
 
 export interface ReplicaProgress {
+  readonly elapsedMilliseconds?: number;
+  readonly previousRevision?: string;
   readonly records: number;
+  readonly restartCount?: number;
+  readonly revision?: string;
   readonly state: "joining" | "ready";
   readonly tombstones: number;
 }
@@ -28,6 +32,24 @@ function parsedRecord(payload: string): Record<string, unknown> {
     throw new Error("The replica record payload is invalid");
   }
   return value;
+}
+
+function parsedRetry(value: string | undefined): Partial<ReplicaProgress> {
+  if (value === undefined) return {};
+  const parsed: unknown = JSON.parse(value);
+  if (!isRecord(parsed)) return {};
+  const elapsedMilliseconds = parsed["elapsedMilliseconds"];
+  const previousRevision = parsed["previousRevision"];
+  const restartCount = parsed["restartCount"];
+  const revision = parsed["revision"];
+  if (
+    typeof elapsedMilliseconds !== "number" ||
+    typeof previousRevision !== "string" ||
+    typeof restartCount !== "number" ||
+    typeof revision !== "string"
+  )
+    return {};
+  return { elapsedMilliseconds, previousRevision, restartCount, revision };
 }
 
 export function createRunnerReplicaStore(directory: string) {
@@ -45,7 +67,9 @@ export function createRunnerReplicaStore(directory: string) {
   database.run(
     "CREATE TABLE IF NOT EXISTS replica_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
   );
-  const state = database.query("SELECT value FROM replica_state WHERE key = ?");
+  const state = database.query<{ value: string }, [string]>(
+    "SELECT value FROM replica_state WHERE key = ?",
+  );
   const setState = database.query(
     "INSERT INTO replica_state (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
   );
@@ -89,6 +113,7 @@ export function createRunnerReplicaStore(directory: string) {
     const hasFrontier = state.get("frontier") !== null;
     const hasManifest = state.get("manifest") !== null;
     return {
+      ...parsedRetry(state.get("retry")?.value),
       records,
       state: hasFrontier && hasManifest && missing === 0 ? "ready" : "joining",
       tombstones,
@@ -215,6 +240,12 @@ export function createRunnerReplicaStore(directory: string) {
         records,
       };
     },
+    recordRetry: (retry: {
+      readonly elapsedMilliseconds: number;
+      readonly previousRevision: string;
+      readonly restartCount: number;
+      readonly revision: string;
+    }) => setState.run("retry", JSON.stringify(retry)),
     progress,
     close: () => {
       database.close();

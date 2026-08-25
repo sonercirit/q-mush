@@ -570,13 +570,21 @@ async function run(): Promise<void> {
   );
 
   const replicaDirectory = join(runnerDirectory, "replica");
+  const replica = createRunnerReplicaStore(replicaDirectory);
   if (configuration !== undefined && configurationPath !== undefined) {
     void catchUpAccountExport(
       replicaDirectory,
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
-      ({ elapsedMilliseconds, previousRevision, restartCount, revision }) => {
+      (retry) => {
+        replica.recordRetry(retry);
+        const {
+          elapsedMilliseconds,
+          previousRevision,
+          restartCount,
+          revision,
+        } = retry;
         console.warn(
           `Replica catch-up joining: revision changed ${previousRevision} -> ${revision}; restart ${String(restartCount)}, elapsed ${String(elapsedMilliseconds)}ms`,
         );
@@ -585,7 +593,6 @@ async function run(): Promise<void> {
       console.error(`Replica catch-up deferred: ${describeError(error)}`);
     });
   }
-  const replica = createRunnerReplicaStore(replicaDirectory);
   const identity = createAnonymousRunnerIdentity(
     replicaDirectory,
     Date.now(),

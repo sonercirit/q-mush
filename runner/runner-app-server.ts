@@ -22,7 +22,13 @@ function contentType(pathname: string): string {
 export type RunnerAppPairing = AnonymousRunnerPairing;
 
 export interface RunnerAppViewSource extends ActiveViewReader {
-  readonly progress: () => { readonly state: "joining" | "ready" };
+  readonly progress: () => {
+    readonly elapsedMilliseconds?: number;
+    readonly previousRevision?: string;
+    readonly restartCount?: number;
+    readonly revision?: string;
+    readonly state: "joining" | "ready";
+  };
   readonly readBlob?: (digest: string) => Blob;
 }
 
@@ -104,13 +110,17 @@ export function createRunnerAppHandler(
         status: 204,
       });
     }
-    if (
-      options?.pairing !== undefined &&
-      !equalSecret(
+    const hasBrowserGrant =
+      options?.pairing === undefined ||
+      equalSecret(
         browserCookie(request.headers.get("cookie")),
         options.pairing.browserGrant,
-      )
-    ) {
+      );
+    const browserShell =
+      request.method === "GET" || request.method === "HEAD"
+        ? url.pathname === "/" || url.pathname === "/app"
+        : false;
+    if (!hasBrowserGrant && !browserShell) {
       return new Response("Pairing required", { status: 401 });
     }
     if (
@@ -160,8 +170,19 @@ export function createRunnerAppHandler(
       }
     }
     if (request.method === "GET" && url.pathname === "/api/local/status") {
+      const progress = options?.views?.progress();
       return Response.json({
-        complete: options?.views?.progress().state === "ready",
+        complete: progress?.state === "ready",
+        ...(progress?.elapsedMilliseconds === undefined
+          ? {}
+          : {
+              retry: {
+                elapsedMilliseconds: progress.elapsedMilliseconds,
+                previousRevision: progress.previousRevision,
+                restartCount: progress.restartCount,
+                revision: progress.revision,
+              },
+            }),
         mutations: false,
         origin: "runner",
         partial: true,

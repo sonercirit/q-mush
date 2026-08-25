@@ -60,6 +60,49 @@ describe("runner app server", () => {
     expect(preflight.headers.has("access-control-allow-origin")).toBe(false);
   });
 
+  test("serves the pairing shell before granting API access", async () => {
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing,
+    });
+    const shell = handler(new Request("http://127.0.0.1:43127/app"));
+    expect(shell.status).toBe(200);
+    expect(await shell.text()).toContain("Local Q Mush");
+    expect(
+      handler(new Request("http://127.0.0.1:43127/api/local/status")).status,
+    ).toBe(401);
+  });
+
+  test("exposes persisted retry progress to a paired browser", async () => {
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing,
+      views: {
+        progress: () => ({
+          elapsedMilliseconds: 123,
+          previousRevision: "old",
+          records: 0,
+          restartCount: 2,
+          revision: "new",
+          state: "joining",
+          tombstones: 0,
+        }),
+        readView: () => ({ complete: false, partial: true, records: [] }),
+      },
+    });
+    const response = handler(
+      new Request("http://127.0.0.1:43127/api/local/status", {
+        headers: { cookie: "qm_browser=grant" },
+      }),
+    );
+    expect(await response.json()).toMatchObject({
+      retry: {
+        elapsedMilliseconds: 123,
+        previousRevision: "old",
+        restartCount: 2,
+        revision: "new",
+      },
+    });
+  });
+
   test("serves paired replica blobs without cross-origin CORS", async () => {
     const bytes = new TextEncoder().encode("replica attachment");
     const digest = sha256(bytes);
