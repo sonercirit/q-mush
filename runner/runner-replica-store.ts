@@ -93,7 +93,11 @@ export function createRunnerReplicaStore(directory: string) {
           );
       })();
     },
-    setFrontier: (frontier: string) => setState.run("frontier", frontier),
+    setFrontier: (frontier: string, verifiedFrontier: string) => {
+      if (frontier !== verifiedFrontier)
+        throw new Error("Replica frontier checksum is invalid");
+      setState.run("frontier", frontier);
+    },
     setManifest: (entries: readonly ReplicaBlobManifestEntry[]) => {
       database.transaction(() => {
         const expected = new Set(entries.map(({ digest }) => digest));
@@ -108,7 +112,7 @@ export function createRunnerReplicaStore(directory: string) {
           }
         }
         const insert = database.query(
-          "INSERT INTO replica_manifest (digest, size) VALUES (?, ?) ON CONFLICT (digest) DO UPDATE SET size = excluded.size",
+          "INSERT INTO replica_manifest (digest, size, complete) VALUES (?, ?, 0) ON CONFLICT (digest) DO UPDATE SET size = excluded.size, complete = CASE WHEN replica_manifest.size = excluded.size THEN replica_manifest.complete ELSE 0 END",
         );
         for (const entry of entries) insert.run(entry.digest, entry.size);
         setState.run("manifest", "complete");
@@ -140,12 +144,15 @@ export function createRunnerReplicaStore(directory: string) {
         throw new Error("Replica blob is unavailable");
       }
       const entry = database
-        .query<{ complete: number }, [string]>(
-          "SELECT complete FROM replica_manifest WHERE digest = ?",
+        .query<{ complete: number; size: number }, [string]>(
+          "SELECT complete, size FROM replica_manifest WHERE digest = ?",
         )
         .get(digest);
-      if (entry?.complete !== 1) throw new Error("Replica blob is unavailable");
-      return Bun.file(join(directory, "blobs", digest));
+      const file = Bun.file(join(directory, "blobs", digest));
+      if (entry?.complete !== 1 || file.size !== entry.size) {
+        throw new Error("Replica blob is unavailable");
+      }
+      return file;
     },
     readView: (entity: string, limit: number, sessionId?: string) => {
       if (!validActiveViewLimit(limit)) {
@@ -164,10 +171,11 @@ export function createRunnerReplicaStore(directory: string) {
           (record) =>
             sessionId === undefined || record["session_id"] === sessionId,
         );
+      const records = stored.slice(0, limit);
       return {
-        complete: true as const,
+        complete: records.length === stored.length,
         partial: true as const,
-        records: stored.slice(0, limit),
+        records,
       };
     },
     progress,

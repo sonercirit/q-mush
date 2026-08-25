@@ -18,7 +18,7 @@ describe("runner full replica store", () => {
     store.applyRecords([
       { entity: "agent_sessions", id: "s1", payload: "{}", tombstone: false },
     ]);
-    store.setFrontier("frontier-1");
+    store.setFrontier("frontier-1", "frontier-1");
     store.setManifest([
       {
         digest: Bun.CryptoHasher.hash("sha256", bytes, "hex"),
@@ -62,7 +62,7 @@ describe("runner full replica store", () => {
       { entity: "agent_sessions", id: "gone", payload: "{}", tombstone: true },
     ]);
     expect(() => store.readView("agent_sessions", 10)).toThrow("joining");
-    store.setFrontier("frontier");
+    store.setFrontier("frontier", "frontier");
     store.setManifest([]);
     expect(store.readView("agent_sessions", 1)).toEqual({
       complete: true,

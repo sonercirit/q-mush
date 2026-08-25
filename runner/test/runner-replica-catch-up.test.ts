@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import {
   ACCOUNT_EXPORT_ENTITIES,
+  accountExportFrontier,
   type AccountExport,
 } from "../../shared/account-export.ts";
 import { sha256 } from "../../shared/sha256.ts";
@@ -14,13 +15,22 @@ import {
 
 const bytes = new TextEncoder().encode("attachment bytes");
 const digest = sha256(bytes);
-const inventory: Omit<AccountExport, "blobs"> = {
+const inventoryBase = {
   entities: ACCOUNT_EXPORT_ENTITIES,
-  frontier: "complete-frontier",
+  entityCounts: Object.fromEntries(
+    ACCOUNT_EXPORT_ENTITIES.map((entity) => [
+      entity,
+      entity === "agent_messages" ? 1 : 0,
+    ]),
+  ),
   manifest: [{ digest, size: bytes.length }],
   records: [
     { entity: "agent_messages", id: "m", payload: "{}", tombstone: false },
   ],
+};
+const inventory: Omit<AccountExport, "blobs"> = {
+  ...inventoryBase,
+  frontier: accountExportFrontier(inventoryBase),
 };
 
 function createDirectory(): string {
@@ -34,7 +44,7 @@ function createSource(blob: CatchUpSource["blob"]): CatchUpSource {
 async function catchUp(
   directory: string,
   source: CatchUpSource,
-  availableBytes = 100,
+  availableBytes = 20_000_000,
 ) {
   return catchUpRunnerReplica(directory, source, availableBytes);
 }

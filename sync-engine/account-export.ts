@@ -25,6 +25,7 @@ import { sha256 } from "../shared/sha256.ts";
 
 import {
   ACCOUNT_EXPORT_ENTITIES,
+  accountExportFrontier,
   type AccountExport,
   type AccountExportBlob,
   type AccountExportRecord,
@@ -48,19 +49,70 @@ const ordinaryTables = [
   agentMessages,
 ] as const;
 
-function publicCredentialColumns() {
+const PUBLIC_CREDENTIAL_COLUMNS = [
+  "id",
+  "userId",
+  "provider",
+  "providerAccountId",
+  "apiFormat",
+  "label",
+  "source",
+  "requiresReauthentication",
+  "isDefault",
+  "isGlobal",
+  "createdAt",
+  "updatedAt",
+  "createdById",
+  "updatedById",
+  "isDeleted",
+] as const;
+const PUBLIC_RUNNER_COLUMNS = [
+  "id",
+  "userId",
+  "name",
+  "machineFingerprint",
+  "platform",
+  "architecture",
+  "activationGeneration",
+  "activationId",
+  "activationPhase",
+  "activationRestartId",
+  "activationLifecycle",
+  "activationLifecycleSettled",
+  "activationSourceId",
+  "activationTargetId",
+  "activationTargetGeneration",
+  "activationReservationId",
+  "activationReservationGeneration",
+  "activationReservationSourceId",
+  "activationMachineFingerprint",
+  "activationPlatform",
+  "activationArchitecture",
+  "activationName",
+  "lastSeenAt",
+  "isDefault",
+  "createdAt",
+  "updatedAt",
+  "createdById",
+  "updatedById",
+  "isDeleted",
+] as const;
+function allowedColumns(table: AnySQLiteTable, names: readonly string[]) {
+  const columns = getTableColumns(table);
   return Object.fromEntries(
-    Object.entries(getTableColumns(providerCredentials)).filter(
-      ([key]) => key !== "encryptedCredential" && key !== "baseUrl",
-    ),
+    names.map((name) => {
+      const column = columns[name];
+      if (column === undefined)
+        throw new Error(`Unknown exported column ${name}`);
+      return [name, column];
+    }),
   );
 }
+function publicCredentialColumns() {
+  return allowedColumns(providerCredentials, PUBLIC_CREDENTIAL_COLUMNS);
+}
 function publicRunnerColumns() {
-  return Object.fromEntries(
-    Object.entries(getTableColumns(runners)).filter(
-      ([key]) => key !== "tokenHash" && key !== "tokenDigest",
-    ),
-  );
+  return allowedColumns(runners, PUBLIC_RUNNER_COLUMNS);
 }
 function rows(
   database: AppDatabase,
@@ -122,14 +174,21 @@ export function exportAccount(
   const manifest = [...blobs.values()]
     .map(({ digest, size }) => ({ digest, size }))
     .sort((a, b) => a.digest.localeCompare(b.digest));
-  const frontier = sha256(
-    `${JSON.stringify(records)}${JSON.stringify(manifest)}`,
+  const entityCounts = Object.fromEntries(
+    ACCOUNT_EXPORT_ENTITIES.map((entity) => [
+      entity,
+      records.filter((record) => record.entity === entity).length,
+    ]),
   );
-  return {
-    blobs: [...blobs.values()],
+  const inventory = {
     entities: ACCOUNT_EXPORT_ENTITIES,
-    frontier,
+    entityCounts,
     manifest,
     records,
+  };
+  return {
+    ...inventory,
+    blobs: [...blobs.values()],
+    frontier: accountExportFrontier(inventory),
   };
 }

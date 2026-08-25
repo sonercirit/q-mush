@@ -17,10 +17,14 @@ const pairedHandler = (identity: ReturnType<typeof temporaryIdentity>) =>
   createRunnerAppHandler(release, appOrigin, { pairing: identity.pairing });
 const browserRequest = (path: string, cookie = "") =>
   new Request(`${appOrigin}${path}`, { headers: { cookie } });
-const pairingRequest = (code: string) =>
+const pairingRequest = (code: string, transcript: string) =>
   new Request(`${appOrigin}/api/local/pair`, {
     method: "POST",
-    headers: { origin: appOrigin, "x-q-mush-pairing-code": code },
+    headers: {
+      origin: appOrigin,
+      "x-q-mush-pairing-code": code,
+      "x-q-mush-pairing-transcript": transcript,
+    },
   });
 
 describe("anonymous runner genesis and browser pairing", () => {
@@ -46,13 +50,22 @@ describe("anonymous runner genesis and browser pairing", () => {
     const handler = pairedHandler(identity);
     const initialStatus = handler(browserRequest("/app")).status;
     expect(initialStatus).toBe(401);
-    const rejected = handler(pairingRequest("wrong-code"));
+    const rejected = handler(
+      pairingRequest("wrong-code", identity.pairing.transcript),
+    );
     expect(rejected.status).toBe(403);
-    const granted = handler(pairingRequest(identity.pairing.code));
+    const granted = handler(
+      pairingRequest(identity.pairing.code, identity.pairing.transcript),
+    );
     expect(granted.status).toBe(204);
     const cookie = granted.headers.get("set-cookie");
     expect(cookie).toContain("HttpOnly");
     expect(handler(browserRequest("/app", cookie ?? "")).status).toBe(200);
+    expect(
+      handler(
+        pairingRequest(identity.pairing.code, identity.pairing.transcript),
+      ).status,
+    ).toBe(403);
     expect(handler(browserRequest("/unpaired-app")).status).toBe(401);
   });
 

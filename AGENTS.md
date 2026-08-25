@@ -169,6 +169,14 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
+- Stage-1 local replicas accept only schema-validated, entity-counted,
+  checksum-bound account inventories; readiness rechecks manifests/blobs,
+  reserves SQLite/WAL plus incoming/install space, and bounded views label
+  truncation incomplete. Engine export columns are allow-listed and blobs
+  download separately/resumably. Runner catch-up is background/non-fatal; its
+  loopback app uses an ephemeral collision-free port unless configured. Physical
+  pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
+  checked, and bearer codes are never logged.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,

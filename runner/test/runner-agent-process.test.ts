@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { expect, test } from "vitest";
 import {
   ACCOUNT_EXPORT_ENTITIES,
+  accountExportFrontier,
   type AccountExport,
 } from "../../shared/account-export.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
@@ -126,27 +127,37 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
     fetch: (request, bunServer) => {
       const pathname = new URL(request.url).pathname;
       if (pathname === "/api/runner/account-export") {
-        return Response.json(
-          options.accountExport === undefined
-            ? {
-                blobs: [],
-                entities: ACCOUNT_EXPORT_ENTITIES,
-                frontier: "process-frontier",
-                manifest: [],
-                records: [],
-              }
-            : {
-                ...options.accountExport,
-                entities: ACCOUNT_EXPORT_ENTITIES,
-                frontier: "process-frontier",
-                manifest: options.accountExport.blobs.map(
-                  ({ digest, size }) => ({
-                    digest,
-                    size,
-                  }),
-                ),
-              },
+        const records = options.accountExport?.records ?? [];
+        const manifest = (options.accountExport?.blobs ?? []).map(
+          ({ digest, size }) => ({ digest, size }),
         );
+        const entityCounts = Object.fromEntries(
+          ACCOUNT_EXPORT_ENTITIES.map((entity) => [
+            entity,
+            records.filter((record) => record.entity === entity).length,
+          ]),
+        );
+        const inventory = {
+          entities: ACCOUNT_EXPORT_ENTITIES,
+          entityCounts,
+          manifest,
+          records,
+        };
+        return Response.json({
+          ...inventory,
+          frontier: accountExportFrontier(inventory),
+        });
+      }
+      if (pathname.startsWith("/api/runner/account-export/blob/")) {
+        const digest = pathname.slice(
+          "/api/runner/account-export/blob/".length,
+        );
+        const blob = options.accountExport?.blobs.find(
+          (entry) => entry.digest === digest,
+        );
+        return blob === undefined
+          ? new Response("Not found", { status: 404 })
+          : new Response(Uint8Array.fromBase64(blob.data));
       }
       if (pathname === "/api/runner/realtime") {
         return bunServer.upgrade(request, {
@@ -264,7 +275,16 @@ function spawnRunner(configurationPath: string): RunnerChild {
       "--restart-id",
       "process-restart",
     ],
-    { stderr: "pipe", stdout: "pipe" },
+    {
+      env: {
+        ...process.env,
+        Q_MUSH_LOCAL_APP_PORT: "43127",
+        Q_MUSH_PAIRING_CODE: "process-pairing-code",
+        Q_MUSH_PAIRING_TRANSCRIPT: "process-transcript",
+      },
+      stderr: "pipe",
+      stdout: "pipe",
+    },
   );
 }
 
@@ -368,17 +388,9 @@ test("a paired client reads every exported entity and attachment after engine ki
       ),
     ).toBe(true);
     setup.server.stop();
-    const reader = setup.child.stdout.getReader();
-    let output = "";
-    while (!output.includes("Physical browser pairing code:")) {
-      const chunk = await reader.read();
-      if (chunk.done) break;
-      output += new TextDecoder().decode(chunk.value);
-    }
-    const code = /pairing code: ([A-Za-z\d_-]+)/u.exec(output)?.[1];
-    expect(code).toBeDefined();
     const pairHeaders = new Headers({
-      "x-q-mush-pairing-code": code ?? "",
+      "x-q-mush-pairing-code": "process-pairing-code",
+      "x-q-mush-pairing-transcript": "process-transcript",
     });
     const pair = await fetch(
       new URL("/api/local/pair", "http://127.0.0.1:43127"),

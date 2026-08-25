@@ -629,34 +629,47 @@ async function run(): Promise<void> {
 
   const replicaDirectory = join(runnerDirectory, "replica");
   if (configuration !== undefined && configurationPath !== undefined) {
-    await catchUpAccountExport(
+    void catchUpAccountExport(
       replicaDirectory,
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
-    );
+    ).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`Replica catch-up deferred: ${message}`);
+    });
   }
   const replica = createRunnerReplicaStore(replicaDirectory);
-  const identity = createAnonymousRunnerIdentity(replicaDirectory);
-  const appOrigin = "http://127.0.0.1:43127";
+  const identity = createAnonymousRunnerIdentity(
+    replicaDirectory,
+    Date.now(),
+    process.env["Q_MUSH_PAIRING_CODE"],
+    process.env["Q_MUSH_PAIRING_TRANSCRIPT"],
+  );
+  const requestedAppPort = Number(process.env["Q_MUSH_LOCAL_APP_PORT"] ?? "0");
+  let handler: ((request: Request) => Response) | undefined;
   const app = Bun.serve({
-    fetch: createRunnerAppHandler(
-      embeddedClientRelease(
-        typeof Q_MUSH_CLIENT_RELEASE === "undefined"
-          ? undefined
-          : Q_MUSH_CLIENT_RELEASE,
-      ),
-      appOrigin,
-      {
-        pairing: identity.pairing,
-        views: replica,
-      },
-    ),
+    fetch(request) {
+      handler ??= createRunnerAppHandler(
+        embeddedClientRelease(
+          typeof Q_MUSH_CLIENT_RELEASE === "undefined"
+            ? undefined
+            : Q_MUSH_CLIENT_RELEASE,
+        ),
+        `http://127.0.0.1:${String(app.port)}`,
+        { pairing: identity.pairing, views: replica },
+      );
+      return handler(request);
+    },
     hostname: "127.0.0.1",
-    port: 43127,
+    port:
+      Number.isSafeInteger(requestedAppPort) && requestedAppPort >= 0
+        ? requestedAppPort
+        : 0,
   });
+  const appOrigin = `http://127.0.0.1:${String(app.port)}`;
   console.log(`Q Mush local app listening at ${appOrigin}.`);
-  console.log(`Physical browser pairing code: ${identity.pairing.code}`);
+  console.log(`Physical pairing transcript: ${identity.pairing.transcript}.`);
   await containers.recoverTracked();
   try {
     if (configuration === undefined || configurationPath === undefined) {

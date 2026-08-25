@@ -19,6 +19,7 @@ import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
   PROMPTS_PATH,
+  RUNNER_ACCOUNT_EXPORT_BLOB_PATH,
   RUNNER_ACCOUNT_EXPORT_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
@@ -444,9 +445,37 @@ export function createRequestHandler(
         if (request.method !== "GET")
           return createMethodNotAllowedResponse("GET");
         const account = runners.runnerAccount(request);
-        return account === undefined
-          ? new Response("Unauthorized", { status: 401 })
-          : Response.json(exportAccount(database, account.userId));
+        if (account === undefined)
+          return new Response("Unauthorized", { status: 401 });
+        const exported = exportAccount(database, account.userId);
+        return Response.json({
+          entities: exported.entities,
+          entityCounts: exported.entityCounts,
+          frontier: exported.frontier,
+          manifest: exported.manifest,
+          records: exported.records,
+        });
+      }
+      if (pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)) {
+        if (request.method !== "GET")
+          return createMethodNotAllowedResponse("GET");
+        const account = runners.runnerAccount(request);
+        if (account === undefined)
+          return new Response("Unauthorized", { status: 401 });
+        const digest = pathname.slice(
+          RUNNER_ACCOUNT_EXPORT_BLOB_PATH.length + 1,
+        );
+        const blob = exportAccount(database, account.userId).blobs.find(
+          (entry) => entry.digest === digest,
+        );
+        return blob === undefined
+          ? new Response("Not found", { status: 404 })
+          : new Response(Uint8Array.fromBase64(blob.data), {
+              headers: {
+                "content-length": String(blob.size),
+                "content-type": "application/octet-stream",
+              },
+            });
       }
       if (pathname === AUTH_GOOGLE_PATH) {
         return googleAuth.begin(request);

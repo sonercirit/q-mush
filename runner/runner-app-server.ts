@@ -1,3 +1,8 @@
+import { timingSafeEqual } from "node:crypto";
+import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
+import type { ActiveViewReader } from "../shared/active-view.ts";
+import { isSha256Digest } from "../shared/digest.ts";
+
 export interface RunnerAppRelease {
   readonly files: Readonly<Record<string, Uint8Array<ArrayBuffer>>>;
   readonly shell: string;
@@ -15,11 +20,9 @@ function contentType(pathname: string): string {
 export interface RunnerAppPairing {
   readonly browserGrant: string;
   readonly code: string;
+  readonly expiresAt: number;
+  readonly transcript: string;
 }
-
-import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
-import type { ActiveViewReader } from "../shared/active-view.ts";
-import { isSha256Digest } from "../shared/digest.ts";
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
@@ -45,6 +48,23 @@ export function createRunnerAppHandler(
   ) {
     throw new Error("The runner app origin must be HTTP loopback");
   }
+  let paired = false;
+  let failedPairings = 0;
+  const equalSecret = (candidate: string | null, secret: string): boolean => {
+    if (candidate === null) return false;
+    const actual = Buffer.from(candidate);
+    const expectedSecret = Buffer.from(secret);
+    return (
+      actual.length === expectedSecret.length &&
+      timingSafeEqual(actual, expectedSecret)
+    );
+  };
+  const browserCookie = (header: string | null): string | null =>
+    header
+      ?.split(";")
+      .map((part) => part.trim())
+      .find((part) => part.startsWith("qm_browser="))
+      ?.slice(11) ?? null;
   return (request) => {
     const url = new URL(request.url);
     if (url.origin !== expected.origin) {
@@ -58,11 +78,23 @@ export function createRunnerAppHandler(
       if (options?.pairing === undefined) {
         return new Response("Not found", { status: 404 });
       }
-      if (
-        request.headers.get("x-q-mush-pairing-code") !== options.pairing.code
-      ) {
+      const valid =
+        !paired &&
+        failedPairings < 5 &&
+        Date.now() <= options.pairing.expiresAt &&
+        equalSecret(
+          request.headers.get("x-q-mush-pairing-code"),
+          options.pairing.code,
+        ) &&
+        equalSecret(
+          request.headers.get("x-q-mush-pairing-transcript"),
+          options.pairing.transcript,
+        );
+      if (!valid) {
+        failedPairings += 1;
         return new Response("Pairing rejected", { status: 403 });
       }
+      paired = true;
       return new Response(null, {
         headers: {
           "set-cookie": `qm_browser=${options.pairing.browserGrant}; HttpOnly; SameSite=Strict; Path=/`,
@@ -72,8 +104,10 @@ export function createRunnerAppHandler(
     }
     if (
       options?.pairing !== undefined &&
-      request.headers.get("cookie")?.split(";", 1)[0] !==
-        `qm_browser=${options.pairing.browserGrant}`
+      !equalSecret(
+        browserCookie(request.headers.get("cookie")),
+        options.pairing.browserGrant,
+      )
     ) {
       return new Response("Pairing required", { status: 401 });
     }
@@ -139,6 +173,8 @@ export function createRunnerAppHandler(
       return new Response(request.method === "HEAD" ? null : release.shell, {
         headers: {
           "cache-control": "no-cache",
+          "content-security-policy":
+            "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'",
           "content-type": "text/html; charset=utf-8",
           "x-content-type-options": "nosniff",
         },
