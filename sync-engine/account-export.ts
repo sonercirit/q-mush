@@ -24,9 +24,6 @@ import { parseSerializedArray } from "../shared/serialized-array.ts";
 import { sha256 } from "../shared/sha256.ts";
 
 import {
-  accountExportFrontier,
-  createAccountExportInventory,
-  type AccountExport,
   type AccountExportBlob,
   type AccountExportRecord,
 } from "../shared/account-export.ts";
@@ -239,30 +236,4 @@ export function exportAccountBlob(
     page = exportAccountPage(database, userId, page.nextOffset);
   }
   return page.blobs.find((entry) => entry.digest === digest);
-}
-
-export function exportAccount(
-  database: AppDatabase,
-  userId: string,
-): AccountExport {
-  const accumulator = createExportAccumulator();
-  const { blobs, records } = accumulator;
-  let offset = 0;
-  let done = false;
-  while (!done) {
-    const page = exportAccountPage(database, userId, offset);
-    records.push(...page.records);
-    for (const blob of page.blobs) blobs.set(blob.digest, blob);
-    offset = page.nextOffset;
-    done = page.done;
-  }
-  const manifest = [...blobs.values()]
-    .map(({ digest, size }) => ({ digest, size }))
-    .sort((a, b) => a.digest.localeCompare(b.digest));
-  const inventory = createAccountExportInventory(records, manifest);
-  return {
-    ...inventory,
-    blobs: [...blobs.values()],
-    frontier: accountExportFrontier(inventory),
-  };
 }

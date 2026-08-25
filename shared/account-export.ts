@@ -43,9 +43,6 @@ export interface AccountExportInventory {
   }[];
   readonly records: readonly AccountExportRecord[];
 }
-export interface AccountExport extends AccountExportInventory {
-  readonly blobs: readonly AccountExportBlob[];
-}
 
 function isNonnegativeInteger(value: unknown): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
@@ -119,7 +116,7 @@ export function accountExportEntityCounts(
   );
 }
 
-export function createAccountExportInventory(
+function createAccountExportInventory(
   records: readonly AccountExportRecord[],
   manifest: AccountExportInventory["manifest"],
 ): Omit<AccountExportInventory, "frontier"> {

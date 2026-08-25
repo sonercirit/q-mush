@@ -6,7 +6,7 @@ import {
   ACCOUNT_EXPORT_ENTITIES,
   accountExportFrontier,
   isAccountExportInventory,
-  type AccountExport,
+  type AccountExportInventory,
 } from "../../shared/account-export.ts";
 import { sha256 } from "../../shared/sha256.ts";
 import {
@@ -29,7 +29,7 @@ const inventoryBase = {
     { entity: "agent_messages", id: "m", payload: "{}", tombstone: false },
   ],
 };
-const inventory: Omit<AccountExport, "blobs"> = {
+const inventory: AccountExportInventory = {
   ...inventoryBase,
   frontier: accountExportFrontier(inventoryBase),
 };

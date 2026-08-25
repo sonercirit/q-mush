@@ -4,10 +4,39 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { catchUpRunnerReplica } from "../runner/runner-replica-catch-up.ts";
-import { ACCOUNT_EXPORT_ENTITIES } from "../shared/account-export.ts";
+import {
+  ACCOUNT_EXPORT_ENTITIES,
+  completeAccountExportInventory,
+  type AccountExportBlob,
+  type AccountExportInventory,
+} from "../shared/account-export.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { createDatabase } from "../shared/database.ts";
-import { exportAccount } from "../sync-engine/account-export.ts";
+import { exportAccountPage } from "../sync-engine/account-export.ts";
+
+function exportAccount(
+  database: ReturnType<typeof createDatabase>,
+): AccountExportInventory & { readonly blobs: readonly AccountExportBlob[] } {
+  const records = [];
+  const blobs = new Map();
+  let offset = 0;
+  let done = false;
+  while (!done) {
+    const page = exportAccountPage(database, USER_ID, offset);
+    records.push(...page.records);
+    for (const blob of page.blobs) blobs.set(blob.digest, blob);
+    offset = page.nextOffset;
+    done = page.done;
+  }
+  const entries = [...blobs.values()];
+  return {
+    ...completeAccountExportInventory(
+      records,
+      entries.map(({ digest, size }) => ({ digest, size })),
+    ),
+    blobs: entries,
+  };
+}
 
 const USER_ID = "seed-user";
 const requiredText: Readonly<Record<string, string>> = {
@@ -97,7 +126,7 @@ test("a seeded engine export catches up byte-completely across executors", async
     seedTable(engine.$client, "runners", 2);
     seedTable(engine.$client, "agent_sessions", 2);
     engine.$client.run("UPDATE prompts SET is_deleted = 1");
-    const exported = exportAccount(engine, USER_ID);
+    const exported = exportAccount(engine);
     const expectedEntityCounts = Object.fromEntries(
       ACCOUNT_EXPORT_ENTITIES.map((entity) => [
         entity,

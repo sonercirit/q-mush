@@ -11,10 +11,10 @@ import { expect, test } from "vitest";
 import {
   ACCOUNT_EXPORT_ENTITIES,
   accountExportBlobResponse,
-  accountExportFrontier,
-  createAccountExportInventory,
+  completeAccountExportInventory,
   findAccountExportBlob,
-  type AccountExport,
+  type AccountExportBlob,
+  type AccountExportRecord,
 } from "../../shared/account-export.ts";
 import type { RunnerToolCommand } from "../../shared/runner-command-broker.ts";
 import {
@@ -55,7 +55,10 @@ interface RunnerTestSocketData {
 }
 
 interface RunnerTestServerOptions {
-  readonly accountExport?: Pick<AccountExport, "blobs" | "records">;
+  readonly accountExport?: {
+    readonly blobs: readonly AccountExportBlob[];
+    readonly records: readonly AccountExportRecord[];
+  };
   readonly command?: RunnerToolCommand;
   readonly rejectRegistration?: boolean;
   readonly transientRegistrationFailures?: number;
@@ -134,10 +137,11 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
         const manifest = (options.accountExport?.blobs ?? []).map(
           ({ digest, size }) => ({ digest, size }),
         );
-        const inventory = createAccountExportInventory(records, manifest);
         return Response.json({
-          ...inventory,
-          frontier: accountExportFrontier(inventory),
+          ...completeAccountExportInventory(records, manifest),
+          blobs: options.accountExport?.blobs ?? [],
+          done: true,
+          nextOffset: records.length,
         });
       }
       if (pathname.startsWith("/api/runner/account-export/blob/")) {
