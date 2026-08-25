@@ -21,6 +21,7 @@ import type { ActiveViewReader } from "../shared/active-view.ts";
 
 export interface RunnerAppViewSource extends ActiveViewReader {
   readonly progress: () => { readonly state: "joining" | "ready" };
+  readonly readBlob?: (digest: string) => Blob;
 }
 
 export function createRunnerAppHandler(
@@ -69,6 +70,25 @@ export function createRunnerAppHandler(
         `qm_browser=${options.pairing.browserGrant}`
     ) {
       return new Response("Pairing required", { status: 401 });
+    }
+    if (request.method === "GET" && url.pathname.startsWith("/api/local/blob/")) {
+      if (options?.views?.readBlob === undefined) {
+        return new Response("Not found", { status: 404 });
+      }
+      const digest = url.pathname.slice("/api/local/blob/".length);
+      if (!/^[a-f\d]{64}$/u.test(digest)) {
+        return new Response("Invalid blob digest", { status: 400 });
+      }
+      try {
+        return new Response(options.views.readBlob(digest), {
+          headers: {
+            "cache-control": "public, max-age=31536000, immutable",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      } catch {
+        return new Response("Not found", { status: 404 });
+      }
     }
     if (request.method === "GET" && url.pathname === "/api/local/view") {
       if (options?.views === undefined) {

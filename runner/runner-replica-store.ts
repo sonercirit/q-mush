@@ -134,6 +134,18 @@ export function createRunnerReplicaStore(directory: string) {
         .query("UPDATE replica_manifest SET complete = 1 WHERE digest = ?")
         .run(digest);
     },
+    readBlob: (digest: string) => {
+      if (!/^[a-f\d]{64}$/u.test(digest) || progress().state !== "ready") {
+        throw new Error("Replica blob is unavailable");
+      }
+      const entry = database
+        .query<{ complete: number }, [string]>(
+          "SELECT complete FROM replica_manifest WHERE digest = ?",
+        )
+        .get(digest);
+      if (entry?.complete !== 1) throw new Error("Replica blob is unavailable");
+      return Bun.file(join(directory, "blobs", digest));
+    },
     readView: (entity: string, limit: number, sessionId?: string) => {
       if (!validActiveViewLimit(limit)) {
         throw new Error("Replica view limit must be between 1 and 100");

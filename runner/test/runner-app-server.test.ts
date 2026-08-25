@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { sha256 } from "../../shared/sha256.ts";
 import { createRunnerAppHandler } from "../../runner/runner-app-server.ts";
 
 const release = {
@@ -50,6 +51,31 @@ describe("runner app server", () => {
     );
     expect(preflight.status).toBe(403);
     expect(preflight.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
+  test("serves paired replica blobs without cross-origin CORS", async () => {
+    const bytes = new TextEncoder().encode("replica attachment");
+    const digest = sha256(bytes);
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
+      pairing: { browserGrant: "grant", code: "code" },
+      views: {
+        progress: () => ({ state: "ready" }),
+        readBlob: (requested) => {
+          if (requested !== digest) throw new Error("missing");
+          return new Blob([bytes], { type: "image/png" });
+        },
+        readView: () => ({ complete: true, partial: true, records: [] }),
+      },
+    });
+    const response = handler(
+      new Request(`http://127.0.0.1:43127/api/local/blob/${digest}`, {
+        headers: { cookie: "qm_browser=grant" },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
+    expect(response.headers.get("cache-control")).toContain("immutable");
+    expect(response.headers.has("access-control-allow-origin")).toBe(false);
   });
 
   test("serves bounded read-only views without replica control endpoints", async () => {
