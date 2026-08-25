@@ -9,6 +9,7 @@ import {
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { createAnonymousRunnerIdentity } from "./runner-anonymous-identity.ts";
 import { createRunnerAppHandler } from "./runner-app-server.ts";
 import {
   createRunnerCommandExecutions,
@@ -570,18 +571,33 @@ async function maintainConnection(
 }
 
 function embeddedClientRelease() {
-  const payload = JSON.parse(Q_MUSH_CLIENT_RELEASE) as {
-    files: Record<string, string>;
-    shell: string;
-  };
+  if (typeof Q_MUSH_CLIENT_RELEASE === "undefined") {
+    return { files: {}, shell: "<!doctype html><title>Q Mush</title>" };
+  }
+  const parsed: unknown = JSON.parse(Q_MUSH_CLIENT_RELEASE);
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    !("files" in parsed) ||
+    typeof parsed.files !== "object" ||
+    parsed.files === null ||
+    !("shell" in parsed) ||
+    typeof parsed.shell !== "string"
+  ) {
+    throw new Error("The embedded browser release is invalid");
+  }
+  const files = Object.entries(parsed.files);
+  if (files.some((entry) => typeof entry[1] !== "string")) {
+    throw new Error("The embedded browser release file is invalid");
+  }
   return {
     files: Object.fromEntries(
-      Object.entries(payload.files).map(([name, value]) => [
+      files.map(([name, value]) => [
         name,
-        Uint8Array.fromBase64(value),
+        Uint8Array.fromBase64(String(value)),
       ]),
     ),
-    shell: payload.shell,
+    shell: parsed.shell,
   };
 }
 
@@ -626,16 +642,19 @@ async function run(): Promise<void> {
     },
   );
 
-  const replica = createRunnerReplicaStore(
-    join(dirname(configurationPath), "replica"),
-  );
+  const replicaDirectory = join(dirname(configurationPath), "replica");
+  const replica = createRunnerReplicaStore(replicaDirectory);
+  const identity = createAnonymousRunnerIdentity(replicaDirectory);
   const appOrigin = "http://127.0.0.1:43127";
   const app = Bun.serve({
-    fetch: createRunnerAppHandler(embeddedClientRelease(), appOrigin),
+    fetch: createRunnerAppHandler(embeddedClientRelease(), appOrigin, {
+      pairing: identity.pairing,
+    }),
     hostname: "127.0.0.1",
     port: 43127,
   });
   console.log(`Q Mush local app listening at ${appOrigin}.`);
+  console.log(`Physical browser pairing code: ${identity.pairing.code}`);
   await containers.recoverTracked();
   try {
     await maintainConnection(configuration, configurationPath, startupRestart);

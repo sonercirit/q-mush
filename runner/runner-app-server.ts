@@ -12,9 +12,15 @@ function contentType(pathname: string): string {
   return "application/octet-stream";
 }
 
+export interface RunnerAppPairing {
+  readonly browserGrant: string;
+  readonly code: string;
+}
+
 export function createRunnerAppHandler(
   release: RunnerAppRelease,
   origin: string,
+  options?: { readonly pairing: RunnerAppPairing },
 ): (request: Request) => Response {
   const expected = new URL(origin);
   if (
@@ -31,6 +37,29 @@ export function createRunnerAppHandler(
     const requestOrigin = request.headers.get("origin");
     if (requestOrigin !== null && requestOrigin !== expected.origin) {
       return new Response("Forbidden", { status: 403 });
+    }
+    if (request.method === "POST" && url.pathname === "/api/local/pair") {
+      if (options?.pairing === undefined) {
+        return new Response("Not found", { status: 404 });
+      }
+      if (
+        request.headers.get("x-q-mush-pairing-code") !== options.pairing.code
+      ) {
+        return new Response("Pairing rejected", { status: 403 });
+      }
+      return new Response(null, {
+        headers: {
+          "set-cookie": `qm_browser=${options.pairing.browserGrant}; HttpOnly; SameSite=Strict; Path=/`,
+        },
+        status: 204,
+      });
+    }
+    if (
+      options?.pairing !== undefined &&
+      request.headers.get("cookie")?.split(";", 1)[0] !==
+        `qm_browser=${options.pairing.browserGrant}`
+    ) {
+      return new Response("Pairing required", { status: 401 });
     }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });
