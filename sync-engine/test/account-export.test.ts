@@ -274,29 +274,30 @@ describe("legacy account export", () => {
 
   test("keeps exported keyset indexes in schema declarations and migrations", () => {
     database = createUserDatabase();
-    const schemaTables = [
-      agentMessages,
-      agentPendingInputs,
-      agentQuestionRequests,
-      agentSessionOperations,
-      agentSessions,
-      agentSessionTurns,
-      attachmentFallbacks,
-      prompts,
-      providerCredentials,
-      providerCredentialWorkspaces,
-      providerQuotaResetReceipts,
-      providerQuotaSettings,
-      runners,
-      runnerWorkspaces,
-      toolSettings,
-      users,
-      workspaces,
-    ];
-    const exportedTableNames = new Set<string>(ACCOUNT_EXPORT_ENTITIES);
-    const exportedTables = schemaTables.filter((table) =>
-      exportedTableNames.has(getTableConfig(table).name),
+    const schemaTablesByName = new Map(
+      [
+        workspaces,
+        users,
+        toolSettings,
+        runnerWorkspaces,
+        runners,
+        providerQuotaSettings,
+        providerQuotaResetReceipts,
+        providerCredentialWorkspaces,
+        providerCredentials,
+        prompts,
+        attachmentFallbacks,
+        agentSessionTurns,
+        agentSessions,
+        agentSessionOperations,
+        agentQuestionRequests,
+        agentPendingInputs,
+        agentMessages,
+      ].map((table) => [getTableConfig(table).name, table]),
     );
+    const exportedTables = ACCOUNT_EXPORT_ENTITIES.map((name) =>
+      schemaTablesByName.get(name),
+    ).filter((table) => table !== undefined);
     const tableNames = exportedTables.map(
       (table) => getTableConfig(table).name,
     );
