@@ -134,6 +134,8 @@ describe("runner full replica store", () => {
         { id: "m2", content: "goodbye" },
       ],
     });
+    // Keep this malformed row after m1: ORDER BY id plus LIMIT proves SQL bounds
+    // the row count before payload parsing, rather than parsing an extra row.
     store.applyRecords([
       {
         entity: "agent_messages",

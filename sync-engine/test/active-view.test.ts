@@ -21,6 +21,10 @@ test("migration engine serves an owned bounded labeled active view", async () =>
   activeViewDatabase.$client.run(
     "CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, user_id TEXT NOT NULL)",
   );
+  activeViewDatabase.$client.run("DROP TABLE agent_messages");
+  activeViewDatabase.$client.run(
+    "CREATE TABLE agent_messages (id TEXT PRIMARY KEY, session_id TEXT NOT NULL)",
+  );
   for (const [id, userId] of [
     ["s1", "u"],
     ["s2", "u"],
@@ -30,6 +34,10 @@ test("migration engine serves an owned bounded labeled active view", async () =>
       id,
       userId,
     ]);
+  activeViewDatabase.$client.run("INSERT INTO agent_messages VALUES (?, ?)", [
+    "foreign-message",
+    "hidden",
+  ]);
   const response = engineLocalResponse(
     activeViewDatabase,
     new Request("http://engine/api/local/view?limit=1&entity=agent_sessions"),
@@ -41,5 +49,19 @@ test("migration engine serves an owned bounded labeled active view", async () =>
     origin: "engine",
     partial: true,
     records: [{ id: "s1" }],
+  });
+  const foreignResponse = engineLocalResponse(
+    activeViewDatabase,
+    new Request(
+      "http://engine/api/local/view?limit=1&entity=agent_messages&sessionId=hidden",
+    ),
+    "u",
+  );
+  expect(foreignResponse.ok).toBe(true);
+  expect(await foreignResponse.json()).toMatchObject({
+    complete: true,
+    origin: "engine",
+    partial: true,
+    records: [],
   });
 });
