@@ -47,6 +47,7 @@ import {
 
 declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
+declare const Q_MUSH_CLIENT_RELEASE: string;
 
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
@@ -568,6 +569,22 @@ async function maintainConnection(
   }
 }
 
+function embeddedClientRelease() {
+  const payload = JSON.parse(Q_MUSH_CLIENT_RELEASE) as {
+    files: Record<string, string>;
+    shell: string;
+  };
+  return {
+    files: Object.fromEntries(
+      Object.entries(payload.files).map(([name, value]) => [
+        name,
+        Uint8Array.fromBase64(value),
+      ]),
+    ),
+    shell: payload.shell,
+  };
+}
+
 async function run(): Promise<void> {
   if (process.argv.includes("--version")) {
     console.log(`Q Mush runner ${Q_MUSH_RUNNER_VERSION}`);
@@ -614,14 +631,7 @@ async function run(): Promise<void> {
   );
   const appOrigin = "http://127.0.0.1:43127";
   const app = Bun.serve({
-    fetch: createRunnerAppHandler(
-      {
-        files: {},
-        shell:
-          "<!doctype html><title>Q Mush local</title><main>Q Mush local replica is joining.</main>",
-      },
-      appOrigin,
-    ),
+    fetch: createRunnerAppHandler(embeddedClientRelease(), appOrigin),
     hostname: "127.0.0.1",
     port: 43127,
   });
