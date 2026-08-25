@@ -624,10 +624,7 @@ async function run(): Promise<void> {
       return handler(request);
     },
     hostname: "127.0.0.1",
-    port:
-      Number.isSafeInteger(appPort) && appPort >= 0
-        ? appPort
-        : 0,
+    port: Number.isSafeInteger(appPort) && appPort >= 0 ? appPort : 0,
   });
   console.log(
     `App: http://127.0.0.1:${String(app.port)}\nPairing code: ${identity.pairing.code}`,
