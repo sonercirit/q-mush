@@ -221,7 +221,7 @@ function accountExportRevision(
   databaseCache.set(userId, { dataVersion, revision, totalChanges });
   return revision;
 }
-export const exportedTables = [
+const exportedTables = [
   ...ordinaryTables
     .filter((table) => table !== users)
     .map((table) => ({ table, selected: undefined })),

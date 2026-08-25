@@ -4,12 +4,28 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
+import { ACCOUNT_EXPORT_ENTITIES } from "../../shared/account-export.ts";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
 import {
-  exportAccountBlob,
-  exportAccountPage,
-  exportedTables,
-} from "../account-export.ts";
+  agentMessages,
+  agentPendingInputs,
+  agentQuestionRequests,
+  agentSessionOperations,
+  agentSessions,
+  agentSessionTurns,
+  attachmentFallbacks,
+  prompts,
+  providerCredentials,
+  providerCredentialWorkspaces,
+  providerQuotaResetReceipts,
+  providerQuotaSettings,
+  runners,
+  runnerWorkspaces,
+  toolSettings,
+  users,
+  workspaces,
+} from "../../shared/database/schema.ts";
+import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
 import { createRunnerStore } from "../runner-store.ts";
 import {
   TEST_ATTACHMENT_DATA,
@@ -258,10 +274,33 @@ describe("legacy account export", () => {
 
   test("keeps exported keyset indexes in schema declarations and migrations", () => {
     database = createUserDatabase();
-    const tableNames = exportedTables.map(
-      ({ table }) => getTableConfig(table).name,
+    const schemaTables = [
+      agentMessages,
+      agentPendingInputs,
+      agentQuestionRequests,
+      agentSessionOperations,
+      agentSessions,
+      agentSessionTurns,
+      attachmentFallbacks,
+      prompts,
+      providerCredentials,
+      providerCredentialWorkspaces,
+      providerQuotaResetReceipts,
+      providerQuotaSettings,
+      runners,
+      runnerWorkspaces,
+      toolSettings,
+      users,
+      workspaces,
+    ];
+    const exportedTableNames = new Set<string>(ACCOUNT_EXPORT_ENTITIES);
+    const exportedTables = schemaTables.filter((table) =>
+      exportedTableNames.has(getTableConfig(table).name),
     );
-    const declared = exportedTables.flatMap(({ table }) =>
+    const tableNames = exportedTables.map(
+      (table) => getTableConfig(table).name,
+    );
+    const declared = exportedTables.flatMap((table) =>
       getTableConfig(table)
         .indexes.map(({ config }) => config.name)
         .filter((name) => name.endsWith("_index")),
