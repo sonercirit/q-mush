@@ -608,7 +608,7 @@ async function run(): Promise<void> {
     process.env["Q_MUSH_PAIRING_CODE"],
     process.env["Q_MUSH_PAIRING_TRANSCRIPT"],
   );
-  const requestedAppPort = Number(process.env["Q_MUSH_LOCAL_APP_PORT"] ?? "0");
+  const appPort = Number(process.env["Q_MUSH_LOCAL_APP_PORT"] ?? "0");
   let handler: ((request: Request) => Response) | undefined;
   const app = Bun.serve({
     fetch(request) {
@@ -625,8 +625,8 @@ async function run(): Promise<void> {
     },
     hostname: "127.0.0.1",
     port:
-      Number.isSafeInteger(requestedAppPort) && requestedAppPort >= 0
-        ? requestedAppPort
+      Number.isSafeInteger(appPort) && appPort >= 0
+        ? appPort
         : 0,
   });
   console.log(
