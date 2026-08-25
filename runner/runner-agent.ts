@@ -578,7 +578,9 @@ async function run(): Promise<void> {
       configurationPath,
       configuration.serverOrigin,
       configuration.token,
-      (retry) => recordReplicaRetry(replica, retry),
+      (retry) => {
+        recordReplicaRetry(replica, retry);
+      },
     ).catch((error: unknown) => {
       console.error(`Replica catch-up deferred: ${describeError(error)}`);
     });
