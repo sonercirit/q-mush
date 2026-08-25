@@ -30,16 +30,15 @@ const pairingRequest = (code: string, transcript: string) =>
 describe("anonymous runner genesis and browser pairing", () => {
   test("creates and reuses device-key account genesis without engine traffic", () => {
     const directory = mkdtempSync(join(tmpdir(), "q-mush-anonymous-"));
-    const engine = vi.fn();
+    const fetch = vi.spyOn(globalThis, "fetch");
     const first = createAnonymousRunnerIdentity(directory);
-    engine();
     const second = createAnonymousRunnerIdentity(directory);
     expect(second.publicIdentity).toEqual(first.publicIdentity);
     expect(first.publicIdentity.accountId).not.toMatch(/^qmr_/u);
     expect(first.publicIdentity.deviceId).not.toBe(
       first.publicIdentity.accountId,
     );
-    expect(engine).toHaveBeenCalledTimes(1);
+    expect(fetch).not.toHaveBeenCalled();
     expect(statSync(join(directory, "device-identity.json")).mode & 0o777).toBe(
       0o600,
     );

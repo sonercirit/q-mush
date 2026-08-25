@@ -106,6 +106,81 @@ test("real Chromium reads a complete runner replica and renders attachments read
   vi.restoreAllMocks();
 });
 
+test("serializes view polling and aborts its read on disposal", async () => {
+  let viewRequests = 0;
+  let activeViews = 0;
+  let maximumActiveViews = 0;
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = new URL(
+      input instanceof Request
+        ? input.url
+        : input instanceof URL
+          ? input.href
+          : input,
+      location.origin,
+    );
+    if (url.pathname === "/api/local/status")
+      return Promise.resolve(Response.json({ complete: true }));
+    viewRequests += 1;
+    activeViews += 1;
+    maximumActiveViews = Math.max(maximumActiveViews, activeViews);
+    return new Promise<Response>((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => {
+        activeViews -= 1;
+        reject(new DOMException("Aborted", "AbortError"));
+      });
+    });
+  });
+  const { dispose, meta, root } = runnerViewFixture();
+
+  await vi.waitFor(() => {
+    expect(viewRequests).toBe(1);
+  });
+  await delay(2_100);
+  expect([viewRequests, maximumActiveViews]).toEqual([1, 1]);
+  dispose();
+  await vi.waitFor(() => {
+    expect(activeViews).toBe(0);
+  });
+  root.remove();
+  meta.remove();
+  vi.restoreAllMocks();
+});
+
+test("recovers after a transient view failure", async () => {
+  let viewRequests = 0;
+  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
+    const url = new URL(
+      input instanceof Request
+        ? input.url
+        : input instanceof URL
+          ? input.href
+          : input,
+      location.origin,
+    );
+    if (url.pathname === "/api/local/status")
+      return Promise.resolve(Response.json({ complete: true }));
+    viewRequests += 1;
+    return Promise.resolve(
+      viewRequests === 1
+        ? Response.json({ error: "joining" }, { status: 503 })
+        : Response.json({
+            complete: true,
+            records: [{ id: "ready", title: "Ready session" }],
+          }),
+    );
+  });
+  const { dispose, meta, root } = runnerViewFixture();
+
+  await waitForText(root, "The runner replica is not ready.");
+  await waitForText(root, "Ready session");
+  expect(root.textContent).not.toContain("The runner replica is not ready.");
+  dispose();
+  root.remove();
+  meta.remove();
+  vi.restoreAllMocks();
+});
+
 test("serializes status polling and stops requests and updates after disposal", async () => {
   let requests = 0;
   let active = 0;

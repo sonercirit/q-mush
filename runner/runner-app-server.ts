@@ -185,11 +185,11 @@ export function createRunnerAppHandler(
         partial: true,
       });
     }
-    if (url.pathname.startsWith("/api/")) {
-      return new Response("Not found", { status: 404 });
-    }
     if (request.method !== "GET" && request.method !== "HEAD") {
       return new Response("Method not allowed", { status: 405 });
+    }
+    if (url.pathname.startsWith("/api/")) {
+      return new Response("Not found", { status: 404 });
     }
     if (url.pathname === "/" || url.pathname === "/app") {
       return new Response(request.method === "HEAD" ? null : release.shell, {

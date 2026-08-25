@@ -9,7 +9,11 @@ export interface QueryHost {
   readonly origin: "engine" | "runner";
   readonly read: (
     entity: "agent_messages" | "agent_sessions",
-    options: { readonly limit: number; readonly sessionId?: string },
+    options: {
+      readonly limit: number;
+      readonly sessionId?: string;
+      readonly signal?: AbortSignal;
+    },
   ) => Promise<ActiveView>;
 }
 
@@ -40,6 +44,7 @@ export function queryHostForDocument(document: {
         parameters.set("sessionId", options.sessionId);
       const value: unknown = await requestJson(
         `/api/local/view?${parameters.toString()}`,
+        options.signal === undefined ? undefined : { signal: options.signal },
       );
       if (
         typeof value !== "object" ||

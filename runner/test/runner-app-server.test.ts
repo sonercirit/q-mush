@@ -129,6 +129,13 @@ describe("runner app server", () => {
         headers: { cookie: "qm_browser=grant" },
       }),
     );
+    expect(
+      handler(
+        new Request("http://127.0.0.1:43127/api/local/blob/not-a-digest", {
+          headers: { cookie: "qm_browser=grant" },
+        }),
+      ).status,
+    ).toBe(400);
     expect(response.status).toBe(200);
     expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes);
     expect(response.headers.get("cache-control")).toContain("immutable");
@@ -161,6 +168,14 @@ describe("runner app server", () => {
       partial: true,
       records: [{ id: "session-1" }],
     });
+    expect(
+      handler(
+        new Request("http://127.0.0.1:43127/api/local/view", {
+          headers,
+          method: "POST",
+        }),
+      ).status,
+    ).toBe(405);
     expect(
       handler(
         new Request("http://127.0.0.1:43127/api/replica/ack", { headers }),

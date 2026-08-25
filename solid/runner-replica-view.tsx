@@ -41,27 +41,34 @@ export function RunnerReplicaView(): JSX.Element {
   }>();
   const [paired, setPaired] = createSignal(false);
   const [pairingCode, setPairingCode] = createSignal("");
-  const load = (
+  const load = async (
     entity: "agent_messages" | "agent_sessions",
     apply: (records: readonly Record<string, unknown>[]) => void,
-    sessionId?: string,
-  ): void => {
-    void host
-      .read(entity, {
+    options: {
+      readonly sessionId?: string;
+      readonly signal?: AbortSignal;
+    } = {},
+  ): Promise<void> => {
+    try {
+      const view = await host.read(entity, {
         limit: 100,
-        ...(sessionId !== undefined && { sessionId }),
-      })
-      .then((view) => {
-        setViewComplete(view.complete);
-        apply(view.records);
-      })
-      .catch(() => setFailed(true));
+        ...options,
+      });
+      if (options.signal?.aborted === true) return;
+      setViewComplete(view.complete);
+      apply(view.records);
+      setFailed(false);
+    } catch (error) {
+      if (options.signal?.aborted !== true) setFailed(true);
+      throw error;
+    }
   };
-  const loadSessions = (): void => {
-    load("agent_sessions", (sessions) =>
-      setViews((value) => ({ ...value, sessions })),
+  const loadSessions = (signal?: AbortSignal): Promise<void> =>
+    load(
+      "agent_sessions",
+      (sessions) => setViews((value) => ({ ...value, sessions })),
+      signal === undefined ? {} : { signal },
     );
-  };
   const loadStatus = async (signal?: AbortSignal): Promise<boolean> => {
     const response = await fetch("/api/local/status", {
       ...(signal === undefined ? {} : { signal }),
@@ -95,8 +102,8 @@ export function RunnerReplicaView(): JSX.Element {
     const poll = (): void => {
       controller = new AbortController();
       void loadStatus(controller.signal)
-        .then((authorized) => {
-          if (authorized && !disposed) loadSessions();
+        .then(async (authorized) => {
+          if (authorized && !disposed) await loadSessions(controller?.signal);
         })
         .catch(() => undefined)
         .finally(() => {
@@ -125,15 +132,15 @@ export function RunnerReplicaView(): JSX.Element {
     if (!response.ok) throw new Error("Pairing rejected");
     setPaired(true);
     await loadStatus();
-    loadSessions();
+    await loadSessions();
   };
   const select = (id: string): void => {
     setSelected(id);
-    load(
+    void load(
       "agent_messages",
       (messages) => setViews((value) => ({ ...value, messages })),
-      id,
-    );
+      { sessionId: id },
+    ).catch(() => undefined);
   };
   return (
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">

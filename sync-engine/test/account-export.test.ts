@@ -298,6 +298,7 @@ describe("legacy account export", () => {
     const exportedTables = ACCOUNT_EXPORT_ENTITIES.map((name) =>
       schemaTablesByName.get(name),
     ).filter((table) => table !== undefined);
+    expect(exportedTables).toHaveLength(ACCOUNT_EXPORT_ENTITIES.length);
     const tableNames = exportedTables.map(
       (table) => getTableConfig(table).name,
     );

@@ -103,6 +103,30 @@ function setSessionFields(
 }
 
 describe("session store runner reassignment", () => {
+  test("fences a cyclic session without aborting valid sibling reassignment", () => {
+    const { database, store } = runningStore();
+    const siblingId = "018bcfe5-6800-7000-8000-000000000097";
+    const row = database.select().from(agentSessions).get();
+    if (row === undefined) throw new Error("Missing test session");
+    database
+      .insert(agentSessions)
+      .values({
+        ...row,
+        id: siblingId,
+        parentSessionId: null,
+        title: "Valid sibling",
+      })
+      .run();
+    setSessionFields(database, { parentSessionId: SESSION_ID });
+
+    expect(() => removeRunner(database, store)).not.toThrow();
+    expectStoredSession(store, siblingId, {
+      runnerRequired: true,
+      status: "idle",
+    });
+    closeHardeningDatabase({ database, store });
+  });
+
   test("reassigns only an owned runner-required session with a new path", () => {
     const { database, store } = runningStore();
     const replacementId = "018bcfe5-6800-7000-8000-000000000099";
