@@ -35,6 +35,7 @@ import {
   createRunnerContainerManager,
   type RunnerContainerManager,
 } from "./runner-container.ts";
+import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
@@ -577,37 +578,6 @@ async function maintainConnection(
   }
 }
 
-function embeddedClientRelease() {
-  if (typeof Q_MUSH_CLIENT_RELEASE === "undefined") {
-    return { files: {}, shell: "<!doctype html><title>Q Mush</title>" };
-  }
-  const parsed: unknown = JSON.parse(Q_MUSH_CLIENT_RELEASE);
-  if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("files" in parsed) ||
-    typeof parsed.files !== "object" ||
-    parsed.files === null ||
-    !("shell" in parsed) ||
-    typeof parsed.shell !== "string"
-  ) {
-    throw new Error("The embedded browser release is invalid");
-  }
-  const files = Object.entries(parsed.files);
-  if (files.some((entry) => typeof entry[1] !== "string")) {
-    throw new Error("The embedded browser release file is invalid");
-  }
-  return {
-    files: Object.fromEntries(
-      files.map(([name, value]) => [
-        name,
-        Uint8Array.fromBase64(String(value)),
-      ]),
-    ),
-    shell: parsed.shell,
-  };
-}
-
 async function run(): Promise<void> {
   if (process.argv.includes("--version")) {
     console.log(`Q Mush runner ${Q_MUSH_RUNNER_VERSION}`);
@@ -670,10 +640,18 @@ async function run(): Promise<void> {
   const identity = createAnonymousRunnerIdentity(replicaDirectory);
   const appOrigin = "http://127.0.0.1:43127";
   const app = Bun.serve({
-    fetch: createRunnerAppHandler(embeddedClientRelease(), appOrigin, {
-      pairing: identity.pairing,
-      views: replica,
-    }),
+    fetch: createRunnerAppHandler(
+      embeddedClientRelease(
+        typeof Q_MUSH_CLIENT_RELEASE === "undefined"
+          ? undefined
+          : Q_MUSH_CLIENT_RELEASE,
+      ),
+      appOrigin,
+      {
+        pairing: identity.pairing,
+        views: replica,
+      },
+    ),
     hostname: "127.0.0.1",
     port: 43127,
   });
