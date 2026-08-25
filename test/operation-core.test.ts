@@ -433,6 +433,32 @@ describe("operation core", () => {
     ).toThrow(/equivocation/);
   });
 
+  test("retains every applied identity through treap rotations", () => {
+    let state = initialApplyState();
+    const operations = Array.from({ length: 40 }, (_, index) =>
+      operation(`writer-${index}`, 1n, {}, `value-${index}`),
+    );
+    for (const item of operations) state = applyOperation(state, item, reducer);
+    expect(Object.keys(state.applied).sort()).toEqual(
+      operations
+        .flatMap((item) => [
+          `id:${item.operationId}`,
+          `writer:${item.writerId}:1`,
+        ])
+        .sort(),
+    );
+    const original = operations[0];
+    if (original === undefined) throw new Error("Missing operation fixture");
+    expect(applyOperation(state, original, reducer)).toBe(state);
+    expect(() =>
+      applyOperation(
+        state,
+        { ...original, payload: { value: "changed" } },
+        reducer,
+      ),
+    ).toThrow(/equivocation/);
+  });
+
   test("preserves input states and resumes checkpoint-shaped durable state", () => {
     const original = initialApplyState();
     const first = applyOperation(
