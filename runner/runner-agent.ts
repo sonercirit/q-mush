@@ -9,6 +9,7 @@ import {
   runnerConnectMessage,
 } from "../shared/runner-realtime-protocol.ts";
 import { createServerWebSocket } from "../shared/server-websocket.ts";
+import { createRunnerAppHandler } from "./runner-app-server.ts";
 import {
   createRunnerCommandExecutions,
   type RunnerCommandExecutions,
@@ -27,6 +28,7 @@ import {
   type RunnerContainerManager,
 } from "./runner-container.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
+import { createRunnerReplicaStore } from "./runner-replica-store.ts";
 import { createRunnerRestartCoordinator } from "./runner-restart.ts";
 import { sendOpenRunnerSocketMessage } from "./runner-socket-send.ts";
 import {
@@ -607,8 +609,30 @@ async function run(): Promise<void> {
     },
   );
 
+  const replica = createRunnerReplicaStore(
+    join(dirname(configurationPath), "replica"),
+  );
+  const appOrigin = "http://127.0.0.1:43127";
+  const app = Bun.serve({
+    fetch: createRunnerAppHandler(
+      {
+        files: {},
+        shell:
+          "<!doctype html><title>Q Mush local</title><main>Q Mush local replica is joining.</main>",
+      },
+      appOrigin,
+    ),
+    hostname: "127.0.0.1",
+    port: 43127,
+  });
+  console.log(`Q Mush local app listening at ${appOrigin}.`);
   await containers.recoverTracked();
-  await maintainConnection(configuration, configurationPath, startupRestart);
+  try {
+    await maintainConnection(configuration, configurationPath, startupRestart);
+  } finally {
+    app.stop();
+    replica.close();
+  }
 }
 
 function reportFatalError(error: unknown): void {

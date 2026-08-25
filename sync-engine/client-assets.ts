@@ -10,7 +10,7 @@ interface ViteClientAssets {
   readonly stylesheet: string;
 }
 
-export interface ClientReleaseManifest {
+interface ClientReleaseManifest {
   readonly files: Readonly<Record<string, string>>;
   readonly version: 1;
 }

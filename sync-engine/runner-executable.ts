@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RUNNER_EXECUTABLE_SHA256_HEADER } from "../shared/routes.ts";
 import { readBuildArtifact } from "./build.ts";
+import { buildClientRelease } from "./client-assets.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import {
   isRunnerExecutableTarget,
@@ -114,6 +115,11 @@ async function compileStandaloneExecutable(
 
 async function runnerVersion(): Promise<string> {
   const source = await bundleRunnerSource();
+  const clientRelease = await buildClientRelease();
+  const releaseManifest = clientRelease.files["manifest.json"];
+  if (releaseManifest === undefined) {
+    throw new Error("The browser release manifest is missing");
+  }
   return createHash("sha256")
     .update("q-mush-standalone-runner-v1\0")
     .update(Bun.version)
@@ -121,6 +127,8 @@ async function runnerVersion(): Promise<string> {
     .update(Bun.revision)
     .update("\0")
     .update(new Uint8Array(await source.arrayBuffer()))
+    .update("\0")
+    .update(releaseManifest)
     .digest("hex");
 }
 
