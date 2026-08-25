@@ -49,7 +49,8 @@ describe("anonymous runner genesis and browser pairing", () => {
     const identity = temporaryIdentity("q-mush-pairing-");
     const handler = pairedHandler(identity);
     const initialStatus = handler(browserRequest("/app")).status;
-    expect(initialStatus).toBe(401);
+    expect(initialStatus).toBe(200);
+    expect(handler(browserRequest("/api/local/status")).status).toBe(401);
     const rejected = handler(
       pairingRequest("wrong-code", identity.pairing.transcript),
     );
