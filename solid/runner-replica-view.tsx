@@ -50,6 +50,11 @@ export function RunnerReplicaView(): JSX.Element {
     );
   };
   onMount(() => {
+    if (host.origin === "engine") {
+      setPaired(true);
+      loadSessions();
+      return;
+    }
     void fetch("/api/local/status").then(async (response) => {
       if (response.status === 401) return;
       const status: unknown = await response.json();
@@ -85,16 +90,18 @@ export function RunnerReplicaView(): JSX.Element {
     <section class="mt-8 grid gap-4" aria-label="Runner replica view">
       <div class="rounded-2xl border border-cyan-300/30 bg-cyan-300/10 p-4 text-cyan-100">
         <p class="font-semibold">
-          Runner replica ·{" "}
-          {replicaComplete() ? "Complete copy" : "Joining copy"}
+          {host.origin === "runner" ? "Runner replica" : "Migration engine"} ·{" "}
+          {host.origin === "engine" || replicaComplete()
+            ? "Complete source"
+            : "Joining copy"}
         </p>
         <p class="mt-1 text-sm">
           {viewComplete() ? "Complete active view" : "Partial active view"} ·
           Read only
         </p>
         <p class="mt-2 text-sm">
-          Mutations are disabled because this page is reading from the runner
-          replica.
+          Mutations are disabled because this page is reading a bounded{" "}
+          {host.origin} active view.
         </p>
       </div>
       <Show

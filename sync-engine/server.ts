@@ -36,6 +36,7 @@ import {
 } from "../shared/routes.ts";
 import { runnerExportBlobResponse } from "./account-export-http.ts";
 import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
+import { engineActiveViewResponse } from "./active-view.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
@@ -461,6 +462,14 @@ export function createRequestHandler(
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (pathname === `${API_BASE_PATH}/local/view`) {
+        if (request.method !== "GET")
+          return createMethodNotAllowedResponse("GET");
+        const user = googleAuth.authenticatedUser(request);
+        return user === null
+          ? new Response("Unauthorized", { status: 401 })
+          : engineActiveViewResponse(database, user.id, new URL(request.url));
+      }
       if (
         pathname === RUNNER_ACCOUNT_EXPORT_PATH ||
         pathname.startsWith(`${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/`)

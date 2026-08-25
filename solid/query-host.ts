@@ -6,7 +6,7 @@ import { requestJson } from "./browser-http.ts";
 
 export interface QueryHost {
   readonly mutations: false;
-  readonly origin: "runner";
+  readonly origin: "engine" | "runner";
   readonly read: (
     entity: "agent_messages" | "agent_sessions",
     options: { readonly limit: number; readonly sessionId?: string },
@@ -22,10 +22,14 @@ export function isRunnerDocument(document: {
 export function queryHostForDocument(document: {
   readonly querySelector: (selectors: string) => unknown;
 }): QueryHost {
-  void document;
+  const origin =
+    document.querySelector('meta[name="q-mush-host"][content="runner"]') ===
+    null
+      ? "engine"
+      : "runner";
   return {
     mutations: false,
-    origin: "runner",
+    origin,
     read: async (entity, options) => {
       if (!validActiveViewLimit(options.limit))
         throw new Error("Active view limit must be between 1 and 100");
@@ -49,7 +53,7 @@ export function queryHostForDocument(document: {
         throw new Error("The host returned an invalid active view");
       return {
         complete: value.complete,
-        origin: "runner",
+        origin,
         partial: true,
         records: value.records.filter(
           (record): record is Record<string, unknown> =>

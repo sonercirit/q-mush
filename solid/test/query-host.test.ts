@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import { queryHostForDocument } from "../query-host.ts";
 
 describe("Solid query host", () => {
-  test("selects the loopback runner and returns a labeled bounded partial view", async () => {
+  test("selects the loopback runner from document metadata and returns a labeled bounded partial view", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(() =>
@@ -25,7 +25,21 @@ describe("Solid query host", () => {
     vi.unstubAllGlobals();
   });
 
-  test("rejects unbounded reads before contacting either host", async () => {
+  test("selects the migration engine when runner metadata is absent", async () => {
+    const engineResponse = Response.json({ complete: false, records: [] });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => engineResponse),
+    );
+    const host = queryHostForDocument({ querySelector: () => null });
+    expect(host.origin).toBe("engine");
+    expect((await host.read("agent_sessions", { limit: 5 })).origin).toBe(
+      "engine",
+    );
+    vi.unstubAllGlobals();
+  });
+
+  test("rejects unbounded reads before contacting the selected host", async () => {
     const fetcher = vi.fn();
     vi.stubGlobal("fetch", fetcher);
     await expect(

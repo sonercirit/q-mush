@@ -141,6 +141,7 @@ export function renderHomePage(): string {
 
 export function renderAppPage(): string {
   return renderDocument("Q Mush App", [
+    <meta name="q-mush-host" content="engine" />,
     <main id="app" class="min-h-screen" />,
     <script src={APP_SCRIPT_PATH} type="module" />,
     <noscript>

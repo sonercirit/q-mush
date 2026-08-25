@@ -46,6 +46,16 @@ const ordinaryTables = [
   agentMessages,
 ] as const;
 
+const PUBLIC_USER_COLUMNS = [
+  "id",
+  "email",
+  "name",
+  "createdAt",
+  "updatedAt",
+  "createdById",
+  "updatedById",
+  "isDeleted",
+] as const;
 const PUBLIC_CREDENTIAL_COLUMNS = [
   "id",
   "userId",
@@ -105,6 +115,9 @@ function allowedColumns(table: AnySQLiteTable, names: readonly string[]) {
     }),
   );
 }
+function publicUserColumns() {
+  return allowedColumns(users, PUBLIC_USER_COLUMNS);
+}
 function publicCredentialColumns() {
   return allowedColumns(providerCredentials, PUBLIC_CREDENTIAL_COLUMNS);
 }
@@ -147,7 +160,10 @@ export interface AccountExportPage {
   readonly records: readonly AccountExportRecord[];
 }
 const exportedTables = [
-  ...ordinaryTables.map((table) => ({ table, selected: undefined })),
+  ...ordinaryTables
+    .filter((table) => table !== users)
+    .map((table) => ({ table, selected: undefined })),
+  { table: users, selected: publicUserColumns() },
   { table: providerCredentials, selected: publicCredentialColumns() },
   { table: runners, selected: publicRunnerColumns() },
 ] as const;
@@ -224,16 +240,32 @@ export function exportAccountPage(
     records,
   };
 }
+const blobIndexes = new WeakMap<
+  AppDatabase,
+  Map<string, Map<string, AccountExportBlob>>
+>();
+function accountBlobIndex(database: AppDatabase, userId: string) {
+  let accounts = blobIndexes.get(database);
+  if (accounts === undefined) {
+    accounts = new Map();
+    blobIndexes.set(database, accounts);
+  }
+  const cached = accounts.get(userId);
+  if (cached !== undefined) return cached;
+  const index = new Map<string, AccountExportBlob>();
+  let page = exportAccountPage(database, userId, 0);
+  for (;;) {
+    for (const blob of page.blobs) index.set(blob.digest, blob);
+    if (page.done) break;
+    page = exportAccountPage(database, userId, page.nextOffset);
+  }
+  accounts.set(userId, index);
+  return index;
+}
 export function exportAccountBlob(
   database: AppDatabase,
   userId: string,
   digest: string,
 ): AccountExportBlob | undefined {
-  let page = exportAccountPage(database, userId, 0);
-  while (!page.done) {
-    const blob = page.blobs.find((entry) => entry.digest === digest);
-    if (blob !== undefined) return blob;
-    page = exportAccountPage(database, userId, page.nextOffset);
-  }
-  return page.blobs.find((entry) => entry.digest === digest);
+  return accountBlobIndex(database, userId).get(digest);
 }

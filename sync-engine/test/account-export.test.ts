@@ -52,6 +52,7 @@ describe("legacy account export", () => {
     expect(exported.records.find(({ id }) => id === "p")?.tombstone).toBe(true);
     expect(encoded).not.toContain("SECRET_CANARY");
     expect(encoded).not.toContain("LOGIN_CANARY");
+    expect(encoded).not.toContain('"google_subject"');
     expect(exported.records.some(({ entity }) => entity === "sessions")).toBe(
       false,
     );

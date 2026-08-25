@@ -634,7 +634,7 @@ async function run(): Promise<void> {
   );
   await containers.recoverTracked();
   try {
-    if (!configuration || !configurationPath) {
+    if (configuration === undefined || configurationPath === undefined) {
       await new Promise<void>(() => undefined);
     } else {
       await maintainConnection(

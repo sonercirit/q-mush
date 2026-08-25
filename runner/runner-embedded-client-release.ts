@@ -35,7 +35,21 @@ export function embeddedClientRelease(
   );
   if (!isRecord(manifest) || !isRecord(manifest["files"]))
     throw new Error("The embedded browser release manifest is invalid");
-  for (const [name, digest] of Object.entries(manifest["files"])) {
+  const manifestFiles = manifest["files"];
+  if (!isRecord(manifestFiles))
+    throw new Error("The embedded browser release manifest is invalid");
+  const manifestNames = Object.keys(manifestFiles);
+  const decodedNames = Object.keys(decoded).filter(
+    (name) => name !== "manifest.json",
+  );
+  if (
+    manifestNames.length !== decodedNames.length ||
+    decodedNames.some((name) => !Object.hasOwn(manifestFiles, name))
+  )
+    throw new Error(
+      "The embedded browser release manifest file set is invalid",
+    );
+  for (const [name, digest] of Object.entries(manifestFiles)) {
     const bytes = decoded[name];
     if (
       !isSha256Digest(digest) ||

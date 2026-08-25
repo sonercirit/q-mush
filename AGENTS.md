@@ -171,13 +171,14 @@ Memory.
 
 - Stage-1 local replicas accept only schema-validated, entity-counted,
   checksum-bound account inventories; readiness rechecks manifests/blobs,
-  reserves SQLite/WAL plus incoming/install space, and bounded views label
-  truncation incomplete. Sensitive export tables use explicit public-column
-  allow-lists; blobs download separately/resumably. Runner catch-up is
-  background/non-fatal; its loopback app uses an ephemeral collision-free port
-  unless configured. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+  reserves SQLite/WAL plus incoming/install space. Solid selects its host from
+  page metadata; both runner and authenticated migration-engine handlers serve
+  bounded, read-only active views labeled with origin and completeness.
+  Sensitive export tables use explicit public-column allow-lists; blobs download
+  separately/resumably. Runner catch-up is background/non-fatal; its loopback
+  app uses an ephemeral collision-free port unless configured. Physical pairing
+  is transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
+  the browser grant and pairing transcript are never logged.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,
