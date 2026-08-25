@@ -12,7 +12,10 @@ afterEach(() => {
 
 test("real Chromium reads sessions and renders replica attachments read-only", async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-    const url = new URL(String(input), location.origin);
+    const url = new URL(
+      input instanceof Request ? input.url : input instanceof URL ? input.href : input,
+      location.origin,
+    );
     const entity = url.searchParams.get("entity");
     const records =
       entity === "agent_sessions"
@@ -50,6 +53,8 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
   expect(image.getAttribute("src")).toBe(`/api/local/blob/${digest}`);
   expect(image.getBoundingClientRect().width).toBeGreaterThan(0);
   const mutation = root.querySelector("button[disabled]");
-  expect(mutation).toBeInstanceOf(HTMLButtonElement);
-  expect(getComputedStyle(mutation as HTMLButtonElement).cursor).toBe("not-allowed");
+  if (!(mutation instanceof HTMLButtonElement)) {
+    throw new Error("Missing disabled mutation control");
+  }
+  expect(getComputedStyle(mutation).cursor).toBe("not-allowed");
 });
