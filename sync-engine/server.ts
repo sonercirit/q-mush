@@ -462,7 +462,9 @@ export function createRequestHandler(
         const sessionId = url.searchParams.get("sessionId");
         const matching = exported.records
           .filter((record) => record.entity === entity && !record.tombstone)
-          .map((record) => JSON.parse(record.payload) as Record<string, unknown>)
+          .map(
+            (record) => JSON.parse(record.payload) as Record<string, unknown>,
+          )
           .filter(
             (record) =>
               sessionId === null || record["session_id"] === sessionId,
