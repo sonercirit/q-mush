@@ -55,11 +55,9 @@ import {
   type RunnerStartupRestart,
   updateRunnerIfAvailable,
 } from "./runner-update.ts";
-
 declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
 declare const Q_MUSH_CLIENT_RELEASE: string;
-
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
 const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
@@ -69,7 +67,6 @@ const runnerUpdateTrigger = createRunnerUpdateTrigger(Q_MUSH_RUNNER_VERSION);
 const runnerRestart = createRunnerRestartCoordinator({
   restartId: () => randomBytes(32).toString("base64url"),
 });
-
 interface RunnerExecution {
   readonly commands: RunnerCommandExecutor;
   readonly containers: RunnerContainerManager;
