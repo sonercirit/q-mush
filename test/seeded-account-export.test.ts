@@ -135,6 +135,45 @@ test("a seeded engine export catches up byte-completely across executors", async
       ]),
     );
     expect(exported.entityCounts).toEqual(expectedEntityCounts);
+    const expectedPublicColumns = {
+      provider_credentials: [
+        "api_format",
+        "created_at",
+        "created_by_id",
+        "id",
+        "is_default",
+        "is_deleted",
+        "is_global",
+        "label",
+        "provider",
+        "provider_account_id",
+        "requires_reauthentication",
+        "source",
+        "updated_at",
+        "updated_by_id",
+        "user_id",
+      ],
+      users: [
+        "created_at",
+        "created_by_id",
+        "email",
+        "id",
+        "is_deleted",
+        "name",
+        "updated_at",
+        "updated_by_id",
+      ],
+    } as const;
+    for (const [entity, expectedColumns] of Object.entries(
+      expectedPublicColumns,
+    )) {
+      const payload = exported.records.find(
+        (record) => record.entity === entity,
+      );
+      expect(
+        Object.keys(parsedPayload(payload?.payload ?? "{}")).sort(),
+      ).toEqual(expectedColumns);
+    }
     const expectedRunnerColumns = engine.$client
       .query<{ name: string }, []>(
         "SELECT name FROM pragma_table_info('runners')",

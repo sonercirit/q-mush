@@ -6,6 +6,7 @@ import {
   zstdDecompressSync,
 } from "node:zlib";
 import { describe, expect, test } from "vitest";
+import type { AppDatabase } from "../../shared/database.ts";
 import {
   BRAVE_SEARCH_KEYS_PATH,
   FAVICON_PATH,
@@ -92,8 +93,9 @@ const braveSearch: BraveSearchSkill = {
   setScopes: unavailableResponse,
 };
 const pages = await renderPages();
-function createTestRequestHandler(): (request: Request) => Promise<Response> {
-  const database = createSchemaCompatibleTestDatabase();
+export function createTestRequestHandler(
+  database: AppDatabase = createSchemaCompatibleTestDatabase(),
+): (request: Request) => Promise<Response> {
   const integrationDependencies = { database };
   const googleAuth = createGoogleAuthFromEnvironment(
     {},

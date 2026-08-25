@@ -16,7 +16,10 @@ export interface QueryHost {
 export function isRunnerDocument(document: {
   readonly querySelector: (selectors: string) => unknown;
 }): boolean {
-  return document.querySelector('meta[name="q-mush-host"]') !== null;
+  return (
+    document.querySelector('meta[name="q-mush-host"][content="runner"]') !==
+    null
+  );
 }
 
 export function queryHostForDocument(document: {

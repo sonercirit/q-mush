@@ -240,32 +240,16 @@ export function exportAccountPage(
     records,
   };
 }
-const blobIndexes = new WeakMap<
-  AppDatabase,
-  Map<string, Map<string, AccountExportBlob>>
->();
-function accountBlobIndex(database: AppDatabase, userId: string) {
-  let accounts = blobIndexes.get(database);
-  if (accounts === undefined) {
-    accounts = new Map();
-    blobIndexes.set(database, accounts);
-  }
-  const cached = accounts.get(userId);
-  if (cached !== undefined) return cached;
-  const index = new Map<string, AccountExportBlob>();
-  let page = exportAccountPage(database, userId, 0);
-  for (;;) {
-    for (const blob of page.blobs) index.set(blob.digest, blob);
-    if (page.done) break;
-    page = exportAccountPage(database, userId, page.nextOffset);
-  }
-  accounts.set(userId, index);
-  return index;
-}
 export function exportAccountBlob(
   database: AppDatabase,
   userId: string,
   digest: string,
 ): AccountExportBlob | undefined {
-  return accountBlobIndex(database, userId).get(digest);
+  let page = exportAccountPage(database, userId, 0);
+  for (;;) {
+    const blob = page.blobs.find((candidate) => candidate.digest === digest);
+    if (blob !== undefined) return blob;
+    if (page.done) return undefined;
+    page = exportAccountPage(database, userId, page.nextOffset);
+  }
 }

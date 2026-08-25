@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
-import { engineActiveViewResponse } from "../active-view.ts";
+import { engineLocalResponse } from "../active-view.ts";
 
 let activeViewDatabase: AppDatabase | undefined;
 afterEach(() => activeViewDatabase?.$client.close());
@@ -30,10 +30,10 @@ test("migration engine serves an owned bounded labeled active view", async () =>
       id,
       userId,
     ]);
-  const response = engineActiveViewResponse(
+  const response = engineLocalResponse(
     activeViewDatabase,
+    new Request("http://engine/api/local/view?limit=1&entity=agent_sessions"),
     "u",
-    new URL("http://engine/api/local/view?limit=1&entity=agent_sessions"),
   );
   expect(response.ok).toBe(true);
   expect(await response.json()).toMatchObject({

@@ -5,7 +5,11 @@ import "../styles.css";
 
 const digest = "a".repeat(64);
 
-test("real Chromium reads sessions and renders replica attachments read-only", async () => {
+test("real Chromium pairs with a runner, reads sessions, and renders replica attachments read-only", async () => {
+  const meta = document.createElement("meta");
+  meta.name = "q-mush-host";
+  meta.content = "runner";
+  document.head.append(meta);
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = new URL(
       input instanceof Request
@@ -15,6 +19,8 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
           : input,
       location.origin,
     );
+    if (url.pathname === "/api/local/status")
+      return Promise.resolve(Response.json({ complete: true }));
     const entity = url.searchParams.get("entity");
     const records =
       entity === "agent_sessions"
@@ -43,6 +49,8 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
   await vi.waitFor(() => {
     expect(root.textContent).toContain("Session from runner B");
   });
+  expect(root.textContent).toContain("Runner replica · Complete source");
+  expect(root.textContent).not.toContain("Runner terminal pairing code");
   const session = root.querySelector("button:not([disabled])");
   if (!(session instanceof HTMLButtonElement))
     throw new Error("Missing session");
@@ -63,5 +71,6 @@ test("real Chromium reads sessions and renders replica attachments read-only", a
   }
   expect(getComputedStyle(mutation).cursor).toBe("not-allowed");
   document.body.replaceChildren();
+  meta.remove();
   vi.restoreAllMocks();
 });
