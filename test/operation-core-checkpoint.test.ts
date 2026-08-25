@@ -61,13 +61,40 @@ const sequentialOperation = (
     "x",
     clock,
   );
-const bigintRecord = (value: object): Readonly<Record<string, bigint>> =>
-  Object.fromEntries(
-    Object.entries(value).filter(
-      (entry): entry is [string, bigint] => typeof entry[1] === "bigint",
-    ),
+const parseBigintRecord = (
+  value: unknown,
+): Readonly<Record<string, bigint>> => {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    Object.values(value).some((item) => typeof item !== "bigint")
+  )
+    throw new Error("Invalid bigint record");
+  return Object.fromEntries(Object.entries(value));
+};
+const parseStringRecord = (
+  value: unknown,
+): Readonly<Record<string, string>> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new Error("Invalid string record");
+  const entries = Object.entries(value);
+  if (entries.some((entry) => typeof entry[1] !== "string"))
+    throw new Error("Invalid string record");
+  return Object.fromEntries(entries.map(([key, item]) => [key, String(item)]));
+};
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
+const checkpointField = (value: object, key: string): unknown =>
+  Object.entries(value).find((entry) => entry[0] === key)?.[1];
+const hasExactKeys = (value: object, keys: readonly string[]) => {
+  const actual = Object.keys(value).sort();
+  return (
+    actual.length === keys.length && keys.every((key) => actual.includes(key))
   );
+};
 const encodeCheckpointValue = (value: unknown): unknown => {
+  if (value === undefined) return ["undefined", null];
   if (typeof value === "bigint") return ["bigint", value.toString()];
   if (Array.isArray(value))
     return ["array", value.map((item) => encodeCheckpointValue(item))];
@@ -88,6 +115,7 @@ const decodeCheckpointValue = (value: unknown): unknown => {
     typeof value[0] !== "string"
   )
     throw new Error("Invalid encoded checkpoint value");
+  if (value[0] === "undefined" && value[1] === null) return undefined;
   if (value[0] === "bigint" && typeof value[1] === "string")
     return BigInt(value[1]);
   if (value[0] === "array" && Array.isArray(value[1]))
@@ -109,54 +137,61 @@ const decodeCheckpointValue = (value: unknown): unknown => {
 };
 const roundTrip = (
   state: OperationApplyState<readonly string[]>,
+  alter: (value: unknown) => unknown = (value) => value,
 ): OperationApplyState<readonly string[]> => {
-  const parsed = decodeCheckpointValue(
-    JSON.parse(JSON.stringify(encodeCheckpointValue(state))),
+  const parsed = alter(
+    decodeCheckpointValue(
+      JSON.parse(JSON.stringify(encodeCheckpointValue(state))),
+    ),
   );
+  if (typeof parsed !== "object" || parsed === null)
+    throw new Error("Invalid checkpoint");
+  const checkpoint = parsed;
+  const field = (key: string) => checkpointField(checkpoint, key);
+  const checkpointKeys = [
+    "applied",
+    "baseFrontier",
+    "baseProjection",
+    "frontier",
+    "pending",
+    "projection",
+    "replayCount",
+    "replayHead",
+    "replayLastClock",
+  ];
+  const applied = parseStringRecord(field("applied"));
   if (
-    typeof parsed !== "object" ||
-    parsed === null ||
-    !("frontier" in parsed) ||
-    !("pending" in parsed) ||
-    !("projection" in parsed) ||
-    !("applied" in parsed) ||
-    !("replayHead" in parsed) ||
-    !("replayCount" in parsed) ||
-    !("replayLastClock" in parsed) ||
-    !("baseProjection" in parsed) ||
-    !("baseFrontier" in parsed) ||
-    !Array.isArray(parsed.pending) ||
-    !Array.isArray(parsed.projection) ||
-    !Array.isArray(parsed.baseProjection) ||
-    !(
-      parsed.replayHead === undefined || typeof parsed.replayHead === "object"
-    ) ||
-    typeof parsed.frontier !== "object" ||
-    parsed.frontier === null ||
-    typeof parsed.applied !== "object" ||
-    parsed.applied === null ||
-    typeof parsed.replayCount !== "number" ||
-    typeof parsed.baseFrontier !== "object" ||
-    parsed.baseFrontier === null
+    !hasExactKeys(checkpoint, checkpointKeys) ||
+    !Array.isArray(field("pending")) ||
+    !isStringArray(field("projection")) ||
+    !isStringArray(field("baseProjection")) ||
+    typeof field("replayCount") !== "number" ||
+    !Number.isSafeInteger(field("replayCount")) ||
+    Number(field("replayCount")) < 0
+  )
+    throw new Error("Invalid checkpoint");
+  const pending = field("pending");
+  const projection = field("projection");
+  const baseProjection = field("baseProjection");
+  if (
+    !Array.isArray(pending) ||
+    !Array.isArray(projection) ||
+    !Array.isArray(baseProjection)
   )
     throw new Error("Invalid checkpoint");
   return {
-    frontier: bigintRecord(parsed.frontier),
-    pending: parsed.pending,
-    projection: parsed.projection,
-    applied: Object.fromEntries(
-      Object.entries(parsed.applied).filter(
-        (entry): entry is [string, string] => typeof entry[1] === "string",
-      ),
-    ),
-    replayHead: parseReplayEntry(parsed.replayHead),
-    replayCount: parsed.replayCount,
+    frontier: parseBigintRecord(field("frontier")),
+    pending: pending.map(parseOperation),
+    projection: projection.map(String),
+    applied,
+    replayHead: parseReplayEntry(field("replayHead")),
+    replayCount: Number(field("replayCount")),
     replayLastClock:
-      parsed.replayLastClock === undefined
+      field("replayLastClock") === undefined
         ? undefined
-        : parseClock(parsed.replayLastClock),
-    baseProjection: parsed.baseProjection,
-    baseFrontier: bigintRecord(parsed.baseFrontier),
+        : parseClock(field("replayLastClock")),
+    baseProjection: baseProjection.map(String),
+    baseFrontier: parseBigintRecord(field("baseFrontier")),
   };
 };
 const parseReplayEntry = (
@@ -220,7 +255,7 @@ const parseOperation = (value: unknown): Operation => {
       logical: value.clock.logical,
       writerId: value.clock.writerId,
     },
-    parents: bigintRecord(value.parents),
+    parents: parseBigintRecord(value.parents),
     entity: {
       type: value.entity.type,
       id: value.entity.id,
@@ -298,6 +333,64 @@ describe("operation checkpoints", () => {
     const item = operation("a", 1n, {}, "123n", 1);
     const checkpoint = roundTrip(applyOperation(arrayState(), item, append));
     expect(checkpoint.replayHead?.operation.payload).toEqual({ value: "123n" });
+  });
+
+  test("preserves adversarial payload structures through checkpoints", () => {
+    const payloads = [
+      { nested: ["123n", { value: "456n" }] },
+      { bigint: "structural key", array: { object: "primitive" } },
+      ["bigint", "123"],
+      ["array", ["primitive", "x"]],
+      ["object", [["value", ["bigint", "123"]]]],
+    ];
+    for (const payload of payloads) {
+      const item = { ...operation("a", 1n, {}, "x", 1), payload };
+      const checkpoint = roundTrip(applyOperation(arrayState(), item, append));
+      expect(checkpoint.replayHead?.operation.payload).toEqual(payload);
+    }
+  });
+
+  test("rejects malformed checkpoint fields instead of normalizing them", () => {
+    const state = applyAll([sequentialOperation("a", 1)]);
+    const replace = (value: unknown, field: string, replacement: unknown) => {
+      if (typeof value !== "object" || value === null)
+        throw new Error("Expected checkpoint object");
+      return {
+        ...Object.fromEntries(Object.entries(value)),
+        [field]: replacement,
+      };
+    };
+    const mutations: ((value: unknown) => unknown)[] = [
+      (value) => replace(value, "extra", true),
+      (value) => replace(value, "frontier", { a: "1" }),
+      (value) => replace(value, "applied", { key: 1n }),
+      (value) => replace(value, "pending", ["operation"]),
+      (value) => replace(value, "projection", [1n]),
+      (value) => replace(value, "baseProjection", [1n]),
+    ];
+    for (const mutate of mutations)
+      expect(() => roundTrip(state, mutate)).toThrow(/Invalid/);
+  });
+
+  test("round trips pending operations and releases them after restart", () => {
+    const a1 = sequentialOperation("a", 1, 10);
+    const a2 = sequentialOperation("a", 2, 20);
+    const a3 = sequentialOperation("a", 3, 30);
+    const waiting = applyOperation(arrayState(), a3, append);
+    const restored = roundTrip(waiting);
+    expect(restored.pending).toEqual([a3]);
+    const complete = applyAll([a1, a2], restored);
+    expect(complete.projection).toEqual(["a-1", "a-2", "a-3"]);
+    expect(complete.frontier).toEqual({ a: 3n });
+    expect(applyOperation(complete, a3, append)).toBe(complete);
+  });
+
+  test("keeps a same-writer frontier monotonic during clock-order replay", () => {
+    const a1 = sequentialOperation("a", 1, 100);
+    const a2 = sequentialOperation("a", 2, 50);
+    const state = applyAll([a1, a2]);
+    expect(state.projection).toEqual(["a-2", "a-1"]);
+    expect(state.frontier).toEqual({ a: 2n });
   });
 
   test("accepts a concurrent earlier-clock operation and converges", () => {

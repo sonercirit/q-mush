@@ -17,39 +17,41 @@
   non-commutative updates converge across arrival order. Replay metadata is a
   mandatory part of every durable checkpoint and uses structural sharing.
   Checkpoints therefore grow linearly with replay history and the `applied`
-  identity index: measured storage is approximately 1 KB per operation (2,000
-  operations produce an approximately 1.94 MB checkpoint). No safe compaction
-  exists yet because a local replica cannot know whether a peer may later send a
-  valid earlier-clock operation. Unbounded history is an explicit known gap;
-  bounded compaction is deferred to stage 2 anti-entropy and durable subscriber
-  receipts, which can establish a stable boundary. Identity fingerprints are
-  plain enumerable checkpoint data, while sequential steady-state admission
-  remains amortized linear overall. Unready operations have indexed identity
-  checks and bounded admission (512 entries, after which admission fails rather
-  than silently wedging), while a ready dependency may enter a full buffer to
-  drain it; operation-ID and writer-sequence equivocation is rejected. Durable
-  checkpoints consist of `frontier`, `pending`, `projection`, `applied`,
-  `replayHead`, `replayCount`, `replayLastClock`, `baseProjection`, and
-  `baseFrontier`; none of the replay fields is optional. Operation values accept
-  primitives, arrays, plain string-keyed objects, and valid Dates; other object
-  prototypes, symbol keys, and cycles are rejected. The auth bearer-token
-  `sessions`, encrypted `provider_credentials`, and setup-token-bearing
-  `runners` tables are deliberately absent from operation replication because
-  ordinary frames contain no secrets. The remaining closed allow-list was
-  audited against schema columns: none stores credentials, authentication
-  tokens, password material, or encryption keys. Blob lookup early hit. Solid
-  selects its host from page metadata; both runner and authenticated
-  migration-engine handlers serve bounded, read-only active views labeled with
-  origin and completeness. Sensitive export tables use explicit public-column
-  allow-lists; blobs download separately/resumably. Engine blob GETs are
-  stateless and read-only: they derive digests from owner-scoped attachment
-  columns, requiring no export priming, duplicated blob table, or process cache.
-  Engine active views rewrite inline attachments to the digest references Solid
-  consumes; runner views use replicated references and its blob store. Runner
-  catch-up is background/non-fatal; its loopback app uses an ephemeral
-  collision-free port unless configured. Physical pairing is transcript-bound,
-  five-minute, one-use/rate-limited, constant-time checked; the browser grant
-  and pairing transcript are never logged.
+  identity index. With 2,000 sequential operations and a minimal
+  `{ value: "x" }` payload, plain JSON with bigint strings measures 2,104,649
+  bytes (1.05 KB/operation, 2.01 MiB total); the collision-safe tagged
+  checkpoint encoding used by tests measures 1.38 KB/operation (2.63 MiB total).
+  No safe compaction exists yet because a local replica cannot know whether a
+  peer may later send a valid earlier-clock operation. Unbounded history is an
+  explicit known gap; bounded compaction is deferred to stage 2 anti-entropy and
+  durable subscriber receipts, which can establish a stable boundary. Identity
+  fingerprints are plain enumerable checkpoint data, while sequential
+  steady-state admission remains amortized linear overall. Unready operations
+  have indexed identity checks and bounded admission (512 entries, after which
+  admission fails rather than silently wedging), while a ready dependency may
+  enter a full buffer to drain it; operation-ID and writer-sequence equivocation
+  is rejected. Durable checkpoints consist of `frontier`, `pending`,
+  `projection`, `applied`, `replayHead`, `replayCount`, `replayLastClock`,
+  `baseProjection`, and `baseFrontier`; none of the replay fields is optional.
+  Operation values accept primitives, arrays, plain string-keyed objects, and
+  valid Dates; other object prototypes, symbol keys, and cycles are rejected.
+  The auth bearer-token `sessions`, encrypted `provider_credentials`, and
+  setup-token-bearing `runners` tables are deliberately absent from operation
+  replication because ordinary frames contain no secrets. The remaining closed
+  allow-list was audited against schema columns: none stores credentials,
+  authentication tokens, password material, or encryption keys. Blob lookup
+  early hit. Solid selects its host from page metadata; both runner and
+  authenticated migration-engine handlers serve bounded, read-only active views
+  labeled with origin and completeness. Sensitive export tables use explicit
+  public-column allow-lists; blobs download separately/resumably. Engine blob
+  GETs are stateless and read-only: they derive digests from owner-scoped
+  attachment columns, requiring no export priming, duplicated blob table, or
+  process cache. Engine active views rewrite inline attachments to the digest
+  references Solid consumes; runner views use replicated references and its blob
+  store. Runner catch-up is background/non-fatal; its loopback app uses an
+  ephemeral collision-free port unless configured. Physical pairing is
+  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
+  the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 
