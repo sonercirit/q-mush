@@ -1,5 +1,5 @@
 import { render } from "solid-js/web";
-import { expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import { RunnerReplicaView } from "../runner-replica-view.tsx";
 import "../styles.css";
 
@@ -23,6 +23,78 @@ function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function completeView(records: readonly unknown[]): Response {
+  return Response.json({ complete: true, records });
+}
+
+function requestUrl(input: RequestInfo | URL): URL {
+  const value =
+    input instanceof Request
+      ? input.url
+      : input instanceof URL
+        ? input.href
+        : input;
+  return new URL(value, location.origin);
+}
+
+function abortableResponse(
+  init: RequestInit | undefined,
+  onAbort: () => void,
+  onResolve?: (resolve: (response: Response) => void) => void,
+): Promise<Response> {
+  return new Promise<Response>((resolve, reject) => {
+    onResolve?.(resolve);
+    init?.signal?.addEventListener("abort", () => {
+      onAbort();
+      reject(new DOMException("Aborted", "AbortError"));
+    });
+  });
+}
+
+function mockRunnerFetch(
+  readView: (url: URL, init?: RequestInit) => Promise<Response>,
+): void {
+  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
+    const url = requestUrl(input);
+    return url.pathname === "/api/local/status"
+      ? Promise.resolve(Response.json({ complete: true }))
+      : readView(url, init);
+  });
+}
+
+function removeRunnerViewFixture(
+  fixture: ReturnType<typeof runnerViewFixture>,
+): void {
+  fixture.dispose();
+  fixture.root.remove();
+  fixture.meta.remove();
+}
+
+async function expectRequestCount(
+  readCount: () => number,
+  expected: number,
+): Promise<void> {
+  await vi.waitFor(() => {
+    expect(readCount()).toBe(expected);
+  });
+}
+
+let mountedFixture: ReturnType<typeof runnerViewFixture> | undefined;
+
+function mountRunnerView(): HTMLDivElement {
+  mountedFixture = runnerViewFixture();
+  return mountedFixture.root;
+}
+
+function disposeRunnerView(): void {
+  if (mountedFixture !== undefined) removeRunnerViewFixture(mountedFixture);
+  mountedFixture = undefined;
+}
+
+afterEach(() => {
+  disposeRunnerView();
+});
+
 async function waitForText(root: HTMLElement, text: string): Promise<void> {
   await vi.waitFor(
     () => {
@@ -35,14 +107,7 @@ async function waitForText(root: HTMLElement, text: string): Promise<void> {
 test("real Chromium reads a complete runner replica and renders attachments read-only", async () => {
   let statusRequests = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-    const url = new URL(
-      input instanceof Request
-        ? input.url
-        : input instanceof URL
-          ? input.href
-          : input,
-      location.origin,
-    );
+    const url = requestUrl(input);
     if (url.pathname === "/api/local/status") {
       statusRequests += 1;
       return Promise.resolve(
@@ -78,7 +143,7 @@ test("real Chromium reads a complete runner replica and renders attachments read
       }),
     );
   });
-  const { dispose, meta, root } = runnerViewFixture();
+  const root = mountRunnerView();
 
   await waitForText(root, "Session from runner B");
   expect(root.textContent).toContain("Runner replica · Complete source");
@@ -100,85 +165,49 @@ test("real Chromium reads a complete runner replica and renders attachments read
     throw new Error("Missing disabled mutation control");
   }
   expect(getComputedStyle(mutation).cursor).toBe("not-allowed");
-  dispose();
-  root.remove();
-  meta.remove();
-  vi.restoreAllMocks();
+  disposeRunnerView();
 });
 
 test("serializes view polling and aborts its read on disposal", async () => {
   let viewRequests = 0;
   let activeViews = 0;
   let maximumActiveViews = 0;
-  vi.spyOn(globalThis, "fetch").mockImplementation((input, init) => {
-    const url = new URL(
-      input instanceof Request
-        ? input.url
-        : input instanceof URL
-          ? input.href
-          : input,
-      location.origin,
-    );
-    if (url.pathname === "/api/local/status")
-      return Promise.resolve(Response.json({ complete: true }));
+  mockRunnerFetch((_url, init) => {
     viewRequests += 1;
     activeViews += 1;
     maximumActiveViews = Math.max(maximumActiveViews, activeViews);
-    return new Promise<Response>((_resolve, reject) => {
-      init?.signal?.addEventListener("abort", () => {
-        activeViews -= 1;
-        reject(new DOMException("Aborted", "AbortError"));
-      });
+    return abortableResponse(init, () => {
+      activeViews -= 1;
     });
   });
-  const { dispose, meta, root } = runnerViewFixture();
+  const root = mountRunnerView();
 
-  await vi.waitFor(() => {
-    expect(viewRequests).toBe(1);
-  });
+  await expectRequestCount(() => viewRequests, 1);
   await delay(2_100);
   expect([viewRequests, maximumActiveViews]).toEqual([1, 1]);
-  dispose();
+  disposeRunnerView();
   await vi.waitFor(() => {
     expect(activeViews).toBe(0);
   });
   root.remove();
-  meta.remove();
-  vi.restoreAllMocks();
 });
 
 test("recovers after a transient view failure", async () => {
   let viewRequests = 0;
-  vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
-    const url = new URL(
-      input instanceof Request
-        ? input.url
-        : input instanceof URL
-          ? input.href
-          : input,
-      location.origin,
-    );
-    if (url.pathname === "/api/local/status")
-      return Promise.resolve(Response.json({ complete: true }));
+  mockRunnerFetch(() => {
     viewRequests += 1;
     return Promise.resolve(
       viewRequests === 1
         ? Response.json({ error: "joining" }, { status: 503 })
-        : Response.json({
-            complete: true,
-            records: [{ id: "ready", title: "Ready session" }],
-          }),
+        : completeView([{ id: "ready", title: "Ready session" }]),
     );
   });
-  const { dispose, meta, root } = runnerViewFixture();
+  const root = mountRunnerView();
 
   await waitForText(root, "The runner replica is not ready.");
   await waitForText(root, "Ready session");
   expect(root.textContent).not.toContain("The runner replica is not ready.");
-  dispose();
-  root.remove();
-  meta.remove();
-  vi.restoreAllMocks();
+  disposeRunnerView();
 });
 
 test("serializes status polling and stops requests and updates after disposal", async () => {
@@ -190,31 +219,27 @@ test("serializes status polling and stops requests and updates after disposal", 
     requests += 1;
     active += 1;
     maximumActive = Math.max(maximumActive, active);
-    return new Promise<Response>((resolve, reject) => {
-      resolveStatus = (response) => {
+    return abortableResponse(
+      init,
+      () => {
         active -= 1;
-        resolve(response);
-      };
-      init?.signal?.addEventListener("abort", () => {
-        active -= 1;
-        reject(new DOMException("Aborted", "AbortError"));
-      });
-    });
+      },
+      (resolve) => {
+        resolveStatus = (response) => {
+          active -= 1;
+          resolve(response);
+        };
+      },
+    );
   });
-  const { dispose, meta, root } = runnerViewFixture();
+  const root = mountRunnerView();
 
-  await vi.waitFor(() => {
-    expect(requests).toBe(1);
-  });
+  await expectRequestCount(() => requests, 1);
   await delay(1_100);
   expect([maximumActive, requests]).toEqual([1, 1]);
-  dispose();
-  root.remove();
+  disposeRunnerView();
   resolveStatus?.(Response.json({ complete: true }));
   await delay(1_100);
   expect(requests).toBe(1);
   expect(root.textContent).toBe("");
-
-  meta.remove();
-  vi.restoreAllMocks();
 });
