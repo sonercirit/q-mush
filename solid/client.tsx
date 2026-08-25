@@ -522,11 +522,7 @@ function App(): JSX.Element {
               )}
             </For>
             <Show
-              when={
-                document.querySelector(
-                  'meta[name="q-mush-host"][content="runner"]',
-                ) !== null
-              }
+              when={document.querySelector('meta[name="q-mush-host"]') !== null}
               fallback={
                 <Show
                   fallback={<AppLoadingCard />}
