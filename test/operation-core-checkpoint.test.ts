@@ -161,6 +161,7 @@ describe("operation checkpoints", () => {
       mutatePendingField("schemaVersion", encodedPrimitive("1")),
       mutatePendingField("schemaVersion", encodedPrimitive(true)),
       mutatePendingField("partition", encodedPrimitive("session")),
+      mutatePendingField("payload", ["date", "2024-01-01"]),
       malformedClockWriter,
       duplicateObjectKey,
       ["bigint", "01"],
