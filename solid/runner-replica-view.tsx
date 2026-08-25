@@ -92,7 +92,9 @@ export function RunnerReplicaView(): JSX.Element {
     const refresh = setInterval(() => {
       void loadStatus();
     }, 1_000);
-    onCleanup(() => clearInterval(refresh));
+    onCleanup(() => {
+      clearInterval(refresh);
+    });
   });
   const pair = async (): Promise<void> => {
     const challenge: unknown = await requestJson("/api/local/pair");
