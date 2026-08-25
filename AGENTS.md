@@ -169,12 +169,12 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
-- Stage-1 local replicas accept only schema-validated, entity-counted,
+- Stage-1 replicas accept only schema-validated, entity-counted,
   checksum-bound account inventories; readiness rechecks manifests/blobs,
   reserves SQLite/WAL plus incoming/install space. Paged exports use keyset
   cursors and per-table counts/max durable update times in one page transaction;
-  presence does not advance audit time. Revision changes restart with capped
-  backoff but no total retry cap, allowing catch-up after sustained writes. Blob
+  presence does not advance audit time. Revision changes use capped backoff with
+  no retry cap, allowing catch-up during writes. Blob
   lookup streams rows and finalizes on an early hit. Solid selects its host from
   page metadata; both runner and authenticated migration-engine handlers serve
   bounded, read-only active views labeled with origin and completeness.
