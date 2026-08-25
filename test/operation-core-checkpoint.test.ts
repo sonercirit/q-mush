@@ -170,10 +170,7 @@ describe("operation checkpoints", () => {
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {
       const copy = structuredClone(pendingDecoded);
-      const rootEntries = requireArray(requireArray(copy)[1]);
-      const pendingEntry = requireEntry(rootEntries, "pending");
-      const operations = requireArray(requireArray(pendingEntry[1])[1]);
-      const operationEntries = requireArray(requireArray(operations[0])[1]);
+      const operationEntries = pendingOperationEntries(copy);
       const nestedEntry = requireEntry(operationEntries, field);
       const nested = requireArray(requireArray(nestedEntry[1])[1]);
       nested.push(["extra", encodedPrimitive(true)]);

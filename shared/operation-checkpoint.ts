@@ -34,7 +34,10 @@ const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
   if (value === undefined) return ["undefined", null];
   if (typeof value === "bigint") return ["bigint", value.toString()];
   if (value instanceof Date) return ["date", value.toISOString()];
-  if (Array.isArray(value)) return ["array", value.map(encodeCheckpointValue)];
+  if (Array.isArray(value)) {
+    const encoded = value.map(encodeCheckpointValue);
+    return ["array", encoded];
+  }
   if (value !== null && typeof value === "object")
     return [
       "object",

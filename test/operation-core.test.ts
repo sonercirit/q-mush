@@ -450,13 +450,10 @@ describe("operation core", () => {
     const original = operations[0];
     if (original === undefined) throw new Error("Missing operation fixture");
     expect(applyOperation(state, original, reducer)).toBe(state);
-    expect(() =>
-      applyOperation(
-        state,
-        { ...original, payload: { value: "changed" } },
-        reducer,
-      ),
-    ).toThrow(/equivocation/);
+    const changed = { ...original, payload: { changed: true } };
+    expect(() => applyOperation(state, changed, reducer)).toThrow(
+      /equivocation/,
+    );
   });
 
   test("preserves input states and resumes checkpoint-shaped durable state", () => {
