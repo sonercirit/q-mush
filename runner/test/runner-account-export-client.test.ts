@@ -101,7 +101,7 @@ test("converges after sustained revision changes during pagination", async () =>
     const revisionNumber = Math.min(requests, 10);
     return Response.json({
       blobs: [],
-      nextCursor: `${String(offset + 1)}`,
+      nextCursor: String(offset + 1),
       done: offset > 0 && revisionNumber >= 10,
       records: [
         exportRecord(

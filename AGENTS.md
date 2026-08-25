@@ -169,25 +169,24 @@ Memory.
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
-- Stage-1 replicas accept only schema-validated, entity-counted,
-  checksum-bound account inventories; readiness rechecks manifests/blobs,
-  reserves SQLite/WAL plus incoming/install space. Paged exports use keyset
-  cursors and per-table counts/max durable update times in one page transaction;
-  presence does not advance audit time. Revision changes use capped backoff with
-  no retry cap, allowing catch-up during writes. Blob
-  lookup streams rows and finalizes on an early hit. Solid selects its host from
-  page metadata; both runner and authenticated migration-engine handlers serve
-  bounded, read-only active views labeled with origin and completeness.
-  Sensitive export tables use explicit public-column allow-lists; blobs download
-  separately/resumably. Engine blob GETs are stateless and read-only: they
-  derive digests from owner-scoped attachment columns, requiring no export
-  priming, duplicated blob table, or process cache. Engine active views rewrite
-  inline attachments to the digest references Solid consumes; runner views use
-  replicated references and its blob store. Runner catch-up is
-  background/non-fatal; its loopback app uses an ephemeral collision-free port
-  unless configured. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+- Stage-1 replicas accept only schema-validated, entity-counted, checksum-bound
+  account inventories; readiness rechecks manifests/blobs, reserves SQLite/WAL
+  plus incoming/install space. Paged exports use keyset cursors and per-table
+  counts/max durable update times in one page transaction; presence does not
+  advance audit time. Revision changes use capped backoff with no retry cap,
+  allowing catch-up during writes. Blob lookup streams rows and finalizes on an
+  early hit. Solid selects its host from page metadata; both runner and
+  authenticated migration-engine handlers serve bounded, read-only active views
+  labeled with origin and completeness. Sensitive export tables use explicit
+  public-column allow-lists; blobs download separately/resumably. Engine blob
+  GETs are stateless and read-only: they derive digests from owner-scoped
+  attachment columns, requiring no export priming, duplicated blob table, or
+  process cache. Engine active views rewrite inline attachments to the digest
+  references Solid consumes; runner views use replicated references and its blob
+  store. Runner catch-up is background/non-fatal; its loopback app uses an
+  ephemeral collision-free port unless configured. Physical pairing is
+  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
+  the browser grant and pairing transcript are never logged.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,
