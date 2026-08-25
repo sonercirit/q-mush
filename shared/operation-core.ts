@@ -7,7 +7,7 @@ export interface HybridTimestamp {
   readonly writerId: string;
 }
 
-export interface OperationEntity {
+interface OperationEntity {
   readonly type: string;
   readonly id: string;
   readonly accountId: string;
