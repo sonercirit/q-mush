@@ -1,7 +1,11 @@
 import { Window } from "happy-dom";
 import { expect, test } from "vitest";
 import { FAVICON_PATH } from "../../shared/routes.ts";
-import { renderAppPage, renderHomePage } from "../../solid/pages.tsx";
+import {
+  renderAppPage,
+  renderHomePage,
+  renderRunnerAppPage,
+} from "../../solid/pages.tsx";
 import { isRunnerDocument } from "../query-host.ts";
 
 function expectFaviconMetadata(html: string, pageUrl: string): void {
@@ -38,6 +42,17 @@ test("marks the engine app without selecting the runner-only mount", () => {
     document.querySelector('meta[name="q-mush-host"]')?.getAttribute("content"),
   ).toBe("engine");
   expect(isRunnerDocument(document)).toBe(false);
+});
+
+test("renders the standalone runner shell at the shared client mount", () => {
+  const parser = new Window().DOMParser;
+  const document = new parser().parseFromString(
+    renderRunnerAppPage("client.hash.js", "styles.hash.css"),
+    "text/html",
+  );
+
+  expect(document.getElementById("app")).not.toBeNull();
+  expect(isRunnerDocument(document)).toBe(true);
 });
 
 test("renders every server page through Solid with absolute favicon metadata", () => {

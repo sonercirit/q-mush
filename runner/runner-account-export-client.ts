@@ -44,6 +44,7 @@ export async function catchUpAccountExport(
   const manifest: Record<string, number> = {};
   let offset = 0;
   let done = false;
+  let revision: string | undefined;
   while (!done) {
     const response = await fetch(
       `${serverOrigin}${RUNNER_ACCOUNT_EXPORT_PATH}?offset=${String(offset)}`,
@@ -55,6 +56,8 @@ export async function catchUpAccountExport(
     if (
       typeof page !== "object" ||
       page === null ||
+      !("revision" in page) ||
+      !isSha256Digest(page.revision) ||
       !("records" in page) ||
       !Array.isArray(page.records) ||
       !page.records.every(isExportRecord) ||
@@ -67,6 +70,15 @@ export async function catchUpAccountExport(
       typeof page.nextOffset !== "number"
     )
       throw new Error("The account export response is invalid");
+    if (revision !== undefined && revision !== page.revision) {
+      records.length = 0;
+      for (const digest of Object.keys(manifest)) delete manifest[digest];
+      offset = 0;
+      done = false;
+      revision = undefined;
+      continue;
+    }
+    revision = page.revision;
     records.push(...page.records);
     for (const entry of page.blobs) manifest[entry.digest] = entry.size;
     done = page.done;

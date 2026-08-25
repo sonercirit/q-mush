@@ -137,7 +137,12 @@ export function rewriteAccountAttachments(
         return item;
       const data = item.data;
       if (typeof data !== "string") return item;
-      const bytes = Uint8Array.fromBase64(data);
+      let bytes: Uint8Array;
+      try {
+        bytes = Uint8Array.fromBase64(data);
+      } catch {
+        return item;
+      }
       const digest = sha256(bytes);
       const blob = { data, digest, size: bytes.length };
       blobs.set(digest, blob);
@@ -160,6 +165,23 @@ export interface AccountExportPage {
   readonly done: boolean;
   readonly nextOffset: number;
   readonly records: readonly AccountExportRecord[];
+  readonly revision: string;
+}
+function accountExportRevision(database: AppDatabase, userId: string): string {
+  const rows: string[] = [];
+  for (const { table, selected } of exportedTables) {
+    const name = getTableName(table);
+    for (const row of boundedRows(
+      database,
+      table,
+      userId,
+      Number.MAX_SAFE_INTEGER,
+      0,
+      selected,
+    ))
+      rows.push(`${name}:${JSON.stringify(row)}`);
+  }
+  return sha256(new TextEncoder().encode(rows.join("\n")));
 }
 const exportedTables = [
   ...ordinaryTables
@@ -195,6 +217,7 @@ export function exportAccountPage(
   offset: number,
   limit = ACCOUNT_EXPORT_PAGE_LIMIT,
 ): AccountExportPage {
+  const revision = accountExportRevision(database, userId);
   const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
   const accumulator = createExportAccumulator();
   const { blobs, records } = accumulator;
@@ -241,6 +264,7 @@ export function exportAccountPage(
     done: records.length < safeLimit,
     nextOffset,
     records,
+    revision,
   };
 }
 export function exportAccountBlob(
@@ -255,24 +279,28 @@ export function exportAccountBlob(
     ["agent_pending_inputs", "content"],
     ["agent_pending_inputs", "images"],
   ] as const;
-  let found: AccountExportBlob | undefined;
   for (const [table, column] of attachmentColumns) {
     const rows = database.$client
       .query<Record<string, unknown>, [string]>(
         `SELECT "${column}" AS value FROM "${table}" WHERE "user_id" = ? AND "${column}" IS NOT NULL`,
       )
-      .iterate(userId);
+      .all(userId);
     for (const row of rows) {
       for (const item of parseSerializedArray(row["value"])) {
         if (typeof item !== "object" || item === null || !("data" in item))
           continue;
         const data = item.data;
         if (typeof data !== "string") continue;
-        const bytes = Uint8Array.fromBase64(data);
-        if (found === undefined && sha256(bytes) === digest)
-          found = { data, digest, size: bytes.length };
+        let bytes: Uint8Array;
+        try {
+          bytes = Uint8Array.fromBase64(data);
+        } catch {
+          continue;
+        }
+        if (sha256(bytes) === digest)
+          return { data, digest, size: bytes.length };
       }
     }
   }
-  return found;
+  return undefined;
 }

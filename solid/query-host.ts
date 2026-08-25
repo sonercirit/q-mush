@@ -25,11 +25,7 @@ export function isRunnerDocument(document: {
 export function queryHostForDocument(document: {
   readonly querySelector: (selectors: string) => unknown;
 }): QueryHost {
-  const origin =
-    document.querySelector('meta[name="q-mush-host"][content="runner"]') ===
-    null
-      ? "engine"
-      : "runner";
+  const origin = isRunnerDocument(document) ? "runner" : "engine";
   return {
     mutations: false,
     origin,

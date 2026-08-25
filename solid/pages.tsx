@@ -45,7 +45,7 @@ export function renderRunnerAppPage(
   return renderDocument("Q Mush", [
     <link rel="stylesheet" href={`/${stylesheet}`} />,
     <meta name="q-mush-host" content="runner" />,
-    <div id="root" />,
+    <div id="app" />,
     <script type="module" src={`/${javaScript}`} />,
   ]);
 }

@@ -14,6 +14,58 @@ import {
 import { sha256 } from "../../shared/sha256.ts";
 import { catchUpAccountExport } from "../runner-account-export-client.ts";
 
+test("restarts pagination when the account changes between pages", async () => {
+  const bytes = new TextEncoder().encode("stable export");
+  const digest = sha256(bytes);
+  const revisions = ["1".repeat(64), "2".repeat(64), "2".repeat(64)];
+  const offsets: number[] = [];
+  const server = Bun.serve({
+    port: 0,
+    fetch(request) {
+      const url = new URL(request.url);
+      if (url.pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
+        const offset = Number(url.searchParams.get("offset"));
+        offsets.push(offset);
+        const revision = revisions.shift() ?? "2".repeat(64);
+        return Response.json({
+          blobs: offset === 0 ? [{ digest, size: bytes.length }] : [],
+          done: revision === "2".repeat(64) && offset > 0,
+          nextOffset: offset + 1,
+          records: [
+            {
+              entity: "users",
+              id: `${revision}-${String(offset)}`,
+              payload: JSON.stringify({ id: `${revision}-${String(offset)}` }),
+              tombstone: false,
+            },
+          ],
+          revision,
+        });
+      }
+      if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`)
+        return accountExportBlobResponse(
+          { data: bytes.toBase64(), digest, size: bytes.length },
+          request.headers.get("range"),
+        );
+      return new Response("Not found", { status: 404 });
+    },
+  });
+  const directory = mkdtempSync(join(tmpdir(), "account-export-restart-"));
+  const configurationPath = join(directory, "runner.json");
+  writeFileSync(configurationPath, "{}");
+  try {
+    await catchUpAccountExport(
+      directory,
+      configurationPath,
+      server.url.origin,
+      "token",
+    );
+    expect(offsets).toEqual([0, 1, 0, 1]);
+  } finally {
+    void server.stop(true);
+  }
+});
+
 // Exercises fetch, HTTP Range, the persisted incoming file, and the shipped client.
 test("account export client resumes a real HTTP blob transfer", async () => {
   const bytes = new TextEncoder().encode("a resumable attachment payload");
@@ -37,6 +89,7 @@ test("account export client resumes a real HTTP blob transfer", async () => {
           blobs: inventory.manifest,
           done: true,
           nextOffset: 0,
+          revision: "0".repeat(64),
           records: inventory.records,
         });
       if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`) {

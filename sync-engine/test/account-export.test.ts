@@ -44,6 +44,12 @@ describe("legacy account export", () => {
 
   test("rejects malformed blob digests without querying the database", () => {
     database = createDatabase(":memory:");
+    database.$client.run(
+      "ALTER TABLE agent_messages RENAME TO hidden_messages",
+    );
+    database.$client.run(
+      "CREATE VIEW agent_messages AS SELECT missing_export_guard() AS content, missing_export_guard() AS images, 'u' AS user_id",
+    );
     expect(exportAccountBlob(database, "u", "not-a-digest")).toBeUndefined();
     expect(hasBlobCacheTable(database)).toBe(false);
     expect(database.$client.query("SELECT 1").get()).toEqual({ "1": 1 });
