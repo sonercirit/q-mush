@@ -23,11 +23,17 @@ const release = {
   shell: "<!doctype html><title>Local Q Mush</title>",
 };
 
+function pairedHandler(
+  selectedRelease = release,
+): ReturnType<typeof createRunnerAppHandler> {
+  return createRunnerAppHandler(selectedRelease, "http://127.0.0.1:43127", {
+    pairing,
+  });
+}
+
 describe("runner app server", () => {
   test("serves only loopback same-origin requests and immutable hashed assets", () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
-      pairing,
-    });
+    const handler = pairedHandler();
     const asset = handler(
       new Request("http://127.0.0.1:43127/app.abc.js", {
         headers: { cookie: "qm_browser=grant" },
@@ -50,9 +56,7 @@ describe("runner app server", () => {
   });
 
   test("rejects DNS-rebinding hosts and never grants cross-origin CORS", () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
-      pairing,
-    });
+    const handler = pairedHandler();
     const rebound = handler(
       new Request("http://attacker.test:43127/app.abc.js", {
         headers: { host: "127.0.0.1:43127" },
@@ -75,9 +79,7 @@ describe("runner app server", () => {
   });
 
   test("serves the pairing shell before granting API access", async () => {
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
-      pairing,
-    });
+    const handler = pairedHandler();
     const shell = handler(new Request("http://127.0.0.1:43127/app"));
     expect(shell.status).toBe(200);
     expect(await shell.text()).toContain("Local Q Mush");
@@ -213,9 +215,7 @@ describe("runner app server", () => {
         }),
       ).status,
     ).toBe(403);
-    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127", {
-      pairing,
-    });
+    const handler = pairedHandler();
     const attempt = (code: string) =>
       handler(
         new Request("http://127.0.0.1:43127/api/local/pair", {
@@ -236,18 +236,13 @@ describe("runner app server", () => {
       ["__proto__"]: new TextEncoder().encode("unsafe"),
     };
     Object.setPrototypeOf(files, null);
-    const handler = createRunnerAppHandler(
-      { files, shell: release.shell },
-      "http://127.0.0.1:43127",
-      { pairing },
+    const handler = pairedHandler({ files, shell: release.shell });
+    const response = handler(
+      new Request("http://127.0.0.1:43127/__proto__", {
+        headers: new Headers({ cookie: "qm_browser=grant" }),
+      }),
     );
-    expect(
-      handler(
-        new Request("http://127.0.0.1:43127/__proto__", {
-          headers: { cookie: "qm_browser=grant" },
-        }),
-      ).status,
-    ).toBe(404);
+    expect(response.status).toBe(404);
   });
 
   test("does not expose authentication or replica membership endpoints", async () => {
@@ -260,11 +255,7 @@ describe("runner app server", () => {
         "api/replica/frontier": new TextEncoder().encode("asset canary"),
       },
     };
-    const handler = createRunnerAppHandler(
-      hiddenApiRelease,
-      "http://127.0.0.1:43127",
-      { pairing },
-    );
+    const handler = pairedHandler(hiddenApiRelease);
     for (const path of [
       "/api/auth/session",
       "/api/replica/frontier",
