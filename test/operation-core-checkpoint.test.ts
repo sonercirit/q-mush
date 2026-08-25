@@ -63,7 +63,17 @@ const sequentialOperation = (
     "x",
     clock,
   );
-type JsonTree = string | number | boolean | null | JsonTree[];
+const requireArray = (value: unknown): unknown[] => {
+  if (!Array.isArray(value)) throw new Error("Missing array fixture");
+  return value;
+};
+const requireEntry = (value: unknown, field: string): unknown[] => {
+  const entry = requireArray(value).find(
+    (candidate) => Array.isArray(candidate) && candidate[0] === field,
+  );
+  if (!Array.isArray(entry)) throw new Error(`Missing ${field} fixture`);
+  return entry;
+};
 const roundTrip = <T>(state: OperationApplyState<T>): OperationApplyState<T> =>
   decodeOperationCheckpoint<T>(encodeOperationCheckpoint(state));
 
@@ -128,13 +138,15 @@ describe("operation checkpoints", () => {
 
   test("rejects malformed and extra checkpoint fields at every level", () => {
     const state = applyAll([sequentialOperation("a", 1)]);
-    const decoded = JSON.parse(encodeOperationCheckpoint(state)) as JsonTree[];
-    const objectEntries = decoded[1] as JsonTree[][];
+    const decoded: unknown = JSON.parse(encodeOperationCheckpoint(state));
+    const decodedArray = requireArray(decoded);
+    const objectEntries = requireArray(decodedArray[1]);
     const change = (field: string, replacement: unknown) => [
-      decoded[0],
-      objectEntries.map((entry: unknown[]) =>
-        entry[0] === field ? [field, replacement] : entry,
-      ),
+      decodedArray[0],
+      objectEntries.map((entry) => {
+        const pair = requireArray(entry);
+        return pair[0] === field ? [field, replacement] : pair;
+      }),
     ];
     const encodedPrimitive = (value: unknown) => ["primitive", value];
     const pendingState = applyOperation(
@@ -142,24 +154,24 @@ describe("operation checkpoints", () => {
       sequentialOperation("a", 2),
       append,
     );
-    const pendingDecoded = JSON.parse(encodeOperationCheckpoint(pendingState)) as JsonTree[];
-    const mutations = [
-      [decoded[0], [...objectEntries, ["extra", encodedPrimitive(true)]]],
+    const pendingDecoded: unknown = JSON.parse(
+      encodeOperationCheckpoint(pendingState),
+    );
+    const mutations: unknown[] = [
+      [decodedArray[0], [...objectEntries, ["extra", encodedPrimitive(true)]]],
       change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
       change("applied", ["object", [["key", ["bigint", "1"]]]]),
     ];
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {
       const copy = structuredClone(pendingDecoded);
-      const rootEntries = copy[1] as JsonTree[][];
-      const pendingEntry = rootEntries.find((entry) => entry[0] === "pending");
-      if (pendingEntry === undefined) throw new Error("Missing pending fixture");
-      const operations = (pendingEntry[1] as JsonTree[])[1] as JsonTree[][];
-      const operationEntries = operations[0]?.[1] as JsonTree[][];
-      const nestedEntry = operationEntries.find((entry) => entry[0] === field);
-      if (nestedEntry === undefined) throw new Error("Missing nested fixture");
-      const nested = (nestedEntry[1] as JsonTree[])[1] as JsonTree[];
-      nested.push(["extra", encodedPrimitive(true)] as JsonTree[]);
+      const rootEntries = requireArray(requireArray(copy)[1]);
+      const pendingEntry = requireEntry(rootEntries, "pending");
+      const operations = requireArray(requireArray(pendingEntry[1])[1]);
+      const operationEntries = requireArray(requireArray(operations[0])[1]);
+      const nestedEntry = requireEntry(operationEntries, field);
+      const nested = requireArray(requireArray(nestedEntry[1])[1]);
+      nested.push(["extra", encodedPrimitive(true)]);
       mutations.push(copy);
     }
     for (const mutation of mutations)

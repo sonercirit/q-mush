@@ -457,15 +457,14 @@ export const applyOperation = <TProjection>(
 };
 
 type EncodedCheckpointValue = readonly [string, unknown];
+const isCheckpointObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  Object.getPrototypeOf(value) === Object.prototype;
 const checkpointObject = (value: unknown): Record<string, unknown> => {
-  if (
-    value === null ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Object.prototype
-  )
-    throw new Error("Invalid checkpoint object");
-  return value as Record<string, unknown>;
+  if (!isCheckpointObject(value)) throw new Error("Invalid checkpoint object");
+  return value;
 };
 const exactCheckpointKeys = (
   value: Record<string, unknown>,
@@ -494,14 +493,13 @@ const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
     ];
   return ["primitive", value];
 };
+const isEncodedPair = (value: unknown): value is [string, unknown] =>
+  Array.isArray(value) && value.length === 2 && typeof value[0] === "string";
 const decodeCheckpointValue = (value: unknown): unknown => {
-  if (
-    !Array.isArray(value) ||
-    value.length !== 2 ||
-    typeof value[0] !== "string"
-  )
+  if (!isEncodedPair(value))
     throw new Error("Invalid encoded checkpoint value");
-  const [tag, body] = value;
+  const tag = value[0];
+  const body = value[1];
   if (tag === "undefined" && body === null) return undefined;
   if (
     tag === "bigint" &&
@@ -540,14 +538,29 @@ const decodeCheckpointValue = (value: unknown): unknown => {
     return body;
   throw new Error("Invalid encoded checkpoint tag");
 };
-const checkpointRecord = <T extends string | bigint>(
+const stringCheckpointRecord = (
   value: unknown,
-  kind: "string" | "bigint",
-): Readonly<Record<string, T>> => {
+): Readonly<Record<string, string>> => {
   const record = checkpointObject(value);
-  if (Object.values(record).some((item) => typeof item !== kind))
+  if (Object.values(record).some((item) => typeof item !== "string"))
     throw new Error("Invalid checkpoint record");
-  return record as Readonly<Record<string, T>>;
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      (entry): entry is [string, string] => typeof entry[1] === "string",
+    ),
+  );
+};
+const bigintCheckpointRecord = (
+  value: unknown,
+): Readonly<Record<string, bigint>> => {
+  const record = checkpointObject(value);
+  if (Object.values(record).some((item) => typeof item !== "bigint"))
+    throw new Error("Invalid checkpoint record");
+  return Object.fromEntries(
+    Object.entries(record).filter(
+      (entry): entry is [string, bigint] => typeof entry[1] === "bigint",
+    ),
+  );
 };
 const decodeClock = (value: unknown): HybridTimestamp => {
   const clock = checkpointObject(value);
@@ -596,14 +609,28 @@ const decodeOperation = (value: unknown): Operation => {
       typeof entity["workspaceId"] !== "string")
   )
     throw new Error("Invalid checkpoint operation");
+  const decodedEntity =
+    Object.hasOwn(entity, "workspaceId") &&
+    typeof entity["workspaceId"] === "string"
+      ? {
+          type: entity["type"],
+          id: entity["id"],
+          accountId: entity["accountId"],
+          workspaceId: entity["workspaceId"],
+        }
+      : {
+          type: entity["type"],
+          id: entity["id"],
+          accountId: entity["accountId"],
+        };
   const operation = createOperation({
     operationId: item["operationId"],
     schemaVersion: Number(item["schemaVersion"]),
     writerId: item["writerId"],
     sequence: item["sequence"],
     clock: decodeClock(item["clock"]),
-    parents: checkpointRecord<bigint>(item["parents"], "bigint"),
-    entity: entity as unknown as OperationEntity,
+    parents: bigintCheckpointRecord(item["parents"]),
+    entity: decodedEntity,
     kind: item["kind"],
     payload: item["payload"],
   });
@@ -650,20 +677,26 @@ export const decodeOperationCheckpoint = <TProjection>(
     Number(state["replayCount"]) < 0
   )
     throw new Error("Invalid operation checkpoint");
-  validateValue(state["projection"]);
-  validateValue(state["baseProjection"]);
+  const validProjection = (value: unknown): value is TProjection => {
+    validateValue(value);
+    return true;
+  };
+  if (!validProjection(state["projection"]))
+    throw new Error("Invalid operation checkpoint projection");
+  if (!validProjection(state["baseProjection"]))
+    throw new Error("Invalid operation checkpoint base projection");
   return {
-    frontier: checkpointRecord<bigint>(state["frontier"], "bigint"),
+    frontier: bigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map(decodeOperation),
-    projection: state["projection"] as TProjection,
-    applied: checkpointRecord<string>(state["applied"], "string"),
+    projection: state["projection"],
+    applied: stringCheckpointRecord(state["applied"]),
     replayHead: decodeReplay(state["replayHead"]),
     replayCount: Number(state["replayCount"]),
     replayLastClock:
       state["replayLastClock"] === undefined
         ? undefined
         : decodeClock(state["replayLastClock"]),
-    baseProjection: state["baseProjection"] as TProjection,
-    baseFrontier: checkpointRecord<bigint>(state["baseFrontier"], "bigint"),
+    baseProjection: state["baseProjection"],
+    baseFrontier: bigintCheckpointRecord(state["baseFrontier"]),
   };
 };
