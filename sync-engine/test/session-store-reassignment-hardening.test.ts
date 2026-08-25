@@ -119,7 +119,9 @@ describe("session store runner reassignment", () => {
       .run();
     setSessionFields(database, { parentSessionId: SESSION_ID });
 
-    expect(() => removeRunner(database, store)).not.toThrow();
+    expect(() => {
+      removeRunner(database, store);
+    }).not.toThrow();
     expectStoredSession(store, siblingId, {
       runnerRequired: true,
       status: "idle",
