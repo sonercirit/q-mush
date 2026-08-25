@@ -28,25 +28,29 @@ type OperationInput<TPayload> = Omit<Operation<TPayload>, "partition">;
 export type FrontierComparison =
   "equal" | "ancestor" | "descendant" | "concurrent";
 
-const sessionEntities = new Set([
-  "agent_sessions",
-  "agent_session_operations",
-  "agent_session_turns",
-  "agent_pending_inputs",
-  "agent_question_requests",
-  "agent_messages",
-]);
-const nonSessionEntities = new Set([
-  "users",
-  "workspaces",
-  "prompts",
-  "provider_quota_settings",
-  "provider_quota_reset_receipts",
-  "provider_credential_workspaces",
-  "attachment_fallbacks",
-  "runner_workspaces",
-  "tool_settings",
-]);
+export const operationEntityPartitions = {
+  session: [
+    "agent_sessions",
+    "agent_session_operations",
+    "agent_session_turns",
+    "agent_pending_inputs",
+    "agent_question_requests",
+    "agent_messages",
+  ],
+  "non-session": [
+    "users",
+    "workspaces",
+    "prompts",
+    "provider_quota_settings",
+    "provider_quota_reset_receipts",
+    "provider_credential_workspaces",
+    "attachment_fallbacks",
+    "runner_workspaces",
+    "tool_settings",
+  ],
+} as const;
+const sessionEntities = new Set(operationEntityPartitions.session);
+const nonSessionEntities = new Set(operationEntityPartitions["non-session"]);
 export const classifyOperationPartition = (
   entityType: string,
 ): OperationPartition => {
@@ -191,6 +195,19 @@ interface ReplayEntry {
   readonly operation: Operation;
   readonly previous: ReplayEntry | undefined;
 }
+const appendReplay = (
+  head: ReplayEntry | undefined,
+  count: number,
+  operations: readonly Operation[],
+): { readonly head: ReplayEntry | undefined; readonly count: number } => {
+  let nextHead = head;
+  let nextCount = count;
+  for (const operation of operations) {
+    nextHead = { operation, previous: nextHead };
+    nextCount += 1;
+  }
+  return { head: nextHead, count: nextCount };
+};
 interface IdentityNode {
   readonly key: string;
   readonly value: string;
@@ -384,20 +401,16 @@ export const applyOperation = <TProjection>(
       );
       projection = reduceOperations(baseProjection, replay, reducer);
       frontier = advanceOperations({ ...baseFrontier }, replay);
-      replayHead = undefined;
-      replayCount = 0;
-      for (const item of replay) {
-        replayHead = { operation: item, previous: replayHead };
-        replayCount += 1;
-      }
+      const appended = appendReplay(undefined, 0, replay);
+      replayHead = appended.head;
+      replayCount = appended.count;
       replayLastClock = replay.at(-1)?.clock;
     } else {
       projection = reduceOperations(projection, ready, reducer);
       frontier = advanceOperations(frontier, ready);
-      for (const item of ready) {
-        replayHead = { operation: item, previous: replayHead };
-        replayCount += 1;
-      }
+      const appended = appendReplay(replayHead, replayCount, ready);
+      replayHead = appended.head;
+      replayCount = appended.count;
       replayLastClock = ready.at(-1)?.clock;
     }
     for (const item of ready) {

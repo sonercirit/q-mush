@@ -12,12 +12,18 @@ import {
   createOperation,
   frontierCovers,
   mergeFrontiers,
+  operationEntityPartitions,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
 
 type Projection = Readonly<Record<string, string>>;
 
+const workspaceEntity = () => ({
+  type: "workspaces",
+  id: "workspace-1",
+  accountId: "account-1",
+});
 const operation = (
   writerId: string,
   sequence: bigint,
@@ -32,7 +38,7 @@ const operation = (
     sequence,
     clock: { physicalMs, logical: 0, writerId },
     parents,
-    entity: { type: "workspaces", id: "workspace-1", accountId: "account-1" },
+    entity: workspaceEntity(),
     kind: "workspace.name.set",
     payload: { value },
   });
@@ -64,43 +70,69 @@ const initialApplyState = (): OperationApplyState<Projection> => ({
   applied: {},
 });
 
+const stringApplyState = (): OperationApplyState<string> => ({
+  frontier: {},
+  pending: [],
+  projection: "",
+  applied: {},
+});
+const runStringOperations = (
+  items: readonly Operation[],
+  reduce: (projection: string, operation: Operation) => string,
+) =>
+  items.reduce<OperationApplyState<string>>(
+    (state, item) => applyOperation(state, item, reduce),
+    stringApplyState(),
+  );
+const sequentialOperation = (writerId: string, index: number) =>
+  operation(
+    writerId,
+    BigInt(index),
+    index === 1 ? {} : { [writerId]: BigInt(index - 1) },
+    "x",
+  );
+const expectEquivocation = (
+  state: OperationApplyState<Projection>,
+  candidate: Operation,
+  pattern: RegExp,
+) => expect(() => applyOperation(state, candidate, reducer)).toThrow(pattern);
+
+const foldOperations = (
+  count: number,
+  make: (index: number) => Operation,
+  reduce: typeof reducer,
+): OperationApplyState<Projection> => {
+  let state = initialApplyState();
+  for (let index = 0; index < count; index += 1)
+    state = applyOperation(state, make(index), reduce);
+  return state;
+};
+const applySequential = (count: number, reduce: typeof reducer) =>
+  foldOperations(count, (index) => sequentialOperation("a", index + 1), reduce);
+const waitingForGhost = () => {
+  const first = operation("a", 1n, { ghost: 1n }, "one");
+  return {
+    first,
+    waiting: applyOperation(initialApplyState(), first, reducer),
+  };
+};
+
 const fillPending = (
   sequence: bigint,
   parents: Readonly<Record<string, bigint>>,
   reduce: typeof reducer,
-): OperationApplyState<Projection> => {
-  let state = initialApplyState();
-  for (let index = 0; index < MAX_PENDING_OPERATIONS; index += 1)
-    state = applyOperation(
-      state,
-      operation(`writer-${index.toString()}`, sequence, parents, "x"),
-      reduce,
-    );
-  return state;
-};
+): OperationApplyState<Projection> =>
+  foldOperations(
+    MAX_PENDING_OPERATIONS,
+    (index) => operation(`writer-${index.toString()}`, sequence, parents, "x"),
+    reduce,
+  );
 
 describe("operation core", () => {
   test("classifies every replicated schema entity", () => {
-    for (const entity of [
-      "agent_messages",
-      "agent_session_operations",
-      "agent_sessions",
-      "agent_session_turns",
-      "agent_pending_inputs",
-      "agent_question_requests",
-    ])
+    for (const entity of operationEntityPartitions.session)
       expect(classifyOperationPartition(entity)).toBe("session");
-    for (const entity of [
-      "users",
-      "workspaces",
-      "prompts",
-      "provider_quota_settings",
-      "provider_quota_reset_receipts",
-      "provider_credential_workspaces",
-      "attachment_fallbacks",
-      "runner_workspaces",
-      "tool_settings",
-    ])
+    for (const entity of operationEntityPartitions["non-session"])
       expect(classifyOperationPartition(entity)).toBe("non-session");
     for (const excluded of ["sessions", "provider_credentials", "runners"])
       expect(() => classifyOperationPartition(excluded)).toThrow(
@@ -113,19 +145,15 @@ describe("operation core", () => {
 
   test("covers every HLC receive winner and rejects far-future clocks", () => {
     expect(MAX_REMOTE_CLOCK_DRIFT_MS).toBe(300_000);
-    const remoteWins = createHybridLogicalClock("a", 100);
-    expect(
-      remoteWins.receive({ physicalMs: 110, logical: 4, writerId: "b" }, 105)
-        .logical,
-    ).toBe(5);
-    const localWins = createHybridLogicalClock("a", 120);
-    expect(
-      localWins.receive({ physicalMs: 110, logical: 4, writerId: "b" }, 105),
-    ).toMatchObject({ physicalMs: 120, logical: 1 });
+    const receive = (initial: number, now: number) =>
+      createHybridLogicalClock("a", initial).receive(
+        { physicalMs: 110, logical: 4, writerId: "b" },
+        now,
+      );
+    expect(receive(100, 105).logical).toBe(5);
+    expect(receive(120, 105)).toMatchObject({ physicalMs: 120, logical: 1 });
+    expect(receive(100, 120)).toMatchObject({ physicalMs: 120, logical: 0 });
     const nowWins = createHybridLogicalClock("a", 100);
-    expect(
-      nowWins.receive({ physicalMs: 110, logical: 4, writerId: "b" }, 120),
-    ).toMatchObject({ physicalMs: 120, logical: 0 });
     expect(() =>
       nowWins.receive(
         {
@@ -141,8 +169,11 @@ describe("operation core", () => {
   test("uses a strict locale-independent clock and canonical key order", () => {
     const left = { physicalMs: 1, logical: 1, writerId: "z" };
     const right = { physicalMs: 1, logical: 1, writerId: "ä" };
-    expect(compareClocks(left, right)).toBe(-1);
-    expect(compareClocks(right, left)).toBe(1);
+    const clockComparisons = [
+      compareClocks(left, right),
+      compareClocks(right, left),
+    ];
+    expect(clockComparisons).toEqual([-1, 1]);
     const first = operation("a", 1n, {}, "one");
     const applied = applyOperation(initialApplyState(), first, reducer);
     const reordered = {
@@ -154,7 +185,7 @@ describe("operation core", () => {
   });
 
   test("converges concurrent non-commutative updates across arrival permutations", () => {
-    const setName = (_projection: string, item: Operation) => {
+    const setPayloadValue = (_projection: string, item: Operation) => {
       if (
         typeof item.payload === "object" &&
         item.payload !== null &&
@@ -166,24 +197,15 @@ describe("operation core", () => {
     };
     const x = operation("b", 1n, {}, "X", 1);
     const y = operation("c", 1n, {}, "Y", 1);
-    const run = (items: readonly Operation[]) => {
-      const initial: OperationApplyState<string> = {
-        frontier: {},
-        pending: [],
-        projection: "",
-        applied: {},
-      };
-      return items.reduce<OperationApplyState<string>>(
-        (state, item) => applyOperation(state, item, setName),
-        initial,
-      );
-    };
+    const run = (items: readonly Operation[]) =>
+      runStringOperations(items, setPayloadValue);
     expect(run([x, y]).projection).toBe(run([y, x]).projection);
     expect(run([x, y]).projection).toBe("Y");
   });
 
   test("converges causal chains and concurrent writers across arrival permutations", () => {
-    const setName = (_projection: string, item: Operation) => item.operationId;
+    const setOperationId = (_projection: string, item: Operation) =>
+      item.operationId;
     const items = [
       operation("a", 1n, {}, "a1", 100),
       operation("a", 2n, { a: 1n }, "a2", 200),
@@ -198,10 +220,7 @@ describe("operation core", () => {
             ).map((tail) => [value, ...tail]),
           );
     const run = (ordered: readonly Operation[]) =>
-      ordered.reduce<OperationApplyState<string>>(
-        (state, item) => applyOperation(state, item, setName),
-        { frontier: {}, pending: [], projection: "", applied: {} },
-      );
+      runStringOperations(ordered, setOperationId);
     for (const ordered of permutations(items)) {
       const result = run(ordered);
       expect(result.projection).toBe("a-2");
@@ -235,26 +254,17 @@ describe("operation core", () => {
       payload: { value: 1n },
     });
     const waiting = applyOperation(initialApplyState(), first, reducer);
-    expect(() =>
-      applyOperation(waiting, { ...first, payload: { value: 1 } }, reducer),
-    ).toThrow(/equivocation/);
+    expectEquivocation(
+      waiting,
+      { ...first, payload: { value: 1 } },
+      /equivocation/,
+    );
   });
 
   test("applied identity updates scale near-linearly", () => {
     const duration = (count: number) => {
-      let state = initialApplyState();
       const started = performance.now();
-      for (let index = 1; index <= count; index += 1)
-        state = applyOperation(
-          state,
-          operation(
-            "a",
-            BigInt(index),
-            index === 1 ? {} : { a: BigInt(index - 1) },
-            "x",
-          ),
-          reducer,
-        );
+      applySequential(count, reducer);
       return performance.now() - started;
     };
     duration(200);
@@ -277,19 +287,8 @@ describe("operation core", () => {
   });
 
   test("applies a sequential stream with exactly one reducer call per operation", () => {
-    let state = initialApplyState();
     const counter = countingReducer();
-    for (let index = 1; index <= 800; index += 1)
-      state = applyOperation(
-        state,
-        operation(
-          "a",
-          BigInt(index),
-          index === 1 ? {} : { a: BigInt(index - 1) },
-          "x",
-        ),
-        counter.reduce,
-      );
+    const state = applySequential(800, counter.reduce);
     expect(counter.calls()).toBe(800);
     expect(state.replayCount).toBe(800);
   });
@@ -306,7 +305,7 @@ describe("operation core", () => {
   });
 
   test("omits undefined object properties but distinguishes null from non-finite numbers", () => {
-    const first = operation("a", 1n, { ghost: 1n }, "one");
+    const { first } = waitingForGhost();
     const entity = { ...first.entity };
     Object.defineProperty(entity, "workspaceId", {
       enumerable: true,
@@ -319,11 +318,7 @@ describe("operation core", () => {
         waiting,
         {
           ...first,
-          entity: {
-            type: "workspaces",
-            id: "workspace-1",
-            accountId: "account-1",
-          },
+          entity: workspaceEntity(),
         },
         reducer,
       ),
@@ -448,15 +443,12 @@ describe("operation core", () => {
     expect(compareFrontiers({ a: 1n }, { a: 2n })).toBe("ancestor");
     expect(compareFrontiers({ a: 2n }, { a: 1n })).toBe("descendant");
     expect(() => advanceFrontier({ a: 1n }, "a", 3n)).toThrow(/gap/);
-    const first = operation("a", 1n, { ghost: 1n }, "one");
-    const waiting = applyOperation(initialApplyState(), first, reducer);
-    expect(() =>
-      applyOperation(
-        waiting,
-        { ...first, operationId: "fresh", payload: { value: "changed" } },
-        reducer,
-      ),
-    ).toThrow(/writer:a:1/);
+    const { first, waiting } = waitingForGhost();
+    expectEquivocation(
+      waiting,
+      { ...first, operationId: "fresh", payload: { value: "changed" } },
+      /writer:a:1/,
+    );
   });
 
   test("ticks the local hybrid clock forward and logically", () => {
@@ -475,20 +467,19 @@ describe("operation core", () => {
       c: 3n,
     });
     expect(advanceFrontier({ a: 2n }, "a", 3n)).toEqual({ a: 3n });
-    expect(frontierCovers({ a: 2n }, { a: 1n })).toBe(true);
-    const first = operation("a", 1n, {}, "one");
+    const coversAncestor = frontierCovers({ a: 2n }, { a: 1n });
+    expect(coversAncestor).toBe(true);
+    const causalFirst = operation("a", 1n, {}, "one");
     const second = operation("a", 2n, { a: 1n }, "two");
     const waiting = applyOperation(initialApplyState(), second, reducer);
-    const applied = applyOperation(waiting, first, reducer);
+    const applied = applyOperation(waiting, causalFirst, reducer);
     expect(applied.pending).toEqual([]);
     expect(applied.frontier).toEqual({ a: 2n });
-    expect(applyOperation(applied, first, reducer)).toBe(applied);
-    expect(() =>
-      applyOperation(
-        applied,
-        { ...first, payload: { value: "changed" } },
-        reducer,
-      ),
-    ).toThrow(/equivocation/);
+    expect(applyOperation(applied, causalFirst, reducer)).toBe(applied);
+    expectEquivocation(
+      applied,
+      { ...causalFirst, payload: { value: "changed" } },
+      /equivocation/,
+    );
   });
 });
