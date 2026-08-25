@@ -35,7 +35,6 @@ const sessionEntities = new Set([
   "agent_pending_inputs",
   "agent_question_requests",
   "agent_messages",
-  "sessions",
 ]);
 const nonSessionEntities = new Set([
   "users",
@@ -77,8 +76,20 @@ const validateValue = (value: unknown, seen = new Set<object>()): void => {
   if (typeof value !== "object") throw new Error("Unsupported operation value");
   if (seen.has(value)) throw new Error("Operation values must not be cyclic");
   seen.add(value);
-  if (Array.isArray(value)) for (const item of value) validateValue(item, seen);
-  else for (const item of Object.values(value)) validateValue(item, seen);
+  if (value instanceof Date) {
+    if (!Number.isFinite(value.getTime()))
+      throw new Error("Operation dates must be valid");
+  } else if (Array.isArray(value)) {
+    for (const item of value) validateValue(item, seen);
+  } else {
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (
+      (prototype !== Object.prototype && prototype !== null) ||
+      Object.getOwnPropertySymbols(value).length > 0
+    )
+      throw new Error("Operation objects must be plain and string-keyed");
+    for (const item of Object.values(value)) validateValue(item, seen);
+  }
   seen.delete(value);
 };
 export const createOperation = <TPayload>(
@@ -185,12 +196,14 @@ export interface OperationApplyState<TProjection> {
   readonly applied: Readonly<Record<string, string>>;
   readonly history?: readonly Operation[];
   readonly baseProjection?: TProjection;
-  readonly identityLookup?: Map<string, string>;
+  readonly baseFrontier?: CausalFrontier;
 }
 export const MAX_PENDING_OPERATIONS = 512;
+const MAX_REPLAY_OPERATIONS = 512;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
+  if (value instanceof Date) return `date:${value.toISOString()}`;
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object")
     return `{${Object.entries(value)
@@ -207,7 +220,6 @@ const identityKeys = (candidate: Operation): readonly string[] => [
 const identityIndex = (
   state: OperationApplyState<unknown>,
 ): Map<string, string> => {
-  if (state.identityLookup !== undefined) return state.identityLookup;
   const index = new Map(Object.entries(state.applied));
   for (const item of state.pending) {
     const fingerprint = canonical(item);
@@ -215,18 +227,36 @@ const identityIndex = (
   }
   return index;
 };
+const isReady = (item: Operation, frontier: CausalFrontier): boolean =>
+  frontierCovers(frontier, item.parents) &&
+  item.sequence === frontierValue(frontier, item.writerId) + 1n;
+const addApplied = (applied: Record<string, string>, item: Operation): void => {
+  const fingerprint = canonical(item);
+  for (const key of identityKeys(item)) applied[key] = fingerprint;
+};
 
-const readyOperations = (
+const orderedReady = (
   operations: readonly Operation[],
   frontier: CausalFrontier,
 ): Operation[] =>
   operations
-    .filter(
-      (item) =>
-        frontierCovers(frontier, item.parents) &&
-        item.sequence === frontierValue(frontier, item.writerId) + 1n,
-    )
+    .filter((item) => isReady(item, frontier))
     .sort((left, right) => compareClocks(left.clock, right.clock));
+const reduceOperations = <TProjection>(
+  initial: TProjection,
+  operations: readonly Operation[],
+  reducer: (projection: TProjection, operation: Operation) => TProjection,
+): TProjection =>
+  operations.reduce((projection, item) => reducer(projection, item), initial);
+
+const advanceOperations = (
+  initial: CausalFrontier,
+  operations: readonly Operation[],
+): CausalFrontier =>
+  operations.reduce(
+    (frontier, item) => advanceFrontier(frontier, item.writerId, item.sequence),
+    initial,
+  );
 
 export const applyOperation = <TProjection>(
   state: OperationApplyState<TProjection>,
@@ -242,35 +272,57 @@ export const applyOperation = <TProjection>(
       throw new Error(`Operation equivocation: ${key}`);
   }
   if (
-    state.applied[`id:${candidate.operationId}`] === fingerprint ||
+    identityKeys(candidate).some((key) => state.applied[key] === fingerprint) ||
     state.pending.some((item) => item.operationId === candidate.operationId)
   )
     return state;
-  if (state.pending.length >= MAX_PENDING_OPERATIONS)
+  if (
+    state.pending.length >= MAX_PENDING_OPERATIONS &&
+    !isReady(candidate, state.frontier)
+  )
     throw new Error("Operation pending buffer is full");
-  for (const key of identityKeys(candidate)) known.set(key, fingerprint);
-  const all = [...(state.history ?? []), ...state.pending, candidate];
-  let frontier: CausalFrontier = {};
-  let projection = state.baseProjection ?? state.projection;
-  const baseProjection = state.baseProjection ?? state.projection;
-  const applied: Record<string, string> = {};
-  const history: Operation[] = [];
-  let remaining = all;
-  let ready = readyOperations(remaining, frontier);
+
+  let frontier = { ...state.frontier };
+  let projection = state.projection;
+  let history = [...(state.history ?? [])];
+  let baseProjection = state.baseProjection ?? state.projection;
+  let baseFrontier = { ...(state.baseFrontier ?? state.frontier) };
+  const applied = { ...state.applied };
+  let remaining = [...state.pending, candidate];
+
+  if (
+    isReady(candidate, frontier) &&
+    frontierCovers(candidate.parents, frontier)
+  ) {
+    history = [];
+    baseProjection = projection;
+    baseFrontier = { ...frontier };
+  }
+  let ready = orderedReady(remaining, frontier);
   while (ready.length > 0) {
+    const earliest = ready[0];
+    if (earliest === undefined) break;
+    if (history.some((item) => compareClocks(earliest.clock, item.clock) < 0)) {
+      const replay = [...history, ...ready].sort((left, right) =>
+        compareClocks(left.clock, right.clock),
+      );
+      if (replay.length > MAX_REPLAY_OPERATIONS)
+        throw new Error("Operation replay history is full");
+      projection = reduceOperations(baseProjection, replay, reducer);
+      frontier = advanceOperations({ ...baseFrontier }, replay);
+      history = replay;
+    } else {
+      projection = reduceOperations(projection, ready, reducer);
+      frontier = advanceOperations(frontier, ready);
+      history.push(...ready);
+    }
+    for (const item of ready) addApplied(applied, item);
     const readyIds = new Set(ready.map((item) => item.operationId));
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
-    for (const item of ready) {
-      projection = reducer(projection, item);
-      frontier = advanceFrontier(frontier, item.writerId, item.sequence);
-      const itemFingerprint = canonical(item);
-      for (const key of identityKeys(item)) applied[key] = itemFingerprint;
-      history.push(item);
-    }
-    ready = readyOperations(remaining, frontier);
+    ready = orderedReady(remaining, frontier);
   }
-  // Both identity fingerprints intentionally remain until a durable replica checkpoint
-  // replaces this state; forgetting either permits replay equivocation after compaction.
+  if (history.length > MAX_REPLAY_OPERATIONS)
+    throw new Error("Operation replay history is full");
   return {
     frontier,
     pending: remaining,
@@ -278,6 +330,6 @@ export const applyOperation = <TProjection>(
     applied,
     history,
     baseProjection,
-    identityLookup: known,
+    baseFrontier,
   };
 };

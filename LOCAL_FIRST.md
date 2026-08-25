@@ -11,25 +11,32 @@
   continuous post-ready synchronization is required by stage 2. The stage-2
   runtime-neutral operation core derives partitions from a closed entity
   allow-list, validates operation values, rejects excessively future HLCs, and
-  uses contiguous per-writer sequences with causal frontiers. It
-  deterministically replays ready operations in HLC
-  `(physicalMs, logical, writerId)` order so concurrent non-commutative updates
-  converge independent of arrival order. Unready operations have indexed
-  identity checks and bounded admission; operation-ID and writer-sequence
-  equivocation is rejected. Applied identity fingerprints remain until the state
-  is replaced by a durable replica checkpoint, which is the compaction boundary.
-  Blob lookup early hit. Solid selects its host from page metadata; both runner
-  and authenticated migration-engine handlers serve bounded, read-only active
-  views labeled with origin and completeness. Sensitive export tables use
-  explicit public-column allow-lists; blobs download separately/resumably.
-  Engine blob GETs are stateless and read-only: they derive digests from
-  owner-scoped attachment columns, requiring no export priming, duplicated blob
-  table, or process cache. Engine active views rewrite inline attachments to the
-  digest references Solid consumes; runner views use replicated references and
-  its blob store. Runner catch-up is background/non-fatal; its loopback app uses
-  an ephemeral collision-free port unless configured. Physical pairing is
-  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
-  the browser grant and pairing transcript are never logged.
+  uses contiguous per-writer sequences with causal frontiers. Newly ready
+  operations apply incrementally; a bounded 512-operation replay window orders
+  late concurrent operations by HLC `(physicalMs, logical, writerId)` so
+  non-commutative updates converge across arrival order. Sequential causal
+  operations establish a new replay base, so steady-state reducer work is linear
+  and history remains bounded. Unready operations have indexed identity checks
+  and bounded admission, while a ready dependency may enter a full buffer to
+  drain it; operation-ID and writer-sequence equivocation is rejected. Durable
+  checkpoints consist of `frontier`, `pending`, `projection`, and `applied`;
+  replay metadata is optional and may be compacted at a causal boundary.
+  Operation values accept primitives, arrays, plain string-keyed objects, and
+  valid Dates; other object prototypes, symbol keys, and cycles are rejected.
+  The auth bearer-token `sessions` table is deliberately absent from replication
+  because ordinary frames contain no secrets. Blob lookup early hit. Solid
+  selects its host from page metadata; both runner and authenticated
+  migration-engine handlers serve bounded, read-only active views labeled with
+  origin and completeness. Sensitive export tables use explicit public-column
+  allow-lists; blobs download separately/resumably. Engine blob GETs are
+  stateless and read-only: they derive digests from owner-scoped attachment
+  columns, requiring no export priming, duplicated blob table, or process cache.
+  Engine active views rewrite inline attachments to the digest references Solid
+  consumes; runner views use replicated references and its blob store. Runner
+  catch-up is background/non-fatal; its loopback app uses an ephemeral
+  collision-free port unless configured. Physical pairing is transcript-bound,
+  five-minute, one-use/rate-limited, constant-time checked; the browser grant
+  and pairing transcript are never logged.
 
 ## Operational rules
 
