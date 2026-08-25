@@ -13,6 +13,12 @@ export interface QueryHost {
   ) => Promise<ActiveView>;
 }
 
+export function isRunnerDocument(document: {
+  readonly querySelector: (selectors: string) => unknown;
+}): boolean {
+  return document.querySelector('meta[name="q-mush-host"]') !== null;
+}
+
 export function queryHostForDocument(document: {
   readonly querySelector: (selectors: string) => unknown;
 }): QueryHost {

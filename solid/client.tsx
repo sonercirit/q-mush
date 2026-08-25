@@ -31,6 +31,7 @@ import {
   OPENROUTER_PANEL,
 } from "./provider-client.tsx";
 import { createProviderController } from "./provider-controller.ts";
+import { isRunnerDocument } from "./query-host.ts";
 import {
   createRealtimeConnection,
   type RealtimeConnection,
@@ -522,7 +523,7 @@ function App(): JSX.Element {
               )}
             </For>
             <Show
-              when={document.querySelector('meta[name="q-mush-host"]') !== null}
+              when={isRunnerDocument(document)}
               fallback={
                 <Show
                   fallback={<AppLoadingCard />}
