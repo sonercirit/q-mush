@@ -9,6 +9,12 @@ const pairing = {
   transcript: "transcript",
 };
 
+const emptyView = () => ({
+  complete: false,
+  partial: true as const,
+  records: [],
+});
+
 const release = {
   files: {
     "app.abc.js": new TextEncoder().encode("console.log('app')"),
@@ -85,7 +91,7 @@ describe("runner app server", () => {
           state: "joining",
           tombstones: 0,
         }),
-        readView: () => ({ complete: false, partial: true, records: [] }),
+        readView: emptyView,
       },
     });
     const response = handler(
@@ -115,7 +121,7 @@ describe("runner app server", () => {
           if (requested !== digest) throw new Error("missing");
           return new Blob([bytes], { type: "image/png" });
         },
-        readView: () => ({ complete: true, partial: true, records: [] }),
+        readView: emptyView,
       },
     });
     const response = handler(

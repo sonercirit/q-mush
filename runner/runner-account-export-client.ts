@@ -36,7 +36,7 @@ function isBlobEntry(value: unknown): value is ExportBlobEntry {
     typeof value["size"] === "number"
   );
 }
-interface AccountExportRetryProgress {
+export interface AccountExportRetryProgress {
   readonly elapsedMilliseconds: number;
   readonly previousRevision: string;
   readonly restartCount: number;

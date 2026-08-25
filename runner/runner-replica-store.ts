@@ -8,6 +8,7 @@ import { isSha256Digest } from "../shared/digest.ts";
 import { sha256 } from "../shared/sha256.ts";
 
 import type { AccountExportRecord } from "../shared/account-export.ts";
+import type { AccountExportRetryProgress } from "./runner-account-export-client.ts";
 
 export type ReplicaRecord = AccountExportRecord;
 
@@ -37,18 +38,19 @@ function parsedRecord(payload: string): Record<string, unknown> {
 function parsedRetry(value: string | undefined): Partial<ReplicaProgress> {
   if (value === undefined) return {};
   const parsed: unknown = JSON.parse(value);
-  if (!isRecord(parsed)) return {};
-  const elapsedMilliseconds = parsed["elapsedMilliseconds"];
-  const previousRevision = parsed["previousRevision"];
-  const restartCount = parsed["restartCount"];
-  const revision = parsed["revision"];
+  const retry = isRecord(parsed) ? parsed : undefined;
+  if (retry === undefined) return {};
+  const elapsedMilliseconds = retry["elapsedMilliseconds"];
+  const previousRevision = retry["previousRevision"];
+  const restartCount = retry["restartCount"];
+  const revision = retry["revision"];
   if (
     typeof elapsedMilliseconds !== "number" ||
     typeof previousRevision !== "string" ||
     typeof restartCount !== "number" ||
     typeof revision !== "string"
   )
-    return {};
+    throw new Error("Invalid persisted replica retry progress");
   return { elapsedMilliseconds, previousRevision, restartCount, revision };
 }
 
@@ -240,12 +242,8 @@ export function createRunnerReplicaStore(directory: string) {
         records,
       };
     },
-    recordRetry: (retry: {
-      readonly elapsedMilliseconds: number;
-      readonly previousRevision: string;
-      readonly restartCount: number;
-      readonly revision: string;
-    }) => setState.run("retry", JSON.stringify(retry)),
+    recordRetry: (retry: AccountExportRetryProgress) =>
+      setState.run("retry", JSON.stringify(retry)),
     progress,
     close: () => {
       database.close();
