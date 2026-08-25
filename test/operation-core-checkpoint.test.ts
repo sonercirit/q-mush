@@ -42,6 +42,11 @@ const append = (projection: readonly string[], item: Operation) => [
   ...projection,
   item.operationId,
 ];
+const applyAll = (
+  items: readonly Operation[],
+  state = arrayState(),
+): OperationApplyState<readonly string[]> =>
+  items.reduce((current, item) => applyOperation(current, item, append), state);
 const sequentialOperation = (
   writer: string,
   sequence: number,
@@ -296,16 +301,8 @@ describe("operation checkpoints", () => {
   test("accepts a concurrent earlier-clock operation and converges", () => {
     const a1 = operation("a", 1n, {}, "a", 100);
     const b1 = operation("b", 1n, {}, "b", 50);
-    const late = applyOperation(
-      roundTrip(applyOperation(arrayState(), a1, append)),
-      b1,
-      append,
-    );
-    const early = applyOperation(
-      applyOperation(arrayState(), b1, append),
-      a1,
-      append,
-    );
+    const late = applyAll([b1], roundTrip(applyAll([a1])));
+    const early = applyAll([b1, a1]);
     expect(late.projection).toEqual(early.projection);
     expect(late.frontier).toEqual(early.frontier);
   });
@@ -313,11 +310,7 @@ describe("operation checkpoints", () => {
   test("makes identical redelivery a no-op after reordering and checkpointing", () => {
     const a1 = operation("a", 1n, {}, "a", 100);
     const b1 = operation("b", 1n, {}, "b", 50);
-    const reordered = applyOperation(
-      applyOperation(arrayState(), a1, append),
-      b1,
-      append,
-    );
+    const reordered = applyAll([a1, b1]);
     expect(applyOperation(reordered, a1, append)).toBe(reordered);
     const restored = roundTrip(reordered);
     expect(applyOperation(restored, b1, append)).toBe(restored);
@@ -327,11 +320,7 @@ describe("operation checkpoints", () => {
     const a1 = operation("a", 1n, {}, "a", 100);
     const a2 = operation("a", 2n, { a: 1n }, "a", 110);
     const b1 = operation("b", 1n, {}, "b", 50);
-    const beforeLate = applyOperation(
-      applyOperation(arrayState(), a1, append),
-      a2,
-      append,
-    );
+    const beforeLate = applyAll([a1, a2]);
     const restored = applyOperation(roundTrip(beforeLate), b1, append);
     const continuous = applyOperation(beforeLate, b1, append);
     expect(restored.projection).toEqual(continuous.projection);
