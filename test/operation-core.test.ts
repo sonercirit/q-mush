@@ -270,12 +270,10 @@ describe("operation core", () => {
     expect(() =>
       createOperation({ ...validationSeed, payload: cyclic }),
     ).toThrow(/must not be cyclic/);
-    expect(() =>
-      createOperation({ ...validationSeed, payload: () => undefined }),
-    ).toThrow(/Unsupported operation value/);
-    expect(() =>
-      createOperation({ ...validationSeed, payload: Symbol("x") }),
-    ).toThrow(/Unsupported operation value/);
+    for (const unsupported of [() => undefined, Symbol("x")])
+      expect(() =>
+        createOperation({ ...validationSeed, payload: unsupported }),
+      ).toThrow(/Unsupported operation value/);
     expect(() =>
       createOperation({ ...validationSeed, payload: new Map() }),
     ).toThrow(/must be plain/);
