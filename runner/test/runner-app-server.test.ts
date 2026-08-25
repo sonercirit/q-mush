@@ -29,6 +29,29 @@ describe("runner app server", () => {
     ).toBe(403);
   });
 
+  test("rejects DNS-rebinding hosts and never grants cross-origin CORS", () => {
+    const handler = createRunnerAppHandler(release, "http://127.0.0.1:43127");
+    const rebound = handler(
+      new Request("http://attacker.test:43127/app.abc.js", {
+        headers: { host: "127.0.0.1:43127" },
+      }),
+    );
+    expect(rebound.status).toBe(421);
+    expect(rebound.headers.has("access-control-allow-origin")).toBe(false);
+
+    const preflight = handler(
+      new Request("http://127.0.0.1:43127/api/local/status", {
+        headers: {
+          "access-control-request-method": "GET",
+          origin: "https://attacker.test",
+        },
+        method: "OPTIONS",
+      }),
+    );
+    expect(preflight.status).toBe(403);
+    expect(preflight.headers.has("access-control-allow-origin")).toBe(false);
+  });
+
   test("serves bounded read-only views without replica control endpoints", async () => {
     const views = {
       progress: () => ({ state: "ready" as const }),
