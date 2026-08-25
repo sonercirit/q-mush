@@ -40,13 +40,16 @@ export function RunnerReplicaView(): JSX.Element {
       })
       .catch(() => setFailed(true));
   };
+  const loadSessions = (): void => {
+    load("agent_sessions", (sessions) =>
+      setViews((value) => ({ ...value, sessions })),
+    );
+  };
   onMount(() => {
     void fetch("/api/local/status").then((response) => {
       if (response.status === 401) return;
       setPaired(true);
-      load("agent_sessions", (sessions) =>
-        setViews((value) => ({ ...value, sessions })),
-      );
+      loadSessions();
     });
   });
   const pair = async (): Promise<void> => {
@@ -62,9 +65,7 @@ export function RunnerReplicaView(): JSX.Element {
     });
     if (!response.ok) throw new Error("Pairing rejected");
     setPaired(true);
-    load("agent_sessions", (sessions) =>
-      setViews((value) => ({ ...value, sessions })),
-    );
+    loadSessions();
   };
   const select = (id: string): void => {
     setSelected(id);
