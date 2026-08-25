@@ -1,5 +1,6 @@
 import { getTableColumns, getTableName } from "drizzle-orm";
 import type { AnySQLiteTable } from "drizzle-orm/sqlite-core";
+import { decodeBase64 } from "../shared/base64.ts";
 import type { AppDatabase } from "../shared/database.ts";
 import {
   agentMessages,
@@ -137,12 +138,8 @@ export function rewriteAccountAttachments(
         return item;
       const data = item.data;
       if (typeof data !== "string") return item;
-      let bytes: Uint8Array;
-      try {
-        bytes = Uint8Array.fromBase64(data);
-      } catch {
-        return item;
-      }
+      const bytes = decodeBase64(data);
+      if (bytes === undefined) return item;
       const digest = sha256(bytes);
       const blob = { data, digest, size: bytes.length };
       blobs.set(digest, blob);
@@ -291,12 +288,8 @@ export function exportAccountBlob(
           continue;
         const data = item.data;
         if (typeof data !== "string") continue;
-        let bytes: Uint8Array;
-        try {
-          bytes = Uint8Array.fromBase64(data);
-        } catch {
-          continue;
-        }
+        const bytes = decodeBase64(data);
+        if (bytes === undefined) continue;
         if (sha256(bytes) === digest)
           return { data, digest, size: bytes.length };
       }

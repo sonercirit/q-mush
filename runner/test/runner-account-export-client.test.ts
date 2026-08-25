@@ -14,43 +14,14 @@ import {
 import { sha256 } from "../../shared/sha256.ts";
 import { catchUpAccountExport } from "../runner-account-export-client.ts";
 
-test("restarts pagination when the account changes between pages", async () => {
-  const bytes = new TextEncoder().encode("stable export");
-  const digest = sha256(bytes);
-  const revisions = ["1".repeat(64), "2".repeat(64), "2".repeat(64)];
-  const offsets: number[] = [];
-  const server = Bun.serve({
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url);
-      if (url.pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
-        const offset = Number(url.searchParams.get("offset"));
-        offsets.push(offset);
-        const revision = revisions.shift() ?? "2".repeat(64);
-        return Response.json({
-          blobs: offset === 0 ? [{ digest, size: bytes.length }] : [],
-          done: revision === "2".repeat(64) && offset > 0,
-          nextOffset: offset + 1,
-          records: [
-            {
-              entity: "users",
-              id: `${revision}-${String(offset)}`,
-              payload: JSON.stringify({ id: `${revision}-${String(offset)}` }),
-              tombstone: false,
-            },
-          ],
-          revision,
-        });
-      }
-      if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`)
-        return accountExportBlobResponse(
-          { data: bytes.toBase64(), digest, size: bytes.length },
-          request.headers.get("range"),
-        );
-      return new Response("Not found", { status: 404 });
-    },
-  });
-  const directory = mkdtempSync(join(tmpdir(), "account-export-restart-"));
+async function runCatchUpServer(
+  prefix: string,
+  fetch: (request: Request) => Response,
+  prepare?: (directory: string) => void,
+): Promise<void> {
+  const server = Bun.serve({ fetch, port: 0 });
+  const directory = mkdtempSync(join(tmpdir(), prefix));
+  prepare?.(directory);
   const configurationPath = join(directory, "runner.json");
   writeFileSync(configurationPath, "{}");
   try {
@@ -60,10 +31,58 @@ test("restarts pagination when the account changes between pages", async () => {
       server.url.origin,
       "token",
     );
-    expect(offsets).toEqual([0, 1, 0, 1]);
   } finally {
     void server.stop(true);
   }
+}
+
+function requestPath(request: Request): string {
+  return new URL(request.url).pathname;
+}
+
+function blobTransferResponse(
+  request: Request,
+  bytes: Uint8Array,
+  digest: string,
+): Response {
+  return accountExportBlobResponse(
+    { data: bytes.toBase64(), digest, size: bytes.length },
+    request.headers.get("range"),
+  );
+}
+
+test("restarts pagination when the account changes between pages", async () => {
+  const bytes = new TextEncoder().encode("stable export");
+  const digest = sha256(bytes);
+  const revisions = ["1".repeat(64), "2".repeat(64), "2".repeat(64)];
+  const offsets: number[] = [];
+  await runCatchUpServer("account-export-restart-", (request) => {
+    const url = new URL(request.url);
+    const exportRequest = url.pathname === RUNNER_ACCOUNT_EXPORT_PATH;
+    if (exportRequest) {
+      const offset = Number(url.searchParams.get("offset"));
+      offsets.push(offset);
+      const revision = revisions.shift() ?? "2".repeat(64);
+      return Response.json({
+        blobs: offset === 0 ? [{ digest, size: bytes.length }] : [],
+        done: revision === "2".repeat(64) && offset > 0,
+        nextOffset: offset + 1,
+        records: [
+          {
+            entity: "users",
+            id: `${revision}-${String(offset)}`,
+            payload: JSON.stringify({ id: `${revision}-${String(offset)}` }),
+            tombstone: false,
+          },
+        ],
+        revision,
+      });
+    }
+    if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`)
+      return blobTransferResponse(request, bytes, digest);
+    return new Response("Not found", { status: 404 });
+  });
+  expect(offsets).toEqual([0, 1, 0, 1]);
 });
 
 // Exercises fetch, HTTP Range, the persisted incoming file, and the shipped client.
@@ -80,11 +99,11 @@ test("account export client resumes a real HTTP blob transfer", async () => {
   };
   const inventory = { ...base, frontier: accountExportFrontier(base) };
   let receivedRange: string | null = null;
-  const server = Bun.serve({
-    port: 0,
-    fetch(request) {
-      const url = new URL(request.url);
-      if (url.pathname === RUNNER_ACCOUNT_EXPORT_PATH)
+  await runCatchUpServer(
+    "account-export-http-",
+    (request) => {
+      const pathname = requestPath(request);
+      if (pathname === RUNNER_ACCOUNT_EXPORT_PATH)
         return Response.json({
           blobs: inventory.manifest,
           done: true,
@@ -92,30 +111,16 @@ test("account export client resumes a real HTTP blob transfer", async () => {
           revision: "0".repeat(64),
           records: inventory.records,
         });
-      if (url.pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`) {
+      if (pathname === `${RUNNER_ACCOUNT_EXPORT_BLOB_PATH}/${digest}`) {
         receivedRange = request.headers.get("range");
-        return accountExportBlobResponse(
-          { data: bytes.toBase64(), digest, size: bytes.length },
-          receivedRange,
-        );
+        return blobTransferResponse(request, bytes, digest);
       }
       return new Response("Not found", { status: 404 });
     },
-  });
-  const directory = mkdtempSync(join(tmpdir(), "account-export-http-"));
-  mkdirSync(join(directory, "incoming"));
-  writeFileSync(join(directory, "incoming", digest), bytes.slice(0, 9));
-  const configurationPath = join(directory, "runner.json");
-  writeFileSync(configurationPath, "{}");
-  try {
-    await catchUpAccountExport(
-      directory,
-      configurationPath,
-      server.url.origin,
-      "token",
-    );
-    expect(receivedRange).toBe("bytes=9-");
-  } finally {
-    void server.stop(true);
-  }
+    (directory) => {
+      mkdirSync(join(directory, "incoming"));
+      writeFileSync(join(directory, "incoming", digest), bytes.slice(0, 9));
+    },
+  );
+  expect(receivedRange).toBe("bytes=9-");
 });

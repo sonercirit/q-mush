@@ -8,6 +8,11 @@ import {
 } from "../../solid/pages.tsx";
 import { isRunnerDocument } from "../query-host.ts";
 
+function parsePage(html: string) {
+  const parser = new Window().DOMParser;
+  return new parser().parseFromString(html, "text/html");
+}
+
 function expectFaviconMetadata(html: string, pageUrl: string): void {
   const window = new Window({ url: pageUrl });
   const document = new window.DOMParser().parseFromString(html, "text/html");
@@ -36,8 +41,7 @@ test("does not put session identities in public server-rendered shells", () => {
 });
 
 test("marks the engine app without selecting the runner-only mount", () => {
-  const parser = new Window().DOMParser;
-  const document = new parser().parseFromString(renderAppPage(), "text/html");
+  const document = parsePage(renderAppPage());
   expect(
     document.querySelector('meta[name="q-mush-host"]')?.getAttribute("content"),
   ).toBe("engine");
@@ -45,10 +49,8 @@ test("marks the engine app without selecting the runner-only mount", () => {
 });
 
 test("renders the standalone runner shell at the shared client mount", () => {
-  const parser = new Window().DOMParser;
-  const document = new parser().parseFromString(
+  const document = parsePage(
     renderRunnerAppPage("client.hash.js", "styles.hash.css"),
-    "text/html",
   );
 
   expect(document.getElementById("app")).not.toBeNull();

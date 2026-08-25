@@ -1,4 +1,5 @@
 import { isRecord } from "./auth-model.ts";
+import { decodeBase64 } from "./base64.ts";
 
 export const AGENT_ATTACHMENT_MODALITIES = [
   "image",
@@ -140,12 +141,8 @@ function readAgentAttachment(value: unknown): AgentAttachment | undefined {
     return undefined;
   }
 
-  let bytes: Uint8Array;
-  try {
-    bytes = Uint8Array.fromBase64(data);
-  } catch {
-    return undefined;
-  }
+  const bytes = decodeBase64(data);
+  if (bytes === undefined) return undefined;
   return bytes.length > 0 &&
     bytes.length <= MAXIMUM_AGENT_ATTACHMENT_BYTES &&
     bytes.toBase64() === data
