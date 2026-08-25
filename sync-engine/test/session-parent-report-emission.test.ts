@@ -217,18 +217,17 @@ testReportedGenerationVariants("runner removal", ({ child, setup }) => {
       setup.reportParent,
     ).remove(TEST_USER_ID, runnerId, TEST_NOW + 6),
   ).toBe(true);
-  expect(
-    setup.database
-      .select({
-        execution: agentSessions.executionGeneration,
-        reported: agentSessions.parentReportedGeneration,
-      })
-      .from(agentSessions)
-      .where(eq(agentSessions.id, child.id))
-      .get(),
-  ).toMatchObject({
-    execution: child.generation + 1,
-    reported: child.generation + 1,
+  const generationFence = setup.database.$client
+    .query<
+      { executionGeneration: number; parentReportedGeneration: number },
+      [string]
+    >(
+      "SELECT execution_generation AS executionGeneration, parent_reported_generation AS parentReportedGeneration FROM agent_sessions WHERE id = ?",
+    )
+    .get(child.id);
+  expect(generationFence).toEqual({
+    executionGeneration: child.generation + 1,
+    parentReportedGeneration: child.generation + 1,
   });
 });
 

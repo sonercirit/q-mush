@@ -5,6 +5,24 @@ import "../styles.css";
 
 const digest = "a".repeat(64);
 
+function runnerViewFixture(): {
+  readonly dispose: () => void;
+  readonly meta: HTMLMetaElement;
+  readonly root: HTMLDivElement;
+} {
+  const meta = document.createElement("meta");
+  meta.name = "q-mush-host";
+  meta.content = "runner";
+  document.head.append(meta);
+  const root = document.createElement("div");
+  document.body.append(root);
+  return { dispose: render(() => <RunnerReplicaView />, root), meta, root };
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
 async function waitForText(root: HTMLElement, text: string): Promise<void> {
   await vi.waitFor(
     () => {
@@ -15,10 +33,6 @@ async function waitForText(root: HTMLElement, text: string): Promise<void> {
 }
 
 test("real Chromium reads a complete runner replica and renders attachments read-only", async () => {
-  const meta = document.createElement("meta");
-  meta.name = "q-mush-host";
-  meta.content = "runner";
-  document.head.append(meta);
   let statusRequests = 0;
   vi.spyOn(globalThis, "fetch").mockImplementation((input) => {
     const url = new URL(
@@ -64,9 +78,7 @@ test("real Chromium reads a complete runner replica and renders attachments read
       }),
     );
   });
-  const root = document.createElement("div");
-  document.body.append(root);
-  const dispose = render(() => <RunnerReplicaView />, root);
+  const { dispose, meta, root } = runnerViewFixture();
 
   await waitForText(root, "Session from runner B");
   expect(root.textContent).toContain("Runner replica · Complete source");
@@ -95,10 +107,6 @@ test("real Chromium reads a complete runner replica and renders attachments read
 });
 
 test("serializes status polling and stops requests and updates after disposal", async () => {
-  const meta = document.createElement("meta");
-  meta.name = "q-mush-host";
-  meta.content = "runner";
-  document.head.append(meta);
   let requests = 0;
   let active = 0;
   let maximumActive = 0;
@@ -118,20 +126,17 @@ test("serializes status polling and stops requests and updates after disposal", 
       });
     });
   });
-  const root = document.createElement("div");
-  document.body.append(root);
-  const dispose = render(() => <RunnerReplicaView />, root);
+  const { dispose, meta, root } = runnerViewFixture();
 
   await vi.waitFor(() => {
     expect(requests).toBe(1);
   });
-  await new Promise((resolve) => setTimeout(resolve, 1_100));
-  expect(requests).toBe(1);
-  expect(maximumActive).toBe(1);
+  await delay(1_100);
+  expect([maximumActive, requests]).toEqual([1, 1]);
   dispose();
   root.remove();
   resolveStatus?.(Response.json({ complete: true }));
-  await new Promise((resolve) => setTimeout(resolve, 1_100));
+  await delay(1_100);
   expect(requests).toBe(1);
   expect(root.textContent).toBe("");
 
