@@ -3,17 +3,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
-export interface ReplicaRecord {
-  readonly entity: string;
-  readonly id: string;
-  readonly payload: string;
-  readonly tombstone: boolean;
-}
+import type {
+  AccountExportRecord as ReplicaRecord,
+  AccountExportBlob as ReplicaBlobManifestEntry,
+} from "../shared/account-export.ts";
 
-export interface ReplicaBlobManifestEntry {
-  readonly digest: string;
-  readonly size: number;
-}
+export type { ReplicaBlobManifestEntry, ReplicaRecord };
 
 export interface ReplicaProgress {
   readonly records: number;
