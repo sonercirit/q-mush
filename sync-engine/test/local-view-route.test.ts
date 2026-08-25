@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
 import { sha256 } from "../../shared/sha256.ts";
-import { exportAccountPage } from "../account-export.ts";
 import { createDrizzleAuthStore } from "../auth-store.ts";
 import { createSchemaCompatibleTestDatabase } from "./authenticated-integration-test-helpers.ts";
 import { createTestRequestHandler } from "./server.test.ts";
@@ -139,8 +138,6 @@ test("local blob route authenticates, scopes blobs, validates methods, and resum
       ],
     );
   }
-  exportAccountPage(database, "owned", 0);
-  exportAccountPage(database, "other", 0);
   const route = createTestRequestHandler(database);
   const digest = sha256(bytes);
   const send = (token: string | undefined, method = "GET", range?: string) =>

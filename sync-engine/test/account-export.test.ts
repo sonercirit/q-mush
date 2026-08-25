@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 import { createDatabase, type AppDatabase } from "../../shared/database.ts";
+import { sha256 } from "../../shared/sha256.ts";
 import { exportAccountBlob, exportAccountPage } from "../account-export.ts";
 
 let database: AppDatabase | undefined;
@@ -58,13 +59,22 @@ describe("legacy account export", () => {
       "INSERT INTO agent_messages (id, user_id, session_id, role, content, images, created_at, updated_at, created_by_id, updated_by_id, is_deleted) VALUES ('m', 'u', 's', 'user', '', ?, 1, 1, 'u', 'u', 0)",
       [JSON.stringify([{ data, mediaType: "image/png" }])],
     );
-    const digest = exportAccountPage(database, "u", 0).blobs[0]?.digest;
-    expect(digest).toBeDefined();
-    expect(exportAccountBlob(database, "u", digest ?? "")).toMatchObject({
+    const digest = sha256(Uint8Array.from([1, 2, 3]));
+    expect(exportAccountBlob(database, "u", digest)).toMatchObject({
       data,
       digest,
       size: 3,
     });
+    exportAccountPage(database, "u", 0, 1);
+    exportAccountPage(database, "u", 0, 1);
+    expect(exportAccountBlob(database, "u", digest)?.data).toBe(data);
+    expect(
+      database.$client
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE name = 'account_export_blobs'",
+        )
+        .get(),
+    ).toBeNull();
   });
 
   test("exports tombstones while structurally excluding login and provider secrets", () => {

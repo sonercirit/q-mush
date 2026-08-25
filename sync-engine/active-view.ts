@@ -4,8 +4,14 @@ import {
 } from "../shared/active-view.ts";
 import type { AppDatabase } from "../shared/database.ts";
 
-import { accountExportBlobResponse } from "../shared/account-export.ts";
-import { exportAccountBlob } from "./account-export.ts";
+import {
+  type AccountExportBlob,
+  accountExportBlobResponse,
+} from "../shared/account-export.ts";
+import {
+  exportAccountBlob,
+  rewriteAccountAttachments,
+} from "./account-export.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 
 export function engineLocalResponse(
@@ -60,10 +66,18 @@ function engineActiveViewResponse(
       `SELECT * FROM "${entity}" WHERE ${ownership} ORDER BY "id" LIMIT ?`,
     )
     .all(...parameters, limit + 1);
+  const records = rows.slice(0, limit).map((original) => {
+    const record = { ...original };
+    const blobs = new Map<string, AccountExportBlob>();
+    for (const field of ["content", "images"] as const)
+      if (field in record)
+        record[field] = rewriteAccountAttachments(record[field], blobs);
+    return record;
+  });
   return Response.json({
     complete: rows.length <= limit,
     origin: "engine",
     partial: true,
-    records: rows.slice(0, limit),
+    records,
   } satisfies ActiveView);
 }

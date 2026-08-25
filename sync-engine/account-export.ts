@@ -125,14 +125,7 @@ function publicCredentialColumns() {
 function publicRunnerColumns() {
   return allowedColumns(runners, PUBLIC_RUNNER_COLUMNS);
 }
-function ensureBlobIndex(database: AppDatabase): void {
-  database.$client.run(
-    "CREATE TABLE IF NOT EXISTS account_export_blobs (user_id TEXT NOT NULL, digest TEXT NOT NULL, data TEXT NOT NULL, size INTEGER NOT NULL, PRIMARY KEY (user_id, digest))",
-  );
-}
-function rewriteAttachments(
-  database: AppDatabase,
-  userId: string,
+export function rewriteAccountAttachments(
   value: unknown,
   blobs: Map<string, AccountExportBlob>,
 ) {
@@ -148,12 +141,6 @@ function rewriteAttachments(
       const digest = sha256(bytes);
       const blob = { data, digest, size: bytes.length };
       blobs.set(digest, blob);
-      ensureBlobIndex(database);
-      database.$client
-        .query<never, [string, string, string, number]>(
-          "INSERT INTO account_export_blobs (user_id, digest, data, size) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, digest) DO UPDATE SET data = excluded.data, size = excluded.size",
-        )
-        .run(userId, digest, data, bytes.length);
       const { data: omitted, ...metadata } = item;
       void omitted;
       return { ...metadata, digest };
@@ -209,14 +196,6 @@ export function exportAccountPage(
   limit = ACCOUNT_EXPORT_PAGE_LIMIT,
 ): AccountExportPage {
   const safeLimit = Math.min(ACCOUNT_EXPORT_PAGE_LIMIT, Math.max(1, limit));
-  if (offset === 0) {
-    ensureBlobIndex(database);
-    database.$client
-      .query<never, [string]>(
-        "DELETE FROM account_export_blobs WHERE user_id = ?",
-      )
-      .run(userId);
-  }
   const accumulator = createExportAccumulator();
   const { blobs, records } = accumulator;
   let skipped = 0;
@@ -246,7 +225,7 @@ export function exportAccountPage(
       const row = { ...originalRow };
       for (const field of ["images", "content"] as const)
         if (field in row)
-          row[field] = rewriteAttachments(database, userId, row[field], blobs);
+          row[field] = rewriteAccountAttachments(row[field], blobs);
       records.push({
         entity: getTableName(table),
         id: String(row["id"]),
@@ -270,12 +249,30 @@ export function exportAccountBlob(
   digest: string,
 ): AccountExportBlob | undefined {
   if (!isSha256Digest(digest)) return undefined;
-  ensureBlobIndex(database);
-  return (
-    database.$client
-      .query<AccountExportBlob, [string, string]>(
-        "SELECT data, digest, size FROM account_export_blobs WHERE user_id = ? AND digest = ?",
+  const attachmentColumns = [
+    ["agent_messages", "content"],
+    ["agent_messages", "images"],
+    ["agent_pending_inputs", "content"],
+    ["agent_pending_inputs", "images"],
+  ] as const;
+  let found: AccountExportBlob | undefined;
+  for (const [table, column] of attachmentColumns) {
+    const rows = database.$client
+      .query<Record<string, unknown>, [string]>(
+        `SELECT "${column}" AS value FROM "${table}" WHERE "user_id" = ? AND "${column}" IS NOT NULL`,
       )
-      .get(userId, digest) ?? undefined
-  );
+      .iterate(userId);
+    for (const row of rows) {
+      for (const item of parseSerializedArray(row["value"])) {
+        if (typeof item !== "object" || item === null || !("data" in item))
+          continue;
+        const data = item.data;
+        if (typeof data !== "string") continue;
+        const bytes = Uint8Array.fromBase64(data);
+        if (found === undefined && sha256(bytes) === digest)
+          found = { data, digest, size: bytes.length };
+      }
+    }
+  }
+  return found;
 }
