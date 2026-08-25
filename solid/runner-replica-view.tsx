@@ -1,5 +1,23 @@
 import { createSignal, For, onMount, Show, type JSX } from "solid-js";
+import { isRecord } from "../shared/auth-model.ts";
 import { queryHostForLocation } from "./query-host.ts";
+
+function replicaImageDigests(value: unknown): readonly string[] {
+  if (typeof value !== "string") return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.flatMap((item: unknown) =>
+      isRecord(item) &&
+      typeof item["digest"] === "string" &&
+      /^[a-f\d]{64}$/u.test(item["digest"])
+        ? [item["digest"]]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
 
 export function RunnerReplicaView(): JSX.Element {
   const host = queryHostForLocation(window.location);
@@ -72,9 +90,20 @@ export function RunnerReplicaView(): JSX.Element {
               {(message) => {
                 const content = message["content"];
                 return (
-                  <p class="whitespace-pre-wrap">
-                    {typeof content === "string" ? content : ""}
-                  </p>
+                  <div>
+                    <p class="whitespace-pre-wrap">
+                      {typeof content === "string" ? content : ""}
+                    </p>
+                    <For each={replicaImageDigests(message["images"])}>
+                      {(digest) => (
+                        <img
+                          alt="Session attachment"
+                          class="mt-3 max-h-64 rounded-lg"
+                          src={`/api/local/blob/${digest}`}
+                        />
+                      )}
+                    </For>
+                  </div>
                 );
               }}
             </For>
