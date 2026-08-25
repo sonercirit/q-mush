@@ -18,3 +18,18 @@ export interface AccountExport {
   }[];
   readonly records: readonly AccountExportRecord[];
 }
+
+export function isAccountExport(value: unknown): value is AccountExport {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "blobs" in value &&
+    Array.isArray(value.blobs) &&
+    "frontier" in value &&
+    typeof value.frontier === "string" &&
+    "manifest" in value &&
+    Array.isArray(value.manifest) &&
+    "records" in value &&
+    Array.isArray(value.records)
+  );
+}

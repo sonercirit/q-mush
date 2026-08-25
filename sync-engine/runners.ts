@@ -153,6 +153,7 @@ export interface RunnerIntegration
   ): RunnerActivationReceiptValidation | undefined;
   remove(request: Request, runnerId: string): Promise<Response>;
   runnerIsAvailable: SessionRunnerAvailability;
+  runnerAccount(request: Request): { readonly userId: string } | undefined;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
   setDefault(request: Request, runnerId: string): Response;
@@ -483,6 +484,12 @@ export function createRunnerIntegration(
       : { connection, userId: connection.userId };
   }
 
+  function runnerAccount(request: Request): { readonly userId: string } | undefined {
+    const token = readBearerToken(request);
+    const connection = token === undefined ? undefined : store.authenticate(token);
+    return connection === undefined ? undefined : { userId: connection.userId };
+  }
+
   function runnerToken(request: Request): string | undefined {
     const token = readBearerToken(request);
     return token !== undefined && store.hasActiveToken(token)
@@ -599,6 +606,7 @@ export function createRunnerIntegration(
     preflightRegistration,
     receiptState,
     remove,
+    runnerAccount,
     runnerIsAvailable,
     runnerToken,
     seen,

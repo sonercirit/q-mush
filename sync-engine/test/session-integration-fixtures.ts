@@ -308,6 +308,7 @@ export function connectedSessionSetup(
     receiptState: (token, metadata, receipt) =>
       storedRunners.receiptState(token, metadata, receipt),
     remove: (request, runnerId) => storedRunners.remove(request, runnerId),
+    runnerAccount: (request) => storedRunners.runnerAccount(request),
     runnerIsAvailable: (userId, runnerId) =>
       storedRunners.runnerIsAvailable(userId, runnerId),
     runnerToken: (request) => storedRunners.runnerToken(request),

@@ -82,6 +82,7 @@ export function providerCredentialQuotaThresholdPath(
     credentialId,
   );
 }
+export const RUNNER_ACCOUNT_EXPORT_PATH = `${API_BASE_PATH}/runner/account-export`;
 export const RUNNERS_PATH = `${API_BASE_PATH}/runners`;
 export const WORKSPACES_PATH = `${API_BASE_PATH}/workspaces`;
 export function connectionScopesPath(

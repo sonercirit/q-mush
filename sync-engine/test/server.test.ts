@@ -135,6 +135,7 @@ function createTestRequestHandler(): (request: Request) => Promise<Response> {
   );
   const integrations = {
     braveSearch,
+    database,
     generic,
     googleAuth,
     openAi,

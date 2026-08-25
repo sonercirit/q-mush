@@ -199,6 +199,7 @@ function realtimeTestRunners(
     preflightRegistration: () => undefined,
     receiptState: () => undefined,
     remove: () => Promise.resolve(new Response()),
+    runnerAccount: () => undefined,
     runnerIsAvailable: () => false,
     runnerToken: () => token,
     seen: () => undefined,

@@ -162,6 +162,7 @@ const realtime = createRealtimeIntegration({
     workspaceStore.exists(userId, workspaceId),
 });
 const requestHandlerIntegrations = Object.freeze({
+  database,
   googleAuth,
   braveSearch,
   generic,

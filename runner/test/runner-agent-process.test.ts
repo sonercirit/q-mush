@@ -118,7 +118,16 @@ function runnerServer(options: RunnerTestServerOptions = {}): Readonly<{
   };
   const server = Bun.serve<RunnerTestSocketData>({
     fetch: (request, bunServer) => {
-      if (new URL(request.url).pathname === "/api/runner/realtime") {
+      const pathname = new URL(request.url).pathname;
+      if (pathname === "/api/runner/account-export") {
+        return Response.json({
+          blobs: [],
+          frontier: "process-frontier",
+          manifest: [],
+          records: [],
+        });
+      }
+      if (pathname === "/api/runner/realtime") {
         return bunServer.upgrade(request, {
           data: { heartbeat: false, nextMessage: 0, operational: false },
         })

@@ -19,6 +19,7 @@ import {
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
   PROMPTS_PATH,
+  RUNNER_ACCOUNT_EXPORT_PATH,
   RUNNER_DIRECTORIES_SEGMENT,
   RUNNER_EXECUTABLE_PATH,
   RUNNER_INSTALLER_PATH,
@@ -32,6 +33,7 @@ import {
   TOOL_SETTINGS_PATH,
   WORKSPACES_PATH,
 } from "../shared/routes.ts";
+import { exportAccount } from "./account-export.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
 import type { RenderedPages } from "./pages.ts";
@@ -422,7 +424,7 @@ export function createRequestHandler(
   pages: RenderedPages,
   integrations: RequestHandlerIntegrations,
 ): (request: Request) => Promise<Response> {
-  const { braveSearch, generic, googleAuth, openAi } = integrations;
+  const { braveSearch, database, generic, googleAuth, openAi } = integrations;
   const { openRouter, prompts, runnerExecutables, runners } = integrations;
   const { sessions, toolSettings, workspaces } = integrations;
   const appPage = prepareBody(pages.app);
@@ -438,6 +440,14 @@ export function createRequestHandler(
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
+        if (request.method !== "GET")
+          return createMethodNotAllowedResponse("GET");
+        const account = runners.runnerAccount(request);
+        return account === undefined
+          ? new Response("Unauthorized", { status: 401 })
+          : Response.json(exportAccount(database, account.userId));
+      }
       if (pathname === AUTH_GOOGLE_PATH) {
         return googleAuth.begin(request);
       }

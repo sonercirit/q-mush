@@ -4,12 +4,14 @@ import { join } from "node:path";
 
 import { sha256 } from "../shared/sha256.ts";
 
-import type {
-  AccountExportRecord as ReplicaRecord,
-  AccountExportBlob as ReplicaBlobManifestEntry,
-} from "../shared/account-export.ts";
+import type { AccountExportRecord } from "../shared/account-export.ts";
 
-export type { ReplicaBlobManifestEntry, ReplicaRecord };
+export type ReplicaRecord = AccountExportRecord;
+
+export interface ReplicaBlobManifestEntry {
+  readonly digest: string;
+  readonly size: number;
+}
 
 export interface ReplicaProgress {
   readonly records: number;
