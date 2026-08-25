@@ -23,6 +23,7 @@ export function createToolSettingsTable(userId: () => AnySQLiteColumn) {
       outputLimitCharacters: integer("output_limit_characters").notNull(),
     },
     (table) => [
+      index("tool_settings_user_id_index").on(table.userId, table.id),
       index("tool_settings_user_deletion_index").on(
         table.userId,
         table.isDeleted,

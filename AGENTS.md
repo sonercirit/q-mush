@@ -8,16 +8,18 @@
 
 - Call capabilities impossible only with excluding evidence; otherwise record an
   open question. Research provider docs/API; prefer defaults and metadata/docs.
-- Preserve patterns; improve touched code. TDD: fail, implement, refactor green.
+- Preserve patterns; improve touched code. Keep one path; avoid premature
+  abstraction. TDD: fail, implement, refactor green.
 - Fix defects on sight; codify harmful ones in tests. Integrate capabilities
   with each protocol's native control, recording gaps.
-- Never weaken checks or claim unperformed verification; disclose gaps. Record
-  decisions/lessons in the appropriate memory file: facts about provider
-  discovery, requests, streaming, caching, retries, or model capability handling
-  belong in `PROVIDER_PROTOCOLS.md`; everything else, including provider
-  credential and OAuth configuration, stays here. Repeated guidance means a
-  missing rule. If evidence overturns a finding, fix code and stale records;
-  act, don't ask. Never commit secrets, artifacts, or env files.
+- Never weaken checks, including pre-existing/out-of-scope checks, or claim
+  unperformed verification; disclose gaps. Record decisions/lessons in the
+  appropriate memory file: facts about provider discovery, requests, streaming,
+  caching, retries, or model capability handling belong in
+  `PROVIDER_PROTOCOLS.md`; everything else, including provider credential and
+  OAuth configuration, stays here. Repeated guidance means a missing rule. If
+  evidence overturns a finding, fix code and stale records; act, don't ask.
+  Never commit secrets, artifacts, or env files.
 - Check narrow, then broad, then failures.
 
 ## Setup, Commands
@@ -55,10 +57,11 @@
   promotes runner handoffs to server markers and fences live markers from
   liveness scans. Text handlers precompress with zstd/Brotli/gzip/deflate;
   `/favicon.svg` revalidates by ETag.
-- `solid/pages.tsx` SSR-renders shells; `sync-engine/pages.ts` loads it with
-  Vite SSR. App mounts at `solid/client.tsx`; routes in `shared/routes.ts`.
-  Browser tests use real Chromium/Tailwind mutations, not synthetic layout/CSS
-  assertions; CI rejects `.only`/zero tests.
+- `/` is the homepage and `/app` the app. `solid/pages.tsx` SSR-renders shells;
+  `sync-engine/pages.ts` loads it with Vite SSR. App mounts at
+  `solid/client.tsx`; routes in `shared/routes.ts`. Browser tests use real
+  Chromium/Tailwind mutations, not synthetic layout/CSS assertions; CI rejects
+  `.only`/zero tests.
 - `sync-engine/auth.ts` does Google OIDC (code + PKCE) with HttpOnly
   state/verifier cookies; it fetches/discards provider tokens.
   `sync-engine/auth-store.ts` uses Bun SQLite/Drizzle to upsert users and
@@ -163,27 +166,8 @@
   `runner_command`, `engine_tool`, `provider_request`, or `provider_admission`;
   codec rejects others; the UI shows it.
 
-- Stage-1 replicas accept only schema-validated, entity-counted, checksum-bound
-  account inventories; readiness rechecks manifests/blobs, reserves SQLite/WAL
-  plus incoming/install space. Paged exports use keyset cursors and cache exact
-  per-table count/max-audit-time revisions until SQLite change counters move;
-  hard deletes are forbidden, so inserts cannot hide behind a cursor while
-  preserving that revision. Presence does not advance audit time. Revision
-  changes retry indefinitely with capped backoff and log each restart's count,
-  elapsed time, and revisions. Stage 1 catches up only at runner startup;
-  continuous post-ready synchronization is required by stage 2. Blob lookup
-  early hit. Solid selects its host from page metadata; both runner and
-  authenticated migration-engine handlers serve bounded, read-only active views
-  labeled with origin and completeness. Sensitive export tables use explicit
-  public-column allow-lists; blobs download separately/resumably. Engine blob
-  GETs are stateless and read-only: they derive digests from owner-scoped
-  attachment columns, requiring no export priming, duplicated blob table, or
-  process cache. Engine active views rewrite inline attachments to the digest
-  references Solid consumes; runner views use replicated references and its blob
-  store. Runner catch-up is background/non-fatal; its loopback app uses an
-  ephemeral collision-free port unless configured. Physical pairing is
-  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
-  the browser grant and pairing transcript are never logged.
+- Local-first replica, pairing, export, and active-view architecture lives in
+  `LOCAL_FIRST.md`; read it before changing those paths.
 - OAuth credential reconnects update the existing record only after returned and
   stored account IDs match; unverifiable OpenRouter accounts fail closed.
   Terminal OpenAI refresh rejection marks the credential re-login-required,

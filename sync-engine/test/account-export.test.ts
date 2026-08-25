@@ -238,6 +238,34 @@ describe("legacy account export", () => {
     expectDatabaseUsable(database);
   });
 
+  test("invalidates a continuation revision after another connection commits", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "export-version-")), "db");
+    database = createDatabase(path);
+    insertUser(database);
+    const first = exportAccountPage(database, "u", undefined, 1);
+    const writer = new Database(path);
+    writer.run("UPDATE users SET updated_at = 2 WHERE id = 'u'");
+    writer.close();
+    expect(
+      exportAccountPage(database, "u", first.nextCursor, 1).revision,
+    ).not.toBe(first.revision);
+  });
+
+  test("uses owner and id indexes for exported keyset pages", () => {
+    database = createUserDatabase();
+    const plans = database.$client
+      .query<{ detail: string }, []>(
+        "EXPLAIN QUERY PLAN SELECT id FROM prompts WHERE user_id = 'u' AND id > '' ORDER BY id LIMIT 100",
+      )
+      .all();
+    expect(
+      plans.some(({ detail }) => detail.includes("prompts_user_id_index")),
+    ).toBe(true);
+    expect(plans.some(({ detail }) => detail.includes("TEMP B-TREE"))).toBe(
+      false,
+    );
+  });
+
   test("reuses revision aggregates while the database is unchanged", () => {
     let aggregateQueries = 0;
     database = instrumentDatabase((originalQuery, sql) => {

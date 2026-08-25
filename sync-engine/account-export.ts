@@ -177,7 +177,9 @@ function exportChangeCounters(database: AppDatabase) {
   return {
     dataVersion:
       database.$client
-        .query<{ dataVersion: number }, []>("PRAGMA data_version")
+        .query<{ dataVersion: number }, []>(
+          "SELECT data_version AS dataVersion FROM pragma_data_version()",
+        )
         .get()?.dataVersion ?? 0,
     totalChanges:
       database.$client
@@ -312,12 +314,6 @@ export function exportAccountPage(
     if (!reachedPosition)
       throw new Error("Invalid account export cursor entity");
     const last = records.at(-1);
-    const ending = exportChangeCounters(database);
-    if (
-      ending.dataVersion !== dataVersion ||
-      ending.totalChanges !== totalChanges
-    )
-      exportRevisionCache.get(database)?.delete(userId);
     return {
       blobs: [...blobs.values()],
       done: records.length < safeLimit,
