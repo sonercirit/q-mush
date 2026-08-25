@@ -6,6 +6,7 @@ const AUTH_BASE_PATH = `${API_BASE_PATH}/auth`;
 export const AUTH_GOOGLE_PATH = `${AUTH_BASE_PATH}/google`;
 export const AUTH_GOOGLE_CALLBACK_PATH = `${AUTH_GOOGLE_PATH}/callback`;
 export const AUTH_LOGOUT_PATH = `${AUTH_BASE_PATH}/logout`;
+export const ACTIVE_VIEWS_PATH = `${API_BASE_PATH}/views/active`;
 export const AUTH_SESSION_PATH = `${AUTH_BASE_PATH}/session`;
 const BRAVE_SEARCH_BASE_PATH = `${API_BASE_PATH}/skills/brave-search`;
 export const BRAVE_SEARCH_KEYS_PATH = `${BRAVE_SEARCH_BASE_PATH}/keys`;

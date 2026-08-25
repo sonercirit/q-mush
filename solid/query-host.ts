@@ -2,6 +2,7 @@ import {
   validActiveViewLimit,
   type ActiveView,
 } from "../shared/active-view.ts";
+import { ACTIVE_VIEWS_PATH } from "../shared/routes.ts";
 import { requestJson } from "./browser-http.ts";
 
 export interface QueryHost {
@@ -34,7 +35,7 @@ function createQueryHost(origin: "engine" | "runner"): QueryHost {
       const path =
         origin === "runner"
           ? `/api/local/view?${parameters.toString()}`
-          : `/api/views/active?${parameters.toString()}`;
+          : `${ACTIVE_VIEWS_PATH}?${parameters.toString()}`;
       const value: unknown = await requestJson(path);
       if (
         typeof value !== "object" ||

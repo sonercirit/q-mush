@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { brotliCompressSync, deflateSync } from "node:zlib";
 import {
+  ACTIVE_VIEWS_PATH,
   API_BASE_PATH,
   APP_PATH,
   APP_SCRIPT_PATH,
@@ -441,6 +442,37 @@ export function createRequestHandler(
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (pathname === ACTIVE_VIEWS_PATH) {
+        if (request.method !== "GET")
+          return createMethodNotAllowedResponse("GET");
+        const user = googleAuth.authenticatedUser(request);
+        if (user === null) return new Response("Unauthorized", { status: 401 });
+        const url = new URL(request.url);
+        const entity = url.searchParams.get("entity");
+        const parsedLimit = Number(url.searchParams.get("limit"));
+        if (
+          (entity !== "agent_messages" && entity !== "agent_sessions") ||
+          !Number.isSafeInteger(parsedLimit) ||
+          parsedLimit < 1 ||
+          parsedLimit > 100
+        ) {
+          return new Response("Invalid active view", { status: 400 });
+        }
+        const exported = exportAccount(database, user.id);
+        const sessionId = url.searchParams.get("sessionId");
+        const matching = exported.records
+          .filter((record) => record.entity === entity && !record.tombstone)
+          .map((record) => JSON.parse(record.payload) as Record<string, unknown>)
+          .filter(
+            (record) =>
+              sessionId === null || record["session_id"] === sessionId,
+          );
+        return Response.json({
+          complete: matching.length <= parsedLimit,
+          partial: true,
+          records: matching.slice(0, parsedLimit),
+        });
+      }
       if (pathname === RUNNER_ACCOUNT_EXPORT_PATH) {
         if (request.method !== "GET")
           return createMethodNotAllowedResponse("GET");
