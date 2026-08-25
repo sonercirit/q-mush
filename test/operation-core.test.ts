@@ -435,9 +435,10 @@ describe("operation core", () => {
 
   test("retains every applied identity through treap rotations", () => {
     let state = initialApplyState();
-    const operations = Array.from({ length: 40 }, (_, index) =>
-      operation(`writer-${index}`, 1n, {}, `value-${index}`),
-    );
+    const operations = Array.from({ length: 40 }, (_, index) => {
+      const suffix = index.toString();
+      return operation(`writer-${suffix}`, 1n, {}, `value-${suffix}`);
+    });
     for (const item of operations) state = applyOperation(state, item, reducer);
     expect(Object.keys(state.applied).sort()).toEqual(
       operations

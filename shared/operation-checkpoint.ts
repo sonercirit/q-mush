@@ -98,9 +98,9 @@ const typedCheckpointRecord = <T extends string | bigint>(
   valid: (item: unknown) => item is T,
 ): Readonly<Record<string, T>> => {
   const entries: [string, T][] = [];
-  for (const entry of Object.entries(checkpointObject(value))) {
-    if (!valid(entry[1])) throw new Error("Invalid checkpoint record");
-    entries.push(entry as [string, T]);
+  for (const [key, item] of Object.entries(checkpointObject(value))) {
+    if (!valid(item)) throw new Error("Invalid checkpoint record");
+    entries.push([key, item]);
   }
   return Object.fromEntries(entries);
 };
