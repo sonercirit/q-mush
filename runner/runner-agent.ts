@@ -662,9 +662,7 @@ async function run(): Promise<void> {
         ? requestedAppPort
         : 0,
   });
-  console.log(
-    `Local app at http://127.0.0.1:${String(app.port)}.`,
-  );
+  console.log(`Local app at http://127.0.0.1:${String(app.port)}.`);
   console.log(`Pairing transcript: ${identity.pairing.transcript}.`);
   await containers.recoverTracked();
   try {
