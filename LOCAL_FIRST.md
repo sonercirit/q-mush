@@ -66,9 +66,12 @@
   admits a bounded batch, drives the shared `applyOperation` reducer path from a
   strictly decoded checkpoint, and persists the complete projection, frontier,
   pending, identity, and replay state; duplicates no-op and equivocation aborts
-  the batch. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+  the batch. The authenticated owner-scoped `POST /api/local/operations`
+  endpoint strictly accepts `{ ownerId, partition, envelopes }` with at most 512
+  encoded envelopes and returns the advanced decimal-string frontier plus the
+  complete encoded checkpoint for resume and anti-entropy. Physical pairing is
+  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
+  the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 

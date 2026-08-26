@@ -12,10 +12,6 @@ export default {
     "scripts/repository-check.ts!",
     "scripts/restart-development-server.ts!",
     "scripts/test-browser.ts!",
-    "shared/operation-checkpoint.ts!",
-    "shared/operation-core.ts!",
-    "sync-engine/operation-intake.ts!",
-    "sync-engine/operation-store.ts!",
   ],
   ignoreFiles: [
     "knip.config.ts",

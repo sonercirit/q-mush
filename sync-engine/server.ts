@@ -19,6 +19,7 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  OPERATION_SYNCHRONIZATION_PATH,
   PROMPTS_PATH,
   RUNNER_ACCOUNT_EXPORT_BLOB_PATH,
   RUNNER_ACCOUNT_EXPORT_PATH,
@@ -39,6 +40,7 @@ import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
 import { engineLocalResponse } from "./active-view.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
+import { createOperationSynchronization } from "./operation-synchronization.ts";
 import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RequestHandlerIntegrations } from "./server-integrations.ts";
@@ -430,6 +432,10 @@ export function createRequestHandler(
   const { braveSearch, database, generic, googleAuth, openAi } = integrations;
   const { openRouter, prompts, runnerExecutables, runners } = integrations;
   const { sessions, toolSettings, workspaces } = integrations;
+  const operationSynchronization = createOperationSynchronization(
+    database,
+    googleAuth,
+  );
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const faviconSource = readFavicon();
@@ -459,6 +465,8 @@ export function createRequestHandler(
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
+      if (pathname === OPERATION_SYNCHRONIZATION_PATH)
+        return operationSynchronization(request);
       if (
         pathname === `${API_BASE_PATH}/local/view` ||
         pathname.startsWith(`${API_BASE_PATH}/local/blob/`)

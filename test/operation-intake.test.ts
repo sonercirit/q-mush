@@ -56,7 +56,7 @@ test("operation intake is replay-idempotent", () => {
 test("operation intake checkpoints applied state for round-trip", () => {
   const { database, intake, operation } = setupWithOperation();
   const result = apply(intake, [operation], 2);
-  const [stored] = storedRows(database, operationCheckpoints);
+  const [stored] = database.select().from(operationCheckpoints).all();
   expect(stored?.encodedCheckpoint).toBe(result.encodedCheckpoint);
   expect(checkpointProjection(stored?.encodedCheckpoint ?? "")).toEqual([
     operation.operationId,

@@ -25,9 +25,11 @@ export interface Operation<TPayload = unknown> {
   readonly payload: TPayload;
 }
 type OperationInput<TPayload> = Omit<Operation<TPayload>, "partition">;
+/** @public */
 export type FrontierComparison =
   "equal" | "ancestor" | "descendant" | "concurrent";
 
+/** @public */
 export const operationEntityPartitions = {
   session: [
     "agent_sessions",
@@ -55,6 +57,7 @@ const sessionEntities: ReadonlySet<string> = new Set(
 const nonSessionEntities: ReadonlySet<string> = new Set(
   operationEntityPartitions["non-session"],
 );
+/** @public */
 export const classifyOperationPartition = (
   entityType: string,
 ): OperationPartition => {
@@ -111,6 +114,7 @@ export const createOperation = <TPayload>(
   return { ...input, partition: classifyOperationPartition(input.entity.type) };
 };
 
+/** @public */
 export const compareClocks = (
   left: HybridTimestamp,
   right: HybridTimestamp,
@@ -118,7 +122,9 @@ export const compareClocks = (
   left.physicalMs - right.physicalMs ||
   left.logical - right.logical ||
   compareText(left.writerId, right.writerId);
+/** @public */
 export const MAX_REMOTE_CLOCK_DRIFT_MS = 5 * 60 * 1000;
+/** @public */
 export interface HybridLogicalClock {
   readonly current: () => HybridTimestamp;
   readonly tick: (physicalMs: number) => HybridTimestamp;
@@ -127,6 +133,7 @@ export interface HybridLogicalClock {
     physicalMs: number,
   ) => HybridTimestamp;
 }
+/** @public */
 export const createHybridLogicalClock = (
   writerId: string,
   initialPhysicalMs = 0,
@@ -158,6 +165,7 @@ export const createHybridLogicalClock = (
 
 const frontierValue = (frontier: CausalFrontier, writerId: string): bigint =>
   frontier[writerId] ?? 0n;
+/** @public */
 export const frontierCovers = (
   frontier: CausalFrontier,
   required: CausalFrontier,
@@ -165,6 +173,7 @@ export const frontierCovers = (
   Object.entries(required).every(
     ([writerId, sequence]) => frontierValue(frontier, writerId) >= sequence,
   );
+/** @public */
 export const mergeFrontiers = (
   left: CausalFrontier,
   right: CausalFrontier,
@@ -176,6 +185,7 @@ export const mergeFrontiers = (
   }
   return merged;
 };
+/** @public */
 export const compareFrontiers = (
   left: CausalFrontier,
   right: CausalFrontier,
@@ -187,6 +197,7 @@ export const compareFrontiers = (
   if (rightCovers) return "ancestor";
   return "concurrent";
 };
+/** @public */
 export const advanceFrontier = (
   frontier: CausalFrontier,
   writerId: string,
@@ -233,6 +244,7 @@ export interface OperationApplyState<TProjection> {
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
 }
+/** @public */
 export const MAX_PENDING_OPERATIONS = 512;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
@@ -381,6 +393,7 @@ export const materializeApplied = (
   visit(root);
   return record;
 };
+/** @public */
 export const appliedIdentityDepth = (
   root: AppliedIdentityNode | undefined,
 ): number =>
