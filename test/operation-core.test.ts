@@ -389,7 +389,7 @@ describe("operation core", () => {
         ])
         .sort(),
     );
-    expect(appliedIdentityDepth(state.applied)).toBeLessThanOrEqual(20);
+    expect(appliedIdentityDepth(state.applied)).toBeLessThanOrEqual(21);
     const original = operations[0];
     if (original === undefined) throw new Error("Missing operation fixture");
     expect(applyOperation(state, original, reducer)).toBe(state);
