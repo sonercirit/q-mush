@@ -432,10 +432,7 @@ export function createRequestHandler(
   const { braveSearch, database, generic, googleAuth, openAi } = integrations;
   const { openRouter, prompts, runnerExecutables, runners } = integrations;
   const { sessions, toolSettings, workspaces } = integrations;
-  const operationSynchronization = createOperationSynchronization(
-    database,
-    googleAuth,
-  );
+  const sync = createOperationSynchronization(database, googleAuth);
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const faviconSource = readFavicon();
@@ -465,8 +462,7 @@ export function createRequestHandler(
     const { pathname } = new URL(request.url);
 
     if (pathname.startsWith(`${API_BASE_PATH}/`)) {
-      if (pathname === OPERATION_SYNCHRONIZATION_PATH)
-        return operationSynchronization(request);
+      if (pathname === OPERATION_SYNCHRONIZATION_PATH) return sync(request);
       if (
         pathname === `${API_BASE_PATH}/local/view` ||
         pathname.startsWith(`${API_BASE_PATH}/local/blob/`)
