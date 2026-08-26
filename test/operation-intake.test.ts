@@ -10,20 +10,27 @@ import {
   appendOperationId,
   testOperation,
 } from "./operation-core-test-support";
-import { setupOperationDatabase } from "./operation-store-test-support";
+import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
-const databases: ReturnType<typeof setupOperationDatabase>["database"][] = [];
+const harness = createOperationDatabaseHarness();
 const setup = () => {
-  const resources = setupOperationDatabase();
-  databases.push(resources.database);
+  const resources = harness.setup();
   return {
     database: resources.database,
     intake: createOperationIntake(resources),
   };
 };
-afterEach(() => {
-  for (const database of databases.splice(0)) database.$client.close();
+const setupWithOperation = () => ({
+  ...setup(),
+  operation: testOperation("writer-a", 1n, {}, "one"),
 });
+const checkpointProjection = (encodedCheckpoint: string) =>
+  decodeOperationCheckpoint(encodedCheckpoint).projection;
+const storedRows = (
+  database: ReturnType<typeof setup>["database"],
+  table: typeof operationEnvelopes | typeof operationCheckpoints,
+) => database.select().from(table).all();
+afterEach(harness.close);
 const apply = (
   intake: ReturnType<typeof createOperationIntake>,
   operations: Parameters<ReturnType<typeof createOperationIntake>["apply"]>[2],
@@ -39,15 +46,14 @@ const apply = (
   );
 
 test("operation intake is replay-idempotent and checkpoints applied state", () => {
-  const { database, intake } = setup();
-  const operation = testOperation("writer-a", 1n, {}, "one");
+  const { database, intake, operation } = setupWithOperation();
   const first = apply(intake, [operation], 2);
   const replay = apply(intake, [operation], 3);
   expect(replay.encodedCheckpoint).toBe(first.encodedCheckpoint);
-  expect(
-    decodeOperationCheckpoint(replay.encodedCheckpoint).projection,
-  ).toEqual([operation.operationId]);
-  expect(database.select().from(operationEnvelopes).all()).toHaveLength(1);
+  expect(checkpointProjection(replay.encodedCheckpoint)).toEqual([
+    operation.operationId,
+  ]);
+  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
 });
 
 test("operation intake retains out-of-order operations pending and drains them", () => {
@@ -60,14 +66,14 @@ test("operation intake retains out-of-order operations pending and drains them",
   const first = testOperation("writer-a", 1n, {}, "one");
   const drained = apply(intake, [first], 3);
   expect(drained.frontier).toEqual({ "writer-a": 2n });
-  expect(
-    decodeOperationCheckpoint(drained.encodedCheckpoint).projection,
-  ).toEqual([first.operationId, second.operationId]);
+  expect(checkpointProjection(drained.encodedCheckpoint)).toEqual([
+    first.operationId,
+    second.operationId,
+  ]);
 });
 
 test("operation intake rejects equivocation", () => {
-  const { intake } = setup();
-  const operation = testOperation("writer-a", 1n, {}, "one");
+  const { intake, operation } = setupWithOperation();
   apply(intake, [operation], 2);
   expect(() =>
     apply(intake, [{ ...operation, payload: { value: "other" } }], 3),
@@ -75,8 +81,7 @@ test("operation intake rejects equivocation", () => {
 });
 
 test("operation intake rolls back envelopes when projection persistence fails", () => {
-  const { database, intake } = setup();
-  const operation = testOperation("writer-a", 1n, {}, "one");
+  const { database, intake, operation } = setupWithOperation();
   expect(() =>
     intake.apply(
       "owner-1",
@@ -89,6 +94,6 @@ test("operation intake rolls back envelopes when projection persistence fails", 
       2,
     ),
   ).toThrow("projection failed");
-  expect(database.select().from(operationEnvelopes).all()).toEqual([]);
-  expect(database.select().from(operationCheckpoints).all()).toEqual([]);
+  expect(storedRows(database, operationEnvelopes)).toEqual([]);
+  expect(storedRows(database, operationCheckpoints)).toEqual([]);
 });

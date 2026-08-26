@@ -14,6 +14,7 @@ export default {
     "scripts/test-browser.ts!",
     "shared/operation-checkpoint.ts!",
     "shared/operation-core.ts!",
+    "sync-engine/operation-intake.ts!",
     "sync-engine/operation-store.ts!",
   ],
   ignoreFiles: [

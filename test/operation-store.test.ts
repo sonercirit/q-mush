@@ -1,6 +1,5 @@
 import { afterEach, expect, test } from "vitest";
 import { createdAuditFields } from "../shared/audit";
-import type { createDatabase } from "../shared/database";
 import { users } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import {
@@ -9,25 +8,15 @@ import {
 } from "../shared/operation-checkpoint";
 import { createOperationStore } from "../sync-engine/operation-store";
 import { testApplyState, testOperation } from "./operation-core-test-support";
-import { setupOperationDatabase } from "./operation-store-test-support";
+import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
-const databases: ReturnType<typeof createDatabase>[] = [];
-const setup = () => {
-  const resources = setupOperationDatabase();
-  databases.push(resources.database);
-  return createOperationStore(resources);
-};
-const databaseForTest = () => {
-  const database = databases[0];
-  if (database === undefined) throw new Error("Missing test database");
-  return database;
-};
+const harness = createOperationDatabaseHarness();
+const setup = () => createOperationStore(harness.setup());
+const databaseForTest = harness.current;
 const failOperation = (): never => {
   throw new Error("Missing test operation");
 };
-afterEach(() => {
-  for (const database of databases.splice(0)) database.$client.close();
-});
+afterEach(harness.close);
 
 test("operation envelopes append idempotently and reject equivocation", () => {
   const store = setup();

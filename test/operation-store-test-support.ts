@@ -21,3 +21,22 @@ export const setupOperationDatabase = () => {
     generateId: () => `generated-${String(++id)}`,
   };
 };
+
+export const createOperationDatabaseHarness = () => {
+  const databases: ReturnType<typeof createDatabase>[] = [];
+  return {
+    close: () => {
+      for (const database of databases.splice(0)) database.$client.close();
+    },
+    current: () => {
+      const database = databases[0];
+      if (database === undefined) throw new Error("Missing test database");
+      return database;
+    },
+    setup: () => {
+      const resources = setupOperationDatabase();
+      databases.push(resources.database);
+      return resources;
+    },
+  };
+};
