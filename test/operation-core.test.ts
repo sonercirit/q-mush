@@ -149,6 +149,22 @@ describe("operation core", () => {
     }
   });
 
+  test("replays again after a replay batch advances the last clock", () => {
+    const appendClock = (projection: string, item: Operation) =>
+      `${projection}${projection === "" ? "" : ","}${item.clock.physicalMs.toString()}`;
+    const items = [
+      operation("a", 1n, {}, "a", 100),
+      operation("b", 1n, { z: 1n }, "b", 50),
+      operation("c", 1n, { z: 1n }, "c", 600),
+      operation("z", 1n, {}, "z", 10),
+      operation("d", 1n, {}, "d", 200),
+    ];
+
+    expect(runStringOperations(items, appendClock).projection).toBe(
+      "10,50,100,200,600",
+    );
+  });
+
   test("does not wedge after the former replay limit", () => {
     let state = initialApplyState();
     for (let index = 1; index <= 600; index += 1) {
@@ -274,6 +290,28 @@ describe("operation core", () => {
       expect(() =>
         createOperation({ ...validationSeed, payload: unsupported }),
       ).toThrow(/Unsupported operation value/);
+
+    const cyclicApplyPayload: { self?: unknown } = {};
+    cyclicApplyPayload.self = cyclicApplyPayload;
+    const invalidApplyPayloads: Readonly<Record<string, unknown>> = {
+      cyclic: cyclicApplyPayload,
+      nonPlain: new Map(),
+      nonFinite: { value: Number.NEGATIVE_INFINITY },
+    };
+    const invalidApplyMessages: Readonly<Record<string, RegExp>> = {
+      cyclic: /must not be cyclic/,
+      nonPlain: /must be plain/,
+      nonFinite: /finite/,
+    };
+    for (const [kind, payload] of Object.entries(invalidApplyPayloads))
+      expect(() =>
+        applyOperation(
+          initialApplyState(),
+          { ...validationSeed, parents: {}, payload },
+          reducer,
+        ),
+      ).toThrow(invalidApplyMessages[kind]);
+
     const dated = createOperation({
       ...validationSeed,
       payload: { at: new Date(1) },
@@ -351,7 +389,7 @@ describe("operation core", () => {
         ])
         .sort(),
     );
-    expect(appliedIdentityDepth(state.applied)).toBeLessThanOrEqual(22);
+    expect(appliedIdentityDepth(state.applied)).toBeLessThanOrEqual(20);
     const original = operations[0];
     if (original === undefined) throw new Error("Missing operation fixture");
     expect(applyOperation(state, original, reducer)).toBe(state);
