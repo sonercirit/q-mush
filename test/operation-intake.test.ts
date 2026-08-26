@@ -31,6 +31,16 @@ const storedRows = (
   database: ReturnType<typeof setup>["database"],
   table: typeof operationEnvelopes | typeof operationCheckpoints,
 ) => database.select().from(table).all();
+const expectNoStoredOperations = (
+  database: ReturnType<typeof setup>["database"],
+) => {
+  expect(storedRows(database, operationEnvelopes)).toEqual([]);
+  expect(storedRows(database, operationCheckpoints)).toEqual([]);
+};
+const operationsOfLength = (length: number) =>
+  Array.from({ length }, (_, index) =>
+    testOperation(`writer-${String(index)}`, 1n, {}, "one"),
+  );
 afterEach(harness.close);
 const apply = (
   intake: ReturnType<typeof createOperationIntake>,
@@ -95,16 +105,12 @@ test("operation intake rejects a mismatched operation partition", () => {
     partition: "session" as const,
   };
   expect(() => apply(intake, [operation], 2)).toThrow("scope mismatch");
-  expect(storedRows(database, operationEnvelopes)).toEqual([]);
-  expect(storedRows(database, operationCheckpoints)).toEqual([]);
+  expectNoStoredOperations(database);
 });
 
 test("operation intake accepts its maximum batch size", () => {
   const { intake } = setup();
-  const operations = Array.from(
-    { length: MAX_PENDING_OPERATIONS },
-    (_, index) => testOperation(`writer-${String(index)}`, 1n, {}, "one"),
-  );
+  const operations = operationsOfLength(MAX_PENDING_OPERATIONS);
   expect(Object.keys(apply(intake, operations, 2).frontier)).toHaveLength(
     MAX_PENDING_OPERATIONS,
   );
@@ -112,10 +118,7 @@ test("operation intake accepts its maximum batch size", () => {
 
 test("operation intake rejects a batch above its maximum size", () => {
   const { intake } = setup();
-  const operations = Array.from(
-    { length: MAX_PENDING_OPERATIONS + 1 },
-    (_, index) => testOperation(`writer-${String(index)}`, 1n, {}, "one"),
-  );
+  const operations = operationsOfLength(MAX_PENDING_OPERATIONS + 1);
   expect(() => apply(intake, operations, 2)).toThrow("batch is too large");
 });
 
@@ -133,6 +136,5 @@ test("operation intake rolls back envelopes when projection persistence fails", 
       2,
     ),
   ).toThrow("projection failed");
-  expect(storedRows(database, operationEnvelopes)).toEqual([]);
-  expect(storedRows(database, operationCheckpoints)).toEqual([]);
+  expectNoStoredOperations(database);
 });
