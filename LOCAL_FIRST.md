@@ -62,9 +62,13 @@
   unless configured. Stage-2 operation durability now stores owner-scoped,
   encoded envelopes with operation-ID and writer-sequence equivocation checks,
   serves bounded ranges after a causal frontier, and atomically replaces one
-  encoded checkpoint per owner and partition. Physical pairing is
-  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
-  the browser grant and pairing transcript are never logged.
+  encoded checkpoint per owner and partition. Engine intake transactionally
+  admits a bounded batch, drives the shared `applyOperation` reducer path from a
+  strictly decoded checkpoint, and persists the complete projection, frontier,
+  pending, identity, and replay state; duplicates no-op and equivocation aborts
+  the batch. Physical pairing is transcript-bound, five-minute,
+  one-use/rate-limited, constant-time checked; the browser grant and pairing
+  transcript are never logged.
 
 ## Operational rules
 
