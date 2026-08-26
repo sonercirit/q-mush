@@ -3,6 +3,7 @@ import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
+import { MAX_PENDING_OPERATIONS } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
 import { testOperation } from "./operation-core-test-support";
@@ -19,6 +20,13 @@ const body = (ownerId = "owner-1", envelopes: readonly string[] = []) => ({
   ownerId,
   partition: "non-session",
   envelopes,
+});
+const ownedOperation = (sequence = 1n) => ({
+  ...testOperation("owner-1", sequence, {}, "one"),
+  entity: {
+    ...testOperation("owner-1", sequence, {}, "one").entity,
+    accountId: "owner-1",
+  },
 });
 const handler = (authenticatedId?: string) => {
   const resources = harness.setup();
@@ -53,8 +61,58 @@ test("operation synchronization bounds operation batches", async () => {
   ).toBe(400);
 });
 
+test("operation synchronization rejects an operation for another account", async () => {
+  const operation = ownedOperation();
+  const crossAccount = {
+    ...operation,
+    entity: { ...operation.entity, accountId: "owner-2" },
+  };
+  expect(
+    (
+      await handler("owner-1")(
+        request(body("owner-1", [encodeOperationEnvelope(crossAccount)])),
+      )
+    ).status,
+  ).toBe(403);
+});
+
+test("operation synchronization rejects another writer identity", async () => {
+  const operation = { ...ownedOperation(), writerId: "owner-2" };
+  expect(
+    (
+      await handler("owner-1")(
+        request(body("owner-1", [encodeOperationEnvelope(operation)])),
+      )
+    ).status,
+  ).toBe(403);
+});
+
+test("operation synchronization accepts its maximum batch size", async () => {
+  const encoded = encodeOperationEnvelope(ownedOperation());
+  expect(
+    (
+      await handler("owner-1")(
+        request(body("owner-1", Array(MAX_PENDING_OPERATIONS).fill(encoded))),
+      )
+    ).status,
+  ).toBe(200);
+});
+
+test("operation synchronization rejects a well-formed batch above its maximum", async () => {
+  const encoded = encodeOperationEnvelope(ownedOperation());
+  expect(
+    (
+      await handler("owner-1")(
+        request(
+          body("owner-1", Array(MAX_PENDING_OPERATIONS + 1).fill(encoded)),
+        ),
+      )
+    ).status,
+  ).toBe(400);
+});
+
 test("operation synchronization returns advanced frontier and checkpoint", async () => {
-  const operation = testOperation("writer-a", 1n, {}, "one");
+  const operation = ownedOperation();
   const response = await handler("owner-1")(
     request(body("owner-1", [encodeOperationEnvelope(operation)])),
   );
@@ -66,7 +124,7 @@ test("operation synchronization returns advanced frontier and checkpoint", async
   expect(typeof checkpoint).toBe("string");
   if (typeof checkpoint !== "string") throw new Error("Expected checkpoint");
   expect(decodeOperationCheckpoint(checkpoint).frontier).toEqual({
-    "writer-a": 1n,
+    "owner-1": 1n,
   });
-  expect(responseBody["frontier"]).toEqual({ "writer-a": "1" });
+  expect(responseBody["frontier"]).toEqual({ "owner-1": "1" });
 });

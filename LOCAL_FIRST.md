@@ -34,8 +34,9 @@
   (or `materializeApplied`) creates the flat record on demand. Sequential
   steady-state admission is expected O(log n) per operation and O(n log n)
   overall, rather than repeatedly materializing O(n) records. Unready operations
-  have indexed identity checks and bounded admission (512 entries, after which
-  admission fails rather than silently wedging), while a ready dependency may
+  have indexed identity checks and bounded admission; operation intake and
+  synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after which
+  admission fails rather than silently wedging, while a ready dependency may
   enter a full buffer to drain it; operation-ID and writer-sequence equivocation
   is rejected. Durable checkpoints consist of `frontier`, `pending`,
   `projection`, `applied`, `replayHead`, `replayCount`, `replayLastClock`,
@@ -69,9 +70,10 @@
   the batch. The authenticated owner-scoped `POST /api/local/operations`
   endpoint strictly accepts `{ ownerId, partition, envelopes }` with at most 512
   encoded envelopes and returns the advanced decimal-string frontier plus the
-  complete encoded checkpoint for resume and anti-entropy. Physical pairing is
-  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
-  the browser grant and pairing transcript are never logged.
+  complete encoded checkpoint for resume and anti-entropy. Every envelope binds
+  both `entity.accountId` and `writerId` to the authenticated account. Physical
+  pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
+  checked; the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 

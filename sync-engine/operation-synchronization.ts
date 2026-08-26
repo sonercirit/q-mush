@@ -1,11 +1,13 @@
 import type { AppDatabase } from "../shared/database.ts";
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
-import type { OperationPartition } from "../shared/operation-core.ts";
+import {
+  MAX_OPERATION_BATCH_SIZE,
+  type OperationPartition,
+} from "../shared/operation-core.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { parseRecordJsonForMethod } from "./http.ts";
 import { createOperationIntake } from "./operation-intake.ts";
 
-const MAX_BATCH_SIZE = 512;
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
@@ -28,7 +30,7 @@ const parseRequest = (
     ownerId.length === 0 ||
     (partition !== "session" && partition !== "non-session") ||
     !Array.isArray(envelopes) ||
-    envelopes.length > MAX_BATCH_SIZE ||
+    envelopes.length > MAX_OPERATION_BATCH_SIZE ||
     !envelopes.every((value) => typeof value === "string")
   )
     return undefined;
@@ -55,6 +57,14 @@ export const createOperationSynchronization = (
       return new Response("Forbidden", { status: 403 });
     try {
       const operations = parsed.envelopes.map(decodeOperationEnvelope);
+      if (
+        operations.some(
+          (operation) =>
+            operation.entity.accountId !== user.id ||
+            operation.writerId !== user.id,
+        )
+      )
+        return new Response("Forbidden", { status: 403 });
       const result = intake.apply(
         user.id,
         parsed.partition,

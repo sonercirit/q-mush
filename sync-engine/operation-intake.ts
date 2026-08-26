@@ -6,6 +6,7 @@ import {
   type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint";
 import {
+  MAX_OPERATION_BATCH_SIZE,
   applyOperation,
   type CausalFrontier,
   type Operation,
@@ -52,7 +53,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
       actorId: string,
       now: number,
     ): OperationIntakeResult {
-      if (operations.length > 512)
+      if (operations.length > MAX_OPERATION_BATCH_SIZE)
         throw new Error("Operation intake batch is too large");
       return resources.database.transaction(() => {
         const encoded = store.loadCheckpoint(ownerId, partition);

@@ -5,6 +5,7 @@ import {
 } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
+import { MAX_PENDING_OPERATIONS } from "../shared/operation-core";
 import { createOperationIntake } from "../sync-engine/operation-intake";
 import {
   appendOperationId,
@@ -85,6 +86,37 @@ test("operation intake rejects equivocation", () => {
   expect(() =>
     apply(intake, [{ ...operation, payload: { value: "other" } }], 3),
   ).toThrow("equivocation");
+});
+
+test("operation intake rejects a mismatched operation partition", () => {
+  const { database, intake } = setup();
+  const operation = {
+    ...testOperation("writer-a", 1n, {}, "one"),
+    partition: "session" as const,
+  };
+  expect(() => apply(intake, [operation], 2)).toThrow("scope mismatch");
+  expect(storedRows(database, operationEnvelopes)).toEqual([]);
+  expect(storedRows(database, operationCheckpoints)).toEqual([]);
+});
+
+test("operation intake accepts its maximum batch size", () => {
+  const { intake } = setup();
+  const operations = Array.from(
+    { length: MAX_PENDING_OPERATIONS },
+    (_, index) => testOperation(`writer-${String(index)}`, 1n, {}, "one"),
+  );
+  expect(Object.keys(apply(intake, operations, 2).frontier)).toHaveLength(
+    MAX_PENDING_OPERATIONS,
+  );
+});
+
+test("operation intake rejects a batch above its maximum size", () => {
+  const { intake } = setup();
+  const operations = Array.from(
+    { length: MAX_PENDING_OPERATIONS + 1 },
+    (_, index) => testOperation(`writer-${String(index)}`, 1n, {}, "one"),
+  );
+  expect(() => apply(intake, operations, 2)).toThrow("batch is too large");
 });
 
 test("operation intake rolls back envelopes when projection persistence fails", () => {
