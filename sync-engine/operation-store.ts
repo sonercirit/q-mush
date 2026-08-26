@@ -138,10 +138,12 @@ export function createOperationStore(resources: OperationStoreResources) {
     ): void {
       decodeOperationCheckpoint(encodedCheckpoint);
       database.transaction((transaction) => {
-        const existing = transaction.query.operationCheckpoints.findFirst({
-          columns: { id: true },
-          where: activeCheckpointScope(ownerId, partition),
-        }).sync();
+        const existing = transaction.query.operationCheckpoints
+          .findFirst({
+            columns: { id: true },
+            where: activeCheckpointScope(ownerId, partition),
+          })
+          .sync();
         if (existing === undefined) {
           transaction
             .insert(operationCheckpoints)
