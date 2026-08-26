@@ -9,26 +9,13 @@ import {
 } from "../shared/operation-checkpoint";
 import { createOperationStore } from "../sync-engine/operation-store";
 import { testApplyState, testOperation } from "./operation-core-test-support";
+import { setupOperationDatabase } from "./operation-store-test-support";
 
 const databases: ReturnType<typeof createDatabase>[] = [];
 const setup = () => {
-  const database = createDatabase(":memory:");
-  databases.push(database);
-  database
-    .insert(users)
-    .values({
-      id: "owner-1",
-      googleSubject: "subject-1",
-      email: "owner@example.com",
-      name: "Owner",
-      ...createdAuditFields(SYSTEM_ID, 1),
-    })
-    .run();
-  let id = 0;
-  return createOperationStore({
-    database,
-    generateId: () => `generated-${String(++id)}`,
-  });
+  const resources = setupOperationDatabase();
+  databases.push(resources.database);
+  return createOperationStore(resources);
 };
 const databaseForTest = () => {
   const database = databases[0];
