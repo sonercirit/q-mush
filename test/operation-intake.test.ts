@@ -5,7 +5,7 @@ import {
 } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
-import { MAX_PENDING_OPERATIONS } from "../shared/operation-core";
+import { MAX_OPERATION_BATCH_SIZE } from "../shared/operation-core";
 import { createOperationIntake } from "../sync-engine/operation-intake";
 import {
   appendOperationId,
@@ -110,15 +110,15 @@ test("operation intake rejects a mismatched operation partition", () => {
 
 test("operation intake accepts its maximum batch size", () => {
   const { intake } = setup();
-  const operations = operationsOfLength(MAX_PENDING_OPERATIONS);
+  const operations = operationsOfLength(MAX_OPERATION_BATCH_SIZE);
   expect(Object.keys(apply(intake, operations, 2).frontier)).toHaveLength(
-    MAX_PENDING_OPERATIONS,
+    MAX_OPERATION_BATCH_SIZE,
   );
 });
 
 test("operation intake rejects a batch above its maximum size", () => {
   const { intake } = setup();
-  const operations = operationsOfLength(MAX_PENDING_OPERATIONS + 1);
+  const operations = operationsOfLength(MAX_OPERATION_BATCH_SIZE + 1);
   expect(() => apply(intake, operations, 2)).toThrow("batch is too large");
 });
 

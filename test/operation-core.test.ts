@@ -11,7 +11,7 @@ import {
   createOperation,
   frontierCovers,
   materializeApplied,
-  MAX_PENDING_OPERATIONS,
+  MAX_OPERATION_BATCH_SIZE,
   mergeFrontiers,
   type Operation,
   type OperationApplyState,
@@ -99,7 +99,7 @@ const fillPending = (
   reduce: typeof reducer,
 ): OperationApplyState<Projection> =>
   foldOperations(
-    MAX_PENDING_OPERATIONS,
+    MAX_OPERATION_BATCH_SIZE,
     (index) => operation(`writer-${index.toString()}`, sequence, parents, "x"),
     reduce,
   );
@@ -199,7 +199,7 @@ describe("operation core", () => {
   });
 
   test("bounds never-ready admission without reducer work", () => {
-    expect(MAX_PENDING_OPERATIONS).toBe(512);
+    expect(MAX_OPERATION_BATCH_SIZE).toBe(512);
     const counter = countingReducer();
     const state = fillPending(1n, { ghost: 9n }, counter.reduce);
     expect(counter.calls()).toBe(0);
@@ -227,7 +227,7 @@ describe("operation core", () => {
       reducer,
     );
     expect(healed.frontier["writer-0"]).toBe(2n);
-    expect(healed.pending).toHaveLength(MAX_PENDING_OPERATIONS - 1);
+    expect(healed.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE - 1);
   });
 
   test("omits undefined object properties but distinguishes null from non-finite numbers", () => {

@@ -246,7 +246,7 @@ export interface OperationApplyState<TProjection> {
 }
 /** @public */
 export const MAX_OPERATION_BATCH_SIZE = 512;
-export const MAX_PENDING_OPERATIONS = MAX_OPERATION_BATCH_SIZE;
+export const MAX_OPERATION_BATCH_SIZE = MAX_OPERATION_BATCH_SIZE;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
@@ -436,7 +436,7 @@ export const applyOperation = <TProjection>(
   )
     return state;
   if (
-    state.pending.length >= MAX_PENDING_OPERATIONS &&
+    state.pending.length >= MAX_OPERATION_BATCH_SIZE &&
     !isReady(candidate, state.frontier)
   )
     throw new Error("Operation pending buffer is full");

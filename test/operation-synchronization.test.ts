@@ -3,7 +3,7 @@ import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
-import { MAX_PENDING_OPERATIONS } from "../shared/operation-core";
+import { MAX_OPERATION_BATCH_SIZE } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
 import { testOperation } from "./operation-core-test-support";
@@ -92,7 +92,7 @@ test("operation synchronization accepts its maximum batch size", async () => {
   expect(
     (
       await handler("owner-1")(
-        request(body("owner-1", Array(MAX_PENDING_OPERATIONS).fill(encoded))),
+        request(body("owner-1", Array(MAX_OPERATION_BATCH_SIZE).fill(encoded))),
       )
     ).status,
   ).toBe(200);
@@ -104,7 +104,7 @@ test("operation synchronization rejects a well-formed batch above its maximum", 
     (
       await handler("owner-1")(
         request(
-          body("owner-1", Array(MAX_PENDING_OPERATIONS + 1).fill(encoded)),
+          body("owner-1", Array(MAX_OPERATION_BATCH_SIZE + 1).fill(encoded)),
         ),
       )
     ).status,
