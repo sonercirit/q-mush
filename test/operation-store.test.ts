@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from "vitest";
 import { createdAuditFields } from "../shared/audit";
-import { createDatabase } from "../shared/database";
+import type { createDatabase } from "../shared/database";
 import { users } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import {
