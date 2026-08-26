@@ -2,7 +2,6 @@ import {
   createOperation,
   materializeApplied,
   restoreAppliedIdentityIndex,
-  validateOperationValue,
   type HybridTimestamp,
   type Operation,
   type OperationApplyState,
@@ -29,7 +28,6 @@ const exactCheckpointKeys = (
     throw new Error("Invalid checkpoint fields");
 };
 const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
-  validateOperationValue(value);
   if (value === undefined) return ["undefined", null];
   if (typeof value === "bigint") return ["bigint", value.toString()];
   if (value instanceof Date) return ["date", value.toISOString()];

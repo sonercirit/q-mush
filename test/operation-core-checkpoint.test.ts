@@ -173,6 +173,8 @@ describe("operation checkpoints", () => {
       change("frontier", ["object", [["a", encodedPrimitive("1")]]]),
       change("applied", ["object", [["key", ["bigint", "1"]]]]),
       change("projection", ["array", [["primitive", 42]]]),
+      change("baseProjection", ["array", [["primitive", 42]]]),
+      mutatePending("payload", ["object", [[1, encodedPrimitive("x")]]]),
       mutatePending("schemaVersion", encodedPrimitive("1")),
       mutatePending("schemaVersion", encodedPrimitive(true)),
       mutatePending("schemaVersion", encodedPrimitive(1e300)),

@@ -65,7 +65,7 @@ export const classifyOperationPartition = (
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
-export const validateOperationValue = (
+const validateOperationValue = (
   value: unknown,
   seen = new Set<object>(),
 ): void => {
