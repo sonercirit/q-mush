@@ -45,15 +45,22 @@ const apply = (
     now,
   );
 
-test("operation intake is replay-idempotent and checkpoints applied state", () => {
+test("operation intake is replay-idempotent", () => {
   const { database, intake, operation } = setupWithOperation();
   const first = apply(intake, [operation], 2);
   const replay = apply(intake, [operation], 3);
   expect(replay.encodedCheckpoint).toBe(first.encodedCheckpoint);
-  expect(checkpointProjection(replay.encodedCheckpoint)).toEqual([
+  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
+});
+
+test("operation intake checkpoints applied state for round-trip", () => {
+  const { database, intake, operation } = setupWithOperation();
+  const result = apply(intake, [operation], 2);
+  const [stored] = storedRows(database, operationCheckpoints);
+  expect(stored?.encodedCheckpoint).toBe(result.encodedCheckpoint);
+  expect(checkpointProjection(stored?.encodedCheckpoint ?? "")).toEqual([
     operation.operationId,
   ]);
-  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
 });
 
 test("operation intake retains out-of-order operations pending and drains them", () => {
