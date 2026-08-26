@@ -2,6 +2,7 @@ import type { AppDatabase } from "../shared/database.ts";
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
 import {
   MAX_OPERATION_BATCH_SIZE,
+  MAX_REMOTE_CLOCK_DRIFT_MS,
   type OperationPartition,
 } from "../shared/operation-core.ts";
 import type { GoogleAuth } from "./auth.ts";
@@ -57,6 +58,7 @@ export const createOperationSynchronization = (
       return new Response("Forbidden", { status: 403 });
     try {
       const operations = parsed.envelopes.map(decodeOperationEnvelope);
+      const now = Date.now();
       if (
         operations.some(
           (operation) =>
@@ -65,13 +67,23 @@ export const createOperationSynchronization = (
         )
       )
         return new Response("Forbidden", { status: 403 });
+      if (
+        operations.some(
+          ({ clock }) =>
+            Math.abs(clock.physicalMs - now) > MAX_REMOTE_CLOCK_DRIFT_MS,
+        )
+      )
+        return Response.json(
+          { error: "Invalid operation batch" },
+          { status: 400 },
+        );
       const result = intake.apply(
         user.id,
         parsed.partition,
         operations,
         (projection, operation) => [...projection, operation.operationId],
         user.id,
-        Date.now(),
+        now,
       );
       return Response.json({
         checkpoint: result.encodedCheckpoint,

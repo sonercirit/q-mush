@@ -3,7 +3,10 @@ import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
-import { MAX_OPERATION_BATCH_SIZE } from "../shared/operation-core";
+import {
+  MAX_OPERATION_BATCH_SIZE,
+  MAX_REMOTE_CLOCK_DRIFT_MS,
+} from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
 import { testOperation } from "./operation-core-test-support";
@@ -22,9 +25,9 @@ const body = (ownerId = "owner-1", envelopes: readonly string[] = []) => ({
   envelopes,
 });
 const ownedOperation = (sequence = 1n) => ({
-  ...testOperation("owner-1", sequence, {}, "one"),
+  ...testOperation("owner-1", sequence, {}, "one", Date.now()),
   entity: {
-    ...testOperation("owner-1", sequence, {}, "one").entity,
+    ...testOperation("owner-1", sequence, {}, "one", Date.now()).entity,
     accountId: "owner-1",
   },
 });
@@ -81,6 +84,20 @@ test("operation synchronization rejects an operation for another account", async
 test("operation synchronization rejects another writer identity", async () => {
   const operation = { ...ownedOperation(), writerId: "owner-2" };
   expect(await operationStatus(operation)).toBe(403);
+});
+
+test("operation synchronization rejects remote clock drift in either direction", async () => {
+  const now = Date.now();
+  for (const physicalMs of [
+    now + MAX_REMOTE_CLOCK_DRIFT_MS * 2,
+    Math.max(0, now - MAX_REMOTE_CLOCK_DRIFT_MS * 2),
+  ])
+    expect(
+      await operationStatus({
+        ...ownedOperation(),
+        clock: { ...ownedOperation().clock, physicalMs },
+      }),
+    ).toBe(400);
 });
 
 test("operation synchronization accepts its maximum batch size", async () => {

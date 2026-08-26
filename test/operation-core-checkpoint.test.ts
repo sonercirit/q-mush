@@ -198,9 +198,8 @@ describe("operation checkpoints", () => {
       requireArray(requireArray(wrongReplayKey)[1]),
       "replayHead",
     );
-    const replayEntries = requireArray(requireArray(replayHead[1])[1]);
-    const previousEntry = requireEntry(replayEntries, "previous");
-    previousEntry[0] = "revious";
+    const replayItems = requireArray(replayHead[1]);
+    replayItems.push(encodedPrimitive(null));
     mutations.push(wrongReplayKey);
     // Target nested records rather than only the operation itself.
     for (const field of ["clock", "entity"] as const) {

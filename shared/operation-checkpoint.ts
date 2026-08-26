@@ -1,6 +1,7 @@
 import {
   createOperation,
   materializeApplied,
+  operationFingerprint,
   restoreAppliedIdentityIndex,
   type HybridTimestamp,
   type Operation,
@@ -28,22 +29,42 @@ const exactCheckpointKeys = (
     throw new Error("Invalid checkpoint fields");
 };
 const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
-  if (value === undefined) return ["undefined", null];
-  if (typeof value === "bigint") return ["bigint", value.toString()];
-  if (value instanceof Date) return ["date", value.toISOString()];
-  if (Array.isArray(value)) {
-    const encoded = value.map(encodeCheckpointValue);
-    return ["array", encoded];
+  const root: { value?: EncodedCheckpointValue } = {};
+  const pending: {
+    readonly value: unknown;
+    readonly assign: (encoded: EncodedCheckpointValue) => void;
+  }[] = [{ value, assign: (encoded) => (root.value = encoded) }];
+  while (pending.length > 0) {
+    const task = pending.pop();
+    if (task === undefined) break;
+    const item = task.value;
+    if (item === undefined) task.assign(["undefined", null]);
+    else if (typeof item === "bigint") task.assign(["bigint", item.toString()]);
+    else if (item instanceof Date) task.assign(["date", item.toISOString()]);
+    else if (Array.isArray(item)) {
+      const body: EncodedCheckpointValue[] = [];
+      task.assign(["array", body]);
+      for (let index = item.length - 1; index >= 0; index -= 1)
+        pending.push({
+          value: item[index],
+          assign: (encoded) => (body[index] = encoded),
+        });
+    } else if (isCheckpointObject(item)) {
+      const body: [string, EncodedCheckpointValue][] = [];
+      task.assign(["object", body]);
+      const entries = Object.entries(item);
+      for (let index = entries.length - 1; index >= 0; index -= 1) {
+        const entry = entries[index];
+        if (entry !== undefined)
+          pending.push({
+            value: entry[1],
+            assign: (encoded) => (body[index] = [entry[0], encoded]),
+          });
+      }
+    } else task.assign(["primitive", item]);
   }
-  if (value !== null && typeof value === "object")
-    return [
-      "object",
-      Object.entries(value).map(([key, item]) => [
-        key,
-        encodeCheckpointValue(item),
-      ]),
-    ];
-  return ["primitive", value];
+  if (root.value === undefined) throw new Error("Checkpoint encoding failed");
+  return root.value;
 };
 const isEncodedPair = (value: unknown): value is [string, unknown] =>
   Array.isArray(value) && value.length === 2 && typeof value[0] === "string";
@@ -119,7 +140,8 @@ const decodeClock = (value: unknown): HybridTimestamp => {
   const clock = checkpointObject(value);
   exactCheckpointKeys(clock, ["physicalMs", "logical", "writerId"]);
   if (
-    !Number.isFinite(clock["physicalMs"]) ||
+    !Number.isSafeInteger(clock["physicalMs"]) ||
+    Number(clock["physicalMs"]) < 0 ||
     !Number.isSafeInteger(clock["logical"]) ||
     Number(clock["logical"]) < 0 ||
     typeof clock["writerId"] !== "string"
@@ -186,13 +208,26 @@ const decodeOperation = (value: unknown): Operation => {
   return operation;
 };
 const decodeReplay = (value: unknown): ReplayEntry | undefined => {
-  if (value === undefined) return undefined;
-  const entry = checkpointObject(value);
-  exactCheckpointKeys(entry, ["operation", "previous"]);
-  return {
-    operation: decodeOperation(entry["operation"]),
-    previous: decodeReplay(entry["previous"]),
-  };
+  if (Array.isArray(value)) {
+    let replay: ReplayEntry | undefined;
+    for (let index = value.length - 1; index >= 0; index -= 1)
+      replay = { operation: decodeOperation(value[index]), previous: replay };
+    return replay;
+  }
+  let encoded = value;
+  const operations: Operation[] = [];
+  while (encoded !== undefined) {
+    const entry = checkpointObject(encoded);
+    exactCheckpointKeys(entry, ["operation", "previous"]);
+    operations.push(decodeOperation(entry["operation"]));
+    encoded = entry["previous"];
+  }
+  let replay: ReplayEntry | undefined;
+  for (let index = operations.length - 1; index >= 0; index -= 1) {
+    const operation = operations[index];
+    if (operation !== undefined) replay = { operation, previous: replay };
+  }
+  return replay;
 };
 const decodeEncoded = (encoded: string, label: string): unknown => {
   try {
@@ -208,15 +243,78 @@ export const decodeOperationEnvelope = (encoded: string): Operation =>
 
 export type OperationCheckpointProjection = readonly string[];
 
+const replayOperations = (head: ReplayEntry | undefined): Operation[] => {
+  const replay: Operation[] = [];
+  for (let entry = head; entry !== undefined; entry = entry.previous)
+    replay.push(entry.operation);
+  return replay;
+};
 export const encodeOperationCheckpoint = (
   state: OperationApplyState<OperationCheckpointProjection>,
-): string =>
-  JSON.stringify(
+): string => {
+  const replay = replayOperations(state.replayHead);
+  return JSON.stringify(
     encodeCheckpointValue({
       ...state,
       applied: materializeApplied(state.applied),
+      replayHead: replay,
     }),
   );
+};
+const clocksEqual = (
+  left: HybridTimestamp | undefined,
+  right: HybridTimestamp | undefined,
+): boolean =>
+  left === undefined
+    ? right === undefined
+    : left.physicalMs === right?.physicalMs &&
+      left.logical === right.logical &&
+      left.writerId === right.writerId;
+const validateCheckpointConsistency = (
+  state: OperationApplyState<OperationCheckpointProjection>,
+): void => {
+  const replay = replayOperations(state.replayHead);
+  if (
+    replay.length !== state.replayCount ||
+    !clocksEqual(state.replayLastClock, state.replayHead?.operation.clock)
+  )
+    throw new Error("Invalid operation checkpoint replay metadata");
+  const expectedFrontier: Record<string, bigint> = { ...state.baseFrontier };
+  const expectedApplied: Record<string, string> = {};
+  for (const operation of replay) {
+    const previous = expectedFrontier[operation.writerId] ?? 0n;
+    if (operation.sequence > previous)
+      expectedFrontier[operation.writerId] = operation.sequence;
+    const fingerprint = operationFingerprint(operation);
+    expectedApplied[`id:${operation.operationId}`] = fingerprint;
+    expectedApplied[
+      `writer:${operation.writerId}:${operation.sequence.toString()}`
+    ] = fingerprint;
+  }
+  const actualApplied = materializeApplied(state.applied);
+  if (
+    operationFingerprint(expectedFrontier) !==
+      operationFingerprint(state.frontier) ||
+    operationFingerprint(expectedApplied) !==
+      operationFingerprint(actualApplied)
+  )
+    throw new Error("Invalid operation checkpoint derived state");
+  for (const operation of state.pending) {
+    const fingerprint = operationFingerprint(operation);
+    const identities = [
+      `id:${operation.operationId}`,
+      `writer:${operation.writerId}:${operation.sequence.toString()}`,
+    ];
+    if (
+      identities.some(
+        (identity) =>
+          actualApplied[identity] !== undefined &&
+          actualApplied[identity] !== fingerprint,
+      )
+    )
+      throw new Error("Invalid operation checkpoint pending identity");
+  }
+};
 export const decodeOperationCheckpoint = (
   encoded: string,
 ): OperationApplyState<OperationCheckpointProjection> => {
@@ -247,7 +345,7 @@ export const decodeOperationCheckpoint = (
     throw new Error("Invalid operation checkpoint projection");
   if (!validProjection(state["baseProjection"]))
     throw new Error("Invalid operation checkpoint base projection");
-  return {
+  const result: OperationApplyState<OperationCheckpointProjection> = {
     frontier: bigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map(decodeOperation),
     projection: state["projection"],
@@ -263,4 +361,6 @@ export const decodeOperationCheckpoint = (
     baseProjection: state["baseProjection"],
     baseFrontier: bigintCheckpointRecord(state["baseFrontier"]),
   };
+  validateCheckpointConsistency(result);
+  return result;
 };
