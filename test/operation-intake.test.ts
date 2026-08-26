@@ -41,6 +41,10 @@ const operationsOfLength = (length: number) =>
   Array.from({ length }, (_, index) =>
     testOperation(`writer-${String(index)}`, 1n, {}, "one"),
   );
+const applyOperationCount = (
+  intake: ReturnType<typeof createOperationIntake>,
+  length: number,
+) => apply(intake, operationsOfLength(length), 2);
 afterEach(harness.close);
 const apply = (
   intake: ReturnType<typeof createOperationIntake>,
@@ -110,16 +114,16 @@ test("operation intake rejects a mismatched operation partition", () => {
 
 test("operation intake accepts its maximum batch size", () => {
   const { intake } = setup();
-  const operations = operationsOfLength(MAX_OPERATION_BATCH_SIZE);
-  expect(Object.keys(apply(intake, operations, 2).frontier)).toHaveLength(
-    MAX_OPERATION_BATCH_SIZE,
-  );
+  expect(
+    Object.keys(applyOperationCount(intake, MAX_OPERATION_BATCH_SIZE).frontier),
+  ).toHaveLength(MAX_OPERATION_BATCH_SIZE);
 });
 
 test("operation intake rejects a batch above its maximum size", () => {
   const { intake } = setup();
-  const operations = operationsOfLength(MAX_OPERATION_BATCH_SIZE + 1);
-  expect(() => apply(intake, operations, 2)).toThrow("batch is too large");
+  expect(() =>
+    applyOperationCount(intake, MAX_OPERATION_BATCH_SIZE + 1),
+  ).toThrow("batch is too large");
 });
 
 test("operation intake rolls back envelopes when projection persistence fails", () => {

@@ -37,6 +37,14 @@ const handler = (authenticatedId?: string) => {
         : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
   });
 };
+const synchronizationStatus = async (envelopes: readonly string[]) =>
+  (await handler("owner-1")(request(body("owner-1", envelopes)))).status;
+const operationStatus = (operation: ReturnType<typeof ownedOperation>) =>
+  synchronizationStatus([encodeOperationEnvelope(operation)]);
+const repeatedOperationStatus = (length: number) =>
+  synchronizationStatus(
+    Array(length).fill(encodeOperationEnvelope(ownedOperation())),
+  );
 
 test.afterEach(harness.close);
 
@@ -67,48 +75,20 @@ test("operation synchronization rejects an operation for another account", async
     ...operation,
     entity: { ...operation.entity, accountId: "owner-2" },
   };
-  expect(
-    (
-      await handler("owner-1")(
-        request(body("owner-1", [encodeOperationEnvelope(crossAccount)])),
-      )
-    ).status,
-  ).toBe(403);
+  expect(await operationStatus(crossAccount)).toBe(403);
 });
 
 test("operation synchronization rejects another writer identity", async () => {
   const operation = { ...ownedOperation(), writerId: "owner-2" };
-  expect(
-    (
-      await handler("owner-1")(
-        request(body("owner-1", [encodeOperationEnvelope(operation)])),
-      )
-    ).status,
-  ).toBe(403);
+  expect(await operationStatus(operation)).toBe(403);
 });
 
 test("operation synchronization accepts its maximum batch size", async () => {
-  const encoded = encodeOperationEnvelope(ownedOperation());
-  expect(
-    (
-      await handler("owner-1")(
-        request(body("owner-1", Array(MAX_OPERATION_BATCH_SIZE).fill(encoded))),
-      )
-    ).status,
-  ).toBe(200);
+  expect(await repeatedOperationStatus(MAX_OPERATION_BATCH_SIZE)).toBe(200);
 });
 
 test("operation synchronization rejects a well-formed batch above its maximum", async () => {
-  const encoded = encodeOperationEnvelope(ownedOperation());
-  expect(
-    (
-      await handler("owner-1")(
-        request(
-          body("owner-1", Array(MAX_OPERATION_BATCH_SIZE + 1).fill(encoded)),
-        ),
-      )
-    ).status,
-  ).toBe(400);
+  expect(await repeatedOperationStatus(MAX_OPERATION_BATCH_SIZE + 1)).toBe(400);
 });
 
 test("operation synchronization returns advanced frontier and checkpoint", async () => {

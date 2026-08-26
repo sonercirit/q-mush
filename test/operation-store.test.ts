@@ -25,12 +25,72 @@ const addSecondOwner = () => {
     })
     .run();
 };
+type Store = ReturnType<typeof createOperationStore>;
+type Partition = "non-session" | "session";
 const checkpoint = (projection: readonly string[]) =>
   encodeOperationCheckpoint(testApplyState<readonly string[]>(projection));
-const loadedProjection = (
-  store: ReturnType<typeof createOperationStore>,
+const append = (
+  store: Store,
   ownerId: string,
-  partition: "non-session" | "session",
+  operation: ReturnType<typeof testOperation>,
+) => store.appendEnvelope(ownerId, operation, SYSTEM_ID, 2);
+const saveCheckpoint = (
+  store: Store,
+  ownerId: string,
+  partition: Partition,
+  projection: readonly string[],
+  now: number,
+) => {
+  store.storeCheckpoint(
+    ownerId,
+    partition,
+    checkpoint(projection),
+    SYSTEM_ID,
+    now,
+  );
+};
+const readRange = (
+  store: Store,
+  frontier: Readonly<Record<string, bigint>>,
+  limit: number,
+) => store.readEnvelopeRange("owner-1", "non-session", frontier, limit);
+const appendPair = (
+  store: Store,
+  secondWriter: string,
+  secondSequence: bigint,
+  secondFrontier: Readonly<Record<string, bigint>>,
+) => {
+  const first = testOperation("writer-a", 1n, {}, "first");
+  const second = testOperation(
+    secondWriter,
+    secondSequence,
+    secondFrontier,
+    "second",
+  );
+  append(store, "owner-1", first);
+  append(store, "owner-1", second);
+  return { first, second };
+};
+const replaceCheckpoint = (
+  store: Store,
+  preservedOwner: string,
+  preservedPartition: Partition,
+  preservedValue: string,
+) => {
+  saveCheckpoint(store, "owner-1", "session", ["initial"], 2);
+  saveCheckpoint(
+    store,
+    preservedOwner,
+    preservedPartition,
+    [preservedValue],
+    2,
+  );
+  saveCheckpoint(store, "owner-1", "session", ["updated"], 3);
+};
+const loadedProjection = (
+  store: Store,
+  ownerId: string,
+  partition: Partition,
 ) =>
   decodeOperationCheckpoint(store.loadCheckpoint(ownerId, partition) ?? "")
     .projection;
@@ -56,8 +116,8 @@ test("operation envelope ranges are owner scoped", () => {
   addSecondOwner();
   const own = testOperation("writer-a", 1n, {}, "own");
   const other = testOperation("writer-b", 1n, {}, "other");
-  store.appendEnvelope("owner-1", own, SYSTEM_ID, 2);
-  store.appendEnvelope("owner-2", other, SYSTEM_ID, 2);
+  append(store, "owner-1", own);
+  append(store, "owner-2", other);
   expect(store.readEnvelopeRange("owner-1", "non-session", {}, 10)).toEqual([
     own,
   ]);
@@ -72,8 +132,8 @@ test("operation envelope ranges are partition scoped", () => {
     entity: { ...sessionBase.entity, type: "agent_sessions" },
     partition: "session" as const,
   };
-  store.appendEnvelope("owner-1", nonSession, SYSTEM_ID, 2);
-  store.appendEnvelope("owner-1", session, SYSTEM_ID, 2);
+  append(store, "owner-1", nonSession);
+  append(store, "owner-1", session);
   expect(store.readEnvelopeRange("owner-1", "session", {}, 10)).toEqual([
     session,
   ]);
@@ -81,24 +141,14 @@ test("operation envelope ranges are partition scoped", () => {
 
 test("operation envelope ranges filter the causal frontier", () => {
   const store = setup();
-  const first = testOperation("writer-a", 1n, {}, "first");
-  const second = testOperation("writer-a", 2n, { "writer-a": 1n }, "second");
-  store.appendEnvelope("owner-1", first, SYSTEM_ID, 2);
-  store.appendEnvelope("owner-1", second, SYSTEM_ID, 2);
-  expect(
-    store.readEnvelopeRange("owner-1", "non-session", { "writer-a": 1n }, 10),
-  ).toEqual([second]);
+  const { second } = appendPair(store, "writer-a", 2n, { "writer-a": 1n });
+  expect(readRange(store, { "writer-a": 1n }, 10)).toEqual([second]);
 });
 
 test("operation envelope ranges honor their limit", () => {
   const store = setup();
-  const first = testOperation("writer-a", 1n, {}, "first");
-  const second = testOperation("writer-b", 1n, {}, "second");
-  store.appendEnvelope("owner-1", first, SYSTEM_ID, 2);
-  store.appendEnvelope("owner-1", second, SYSTEM_ID, 2);
-  expect(store.readEnvelopeRange("owner-1", "non-session", {}, 1)).toEqual([
-    first,
-  ]);
+  const { first } = appendPair(store, "writer-b", 1n, {});
+  expect(readRange(store, {}, 1)).toEqual([first]);
 });
 
 test("operation envelope range limits must be positive", () => {
@@ -110,67 +160,21 @@ test("operation envelope range limits must be positive", () => {
 
 test("encoded checkpoints replace atomically per owner and partition", () => {
   const store = setup();
-  store.storeCheckpoint("owner-1", "non-session", checkpoint([]), SYSTEM_ID, 2);
-  store.storeCheckpoint(
-    "owner-1",
-    "non-session",
-    checkpoint(["next"]),
-    SYSTEM_ID,
-    3,
-  );
+  saveCheckpoint(store, "owner-1", "non-session", [], 2);
+  saveCheckpoint(store, "owner-1", "non-session", ["next"], 3);
   expect(loadedProjection(store, "owner-1", "non-session")).toEqual(["next"]);
 });
 
 test("encoded checkpoint replacement is owner scoped", () => {
   const store = setup();
   addSecondOwner();
-  store.storeCheckpoint(
-    "owner-1",
-    "session",
-    checkpoint(["one"]),
-    SYSTEM_ID,
-    2,
-  );
-  store.storeCheckpoint(
-    "owner-2",
-    "session",
-    checkpoint(["two"]),
-    SYSTEM_ID,
-    2,
-  );
-  store.storeCheckpoint(
-    "owner-1",
-    "session",
-    checkpoint(["updated"]),
-    SYSTEM_ID,
-    3,
-  );
+  replaceCheckpoint(store, "owner-2", "session", "two");
   expect(loadedProjection(store, "owner-2", "session")).toEqual(["two"]);
 });
 
 test("encoded checkpoint replacement is partition scoped", () => {
   const store = setup();
-  store.storeCheckpoint(
-    "owner-1",
-    "session",
-    checkpoint(["session"]),
-    SYSTEM_ID,
-    2,
-  );
-  store.storeCheckpoint(
-    "owner-1",
-    "non-session",
-    checkpoint(["other"]),
-    SYSTEM_ID,
-    2,
-  );
-  store.storeCheckpoint(
-    "owner-1",
-    "session",
-    checkpoint(["updated"]),
-    SYSTEM_ID,
-    3,
-  );
+  replaceCheckpoint(store, "owner-1", "non-session", "other");
   expect(loadedProjection(store, "owner-1", "non-session")).toEqual(["other"]);
 });
 
