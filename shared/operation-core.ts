@@ -247,6 +247,7 @@ const canonical = (value: unknown): string => {
       .join(",")}}`;
   return JSON.stringify(value);
 };
+export const operationFingerprint = canonical;
 const identityKeys = (candidate: Operation): readonly string[] => [
   `id:${candidate.operationId}`,
   `writer:${candidate.writerId}:${candidate.sequence.toString()}`,

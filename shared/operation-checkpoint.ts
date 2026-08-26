@@ -194,6 +194,18 @@ const decodeReplay = (value: unknown): ReplayEntry | undefined => {
     previous: decodeReplay(entry["previous"]),
   };
 };
+const decodeEncoded = (encoded: string, label: string): unknown => {
+  try {
+    return decodeCheckpointValue(JSON.parse(encoded));
+  } catch (error) {
+    throw new Error(`Invalid ${label}`, { cause: error });
+  }
+};
+export const encodeOperationEnvelope = (operation: Operation): string =>
+  JSON.stringify(encodeCheckpointValue(operation));
+export const decodeOperationEnvelope = (encoded: string): Operation =>
+  decodeOperation(decodeEncoded(encoded, "operation envelope"));
+
 export type OperationCheckpointProjection = readonly string[];
 
 export const encodeOperationCheckpoint = (
@@ -208,12 +220,7 @@ export const encodeOperationCheckpoint = (
 export const decodeOperationCheckpoint = (
   encoded: string,
 ): OperationApplyState<OperationCheckpointProjection> => {
-  let decoded: unknown;
-  try {
-    decoded = decodeCheckpointValue(JSON.parse(encoded));
-  } catch (error) {
-    throw new Error("Invalid operation checkpoint", { cause: error });
-  }
+  const decoded = decodeEncoded(encoded, "operation checkpoint");
   const state = checkpointObject(decoded);
   exactCheckpointKeys(state, [
     "frontier",

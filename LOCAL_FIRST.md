@@ -59,9 +59,12 @@
   inline attachments to the digest references Solid consumes; runner views use
   replicated references and its blob store. Runner catch-up is
   background/non-fatal; its loopback app uses an ephemeral collision-free port
-  unless configured. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+  unless configured. Stage-2 operation durability now stores owner-scoped,
+  encoded envelopes with operation-ID and writer-sequence equivocation checks,
+  serves bounded ranges after a causal frontier, and atomically replaces one
+  encoded checkpoint per owner and partition. Physical pairing is
+  transcript-bound, five-minute, one-use/rate-limited, constant-time checked;
+  the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 
