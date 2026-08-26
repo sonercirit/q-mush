@@ -246,7 +246,6 @@ export interface OperationApplyState<TProjection> {
 }
 /** @public */
 export const MAX_OPERATION_BATCH_SIZE = 512;
-export const MAX_OPERATION_BATCH_SIZE = MAX_OPERATION_BATCH_SIZE;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
   if (typeof value === "bigint") return `bigint:${value.toString()}`;
