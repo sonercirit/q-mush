@@ -7,6 +7,7 @@ import { SYSTEM_ID } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
+  operationSequenceOrder,
 } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
@@ -17,10 +18,7 @@ import {
   createOperationIntake,
   type OperationIntakeLimits,
 } from "../sync-engine/operation-intake";
-import {
-  createOperationStore,
-  operationSequenceOrder,
-} from "../sync-engine/operation-store";
+import { createOperationStore } from "../sync-engine/operation-store";
 import {
   appendOperationId,
   testOperation,

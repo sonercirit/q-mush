@@ -10,6 +10,7 @@ import {
   decodeOperationCheckpoint,
   decodeOperationEnvelope,
   encodeOperationEnvelope,
+  operationSequenceOrder,
 } from "../shared/operation-checkpoint";
 import {
   operationFingerprint,
@@ -23,10 +24,6 @@ interface OperationStoreResources {
   readonly generateId?: IdGenerator;
 }
 
-export const operationSequenceOrder = (sequence: bigint): string => {
-  const decimal = sequence.toString();
-  return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
-};
 export interface OperationEnvelopePage {
   readonly envelopes: readonly Operation[];
   readonly hasMore: boolean;
