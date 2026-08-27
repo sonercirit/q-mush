@@ -490,6 +490,7 @@ export const operationEnvelopes = sqliteTable(
     partition: operationPartitionColumn(),
     writerId: text("writer_id").notNull(),
     sequence: text("sequence").notNull(),
+    sequenceOrder: text("sequence_order").notNull(),
     operationId: text("operation_id").notNull(),
     fingerprint: text("fingerprint").notNull(),
     encodedEnvelope: text("encoded_envelope").notNull(),
@@ -504,8 +505,9 @@ export const operationEnvelopes = sqliteTable(
     index("operation_envelopes_owner_partition_writer_index").on(
       table.userId,
       table.partition,
+      table.isDeleted,
       table.writerId,
-      table.sequence,
+      table.sequenceOrder,
     ),
   ],
 );

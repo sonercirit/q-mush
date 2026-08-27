@@ -62,12 +62,6 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           "Operation intake batch is too large",
         );
       return resources.database.transaction(() => {
-        const storedCount = store.countEnvelopes(ownerId, partition);
-        if (storedCount > MAX_OWNER_PARTITION_OPERATIONS - operations.length)
-          throw operationProtocolError(
-            "capacity",
-            "Operation history capacity reached",
-          );
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
@@ -79,7 +73,21 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
               "invalid",
               "Operation intake scope mismatch",
             );
-          store.appendEnvelope(ownerId, operation, actorId, now);
+          const appended = store.appendEnvelope(
+            ownerId,
+            operation,
+            actorId,
+            now,
+          );
+          if (
+            appended &&
+            store.countEnvelopes(ownerId, partition) >
+              MAX_OWNER_PARTITION_OPERATIONS
+          )
+            throw operationProtocolError(
+              "capacity",
+              "Operation history capacity reached",
+            );
           state = applyOperation(state, operation, reducer);
         }
         const encodedCheckpoint = encodeOperationCheckpoint(state);

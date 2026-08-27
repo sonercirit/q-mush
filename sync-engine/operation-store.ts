@@ -1,4 +1,4 @@
-import { and, count, eq, or } from "drizzle-orm";
+import { and, asc, count, eq, gt, notInArray, or } from "drizzle-orm";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit";
 import type { AppDatabase } from "../shared/database";
 import {
@@ -8,6 +8,7 @@ import {
 import { createUuidV7, type IdGenerator } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
+  decodeOperationEnvelope,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
@@ -20,6 +21,15 @@ import {
 interface OperationStoreResources {
   readonly database: AppDatabase;
   readonly generateId?: IdGenerator;
+}
+
+const sequenceOrder = (sequence: bigint): string => {
+  const decimal = sequence.toString();
+  return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
+};
+export interface OperationEnvelopePage {
+  readonly envelopes: readonly Operation[];
+  readonly hasMore: boolean;
 }
 
 function activeEnvelopeScope(ownerId: string, partition: OperationPartition) {
@@ -84,6 +94,7 @@ export function createOperationStore(resources: OperationStoreResources) {
             partition: operation.partition,
             writerId: operation.writerId,
             sequence: operation.sequence.toString(),
+            sequenceOrder: sequenceOrder(operation.sequence),
             operationId: operation.operationId,
             fingerprint,
             encodedEnvelope: encodeOperationEnvelope(operation),
@@ -92,6 +103,49 @@ export function createOperationStore(resources: OperationStoreResources) {
           .run();
         return true;
       });
+    },
+    readEnvelopes(
+      ownerId: string,
+      partition: OperationPartition,
+      frontier: Readonly<Record<string, bigint>>,
+      limit: number,
+    ): OperationEnvelopePage {
+      const writers = Object.keys(frontier);
+      const afterFrontier = writers.map((writerId) =>
+        and(
+          eq(operationEnvelopes.writerId, writerId),
+          gt(
+            operationEnvelopes.sequenceOrder,
+            sequenceOrder(frontier[writerId] ?? 0n),
+          ),
+        ),
+      );
+      const range =
+        writers.length === 0
+          ? activeEnvelopeScope(ownerId, partition)
+          : and(
+              activeEnvelopeScope(ownerId, partition),
+              or(
+                notInArray(operationEnvelopes.writerId, writers),
+                ...afterFrontier,
+              ),
+            );
+      const rows = database
+        .select({ encoded: operationEnvelopes.encodedEnvelope })
+        .from(operationEnvelopes)
+        .where(range)
+        .orderBy(
+          asc(operationEnvelopes.writerId),
+          asc(operationEnvelopes.sequenceOrder),
+        )
+        .limit(limit + 1)
+        .all();
+      return {
+        envelopes: rows
+          .slice(0, limit)
+          .map(({ encoded }) => decodeOperationEnvelope(encoded)),
+        hasMore: rows.length > limit,
+      };
     },
     countEnvelopes(ownerId: string, partition: OperationPartition): number {
       return (

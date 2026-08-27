@@ -1,5 +1,8 @@
 import type { AppDatabase } from "../shared/database";
-import { decodeOperationEnvelope } from "../shared/operation-checkpoint";
+import {
+  decodeOperationEnvelope,
+  encodeOperationEnvelope,
+} from "../shared/operation-checkpoint";
 import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
@@ -11,12 +14,65 @@ import {
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import { createOperationIntake } from "./operation-intake";
+import { createOperationStore } from "./operation-store";
 
+const MAX_ENVELOPE_PAGE_SIZE = 256;
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
   readonly envelopes: readonly string[];
 }
+interface SynchronizationReadRequest {
+  readonly ownerId: string;
+  readonly partition: OperationPartition;
+  readonly frontier: Readonly<Record<string, bigint>>;
+}
+const parseFrontier = (
+  value: unknown,
+): Readonly<Record<string, bigint>> | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  const result: Record<string, bigint> = {};
+  for (const [writerId, sequence] of Object.entries(value)) {
+    if (
+      writerId.length === 0 ||
+      typeof sequence !== "string" ||
+      !/^(0|[1-9]\d*)$/.test(sequence)
+    )
+      return undefined;
+    result[writerId] = BigInt(sequence);
+  }
+  return result;
+};
+const parseScope = (
+  record: Readonly<Record<string, unknown>>,
+):
+  | { readonly ownerId: string; readonly partition: OperationPartition }
+  | undefined => {
+  const ownerId = record["ownerId"];
+  const partition = record["partition"];
+  return typeof ownerId === "string" &&
+    ownerId.length > 0 &&
+    (partition === "session" || partition === "non-session")
+    ? { ownerId, partition }
+    : undefined;
+};
+const parseReadRequest = (
+  record: Readonly<Record<string, unknown>>,
+): SynchronizationReadRequest | undefined => {
+  const scope = parseScope(record);
+  const frontier = parseFrontier(record["frontier"]);
+  if (
+    Object.keys(record).length !== 3 ||
+    !Object.hasOwn(record, "ownerId") ||
+    !Object.hasOwn(record, "partition") ||
+    !Object.hasOwn(record, "frontier") ||
+    scope === undefined ||
+    frontier === undefined
+  )
+    return undefined;
+  return { ...scope, frontier };
+};
 const exactKeys = (record: Readonly<Record<string, unknown>>): boolean =>
   Object.keys(record).length === 3 &&
   Object.hasOwn(record, "ownerId") &&
@@ -25,14 +81,11 @@ const exactKeys = (record: Readonly<Record<string, unknown>>): boolean =>
 const parseRequest = (
   record: Readonly<Record<string, unknown>>,
 ): SynchronizationRequest | undefined => {
-  const ownerId = record["ownerId"];
-  const partition = record["partition"];
+  const scope = parseScope(record);
   const envelopes = record["envelopes"];
   if (
     !exactKeys(record) ||
-    typeof ownerId !== "string" ||
-    ownerId.length === 0 ||
-    (partition !== "session" && partition !== "non-session") ||
+    scope === undefined ||
     !Array.isArray(envelopes) ||
     envelopes.length > MAX_OPERATION_BATCH_SIZE ||
     !envelopes.every(
@@ -43,7 +96,7 @@ const parseRequest = (
     )
   )
     return undefined;
-  return { ownerId, partition, envelopes };
+  return { ...scope, envelopes };
 };
 
 export const createOperationSynchronization = (
@@ -51,19 +104,37 @@ export const createOperationSynchronization = (
   googleAuth: Pick<GoogleAuth, "authenticatedUser">,
 ) => {
   const intake = createOperationIntake({ database });
+  const store = createOperationStore({ database });
   return async (request: Request): Promise<Response> => {
     const user = googleAuth.authenticatedUser(request);
     if (user === null) return new Response("Unauthorized", { status: 401 });
+    const reading = request.method === "PUT";
+    const parseSynchronizationRequest = (
+      record: Readonly<Record<string, unknown>>,
+    ): SynchronizationReadRequest | SynchronizationRequest | undefined =>
+      reading ? parseReadRequest(record) : parseRequest(record);
     const parsed = await parseRecordJsonForMethod(
       request,
-      "POST",
-      parseRequest,
+      reading ? "PUT" : "POST",
+      parseSynchronizationRequest,
     );
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined)
       return Response.json({ error: "Invalid request" }, { status: 400 });
     if (parsed.ownerId !== user.id)
       return new Response("Forbidden", { status: 403 });
+    if ("frontier" in parsed) {
+      const page = store.readEnvelopes(
+        user.id,
+        parsed.partition,
+        parsed.frontier,
+        MAX_ENVELOPE_PAGE_SIZE,
+      );
+      return Response.json({
+        envelopes: page.envelopes.map(encodeOperationEnvelope),
+        hasMore: page.hasMore,
+      });
+    }
     try {
       const operations = parsed.envelopes.map((envelope) => {
         try {

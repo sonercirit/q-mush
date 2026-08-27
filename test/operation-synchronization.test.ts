@@ -198,3 +198,77 @@ test("operation synchronization response stays bounded as history grows", async 
   }
   expect(responseLength).toBeLessThan(100);
 });
+
+test("operation synchronization rejects unknown request fields", async () => {
+  expect(
+    (await handler("owner-1")(request({ ...body(), unexpected: true }))).status,
+  ).toBe(400);
+});
+
+test("operation synchronization returns deterministic bounded missing pages", async () => {
+  const synchronized = handler("owner-1");
+  const operations = [ownedOperation(2n), ownedOperation(1n)];
+  expect(
+    (
+      await synchronized(
+        request(body("owner-1", operations.map(encodeOperationEnvelope))),
+      )
+    ).status,
+  ).toBe(200);
+  const read = new Request("http://localhost/api/local/operations", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ownerId: "owner-1",
+      partition: "non-session",
+      frontier: {},
+    }),
+  });
+  const response = await synchronized(read);
+  expect(response.status).toBe(200);
+  const result: unknown = await response.json();
+  expect(result).toEqual({
+    envelopes: [
+      encodeOperationEnvelope(ownedOperation(1n)),
+      encodeOperationEnvelope(ownedOperation(2n)),
+    ],
+    hasMore: false,
+  });
+});
+
+test("operation synchronization acknowledges duplicate replay at history capacity", async () => {
+  const synchronized = handler("owner-1");
+  const envelopes = Array.from({ length: 2000 }, (_, index) =>
+    encodeOperationEnvelope(ownedOperation(BigInt(index + 1))),
+  );
+  for (
+    let offset = 0;
+    offset < envelopes.length;
+    offset += MAX_OPERATION_BATCH_SIZE
+  )
+    expect(
+      (
+        await synchronized(
+          request(
+            body(
+              "owner-1",
+              envelopes.slice(offset, offset + MAX_OPERATION_BATCH_SIZE),
+            ),
+          ),
+        )
+      ).status,
+    ).toBe(200);
+  const replay = await synchronized(
+    request(body("owner-1", [envelopes[0] ?? ""])),
+  );
+  expect(replay.status).toBe(200);
+  const overflowEnvelope = encodeOperationEnvelope(ownedOperation(2001n));
+  const overflow = await synchronized(
+    request(body("owner-1", [overflowEnvelope])),
+  );
+  expect(overflow.status).toBe(507);
+});
+
+test("remote drift limit remains five minutes", () => {
+  expect(MAX_REMOTE_CLOCK_DRIFT_MS).toBe(300_000);
+});

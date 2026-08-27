@@ -1,6 +1,10 @@
 import { afterEach, expect, test } from "vitest";
 import { createdAuditFields } from "../shared/audit";
-import { users } from "../shared/database/schema";
+import {
+  operationCheckpoints,
+  operationEnvelopes,
+  users,
+} from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
@@ -171,4 +175,40 @@ test("undecodable checkpoints are rejected before persistence", () => {
     store.storeCheckpoint("owner-1", "session", "invalid", SYSTEM_ID, 2);
   }).toThrow();
   expect(store.loadCheckpoint("owner-1", "session")).toBeUndefined();
+});
+
+test("soft-deleted envelopes do not dedupe or count", () => {
+  const store = setup();
+  const operation = testOperation("writer-a", 1n, {}, "first");
+  append(store, "owner-1", operation);
+  databaseForTest().update(operationEnvelopes).set({ isDeleted: true }).run();
+  expectEnvelopeCount(store, "owner-1", "non-session", 0);
+  expect(append(store, "owner-1", operation)).toBe(true);
+});
+
+test("soft-deleted checkpoints are not loaded or replaced", () => {
+  const store = setup();
+  saveCheckpoint(store, "owner-1", "session", ["old"], 2);
+  databaseForTest().update(operationCheckpoints).set({ isDeleted: true }).run();
+  expect(store.loadCheckpoint("owner-1", "session")).toBeUndefined();
+  saveCheckpoint(store, "owner-1", "session", ["new"], 3);
+  expect(loadedProjection(store, "owner-1", "session")).toEqual(["new"]);
+});
+
+test("envelope range plan uses the ordered owner index without sorting", () => {
+  const database = harness.setup().database.$client;
+  const plan = database
+    .query<{ readonly detail: string }, []>(
+      "EXPLAIN QUERY PLAN SELECT encoded_envelope FROM operation_envelopes WHERE user_id = 'owner-1' AND partition = 'non-session' AND is_deleted = 0 ORDER BY writer_id, sequence_order LIMIT 257",
+    )
+    .all()
+    .map(({ detail }) => detail);
+  expect(
+    plan.some((detail) =>
+      detail.includes(
+        "SEARCH operation_envelopes USING INDEX operation_envelopes_owner_partition_writer_index",
+      ),
+    ),
+  ).toBe(true);
+  expect(plan.some((detail) => detail.includes("USE TEMP B-TREE"))).toBe(false);
 });

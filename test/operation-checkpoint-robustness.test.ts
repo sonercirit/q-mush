@@ -104,3 +104,13 @@ test("round trips replay depth beyond the former call-stack limit", () => {
   });
   expect(decodeOperationCheckpoint(encoded).replayCount).toBe(depth);
 });
+
+test("checkpoint decoding rejects negative physical clocks", () => {
+  const encoded = encodeOperationCheckpoint({
+    ...testApplyState<readonly string[]>([]),
+    replayLastClock: { physicalMs: -1, logical: 0, writerId: "a" },
+  });
+  expect(() => decodeOperationCheckpoint(encoded)).toThrow(
+    "Invalid checkpoint clock",
+  );
+});

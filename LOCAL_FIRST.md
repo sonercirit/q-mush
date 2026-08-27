@@ -83,20 +83,24 @@
   shared `applyOperation` reducer path from a strictly decoded checkpoint, and
   persists the complete projection, frontier, pending, identity, and replay
   state; duplicates no-op and equivocation aborts and rolls back the complete
-  batch. The envelope store exposes only append/count/checkpoint operations; the
-  unused cast-and-sort range reader was removed rather than retaining a
-  scan-prone API whose text sequence ordering was incorrect beyond SQLite's
-  signed 64-bit integer range. Client-caused intake scope and batch-bound
-  failures are protocol-invalid errors (HTTP 400), not internal errors. The
-  authenticated owner-scoped `POST /api/local/operations` endpoint strictly
-  accepts `{ ownerId, partition, envelopes }` with at most 512 encoded envelopes
-  and returns only the advanced decimal-string frontier; durable server
-  checkpoints stay server-side, while bounded envelope ranges provide resume and
-  anti-entropy in deterministic writer/sequence order before limiting. Every
-  envelope binds both `entity.accountId` and `writerId` to the authenticated
-  account. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+  batch. An order-preserving, arbitrary-size decimal sequence key backs the
+  owner/partition/writer range index; the store returns bounded missing-envelope
+  pages in deterministic writer/sequence order without SQLite integer casts.
+  Client-caused intake scope and batch-bound failures are protocol-invalid
+  errors (HTTP 400), while history/checkpoint capacity is HTTP 507. The
+  authenticated, owner-scoped endpoint accepts strict write `POST` bodies
+  `{ ownerId, partition, envelopes }` (at most 512) and read `PUT` bodies
+  `{ ownerId, partition, frontier }`; reads return at most 256 encoded envelopes
+  plus `hasMore` for resume and anti-entropy. Writes return only the
+  decimal-string frontier and duplicate replays remain acknowledged even when
+  history is full. Each intake still decodes, re-derives, and re-encodes the
+  complete checkpoint, so request work is O(history), not O(batch): measured
+  200-operation batches grew 87–188 ms, one operation at 1,990 took 96 ms, and
+  the 2,000-operation checkpoint was 2,661,057 bytes (1,330 B/op), bounding
+  throughput before the history cap. Every envelope binds both
+  `entity.accountId` and `writerId` to the authenticated account. Physical
+  pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
+  checked; the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 
