@@ -1,8 +1,13 @@
 import { expect, test } from "vitest";
-import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
+import {
+  decodeOperationEnvelope,
+  encodeOperationEnvelope,
+} from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
+  MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OPERATION_ENVELOPE_BYTES,
+  MAX_OWNER_PARTITION_OPERATIONS,
   MAX_REMOTE_CLOCK_DRIFT_MS,
 } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
@@ -88,6 +93,12 @@ const repeatedOperationStatus = (length: number) =>
   synchronizationStatus(
     Array(length).fill(encodeOperationEnvelope(ownedOperation())),
   );
+const ownedEnvelopes = (length: number) =>
+  Array<undefined>(length)
+    .fill(undefined)
+    .map((_, index) =>
+      encodeOperationEnvelope(ownedOperation(BigInt(index + 1))),
+    );
 
 test.afterEach(harness.close);
 
@@ -108,11 +119,15 @@ test("operation synchronization rejects malformed payloads", async () => {
 test("operation synchronization pins protocol request limits", () => {
   expect({
     batchSize: MAX_OPERATION_BATCH_SIZE,
+    checkpointBytes: MAX_OPERATION_CHECKPOINT_BYTES,
     envelopeBytes: MAX_OPERATION_ENVELOPE_BYTES,
+    ownerPartitionOperations: MAX_OWNER_PARTITION_OPERATIONS,
     remoteClockDriftMs: MAX_REMOTE_CLOCK_DRIFT_MS,
   }).toEqual({
     batchSize: 512,
+    checkpointBytes: 4_194_304,
     envelopeBytes: 16_384,
+    ownerPartitionOperations: 2_000,
     remoteClockDriftMs: 300_000,
   });
 });
@@ -185,6 +200,21 @@ test("operation synchronization returns only the advanced frontier", async () =>
   expect(isRecord(responseBody)).toBe(true);
   if (!isRecord(responseBody)) throw new Error("Expected response record");
   expect(responseBody).toEqual({ frontier: { "owner-1": "1" } });
+});
+
+test("operation envelope round trip preserves an own prototype-named payload key", () => {
+  const payload: Record<string, unknown> = { b: 1 };
+  Object.defineProperty(payload, "__proto__", {
+    enumerable: true,
+    value: "x",
+  });
+  const operation = { ...ownedOperation(), payload };
+  const decoded = decodeOperationEnvelope(encodeOperationEnvelope(operation));
+  expect(isRecord(decoded.payload)).toBe(true);
+  if (!isRecord(decoded.payload)) throw new Error("Expected payload record");
+  expect(Object.keys(decoded.payload)).toEqual(["b", "__proto__"]);
+  expect(Object.hasOwn(decoded.payload, "__proto__")).toBe(true);
+  expect(decoded.payload).toEqual(payload);
 });
 
 test("operation synchronization maps malformed envelopes to bad request", async () => {
@@ -279,6 +309,13 @@ test("operation synchronization rejects invalid read scope and frontier syntax",
   ).toBe(400);
 });
 
+test.each(["", "00", "01", "007", "-5"])(
+  "operation synchronization rejects noncanonical frontier sequence %j",
+  async (sequence) => {
+    expect(await oversizedFrontierStatus({ writer: sequence })).toBe(400);
+  },
+);
+
 test("operation synchronization accepts inclusive frontier component limits", async () => {
   expect(await oversizedFrontierStatus({ ["x".repeat(16_384)]: "0" })).toBe(
     200,
@@ -321,11 +358,36 @@ test("operation synchronization returns deterministic bounded missing pages", as
   });
 });
 
+test("operation synchronization limits missing-envelope pages to 256", async () => {
+  const synchronized = handler("owner-1");
+  const envelopes = ownedEnvelopes(257);
+  expect((await synchronized(request(body("owner-1", envelopes)))).status).toBe(
+    200,
+  );
+  const response = await synchronized(readRequest({}));
+  const result: unknown = await response.json();
+  expect(isRecord(result) && Array.isArray(result["envelopes"])).toBe(true);
+  if (!isRecord(result) || !Array.isArray(result["envelopes"]))
+    throw new Error("Expected envelope page");
+  expect({
+    length: result["envelopes"].length,
+    hasMore: result["hasMore"],
+  }).toEqual({ length: 256, hasMore: true });
+});
+
+test("operation synchronization advertises both supported methods", async () => {
+  const response = await handler("owner-1")(
+    new Request("http://localhost/api/local/operations", { method: "GET" }),
+  );
+  expect({
+    status: response.status,
+    allow: response.headers.get("allow"),
+  }).toEqual({ status: 405, allow: "POST, PUT" });
+});
+
 test("operation synchronization acknowledges duplicate replay at history capacity", async () => {
   const synchronized = handler("owner-1");
-  const envelopes = Array.from({ length: 2000 }, (_, index) =>
-    encodeOperationEnvelope(ownedOperation(BigInt(index + 1))),
-  );
+  const envelopes = ownedEnvelopes(2000);
   for (
     let offset = 0;
     offset < envelopes.length;

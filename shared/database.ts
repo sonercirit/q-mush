@@ -57,23 +57,30 @@ export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   noncriticalWrite(action: () => void): void;
 };
 
-export function createDatabase(path: string): AppDatabase {
-  if (path !== ":memory:") {
-    mkdirSync(dirname(resolve(path)), { recursive: true });
-  }
-
-  const client = new Database(path, { create: true });
-  const database = Object.assign(drizzle(client, { schema: databaseSchema }), {
+const attachDatabase = (client: Database): AppDatabase =>
+  Object.assign(drizzle(client, { schema: databaseSchema }), {
     noncriticalWrite(action: () => void): void {
       action();
     },
   });
 
+export function createDatabase(
+  path: string,
+  runMigrations = true,
+): AppDatabase {
+  if (path !== ":memory:") {
+    mkdirSync(dirname(resolve(path)), { recursive: true });
+  }
+
+  const client = new Database(path, { create: true });
+  const database = attachDatabase(client);
+
   try {
     // Drizzle wraps migrations in a transaction, where SQLite ignores changes
     // to foreign_keys. Disable it beforehand so generated table rebuilds work.
     client.run("PRAGMA foreign_keys = OFF");
-    migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });
+    if (runMigrations)
+      migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });
     client.run("PRAGMA foreign_keys = ON");
   } catch (error) {
     client.close();

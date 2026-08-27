@@ -34,14 +34,16 @@
   later send a valid earlier-clock operation. The reachable authenticated route
   therefore fails closed at 16 KiB per encoded envelope, 2,000 stored operations
   per owner/partition, or a 4 MiB encoded checkpoint (HTTP 507 for either
-  history capacity); with 4 KiB payloads the 4 MiB checkpoint limit is reached
-  after about 300 operations, before the nominal 2,000-envelope cap, and this
-  wedge is unrecoverable until the stability protocol permits compaction. These
-  are temporary safety limits, not compaction. Reviewer in-memory
-  single-operation measurements grew from 258 KB/9.8 ms at 200 operations
-  through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200; 20,000
-  operations produced a 25.1 MB checkpoint whose decode alone took 564 ms.
-  Bounded compaction remains deferred to stage 2 anti-entropy and durable
+  history capacity). These validation limits apply after the synchronization
+  route has fully buffered and parsed its JSON body; stage 2 does not impose a
+  route-level request-byte bound. With 4 KiB payloads the 4 MiB checkpoint limit
+  is reached after about 300 operations, before the nominal 2,000-envelope cap,
+  and this wedge is unrecoverable until the stability protocol permits
+  compaction. These are temporary safety limits, not compaction. Reviewer
+  in-memory single-operation measurements grew from 258 KB/9.8 ms at 200
+  operations through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200;
+  20,000 operations produced a 25.1 MB checkpoint whose decode alone took 564
+  ms. Bounded compaction remains deferred to stage 2 anti-entropy and durable
   subscriber receipts, which can establish a stable boundary. Writer identity is
   currently forced to the authenticated account ID; whether device keys should
   introduce per-device writer IDs remains open for that later slice. Identity

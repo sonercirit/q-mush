@@ -117,6 +117,11 @@ export const createOperationSynchronization = (
   return async (request: Request): Promise<Response> => {
     const user = googleAuth.authenticatedUser(request);
     if (user === null) return new Response("Unauthorized", { status: 401 });
+    if (request.method !== "POST" && request.method !== "PUT")
+      return new Response("Method Not Allowed", {
+        status: 405,
+        headers: { Allow: "POST, PUT" },
+      });
     const reading = request.method === "PUT";
     const parseSynchronizationRequest = (
       record: Readonly<Record<string, unknown>>,

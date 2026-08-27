@@ -4,6 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
+import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
+import { createOperation } from "../../shared/operation-core.ts";
+import { createOperationStore } from "../../sync-engine/operation-store.ts";
 
 const DRIZZLE_DIRECTORY = join(import.meta.dirname, "../../drizzle");
 const CURRENT_BASE_MIGRATIONS = [
@@ -185,5 +188,36 @@ test("backfills sequence order while upgrading populated operation storage", asy
     )
     .get();
   expect(row?.sequenceOrder).toBe("00005:12345");
+  const operation = createOperation({
+    operationId: "operation-1",
+    schemaVersion: 1,
+    writerId: "writer-1",
+    sequence: 12_345n,
+    clock: { physicalMs: 1, logical: 0, writerId: "writer-1" },
+    parents: {},
+    entity: {
+      type: "workspaces",
+      id: "workspace-1",
+      accountId: "owner-1",
+    },
+    kind: "workspace.name.set",
+    payload: { value: "migrated" },
+  });
+  database.run(
+    "UPDATE operation_envelopes SET encoded_envelope = ? WHERE id = ?",
+    [encodeOperationEnvelope(operation), "envelope-1"],
+  );
   database.close();
+  const upgraded = createDatabase(
+    join(temporaryDirectory, "operations.sqlite"),
+    false,
+  );
+  const page = createOperationStore({ database: upgraded }).readEnvelopes(
+    "owner-1",
+    "non-session",
+    { "writer-1": 5n },
+    1,
+  );
+  expect(page.envelopes).toEqual([operation]);
+  upgraded.$client.close();
 });
