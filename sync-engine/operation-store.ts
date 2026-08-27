@@ -47,6 +47,44 @@ function activeCheckpointScope(ownerId: string, partition: OperationPartition) {
   );
 }
 
+export function buildOperationEnvelopeQuery(
+  database: AppDatabase,
+  ownerId: string,
+  partition: OperationPartition,
+  frontier: Readonly<Record<string, bigint>>,
+  limit: number,
+) {
+  const writers = Object.keys(frontier);
+  const afterFrontier = writers.map((writerId) =>
+    and(
+      eq(operationEnvelopes.writerId, writerId),
+      gt(
+        operationEnvelopes.sequenceOrder,
+        sequenceOrder(frontier[writerId] ?? 0n),
+      ),
+    ),
+  );
+  const range =
+    writers.length === 0
+      ? activeEnvelopeScope(ownerId, partition)
+      : and(
+          activeEnvelopeScope(ownerId, partition),
+          or(
+            notInArray(operationEnvelopes.writerId, writers),
+            ...afterFrontier,
+          ),
+        );
+  return database
+    .select({ encoded: operationEnvelopes.encodedEnvelope })
+    .from(operationEnvelopes)
+    .where(range)
+    .orderBy(
+      asc(operationEnvelopes.writerId),
+      asc(operationEnvelopes.sequenceOrder),
+    )
+    .limit(limit + 1);
+}
+
 export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
@@ -110,36 +148,13 @@ export function createOperationStore(resources: OperationStoreResources) {
       frontier: Readonly<Record<string, bigint>>,
       limit: number,
     ): OperationEnvelopePage {
-      const writers = Object.keys(frontier);
-      const afterFrontier = writers.map((writerId) =>
-        and(
-          eq(operationEnvelopes.writerId, writerId),
-          gt(
-            operationEnvelopes.sequenceOrder,
-            sequenceOrder(frontier[writerId] ?? 0n),
-          ),
-        ),
-      );
-      const range =
-        writers.length === 0
-          ? activeEnvelopeScope(ownerId, partition)
-          : and(
-              activeEnvelopeScope(ownerId, partition),
-              or(
-                notInArray(operationEnvelopes.writerId, writers),
-                ...afterFrontier,
-              ),
-            );
-      const rows = database
-        .select({ encoded: operationEnvelopes.encodedEnvelope })
-        .from(operationEnvelopes)
-        .where(range)
-        .orderBy(
-          asc(operationEnvelopes.writerId),
-          asc(operationEnvelopes.sequenceOrder),
-        )
-        .limit(limit + 1)
-        .all();
+      const rows = buildOperationEnvelopeQuery(
+        database,
+        ownerId,
+        partition,
+        frontier,
+        limit,
+      ).all();
       return {
         envelopes: rows
           .slice(0, limit)

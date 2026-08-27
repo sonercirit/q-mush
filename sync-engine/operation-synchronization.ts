@@ -17,6 +17,10 @@ import { createOperationIntake } from "./operation-intake";
 import { createOperationStore } from "./operation-store";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
+const MAX_FRONTIER_WRITERS = 512;
+const MAX_FRONTIER_COMPONENT_BYTES = 16 * 1024;
+const utf8Length = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
@@ -32,11 +36,16 @@ const parseFrontier = (
 ): Readonly<Record<string, bigint>> | undefined => {
   if (typeof value !== "object" || value === null || Array.isArray(value))
     return undefined;
+  const entries = Object.entries(value);
+  if (entries.length > MAX_FRONTIER_WRITERS) return undefined;
   const result: Record<string, bigint> = {};
-  for (const [writerId, sequence] of Object.entries(value)) {
+  for (const [writerId, sequence] of entries) {
     if (
       writerId.length === 0 ||
+      writerId === "__proto__" ||
+      utf8Length(writerId) > MAX_FRONTIER_COMPONENT_BYTES ||
       typeof sequence !== "string" ||
+      utf8Length(sequence) > MAX_FRONTIER_COMPONENT_BYTES ||
       !/^(0|[1-9]\d*)$/.test(sequence)
     )
       return undefined;
@@ -123,19 +132,19 @@ export const createOperationSynchronization = (
       return Response.json({ error: "Invalid request" }, { status: 400 });
     if (parsed.ownerId !== user.id)
       return new Response("Forbidden", { status: 403 });
-    if ("frontier" in parsed) {
-      const page = store.readEnvelopes(
-        user.id,
-        parsed.partition,
-        parsed.frontier,
-        MAX_ENVELOPE_PAGE_SIZE,
-      );
-      return Response.json({
-        envelopes: page.envelopes.map(encodeOperationEnvelope),
-        hasMore: page.hasMore,
-      });
-    }
     try {
+      if ("frontier" in parsed) {
+        const page = store.readEnvelopes(
+          user.id,
+          parsed.partition,
+          parsed.frontier,
+          MAX_ENVELOPE_PAGE_SIZE,
+        );
+        return Response.json({
+          envelopes: page.envelopes.map(encodeOperationEnvelope),
+          hasMore: page.hasMore,
+        });
+      }
       const operations = parsed.envelopes.map((envelope) => {
         try {
           return decodeOperationEnvelope(envelope);

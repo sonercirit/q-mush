@@ -17,6 +17,20 @@ const request = (body: unknown) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
+const readRequest = (
+  frontier: unknown,
+  extra: Readonly<Record<string, unknown>> = {},
+) =>
+  new Request("http://localhost/api/local/operations", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      ownerId: "owner-1",
+      partition: "non-session",
+      frontier,
+      ...extra,
+    }),
+  });
 const body = (
   ownerId = "owner-1",
   envelopes: readonly string[] = [],
@@ -205,6 +219,52 @@ test("operation synchronization rejects unknown request fields", async () => {
   ).toBe(400);
 });
 
+test("operation synchronization rejects unknown read request fields", async () => {
+  expect(
+    (await handler("owner-1")(readRequest({}, { unexpected: true }))).status,
+  ).toBe(400);
+});
+
+test("operation synchronization bounds frontier writers and components", async () => {
+  const synchronized = handler("owner-1");
+  const maximum = Object.fromEntries(
+    Array.from({ length: 512 }, (_, index) => [`writer-${index}`, "0"]),
+  );
+  expect((await synchronized(readRequest(maximum))).status).toBe(200);
+  expect(
+    (await synchronized(readRequest({ ...maximum, overflow: "0" }))).status,
+  ).toBe(400);
+  expect(
+    (await synchronized(readRequest({ ["x".repeat(16 * 1024 + 1)]: "0" })))
+      .status,
+  ).toBe(400);
+  expect(
+    (await synchronized(readRequest({ writer: "1".repeat(16 * 1024 + 1) })))
+      .status,
+  ).toBe(400);
+});
+
+test("operation synchronization rejects prototype frontier keys", async () => {
+  const read = new Request("http://localhost/api/local/operations", {
+    method: "PUT",
+    headers: { "content-type": "application/json" },
+    body: '{"ownerId":"owner-1","partition":"non-session","frontier":{"__proto__":"0"}}',
+  });
+  expect((await handler("owner-1")(read)).status).toBe(400);
+});
+
+test("operation synchronization catches read storage faults", async () => {
+  const synchronized = handler("owner-1");
+  harness.close();
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    expect((await synchronized(readRequest({}))).status).toBe(500);
+  } finally {
+    console.error = originalError;
+  }
+});
+
 test("operation synchronization returns deterministic bounded missing pages", async () => {
   const synchronized = handler("owner-1");
   const operations = [ownedOperation(2n), ownedOperation(1n)];
@@ -266,6 +326,16 @@ test("operation synchronization acknowledges duplicate replay at history capacit
   expect(overflow.status).toBe(507);
 });
 
-test("remote drift limit remains five minutes", () => {
-  expect(MAX_REMOTE_CLOCK_DRIFT_MS).toBe(300_000);
+test("remote drift accepts operations at the five-minute boundary", async () => {
+  const now = Date.now();
+  const operation = ownedOperation();
+  expect(
+    await operationStatus({
+      ...operation,
+      clock: {
+        ...operation.clock,
+        physicalMs: now + MAX_REMOTE_CLOCK_DRIFT_MS - 100,
+      },
+    }),
+  ).toBe(200);
 });

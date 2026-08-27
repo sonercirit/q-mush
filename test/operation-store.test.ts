@@ -1,3 +1,4 @@
+import type { SQLQueryBindings } from "bun:sqlite";
 import { afterEach, expect, test } from "vitest";
 import { createdAuditFields } from "../shared/audit";
 import {
@@ -10,7 +11,10 @@ import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
-import { createOperationStore } from "../sync-engine/operation-store";
+import {
+  buildOperationEnvelopeQuery,
+  createOperationStore,
+} from "../sync-engine/operation-store";
 import {
   testApplyState,
   testOperation,
@@ -18,6 +22,29 @@ import {
 } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
+const explainDetail = (row: unknown): string => {
+  if (
+    typeof row !== "object" ||
+    row === null ||
+    !("detail" in row) ||
+    typeof row.detail !== "string"
+  )
+    throw new Error("Expected SQLite explain detail");
+  return row.detail;
+};
+const sqlBindings = (values: readonly unknown[]): SQLQueryBindings[] =>
+  values.map((value) => {
+    if (
+      typeof value === "string" ||
+      typeof value === "number" ||
+      typeof value === "bigint" ||
+      typeof value === "boolean" ||
+      value === null ||
+      value instanceof Uint8Array
+    )
+      return value;
+    throw new Error("Expected SQLite query binding");
+  });
 const harness = createOperationDatabaseHarness();
 const setup = () => createOperationStore(harness.setup());
 const databaseForTest = harness.current;
@@ -103,6 +130,72 @@ test("operation envelopes append idempotently and reject equivocation", () => {
       4,
     ),
   ).toThrow("Operation identity equivocation");
+});
+
+test("operation identity conflicts across different writer sequences", () => {
+  const store = setup();
+  const first = testOperation("writer-a", 1n, {}, "first");
+  append(store, "owner-1", first);
+  expect(() =>
+    append(store, "owner-1", {
+      ...testOperation("writer-b", 2n, {}, "changed"),
+      operationId: first.operationId,
+    }),
+  ).toThrow("Operation identity equivocation");
+});
+
+test("operation envelope pages preserve bigint and cross-writer ordering", () => {
+  const store = setup();
+  const sequences = [
+    9n,
+    10n,
+    2n ** 63n,
+    2n ** 63n + 5n,
+    2n ** 64n,
+    12_000_000_000_000_000_000_000n,
+  ];
+  for (const writer of ["writer-b", "writer-a"])
+    for (const sequence of sequences.slice().reverse())
+      append(store, "owner-1", testOperation(writer, sequence, {}, "value", 1));
+  expect(
+    store
+      .readEnvelopes("owner-1", "non-session", {}, 20)
+      .envelopes.map(({ writerId, sequence }) => [writerId, sequence]),
+  ).toEqual(
+    ["writer-a", "writer-b"].flatMap((writer) =>
+      sequences.map((sequence) => [writer, sequence]),
+    ),
+  );
+});
+
+test("operation envelope frontier pages are complete and exactly bounded", () => {
+  const store = setup();
+  for (let sequence = 1; sequence <= 300; sequence += 1)
+    append(
+      store,
+      "owner-1",
+      testOperation("writer-a", BigInt(sequence), {}, "value"),
+    );
+  const first = store.readEnvelopes("owner-1", "non-session", {}, 256);
+  expect({ length: first.envelopes.length, hasMore: first.hasMore }).toEqual({
+    length: 256,
+    hasMore: true,
+  });
+  const lastSequence = first.envelopes.at(-1)?.sequence;
+  expect(lastSequence).toBe(256n);
+  const second = store.readEnvelopes(
+    "owner-1",
+    "non-session",
+    { "writer-a": lastSequence ?? 0n },
+    256,
+  );
+  expect({ length: second.envelopes.length, hasMore: second.hasMore }).toEqual({
+    length: 44,
+    hasMore: false,
+  });
+  expect(
+    [...first.envelopes, ...second.envelopes].map(({ sequence }) => sequence),
+  ).toEqual(Array.from({ length: 300 }, (_, index) => BigInt(index + 1)));
 });
 
 test("operation envelopes isolate identities by owner", () => {
@@ -195,14 +288,19 @@ test("soft-deleted checkpoints are not loaded or replaced", () => {
   expect(loadedProjection(store, "owner-1", "session")).toEqual(["new"]);
 });
 
-test("envelope range plan uses the ordered owner index without sorting", () => {
-  const database = harness.setup().database.$client;
-  const plan = database
-    .query<{ readonly detail: string }, []>(
-      "EXPLAIN QUERY PLAN SELECT encoded_envelope FROM operation_envelopes WHERE user_id = 'owner-1' AND partition = 'non-session' AND is_deleted = 0 ORDER BY writer_id, sequence_order LIMIT 257",
-    )
-    .all()
-    .map(({ detail }) => detail);
+test("frontier envelope query plan scans the ordered owner prefix without sorting", () => {
+  const resources = harness.setup();
+  const built = buildOperationEnvelopeQuery(
+    resources.database,
+    "owner-1",
+    "non-session",
+    { "writer-a": 8n, "writer-b": 12n },
+    256,
+  ).toSQL();
+  const plan = resources.database.$client
+    .query(`EXPLAIN QUERY PLAN ${built.sql}`)
+    .all(...sqlBindings(built.params))
+    .map(explainDetail);
   expect(
     plan.some((detail) =>
       detail.includes(

@@ -15,7 +15,10 @@
   retain the complete post-checkpoint replay set and order all applied
   operations by HLC `(physicalMs, logical, writerId)`, so non-commutative
   updates converge across arrival order. Replay metadata is a mandatory part of
-  every durable checkpoint and uses structural sharing in memory. Encoding
+  every durable checkpoint and uses structural sharing in memory. An open
+  question is how offline clients can sync queued operations: the current
+  five-minute drift check also rejects clocks more than five minutes in the
+  past, so a client offline longer than that cannot submit its queue. Encoding
   flattens replay history and both encoding and decoding are depth-independent,
   without dropping history. Checkpoints therefore grow linearly with replay
   history and the `applied` identity index. With 2,000 sequential operations and
@@ -31,11 +34,14 @@
   later send a valid earlier-clock operation. The reachable authenticated route
   therefore fails closed at 16 KiB per encoded envelope, 2,000 stored operations
   per owner/partition, or a 4 MiB encoded checkpoint (HTTP 507 for either
-  history capacity); these are temporary safety limits, not compaction. Reviewer
-  in-memory single-operation measurements grew from 258 KB/9.8 ms at 200
-  operations through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200;
-  20,000 operations produced a 25.1 MB checkpoint whose decode alone took 564
-  ms. Bounded compaction remains deferred to stage 2 anti-entropy and durable
+  history capacity); with 4 KiB payloads the 4 MiB checkpoint limit is reached
+  after about 300 operations, before the nominal 2,000-envelope cap, and this
+  wedge is unrecoverable until the stability protocol permits compaction. These
+  are temporary safety limits, not compaction. Reviewer in-memory
+  single-operation measurements grew from 258 KB/9.8 ms at 200 operations
+  through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200; 20,000
+  operations produced a 25.1 MB checkpoint whose decode alone took 564 ms.
+  Bounded compaction remains deferred to stage 2 anti-entropy and durable
   subscriber receipts, which can establish a stable boundary. Writer identity is
   currently forced to the authenticated account ID; whether device keys should
   introduce per-device writer IDs remains open for that later slice. Identity
@@ -85,16 +91,22 @@
   state; duplicates no-op and equivocation aborts and rolls back the complete
   batch. An order-preserving, arbitrary-size decimal sequence key backs the
   owner/partition/writer range index; the store returns bounded missing-envelope
-  pages in deterministic writer/sequence order without SQLite integer casts.
-  Client-caused intake scope and batch-bound failures are protocol-invalid
-  errors (HTTP 400), while history/checkpoint capacity is HTTP 507. The
-  authenticated, owner-scoped endpoint accepts strict write `POST` bodies
+  pages in deterministic writer/sequence order without SQLite integer casts. The
+  frontier OR predicate uses that ordered index to avoid a temporary sort, but
+  SQLite scans the complete matching owner/partition index prefix: read work is
+  O(history), not a bounded per-writer index range. Client-caused intake scope
+  and batch-bound failures are protocol-invalid errors (HTTP 400), while
+  history/checkpoint capacity is HTTP 507. The authenticated, owner-scoped
+  endpoint accepts strict write `POST` bodies
   `{ ownerId, partition, envelopes }` (at most 512) and read `PUT` bodies
   `{ ownerId, partition, frontier }`; reads return at most 256 encoded envelopes
   plus `hasMore` for resume and anti-entropy. Writes return only the
   decimal-string frontier and duplicate replays remain acknowledged even when
   history is full. Each intake still decodes, re-derives, and re-encodes the
-  complete checkpoint, so request work is O(history), not O(batch): measured
+  complete checkpoint inside the write transaction on the single shared SQLite
+  connection, so request work is O(history), not O(batch), and serializes every
+  other server write. One-operation measurements were 7 ms at 100 operations, 27
+  ms at 500, 46 ms at 1,000, 70 ms at 1,500, and 89 ms at 2,000; measured
   200-operation batches grew 87–188 ms, one operation at 1,990 took 96 ms, and
   the 2,000-operation checkpoint was 2,661,057 bytes (1,330 B/op), bounding
   throughput before the history cap. Every envelope binds both
