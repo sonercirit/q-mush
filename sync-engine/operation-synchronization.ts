@@ -13,7 +13,10 @@ import {
 } from "../shared/operation-core";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
-import { createOperationIntake } from "./operation-intake";
+import {
+  createOperationIntake,
+  type OperationIntakeLimits,
+} from "./operation-intake";
 import { createOperationStore } from "./operation-store";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
@@ -111,8 +114,11 @@ const parseRequest = (
 export const createOperationSynchronization = (
   database: AppDatabase,
   googleAuth: Pick<GoogleAuth, "authenticatedUser">,
+  limits?: OperationIntakeLimits,
 ) => {
-  const intake = createOperationIntake({ database });
+  const intake = createOperationIntake(
+    limits === undefined ? { database } : { database, limits },
+  );
   const store = createOperationStore({ database });
   return async (request: Request): Promise<Response> => {
     const user = googleAuth.authenticatedUser(request);

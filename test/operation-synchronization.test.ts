@@ -11,6 +11,7 @@ import {
   MAX_REMOTE_CLOCK_DRIFT_MS,
 } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
+import { type OperationIntakeLimits } from "../sync-engine/operation-intake";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
 import { testOperation } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
@@ -49,14 +50,18 @@ const ownedOperation = (sequence = 1n) => ({
     accountId: "owner-1",
   },
 });
-const handler = (authenticatedId?: string) => {
+const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
   const resources = harness.setup();
-  return createOperationSynchronization(resources.database, {
-    authenticatedUser: () =>
-      authenticatedId === undefined
-        ? null
-        : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
-  });
+  return createOperationSynchronization(
+    resources.database,
+    {
+      authenticatedUser: () =>
+        authenticatedId === undefined
+          ? null
+          : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
+    },
+    limits,
+  );
 };
 const statusAfterClosedDatabase = async (request: Request) => {
   const synchronized = handler("owner-1");
@@ -385,35 +390,32 @@ test("operation synchronization advertises both supported methods", async () => 
   }).toEqual({ status: 405, allow: "POST, PUT" });
 });
 
-test("operation synchronization acknowledges duplicate replay at history capacity", async () => {
-  const synchronized = handler("owner-1");
-  const envelopes = ownedEnvelopes(2000);
-  for (
-    let offset = 0;
-    offset < envelopes.length;
-    offset += MAX_OPERATION_BATCH_SIZE
-  )
-    expect(
-      (
-        await synchronized(
-          request(
-            body(
-              "owner-1",
-              envelopes.slice(offset, offset + MAX_OPERATION_BATCH_SIZE),
-            ),
-          ),
-        )
-      ).status,
-    ).toBe(200);
+test("operation synchronization fails closed at capacity without counting duplicates", async () => {
+  const synchronized = handler("owner-1", {
+    ownerPartitionOperations: 2,
+  });
+  const envelopes = ownedEnvelopes(3);
+  const initial = await synchronized(
+    request(body("owner-1", envelopes.slice(0, 2))),
+  );
   const replay = await synchronized(
     request(body("owner-1", [envelopes[0] ?? ""])),
   );
-  expect(replay.status).toBe(200);
-  const overflowEnvelope = encodeOperationEnvelope(ownedOperation(2001n));
   const overflow = await synchronized(
-    request(body("owner-1", [overflowEnvelope])),
+    request(body("owner-1", [envelopes[2] ?? ""])),
   );
-  expect(overflow.status).toBe(507);
+  expect({
+    initial: initial.status,
+    replay: replay.status,
+    overflow: overflow.status,
+  }).toEqual({ initial: 200, replay: 200, overflow: 507 });
+});
+
+test("operation synchronization fails closed above checkpoint byte capacity", async () => {
+  const response = await handler("owner-1", { checkpointBytes: 1 })(
+    request(body("owner-1", [encodeOperationEnvelope(ownedOperation())])),
+  );
+  expect(response.status).toBe(507);
 });
 
 test("remote drift accepts operations at the five-minute boundary", async () => {

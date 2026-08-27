@@ -8,9 +8,11 @@ import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
-  MAX_OWNER_PARTITION_OPERATIONS,
 } from "../shared/operation-core";
-import { createOperationIntake } from "../sync-engine/operation-intake";
+import {
+  createOperationIntake,
+  type OperationIntakeLimits,
+} from "../sync-engine/operation-intake";
 import {
   appendOperationId,
   testOperation,
@@ -19,11 +21,13 @@ import {
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
-const setup = () => {
+const setup = (limits?: OperationIntakeLimits) => {
   const resources = harness.setup();
   return {
     database: resources.database,
-    intake: createOperationIntake(resources),
+    intake: createOperationIntake(
+      limits === undefined ? resources : { ...resources, limits },
+    ),
   };
 };
 const setupWithOperation = () => ({
@@ -170,26 +174,8 @@ test("operation intake rejects a batch above its maximum size", () => {
 });
 
 test("operation intake rejects owner-partition history above its capacity", () => {
-  const { intake } = setup();
-  for (
-    let offset = 0;
-    offset < MAX_OWNER_PARTITION_OPERATIONS;
-    offset += MAX_OPERATION_BATCH_SIZE
-  ) {
-    const length = Math.min(
-      MAX_OPERATION_BATCH_SIZE,
-      MAX_OWNER_PARTITION_OPERATIONS - offset,
-    );
-    apply(
-      intake,
-      operationsOfLength(length).map((operation, index) => ({
-        ...operation,
-        operationId: `operation-${String(offset + index)}`,
-        writerId: `writer-${String(offset + index)}`,
-      })),
-      2,
-    );
-  }
+  const { intake } = setup({ ownerPartitionOperations: 2 });
+  apply(intake, operationsOfLength(2), 2);
   expect(() =>
     apply(intake, [testOperation("overflow", 1n, {}, "one")], 3),
   ).toThrow("history capacity reached");

@@ -18,9 +18,14 @@ import {
 } from "../shared/operation-core";
 import { createOperationStore } from "./operation-store";
 
+export interface OperationIntakeLimits {
+  readonly checkpointBytes?: number;
+  readonly ownerPartitionOperations?: number;
+}
 interface OperationIntakeResources {
   readonly database: AppDatabase;
   readonly generateId?: IdGenerator;
+  readonly limits?: OperationIntakeLimits;
 }
 interface OperationIntakeResult {
   readonly frontier: CausalFrontier;
@@ -44,6 +49,11 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
     database: resources.database,
     generateId: resources.generateId ?? createUuidV7,
   });
+  const checkpointByteLimit =
+    resources.limits?.checkpointBytes ?? MAX_OPERATION_CHECKPOINT_BYTES;
+  const ownerPartitionOperationLimit =
+    resources.limits?.ownerPartitionOperations ??
+    MAX_OWNER_PARTITION_OPERATIONS;
   return {
     apply(
       ownerId: string,
@@ -81,7 +91,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             now,
           );
           if (appended) storedCount += 1;
-          if (storedCount > MAX_OWNER_PARTITION_OPERATIONS)
+          if (storedCount > ownerPartitionOperationLimit)
             throw operationProtocolError(
               "capacity",
               "Operation history capacity reached",
@@ -91,7 +101,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
         const encodedCheckpoint = encodeOperationCheckpoint(state);
         if (
           new TextEncoder().encode(encodedCheckpoint).byteLength >
-          MAX_OPERATION_CHECKPOINT_BYTES
+          checkpointByteLimit
         )
           throw operationProtocolError(
             "capacity",
