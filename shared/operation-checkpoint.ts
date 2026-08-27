@@ -93,11 +93,18 @@ const decodeCheckpointValue = (value: unknown): unknown => {
       if (
         !Array.isArray(entry) ||
         entry.length !== 2 ||
-        typeof entry[0] !== "string" ||
-        Object.hasOwn(result, entry[0])
+        typeof entry[0] !== "string"
       )
         throw new Error("Invalid encoded checkpoint entry");
-      result[entry[0]] = decodeCheckpointValue(entry[1]);
+      const key = entry[0];
+      if (Object.hasOwn(result, key))
+        throw new Error("Invalid encoded checkpoint entry");
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        value: decodeCheckpointValue(entry[1]),
+        writable: true,
+      });
     }
     return result;
   }

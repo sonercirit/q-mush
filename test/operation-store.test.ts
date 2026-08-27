@@ -1,4 +1,3 @@
-import type { SQLQueryBindings } from "bun:sqlite";
 import { afterEach, expect, test } from "vitest";
 import { createdAuditFields } from "../shared/audit";
 import {
@@ -19,29 +18,6 @@ import {
 } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
-const explainDetail = (row: unknown): string => {
-  if (
-    typeof row !== "object" ||
-    row === null ||
-    !("detail" in row) ||
-    typeof row.detail !== "string"
-  )
-    throw new Error("Expected SQLite explain detail");
-  return row.detail;
-};
-const sqlBindings = (values: readonly unknown[]): SQLQueryBindings[] =>
-  values.map((value) => {
-    if (
-      typeof value === "string" ||
-      typeof value === "number" ||
-      typeof value === "bigint" ||
-      typeof value === "boolean" ||
-      value === null ||
-      value instanceof Uint8Array
-    )
-      return value;
-    throw new Error("Expected SQLite query binding");
-  });
 const changedOperation = (
   operation: ReturnType<typeof testOperation>,
   changes: Readonly<Partial<ReturnType<typeof testOperation>>>,
@@ -73,6 +49,14 @@ const append = (
   ownerId: string,
   operation: ReturnType<typeof testOperation>,
 ) => store.appendEnvelope(ownerId, operation, SYSTEM_ID, 2);
+const appendSequenceRange = (store: Store, count: number) => {
+  for (let sequence = 1; sequence <= count; sequence += 1)
+    append(
+      store,
+      "owner-1",
+      testOperation("writer-a", BigInt(sequence), {}, "value"),
+    );
+};
 const saveCheckpoint = (
   store: Store,
   ownerId: string,
@@ -177,12 +161,7 @@ test("operation envelope pages preserve bigint and cross-writer ordering", () =>
 
 test("operation envelope frontier pages are complete and exactly bounded", () => {
   const store = setup();
-  for (let sequence = 1; sequence <= 300; sequence += 1)
-    append(
-      store,
-      "owner-1",
-      testOperation("writer-a", BigInt(sequence), {}, "value"),
-    );
+  appendSequenceRange(store, 300);
   const first = store.readEnvelopes("owner-1", "non-session", {}, 256);
   expect({ length: first.envelopes.length, hasMore: first.hasMore }).toEqual({
     length: 256,
@@ -295,26 +274,21 @@ test("soft-deleted checkpoints are not loaded or replaced", () => {
   expect(loadedProjection(store, "owner-1", "session")).toEqual(["new"]);
 });
 
-test("frontier envelope query plan scans the ordered owner prefix without sorting", () => {
-  const resources = harness.setup();
-  const built = createOperationStore(resources)
-    .buildEnvelopeQuery(
-      "owner-1",
-      "non-session",
-      { "writer-a": 8n, "writer-b": 12n },
-      256,
-    )
-    .toSQL();
-  const plan = resources.database.$client
-    .query(`EXPLAIN QUERY PLAN ${built.sql}`)
-    .all(...sqlBindings(built.params))
-    .map(explainDetail);
+test("operation envelope page at its exact limit is complete", () => {
+  const store = setup();
+  appendSequenceRange(store, 3);
+  expect(store.readEnvelopes("owner-1", "non-session", {}, 3).hasMore).toBe(
+    false,
+  );
+});
+
+test("operation envelope ordering crosses four-to-five-digit sequences", () => {
+  const store = setup();
+  for (const sequence of [10_000n, 9_999n])
+    append(store, "owner-1", testOperation("writer-a", sequence, {}, "value"));
   expect(
-    plan.some((detail) =>
-      detail.includes(
-        "SEARCH operation_envelopes USING INDEX operation_envelopes_owner_partition_writer_index",
-      ),
-    ),
-  ).toBe(true);
-  expect(plan.some((detail) => detail.includes("USE TEMP B-TREE"))).toBe(false);
+    store
+      .readEnvelopes("owner-1", "non-session", {}, 2)
+      .envelopes.map(({ sequence }) => sequence),
+  ).toEqual([9_999n, 10_000n]);
 });

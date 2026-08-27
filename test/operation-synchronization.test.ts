@@ -105,6 +105,18 @@ test("operation synchronization rejects malformed payloads", async () => {
   ).toBe(400);
 });
 
+test("operation synchronization pins protocol request limits", () => {
+  expect({
+    batchSize: MAX_OPERATION_BATCH_SIZE,
+    envelopeBytes: MAX_OPERATION_ENVELOPE_BYTES,
+    remoteClockDriftMs: MAX_REMOTE_CLOCK_DRIFT_MS,
+  }).toEqual({
+    batchSize: 512,
+    envelopeBytes: 16_384,
+    remoteClockDriftMs: 300_000,
+  });
+});
+
 test("operation synchronization bounds operation batches", async () => {
   expect(
     (await handler("owner-1")(request(body("owner-1", Array(513).fill("x")))))
@@ -248,6 +260,32 @@ test("operation synchronization bounds frontier writers and components", async (
   expect(
     await oversizedFrontierStatus({ writer: "1".repeat(16 * 1024 + 1) }),
   ).toBe(400);
+});
+
+test("operation synchronization rejects invalid read scope and frontier syntax", async () => {
+  const synchronized = handler("owner-1");
+  expect((await synchronized(readRequest({ "": "0" }))).status).toBe(400);
+  expect((await synchronized(readRequest({ writer: "1e5" }))).status).toBe(400);
+  expect(
+    (
+      await synchronized(
+        jsonRequest("PUT", {
+          ownerId: "owner-1",
+          partition: "other",
+          frontier: {},
+        }),
+      )
+    ).status,
+  ).toBe(400);
+});
+
+test("operation synchronization accepts inclusive frontier component limits", async () => {
+  expect(await oversizedFrontierStatus({ ["x".repeat(16_384)]: "0" })).toBe(
+    200,
+  );
+  expect(await oversizedFrontierStatus({ writer: "1".repeat(16_384) })).toBe(
+    200,
+  );
 });
 
 test("operation synchronization rejects prototype frontier keys", async () => {

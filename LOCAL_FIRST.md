@@ -100,16 +100,17 @@
   endpoint accepts strict write `POST` bodies
   `{ ownerId, partition, envelopes }` (at most 512) and read `PUT` bodies
   `{ ownerId, partition, frontier }`; reads return at most 256 encoded envelopes
-  plus `hasMore` for resume and anti-entropy. Writes return only the
-  decimal-string frontier and duplicate replays remain acknowledged even when
-  history is full. Each intake still decodes, re-derives, and re-encodes the
-  complete checkpoint inside the write transaction on the single shared SQLite
-  connection, so request work is O(history), not O(batch), and serializes every
-  other server write. One-operation measurements were 7 ms at 100 operations, 27
-  ms at 500, 46 ms at 1,000, 70 ms at 1,500, and 89 ms at 2,000; measured
-  200-operation batches grew 87–188 ms, one operation at 1,990 took 96 ms, and
-  the 2,000-operation checkpoint was 2,661,057 bytes (1,330 B/op), bounding
-  throughput before the history cap. Every envelope binds both
+  plus `hasMore` for resume and anti-entropy. Read frontiers fail closed above
+  512 writers or 16 KiB for either a writer ID or decimal sequence component.
+  Writes return only the decimal-string frontier and duplicate replays remain
+  acknowledged even when history is full. Each intake still decodes, re-derives,
+  and re-encodes the complete checkpoint inside the write transaction on the
+  single shared SQLite connection, so request work is O(history), not O(batch),
+  and serializes every other server write. One-operation measurements were 7 ms
+  at 100 operations, 27 ms at 500, 46 ms at 1,000, 70 ms at 1,500, and 89 ms at
+  2,000; measured 200-operation batches grew 87–188 ms, one operation at 1,990
+  took 96 ms, and the 2,000-operation checkpoint was 2,661,057 bytes (1,330
+  B/op), bounding throughput before the history cap. Every envelope binds both
   `entity.accountId` and `writerId` to the authenticated account. Physical
   pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
   checked; the browser grant and pairing transcript are never logged.

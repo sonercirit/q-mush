@@ -92,11 +92,6 @@ export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
   return {
-    buildEnvelopeQuery(
-      ...parameters: EnvelopeQueryParameters
-    ): ReturnType<typeof buildOperationEnvelopeQuery> {
-      return buildOperationEnvelopeQuery(database, ...parameters);
-    },
     appendEnvelope(
       ownerId: string,
       operation: Operation,

@@ -57,6 +57,14 @@ const roundTrip = (
   decodeOperationCheckpoint(encodeOperationCheckpoint(state));
 
 describe("operation checkpoints", () => {
+  test("rejects encoded prototype object entries without prototype mutation", () => {
+    const encoded = JSON.stringify([
+      "object",
+      [["__proto__", ["primitive", "value"]]],
+    ]);
+    expect(() => decodeOperationCheckpoint(encoded)).toThrow(/checkpoint/);
+  });
+
   test("serializes complete checkpoints and rejects resent equivocation", () => {
     let state = arrayState();
     for (let sequence = 1; sequence <= 3; sequence += 1)
