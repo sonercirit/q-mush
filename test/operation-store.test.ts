@@ -53,6 +53,12 @@ const saveCheckpoint = (
     now,
   );
 };
+const expectEnvelopeCount = (
+  store: Store,
+  ownerId: string,
+  partition: Partition,
+  count: number,
+) => expect(store.countEnvelopes(ownerId, partition)).toBe(count);
 const replaceCheckpoint = (
   store: Store,
   preservedOwner: string,
@@ -119,16 +125,24 @@ test("operation envelopes isolate identities by partition", () => {
 test("operation envelope counts are owner scoped", () => {
   const store = setup();
   addSecondOwner();
-  append(store, "owner-1", testOperation("writer-a", 1n, {}, "one"));
-  append(store, "owner-2", testOperation("writer-b", 1n, {}, "two"));
-  expect(store.countEnvelopes("owner-1", "non-session")).toBe(1);
+  appendForScopeCount(
+    store,
+    "owner-1",
+    testOperation("writer-a", 1n, {}, "one"),
+  );
+  appendForScopeCount(
+    store,
+    "owner-2",
+    testOperation("writer-b", 1n, {}, "two"),
+  );
+  expectEnvelopeCount(store, "owner-1", "non-session", 1);
 });
 
 test("operation envelope counts are partition scoped", () => {
   const store = setup();
   append(store, "owner-1", testOperation("writer-a", 1n, {}, "one"));
   append(store, "owner-1", testSessionOperation("writer-a", 1n, "two"));
-  expect(store.countEnvelopes("owner-1", "session")).toBe(1);
+  expectEnvelopeCount(store, "owner-1", "session", 1);
 });
 
 test("empty operation envelope histories count as zero", () => {

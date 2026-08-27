@@ -36,6 +36,10 @@ const storedRows = (
   database: ReturnType<typeof setup>["database"],
   table: typeof operationEnvelopes | typeof operationCheckpoints,
 ) => database.select().from(table).all();
+const expectStoredEnvelopeCount = (
+  database: ReturnType<typeof setup>["database"],
+  count: number,
+) => expect(storedRows(database, operationEnvelopes)).toHaveLength(count);
 const expectNoStoredOperations = (
   database: ReturnType<typeof setup>["database"],
 ) => {
@@ -101,7 +105,7 @@ test("operation intake is replay-idempotent", () => {
   const first = apply(intake, [operation], 2);
   const replay = apply(intake, [operation], 3);
   expect(replay.encodedCheckpoint).toBe(first.encodedCheckpoint);
-  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
+  expectStoredEnvelopeCount(database, 1);
 });
 
 test("operation intake checkpoints applied state for round-trip", () => {
@@ -206,7 +210,7 @@ test("operation intake history capacity counts stored envelopes, not replays", (
   const { database, intake, operation } = setupWithOperation();
   apply(intake, [operation], 2);
   apply(intake, [operation], 3);
-  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
+  expectStoredEnvelopeCount(database, 1);
 });
 
 test("operation intake rejects checkpoints above their byte capacity", () => {
@@ -217,9 +221,8 @@ test("operation intake rejects checkpoints above their byte capacity", () => {
     {},
     "x".repeat(MAX_OPERATION_CHECKPOINT_BYTES),
   );
-  expect(() => apply(intake, [operation], 2)).toThrow(
-    "checkpoint capacity reached",
-  );
+  const result = () => apply(intake, [operation], 2);
+  expect(result).toThrow("checkpoint capacity reached");
   expectNoStoredOperations(database);
 });
 test("operation intake rolls back envelopes when projection persistence fails", () => {
