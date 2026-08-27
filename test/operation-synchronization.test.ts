@@ -228,10 +228,7 @@ test("operation synchronization returns deterministic bounded missing pages", as
   expect(response.status).toBe(200);
   const result: unknown = await response.json();
   expect(result).toEqual({
-    envelopes: [
-      encodeOperationEnvelope(ownedOperation(1n)),
-      encodeOperationEnvelope(ownedOperation(2n)),
-    ],
+    envelopes: operations.slice().reverse().map(encodeOperationEnvelope),
     hasMore: false,
   });
 });

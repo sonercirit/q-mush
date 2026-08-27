@@ -62,6 +62,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           "Operation intake batch is too large",
         );
       return resources.database.transaction(() => {
+        let storedCount = store.countEnvelopes(ownerId, partition);
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
@@ -79,11 +80,8 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             actorId,
             now,
           );
-          if (
-            appended &&
-            store.countEnvelopes(ownerId, partition) >
-              MAX_OWNER_PARTITION_OPERATIONS
-          )
+          if (appended) storedCount += 1;
+          if (storedCount > MAX_OWNER_PARTITION_OPERATIONS)
             throw operationProtocolError(
               "capacity",
               "Operation history capacity reached",
