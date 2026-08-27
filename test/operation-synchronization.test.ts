@@ -228,7 +228,10 @@ test("operation synchronization rejects unknown read request fields", async () =
 test("operation synchronization bounds frontier writers and components", async () => {
   const synchronized = handler("owner-1");
   const maximum = Object.fromEntries(
-    Array.from({ length: 512 }, (_, index) => [`writer-${index}`, "0"]),
+    Array.from({ length: 512 }, (_, index) => [
+      `writer-${index.toString()}`,
+      "0",
+    ]),
   );
   expect((await synchronized(readRequest(maximum))).status).toBe(200);
   expect(
