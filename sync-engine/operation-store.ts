@@ -53,7 +53,7 @@ type EnvelopeQueryParameters = readonly [
   frontier: Readonly<Record<string, bigint>>,
   limit: number,
 ];
-export function buildOperationEnvelopeQuery(
+function buildOperationEnvelopeQuery(
   database: AppDatabase,
   ...[ownerId, partition, frontier, limit]: EnvelopeQueryParameters
 ) {
@@ -92,6 +92,11 @@ export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
   return {
+    buildEnvelopeQuery(
+      ...parameters: EnvelopeQueryParameters
+    ): ReturnType<typeof buildOperationEnvelopeQuery> {
+      return buildOperationEnvelopeQuery(database, ...parameters);
+    },
     appendEnvelope(
       ownerId: string,
       operation: Operation,
@@ -148,6 +153,7 @@ export function createOperationStore(resources: OperationStoreResources) {
     readEnvelopes(
       ...parameters: EnvelopeQueryParameters
     ): OperationEnvelopePage {
+      const limit = parameters[3];
       const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
       return {
         envelopes: rows

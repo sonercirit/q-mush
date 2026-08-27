@@ -11,10 +11,7 @@ import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
-import {
-  buildOperationEnvelopeQuery,
-  createOperationStore,
-} from "../sync-engine/operation-store";
+import { createOperationStore } from "../sync-engine/operation-store";
 import {
   testApplyState,
   testOperation,
@@ -300,13 +297,14 @@ test("soft-deleted checkpoints are not loaded or replaced", () => {
 
 test("frontier envelope query plan scans the ordered owner prefix without sorting", () => {
   const resources = harness.setup();
-  const built = buildOperationEnvelopeQuery(
-    resources.database,
-    "owner-1",
-    "non-session",
-    { "writer-a": 8n, "writer-b": 12n },
-    256,
-  ).toSQL();
+  const built = createOperationStore(resources)
+    .buildEnvelopeQuery(
+      "owner-1",
+      "non-session",
+      { "writer-a": 8n, "writer-b": 12n },
+      256,
+    )
+    .toSQL();
   const plan = resources.database.$client
     .query(`EXPLAIN QUERY PLAN ${built.sql}`)
     .all(...sqlBindings(built.params))
