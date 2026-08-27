@@ -6,7 +6,10 @@ import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
 import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
 import { createOperation } from "../../shared/operation-core.ts";
-import { createOperationStore } from "../../sync-engine/operation-store.ts";
+import {
+  createOperationStore,
+  operationSequenceOrder,
+} from "../../sync-engine/operation-store.ts";
 
 const DRIZZLE_DIRECTORY = join(import.meta.dirname, "../../drizzle");
 const CURRENT_BASE_MIGRATIONS = [
@@ -187,7 +190,7 @@ test("backfills sequence order while upgrading populated operation storage", asy
       "SELECT sequence_order AS sequenceOrder FROM operation_envelopes",
     )
     .get();
-  expect(row?.sequenceOrder).toBe("00005:12345");
+  expect(row?.sequenceOrder).toBe(operationSequenceOrder(12_345n));
   const operation = createOperation({
     operationId: "operation-1",
     schemaVersion: 1,

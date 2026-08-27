@@ -23,7 +23,7 @@ interface OperationStoreResources {
   readonly generateId?: IdGenerator;
 }
 
-const sequenceOrder = (sequence: bigint): string => {
+export const operationSequenceOrder = (sequence: bigint): string => {
   const decimal = sequence.toString();
   return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
 };
@@ -63,7 +63,7 @@ function buildOperationEnvelopeQuery(
       eq(operationEnvelopes.writerId, writerId),
       gt(
         operationEnvelopes.sequenceOrder,
-        sequenceOrder(frontier[writerId] ?? 0n),
+        operationSequenceOrder(frontier[writerId] ?? 0n),
       ),
     ),
   );
@@ -135,7 +135,7 @@ export function createOperationStore(resources: OperationStoreResources) {
             partition: operation.partition,
             writerId: operation.writerId,
             sequence: operation.sequence.toString(),
-            sequenceOrder: sequenceOrder(operation.sequence),
+            sequenceOrder: operationSequenceOrder(operation.sequence),
             operationId: operation.operationId,
             fingerprint,
             encodedEnvelope: encodeOperationEnvelope(operation),
