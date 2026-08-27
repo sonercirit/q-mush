@@ -159,6 +159,32 @@ test("operation envelope pages preserve bigint and cross-writer ordering", () =>
   );
 });
 
+test("operation envelope frontier includes a writer absent from the frontier", () => {
+  const store = setup();
+  append(store, "owner-1", testOperation("writer-a", 1n, {}, "a"));
+  append(store, "owner-1", testOperation("writer-b", 1n, {}, "b"));
+  expect(
+    store
+      .readEnvelopes("owner-1", "non-session", { "writer-a": 1n }, 20)
+      .envelopes.map(({ writerId }) => writerId),
+  ).toEqual(["writer-b"]);
+});
+
+test("operation envelope pages preserve explicit intra-writer sequence order", () => {
+  const store = setup();
+  append(store, "owner-1", testOperation("writer-a", 2n, {}, "two"));
+  append(store, "owner-1", testOperation("writer-a", 1n, {}, "one"));
+  databaseForTest().$client.run(
+    "DROP INDEX operation_envelopes_owner_partition_writer_index",
+  );
+  databaseForTest().$client.run("PRAGMA reverse_unordered_selects = ON");
+  expect(
+    store
+      .readEnvelopes("owner-1", "non-session", {}, 1)
+      .envelopes.map(({ sequence }) => sequence),
+  ).toEqual([1n]);
+});
+
 test("operation envelope frontier pages are complete and exactly bounded", () => {
   const store = setup();
   appendSequenceRange(store, 300);

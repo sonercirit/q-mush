@@ -1,9 +1,13 @@
 import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import { createDatabase } from "../../shared/database.ts";
+import {
+  createDatabase,
+  databaseSchema,
+} from "../../shared/database.ts";
 import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
 import { createOperation } from "../../shared/operation-core.ts";
 import { createOperationStore } from "../../sync-engine/operation-store.ts";
@@ -207,10 +211,14 @@ test("backfills sequence order while upgrading populated operation storage", asy
     "UPDATE operation_envelopes SET encoded_envelope = ? WHERE id = ?",
     [encodeOperationEnvelope(operation), "envelope-1"],
   );
-  database.close();
-  const upgraded = createDatabase(
-    join(temporaryDirectory, "operations.sqlite"),
-    false,
+  const upgraded = Object.assign(
+    drizzle(database, { schema: databaseSchema }),
+    {
+      $client: database,
+      noncriticalWrite(action: () => void): void {
+        action();
+      },
+    },
   );
   const page = createOperationStore({ database: upgraded }).readEnvelopes(
     "owner-1",

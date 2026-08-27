@@ -30,7 +30,7 @@ import {
 const MIGRATIONS_DIRECTORY = fileURLToPath(
   new URL("../drizzle", import.meta.url),
 );
-const databaseSchema = {
+export const databaseSchema = {
   agentMessages,
   agentPendingInputs,
   agentQuestionRequests,
@@ -64,10 +64,7 @@ const attachDatabase = (client: Database): AppDatabase =>
     },
   });
 
-export function createDatabase(
-  path: string,
-  runMigrations = true,
-): AppDatabase {
+export function createDatabase(path: string): AppDatabase {
   if (path !== ":memory:") {
     mkdirSync(dirname(resolve(path)), { recursive: true });
   }
@@ -79,8 +76,7 @@ export function createDatabase(
     // Drizzle wraps migrations in a transaction, where SQLite ignores changes
     // to foreign_keys. Disable it beforehand so generated table rebuilds work.
     client.run("PRAGMA foreign_keys = OFF");
-    if (runMigrations)
-      migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });
+    migrate(database, { migrationsFolder: MIGRATIONS_DIRECTORY });
     client.run("PRAGMA foreign_keys = ON");
   } catch (error) {
     client.close();

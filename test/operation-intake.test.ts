@@ -8,6 +8,7 @@ import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
+  MAX_OWNER_PARTITION_OPERATIONS,
 } from "../shared/operation-core";
 import {
   createOperationIntake,
@@ -171,6 +172,28 @@ test("operation intake rejects a batch above its maximum size", () => {
   expect(() =>
     applyOperationCount(intake, MAX_OPERATION_BATCH_SIZE + 1),
   ).toThrow("batch is too large");
+});
+
+test("operation intake default path enforces the owner-partition constant", () => {
+  const { database, intake } = setup();
+  database.$client.run(
+    `WITH RECURSIVE rows(sequence) AS (
+      SELECT 1 UNION ALL SELECT sequence + 1 FROM rows WHERE sequence < ?
+    )
+    INSERT INTO operation_envelopes
+      (id, user_id, created_at, created_by_id, updated_at, updated_by_id,
+       partition, writer_id, sequence, sequence_order, operation_id,
+       fingerprint, encoded_envelope)
+    SELECT 'bulk-' || sequence, 'owner-1', 1, ?, 1, ?, 'non-session',
+      'bulk-writer', CAST(sequence AS TEXT), printf('%05d:%d',
+      length(CAST(sequence AS TEXT)), sequence), 'bulk-operation-' || sequence,
+      'bulk-fingerprint-' || sequence, 'unused'
+    FROM rows`,
+    [MAX_OWNER_PARTITION_OPERATIONS - 1, SYSTEM_ID, SYSTEM_ID],
+  );
+  expect(
+    apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,
+  ).toEqual({ "final-writer": 1n });
 });
 
 test("operation intake rejects owner-partition history above its capacity", () => {

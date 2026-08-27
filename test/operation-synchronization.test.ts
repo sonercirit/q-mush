@@ -12,6 +12,7 @@ import {
 } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
 import { type OperationIntakeLimits } from "../sync-engine/operation-intake";
+import { createOperationStore } from "../sync-engine/operation-store";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
 import { testOperation } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
@@ -341,6 +342,28 @@ test("operation synchronization rejects prototype frontier keys", async () => {
 
 test("operation synchronization catches read storage faults", async () => {
   expect(await statusAfterClosedDatabase(readRequest({}))).toBe(500);
+});
+
+test("operation synchronization delivers a writer absent from the request frontier", async () => {
+  const synchronized = handler("owner-1");
+  const store = createOperationStore({ database: harness.current() });
+  store.appendEnvelope("owner-1", ownedOperation(), "owner-1", 1);
+  store.appendEnvelope(
+    "owner-1",
+    { ...ownedOperation(), writerId: "writer-b", operationId: "writer-b-1" },
+    "owner-1",
+    1,
+  );
+  const response = await synchronized(readRequest({ "owner-1": "1" }));
+  const responseBody: unknown = await response.json();
+  expect(isRecord(responseBody)).toBe(true);
+  if (!isRecord(responseBody)) throw new Error("Expected response record");
+  const envelopes = responseBody["envelopes"];
+  expect(Array.isArray(envelopes)).toBe(true);
+  if (!Array.isArray(envelopes)) throw new Error("Expected envelope array");
+  expect(
+    envelopes.map(decodeOperationEnvelope).map(({ writerId }) => writerId),
+  ).toEqual(["writer-b"]);
 });
 
 test("operation synchronization returns deterministic bounded missing pages", async () => {
