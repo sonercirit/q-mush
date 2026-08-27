@@ -373,17 +373,15 @@ describe("operation core", () => {
             return "x";
           },
         });
-        return operation(
-          `waiting-${String(index)}`,
-          1n,
-          { ghost: 1n },
+        return {
+          ...operation(`waiting-${String(index)}`, 1n, { ghost: 1n }, "x"),
           payload,
-        );
+        };
       },
       reducer,
     );
     expect(state.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE);
-    expect(payloadReads).toBe(MAX_OPERATION_BATCH_SIZE * 3);
+    expect(payloadReads).toBe(MAX_OPERATION_BATCH_SIZE * 2);
   });
 
   test("preserves the applied index structurally during sequential admission", () => {
