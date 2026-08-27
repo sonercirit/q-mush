@@ -45,6 +45,13 @@ const sqlBindings = (values: readonly unknown[]): SQLQueryBindings[] =>
       return value;
     throw new Error("Expected SQLite query binding");
   });
+const changedOperation = (
+  operation: ReturnType<typeof testOperation>,
+  changes: Readonly<Partial<ReturnType<typeof testOperation>>>,
+) => ({ ...operation, payload: { value: "changed" }, ...changes });
+const expectedSequences = (count: number) =>
+  Array.from({ length: count }, (_, index) => BigInt(index + 1));
+const firstOperation = () => testOperation("writer-a", 1n, {}, "first");
 const harness = createOperationDatabaseHarness();
 const setup = () => createOperationStore(harness.setup());
 const databaseForTest = harness.current;
@@ -119,13 +126,13 @@ afterEach(harness.close);
 
 test("operation envelopes append idempotently and reject equivocation", () => {
   const store = setup();
-  const first = testOperation("writer-a", 1n, {}, "first");
+  const first = firstOperation();
   expect(store.appendEnvelope("owner-1", first, SYSTEM_ID, 2)).toBe(true);
   expect(store.appendEnvelope("owner-1", first, SYSTEM_ID, 3)).toBe(false);
   expect(() =>
     store.appendEnvelope(
       "owner-1",
-      { ...first, operationId: "different", payload: { value: "changed" } },
+      changedOperation(first, { operationId: "different" }),
       SYSTEM_ID,
       4,
     ),
@@ -134,13 +141,16 @@ test("operation envelopes append idempotently and reject equivocation", () => {
 
 test("operation identity conflicts across different writer sequences", () => {
   const store = setup();
-  const first = testOperation("writer-a", 1n, {}, "first");
+  const first = firstOperation();
   append(store, "owner-1", first);
   expect(() =>
-    append(store, "owner-1", {
-      ...testOperation("writer-b", 2n, {}, "changed"),
-      operationId: first.operationId,
-    }),
+    append(
+      store,
+      "owner-1",
+      changedOperation(testOperation("writer-b", 2n, {}, "second"), {
+        operationId: first.operationId,
+      }),
+    ),
   ).toThrow("Operation identity equivocation");
 });
 
@@ -195,7 +205,7 @@ test("operation envelope frontier pages are complete and exactly bounded", () =>
   });
   expect(
     [...first.envelopes, ...second.envelopes].map(({ sequence }) => sequence),
-  ).toEqual(Array.from({ length: 300 }, (_, index) => BigInt(index + 1)));
+  ).toEqual(expectedSequences(300));
 });
 
 test("operation envelopes isolate identities by owner", () => {

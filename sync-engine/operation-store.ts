@@ -47,12 +47,15 @@ function activeCheckpointScope(ownerId: string, partition: OperationPartition) {
   );
 }
 
-export function buildOperationEnvelopeQuery(
-  database: AppDatabase,
+type EnvelopeQueryParameters = readonly [
   ownerId: string,
   partition: OperationPartition,
   frontier: Readonly<Record<string, bigint>>,
   limit: number,
+];
+export function buildOperationEnvelopeQuery(
+  database: AppDatabase,
+  ...[ownerId, partition, frontier, limit]: EnvelopeQueryParameters
 ) {
   const writers = Object.keys(frontier);
   const afterFrontier = writers.map((writerId) =>
@@ -143,18 +146,9 @@ export function createOperationStore(resources: OperationStoreResources) {
       });
     },
     readEnvelopes(
-      ownerId: string,
-      partition: OperationPartition,
-      frontier: Readonly<Record<string, bigint>>,
-      limit: number,
+      ...parameters: EnvelopeQueryParameters
     ): OperationEnvelopePage {
-      const rows = buildOperationEnvelopeQuery(
-        database,
-        ownerId,
-        partition,
-        frontier,
-        limit,
-      ).all();
+      const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
       return {
         envelopes: rows
           .slice(0, limit)

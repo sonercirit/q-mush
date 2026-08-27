@@ -11,25 +11,22 @@ import { testOperation } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
-const request = (body: unknown) =>
+const jsonRequest = (method: "POST" | "PUT", payload: unknown) =>
   new Request("http://localhost/api/local/operations", {
-    method: "POST",
+    method,
     headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
   });
+const request = (body: unknown) => jsonRequest("POST", body);
 const readRequest = (
   frontier: unknown,
   extra: Readonly<Record<string, unknown>> = {},
 ) =>
-  new Request("http://localhost/api/local/operations", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ownerId: "owner-1",
-      partition: "non-session",
-      frontier,
-      ...extra,
-    }),
+  jsonRequest("PUT", {
+    ownerId: "owner-1",
+    partition: "non-session",
+    frontier,
+    ...extra,
   });
 const body = (
   ownerId = "owner-1",
@@ -56,6 +53,17 @@ const handler = (authenticatedId?: string) => {
         : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
   });
 };
+const statusAfterClosedDatabase = async (request: Request) => {
+  const synchronized = handler("owner-1");
+  harness.close();
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    return (await synchronized(request)).status;
+  } finally {
+    console.error = originalError;
+  }
+};
 const synchronizationStatus = async (envelopes: readonly string[]) =>
   (await handler("owner-1")(request(body("owner-1", envelopes)))).status;
 const expectSynchronizationStatus = async (
@@ -64,6 +72,9 @@ const expectSynchronizationStatus = async (
 ) => {
   expect(await synchronizationStatus([envelope])).toBe(expected);
 };
+const oversizedFrontierStatus = async (
+  frontier: Readonly<Record<string, string>>,
+) => (await handler("owner-1")(readRequest(frontier))).status;
 const operationResponse = (
   operation: ReturnType<typeof ownedOperation>,
   partition: "non-session" | "session" = "non-session",
@@ -189,15 +200,7 @@ test("operation synchronization maps identity equivocation to conflict", async (
 });
 
 test("operation synchronization maps storage faults to server errors", async () => {
-  const synchronized = handler("owner-1");
-  harness.close();
-  const originalError = console.error;
-  console.error = () => undefined;
-  try {
-    expect(await synchronized(request(body()))).toHaveProperty("status", 500);
-  } finally {
-    console.error = originalError;
-  }
+  expect(await statusAfterClosedDatabase(request(body()))).toBe(500);
 });
 
 test("operation synchronization response stays bounded as history grows", async () => {
@@ -214,15 +217,17 @@ test("operation synchronization response stays bounded as history grows", async 
 });
 
 test("operation synchronization rejects unknown request fields", async () => {
-  expect(
-    (await handler("owner-1")(request({ ...body(), unexpected: true }))).status,
-  ).toBe(400);
+  const writeStatus = (
+    await handler("owner-1")(request({ ...body(), unexpected: true }))
+  ).status;
+  expect(writeStatus).toBe(400);
 });
 
 test("operation synchronization rejects unknown read request fields", async () => {
-  expect(
-    (await handler("owner-1")(readRequest({}, { unexpected: true }))).status,
-  ).toBe(400);
+  const readStatus = (
+    await handler("owner-1")(readRequest({}, { unexpected: true }))
+  ).status;
+  expect(readStatus).toBe(400);
 });
 
 test("operation synchronization bounds frontier writers and components", async () => {
@@ -238,12 +243,10 @@ test("operation synchronization bounds frontier writers and components", async (
     (await synchronized(readRequest({ ...maximum, overflow: "0" }))).status,
   ).toBe(400);
   expect(
-    (await synchronized(readRequest({ ["x".repeat(16 * 1024 + 1)]: "0" })))
-      .status,
+    await oversizedFrontierStatus({ ["x".repeat(16 * 1024 + 1)]: "0" }),
   ).toBe(400);
   expect(
-    (await synchronized(readRequest({ writer: "1".repeat(16 * 1024 + 1) })))
-      .status,
+    await oversizedFrontierStatus({ writer: "1".repeat(16 * 1024 + 1) }),
   ).toBe(400);
 });
 
@@ -257,15 +260,7 @@ test("operation synchronization rejects prototype frontier keys", async () => {
 });
 
 test("operation synchronization catches read storage faults", async () => {
-  const synchronized = handler("owner-1");
-  harness.close();
-  const originalError = console.error;
-  console.error = () => undefined;
-  try {
-    expect((await synchronized(readRequest({}))).status).toBe(500);
-  } finally {
-    console.error = originalError;
-  }
+  expect(await statusAfterClosedDatabase(readRequest({}))).toBe(500);
 });
 
 test("operation synchronization returns deterministic bounded missing pages", async () => {
@@ -278,15 +273,7 @@ test("operation synchronization returns deterministic bounded missing pages", as
       )
     ).status,
   ).toBe(200);
-  const read = new Request("http://localhost/api/local/operations", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      ownerId: "owner-1",
-      partition: "non-session",
-      frontier: {},
-    }),
-  });
+  const read = readRequest({});
   const response = await synchronized(read);
   expect(response.status).toBe(200);
   const result: unknown = await response.json();
