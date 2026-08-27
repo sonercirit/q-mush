@@ -1,32 +1,9 @@
 import { Database } from "bun:sqlite";
-import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
-import {
-  agentMessages,
-  agentPendingInputs,
-  agentQuestionRequests,
-  agentSessionOperations,
-  agentSessions,
-  agentSessionTurns,
-  attachmentFallbacks,
-  operationCheckpoints,
-  operationEnvelopes,
-  prompts,
-  providerCredentials,
-  providerCredentialWorkspaces,
-  providerQuotaResetReceipts,
-  providerQuotaSettings,
-  runners,
-  runnerWorkspaces,
-  sessions,
-  toolSettings,
-  users,
-  workspaces,
-} from "../../shared/database/schema.ts";
 import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
 import { createOperation } from "../../shared/operation-core.ts";
 import { createOperationStore } from "../../sync-engine/operation-store.ts";
@@ -230,34 +207,15 @@ test("backfills sequence order while upgrading populated operation storage", asy
     "UPDATE operation_envelopes SET encoded_envelope = ? WHERE id = ?",
     [encodeOperationEnvelope(operation), "envelope-1"],
   );
-  const schema = {
-    agentMessages,
-    agentPendingInputs,
-    agentQuestionRequests,
-    agentSessionOperations,
-    agentSessions,
-    agentSessionTurns,
-    attachmentFallbacks,
-    operationCheckpoints,
-    operationEnvelopes,
-    prompts,
-    providerCredentials,
-    providerCredentialWorkspaces,
-    providerQuotaResetReceipts,
-    providerQuotaSettings,
-    runners,
-    runnerWorkspaces,
-    sessions,
-    toolSettings,
-    users,
-    workspaces,
-  };
-  const upgraded = Object.assign(drizzle(database, { schema }), {
-    $client: database,
-    noncriticalWrite(action: () => void): void {
-      action();
-    },
-  });
+  const upgraded = createDatabase(join(temporaryDirectory, "fresh.sqlite"));
+  upgraded.$client.run("ATTACH DATABASE ? AS migrated", [
+    join(temporaryDirectory, "operations.sqlite"),
+  ]);
+  upgraded.$client.run("PRAGMA foreign_keys = OFF");
+  upgraded.$client.run("DELETE FROM operation_envelopes");
+  upgraded.$client.run(
+    "INSERT INTO operation_envelopes SELECT * FROM migrated.operation_envelopes",
+  );
   const page = createOperationStore({ database: upgraded }).readEnvelopes(
     "owner-1",
     "non-session",
