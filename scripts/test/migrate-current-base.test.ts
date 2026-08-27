@@ -4,10 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
-import {
-  createDatabase,
-  databaseSchema,
-} from "../../shared/database.ts";
+import { createDatabase, databaseSchema } from "../../shared/database.ts";
 import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
 import { createOperation } from "../../shared/operation-core.ts";
 import { createOperationStore } from "../../sync-engine/operation-store.ts";
