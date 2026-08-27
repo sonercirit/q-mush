@@ -125,16 +125,10 @@ test("operation envelopes isolate identities by partition", () => {
 test("operation envelope counts are owner scoped", () => {
   const store = setup();
   addSecondOwner();
-  appendForScopeCount(
-    store,
-    "owner-1",
-    testOperation("writer-a", 1n, {}, "one"),
-  );
-  appendForScopeCount(
-    store,
-    "owner-2",
-    testOperation("writer-b", 1n, {}, "two"),
-  );
+  const ownOperation = testOperation("writer-a", 1n, {}, "one");
+  append(store, "owner-1", ownOperation);
+  const otherOwnerOperation = testOperation("writer-b", 1n, {}, "two");
+  append(store, "owner-2", otherOwnerOperation);
   expectEnvelopeCount(store, "owner-1", "non-session", 1);
 });
 

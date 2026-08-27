@@ -44,6 +44,10 @@ const handler = (authenticatedId?: string) => {
 };
 const synchronizationStatus = async (envelopes: readonly string[]) =>
   (await handler("owner-1")(request(body("owner-1", envelopes)))).status;
+const expectSynchronizationStatus = async (
+  envelope: string,
+  expected: number,
+) => expect(await synchronizationStatus([envelope])).toBe(expected);
 const operationResponse = (
   operation: ReturnType<typeof ownedOperation>,
   partition: "non-session" | "session" = "non-session",
@@ -111,7 +115,19 @@ test("operation synchronization rejects remote clock drift in either direction",
 
 test("operation synchronization rejects oversized envelopes", async () => {
   const oversized = "x".repeat(MAX_OPERATION_ENVELOPE_BYTES + 1);
-  expect(await synchronizationStatus([oversized])).toBe(400);
+  await expectSynchronizationStatus(oversized, 400);
+});
+
+test("operation synchronization measures envelope limits in UTF-8 bytes", async () => {
+  const oversized = "🦆".repeat(MAX_OPERATION_ENVELOPE_BYTES / 2);
+  await expectSynchronizationStatus(oversized, 400);
+});
+
+test("operation synchronization reports malformed oversized envelopes clearly", async () => {
+  const response = await handler("owner-1")(
+    request(body("owner-1", ["x".repeat(MAX_OPERATION_ENVELOPE_BYTES + 1)])),
+  );
+  expect(await response.json()).toEqual({ error: "Invalid request" });
 });
 
 test("operation synchronization accepts its maximum batch size", async () => {
