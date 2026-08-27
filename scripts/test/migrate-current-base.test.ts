@@ -41,7 +41,7 @@ const PARENT_REPORT_MIGRATION_TIMESTAMP = 1_787_268_023_468;
 const TOOL_SETTINGS_MIGRATION_TIMESTAMP = 1_786_905_773_660;
 const CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP = 1_787_417_810_687;
 const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
-const OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP = 1_787_794_572_383;
+const OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP = 1_787_798_425_604;
 const OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP = 1_787_790_945_286;
 const OPERATION_STORAGE_MIGRATION_TIMESTAMP = 1_787_781_913_680;
 const ACCOUNT_EXPORT_INDEX_MIGRATION_TIMESTAMP = 1_787_659_701_217;
@@ -161,4 +161,29 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     "operation_envelopes_owner_partition_writer_index",
   );
   upgradedDatabase.$client.close();
+});
+
+test("backfills sequence order while upgrading populated operation storage", async () => {
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-operation-upgrade-"));
+  const database = new Database(join(temporaryDirectory, "operations.sqlite"), {
+    create: true,
+  });
+  database.run("CREATE TABLE users (id text PRIMARY KEY NOT NULL)");
+  await applyMigration(database, "0040_mixed_the_leader.sql");
+  await applyMigration(database, "0041_magenta_puma.sql");
+  database.run(
+    `INSERT INTO operation_envelopes
+      (id, user_id, created_at, created_by_id, updated_at, updated_by_id, partition,
+       writer_id, sequence, operation_id, fingerprint, encoded_envelope)
+     VALUES ('envelope-1', 'owner-1', 1, 'owner-1', 1, 'owner-1', 'non-session',
+       'writer-1', '12345', 'operation-1', 'fingerprint-1', 'encoded-1')`,
+  );
+  await applyMigration(database, "0042_clammy_shadow_king.sql");
+  const row = database
+    .query<{ readonly sequenceOrder: string }, []>(
+      "SELECT sequence_order AS sequenceOrder FROM operation_envelopes",
+    )
+    .get();
+  expect(row?.sequenceOrder).toBe("00005:12345");
+  database.close();
 });

@@ -490,7 +490,7 @@ export const operationEnvelopes = sqliteTable(
     partition: operationPartitionColumn(),
     writerId: text("writer_id").notNull(),
     sequence: text("sequence").notNull(),
-    sequenceOrder: text("sequence_order").notNull(),
+    sequenceOrder: text("sequence_order").notNull().default(""),
     operationId: text("operation_id").notNull(),
     fingerprint: text("fingerprint").notNull(),
     encodedEnvelope: text("encoded_envelope").notNull(),

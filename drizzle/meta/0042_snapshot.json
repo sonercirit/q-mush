@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5409bb11-9b9f-4608-9cbe-55678ae9167d",
+  "id": "20947ccc-790f-48c6-a4eb-b926a934b406",
   "prevId": "2e6ae241-7d6f-475c-8201-bd5dac441c41",
   "tables": {
     "agent_messages": {
@@ -1518,7 +1518,8 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
+          "autoincrement": false,
+          "default": "''"
         },
         "operation_id": {
           "name": "operation_id",
