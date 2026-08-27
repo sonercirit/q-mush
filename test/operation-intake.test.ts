@@ -4,7 +4,10 @@ import {
   operationEnvelopes,
 } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
-import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
+import {
+  decodeOperationCheckpoint,
+  encodeOperationEnvelope,
+} from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
@@ -14,6 +17,10 @@ import {
   createOperationIntake,
   type OperationIntakeLimits,
 } from "../sync-engine/operation-intake";
+import {
+  createOperationStore,
+  operationSequenceOrder,
+} from "../sync-engine/operation-store";
 import {
   appendOperationId,
   testOperation,
@@ -174,8 +181,12 @@ test("operation intake rejects a batch above its maximum size", () => {
   ).toThrow("batch is too large");
 });
 
-test("operation intake default path enforces the owner-partition constant", () => {
+test("operation intake default path enforces the 2000-operation owner-partition limit", () => {
+  expect(MAX_OWNER_PARTITION_OPERATIONS).toBe(2_000);
   const { database, intake } = setup();
+  const seededEnvelope = encodeOperationEnvelope(
+    testOperation("bulk-writer", 1n, {}, "seeded"),
+  );
   database.$client.run(
     `WITH RECURSIVE rows(sequence) AS (
       SELECT 1 UNION ALL SELECT sequence + 1 FROM rows WHERE sequence < ?
@@ -185,12 +196,25 @@ test("operation intake default path enforces the owner-partition constant", () =
        partition, writer_id, sequence, sequence_order, operation_id,
        fingerprint, encoded_envelope)
     SELECT 'bulk-' || sequence, 'owner-1', 1, ?, 1, ?, 'non-session',
-      'bulk-writer', CAST(sequence AS TEXT), printf('%05d:%d',
-      length(CAST(sequence AS TEXT)), sequence), 'bulk-operation-' || sequence,
-      'bulk-fingerprint-' || sequence, 'unused'
+      'bulk-writer', CAST(sequence AS TEXT), ?, 'bulk-operation-' || sequence,
+      'bulk-fingerprint-' || sequence, ?
     FROM rows`,
-    [MAX_OWNER_PARTITION_OPERATIONS - 1, SYSTEM_ID, SYSTEM_ID],
+    [
+      MAX_OWNER_PARTITION_OPERATIONS - 1,
+      SYSTEM_ID,
+      SYSTEM_ID,
+      operationSequenceOrder(1n),
+      seededEnvelope,
+    ],
   );
+  expect(
+    createOperationStore({ database }).readEnvelopes(
+      "owner-1",
+      "non-session",
+      {},
+      1,
+    ).envelopes,
+  ).toEqual([testOperation("bulk-writer", 1n, {}, "seeded")]);
   expect(
     apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,
   ).toEqual({ "final-writer": 1n });
