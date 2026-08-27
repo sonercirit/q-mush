@@ -145,6 +145,16 @@ test("operation envelope ranges filter the causal frontier", () => {
   expect(readRange(store, { "writer-a": 1n }, 10)).toEqual([second]);
 });
 
+test("operation envelope ranges apply each writer frontier before limiting", () => {
+  const store = setup();
+  appendPair(store, "writer-b", 1n, {});
+  const writerC = testOperation("writer-c", 1n, {}, "third");
+  append(store, "owner-1", writerC);
+  expect(readRange(store, { "writer-a": 1n, "writer-b": 1n }, 1)).toEqual([
+    writerC,
+  ]);
+});
+
 test("operation envelope ranges honor their limit", () => {
   const store = setup();
   const { first } = appendPair(store, "writer-b", 1n, {});

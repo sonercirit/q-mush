@@ -40,11 +40,11 @@ export interface Operation<TPayload = unknown> {
   readonly payload: TPayload;
 }
 type OperationInput<TPayload> = Omit<Operation<TPayload>, "partition">;
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public frontier relation type for replica ordering. */
 export type FrontierComparison =
   "equal" | "ancestor" | "descendant" | "concurrent";
 
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public entity partition catalog for schema routing. */
 export const operationEntityPartitions = {
   session: [
     "agent_sessions",
@@ -72,7 +72,7 @@ const sessionEntities: ReadonlySet<string> = new Set(
 const nonSessionEntities: ReadonlySet<string> = new Set(
   operationEntityPartitions["non-session"],
 );
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public entity partition classifier for operation creation. */
 export const classifyOperationPartition = (
   entityType: string,
 ): OperationPartition => {
@@ -129,7 +129,7 @@ export const createOperation = <TPayload>(
   return { ...input, partition: classifyOperationPartition(input.entity.type) };
 };
 
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public clock comparator for deterministic replay. */
 export const compareClocks = (
   left: HybridTimestamp,
   right: HybridTimestamp,
@@ -137,9 +137,9 @@ export const compareClocks = (
   left.physicalMs - right.physicalMs ||
   left.logical - right.logical ||
   compareText(left.writerId, right.writerId);
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public remote clock drift bound for authenticated intake. */
 export const MAX_REMOTE_CLOCK_DRIFT_MS = 5 * 60 * 1000;
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public hybrid clock contract for replica writers. */
 export interface HybridLogicalClock {
   readonly current: () => HybridTimestamp;
   readonly tick: (physicalMs: number) => HybridTimestamp;
@@ -148,7 +148,7 @@ export interface HybridLogicalClock {
     physicalMs: number,
   ) => HybridTimestamp;
 }
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public hybrid clock constructor for replica writers. */
 export const createHybridLogicalClock = (
   writerId: string,
   initialPhysicalMs = 0,
@@ -180,7 +180,7 @@ export const createHybridLogicalClock = (
 
 const frontierValue = (frontier: CausalFrontier, writerId: string): bigint =>
   frontier[writerId] ?? 0n;
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public causal coverage predicate for anti-entropy. */
 export const frontierCovers = (
   frontier: CausalFrontier,
   required: CausalFrontier,
@@ -188,7 +188,7 @@ export const frontierCovers = (
   Object.entries(required).every(
     ([writerId, sequence]) => frontierValue(frontier, writerId) >= sequence,
   );
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public frontier merge primitive for replica reconciliation. */
 export const mergeFrontiers = (
   left: CausalFrontier,
   right: CausalFrontier,
@@ -200,7 +200,7 @@ export const mergeFrontiers = (
   }
   return merged;
 };
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public frontier comparator for conflict detection. */
 export const compareFrontiers = (
   left: CausalFrontier,
   right: CausalFrontier,
@@ -212,7 +212,7 @@ export const compareFrontiers = (
   if (rightCovers) return "ancestor";
   return "concurrent";
 };
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public frontier advancement primitive for ordered writers. */
 export const advanceFrontier = (
   frontier: CausalFrontier,
   writerId: string,
@@ -259,7 +259,7 @@ export interface OperationApplyState<TProjection> {
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
 }
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public batch admission bound shared with synchronization. */
 export const MAX_OPERATION_BATCH_SIZE = 512;
 const canonical = (value: unknown): string => {
   if (value === undefined) return "undefined";
@@ -301,9 +301,7 @@ const pendingIdentityIndex = (
     return pendingIdentityIndexes.get(state);
   let index: AppliedIdentityNode | undefined;
   for (const item of state.pending) {
-    const fingerprint = canonical(item);
-    for (const key of identityKeys(item))
-      index = setAppliedNode(index, key, fingerprint);
+    index = addIdentityKeys(index, item);
   }
   pendingIdentityIndexes.set(state, index);
   return index;
@@ -311,14 +309,21 @@ const pendingIdentityIndex = (
 const isReady = (item: Operation, frontier: CausalFrontier): boolean =>
   frontierCovers(frontier, item.parents) &&
   item.sequence === frontierValue(frontier, item.writerId) + 1n;
+const addIdentityKeys = (
+  root: AppliedIdentityNode | undefined,
+  item: Operation,
+  fingerprint = canonical(item),
+): AppliedIdentityNode | undefined => {
+  let next = root;
+  for (const key of identityKeys(item))
+    next = setAppliedNode(next, key, fingerprint);
+  return next;
+};
 const addApplied = (
   root: AppliedIdentityNode | undefined,
   item: Operation,
 ): AppliedIdentityNode => {
-  const fingerprint = canonical(item);
-  let next = root;
-  for (const key of identityKeys(item))
-    next = setAppliedNode(next, key, fingerprint);
+  const next = addIdentityKeys(root, item);
   if (next === undefined) throw new Error("Applied identity update failed");
   return next;
 };
@@ -411,7 +416,7 @@ export const materializeApplied = (
   visit(root);
   return record;
 };
-/** @public Shared operation protocol primitive retained for replica clients. */
+/** @public identity tree depth diagnostic for balance tests. */
 export const appliedIdentityDepth = (
   root: AppliedIdentityNode | undefined,
 ): number =>
@@ -463,9 +468,11 @@ export const applyOperation = <TProjection>(
     throw operationProtocolError("invalid", "Operation pending buffer is full");
 
   if (!isReady(candidate, state.frontier)) {
-    let nextPendingIndex = pendingIndex;
-    for (const key of identityKeys(candidate))
-      nextPendingIndex = setAppliedNode(nextPendingIndex, key, fingerprint);
+    const nextPendingIndex = addIdentityKeys(
+      pendingIndex,
+      candidate,
+      fingerprint,
+    );
     const buffered: OperationApplyState<TProjection> = {
       ...state,
       pending: [...state.pending, candidate],
@@ -518,9 +525,11 @@ export const applyOperation = <TProjection>(
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
     ready = orderedReady(remaining, frontier);
   }
-  let nextPendingIndex = pendingIndex;
-  for (const key of identityKeys(candidate))
-    nextPendingIndex = setAppliedNode(nextPendingIndex, key, fingerprint);
+  const nextPendingIndex = addIdentityKeys(
+    pendingIndex,
+    candidate,
+    fingerprint,
+  );
   const nextState: OperationApplyState<TProjection> = {
     frontier,
     pending: remaining,

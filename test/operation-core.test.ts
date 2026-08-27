@@ -77,11 +77,24 @@ const foldOperations = (
   count: number,
   make: (index: number) => Operation,
   reduce: typeof reducer,
+  initial = initialApplyState(),
 ): OperationApplyState<Projection> => {
-  let state = initialApplyState();
+  let state = initial;
   for (let index = 0; index < count; index += 1)
     state = applyOperation(state, make(index), reduce);
   return state;
+};
+const measureAdmission = (
+  count: number,
+  initial: OperationApplyState<Projection>,
+  make: (index: number) => Operation,
+): {
+  readonly duration: number;
+  readonly state: OperationApplyState<Projection>;
+} => {
+  const started = performance.now();
+  const state = foldOperations(count, make, reducer, initial);
+  return { duration: performance.now() - started, state };
 };
 const applySequential = (count: number, reduce: typeof reducer) =>
   foldOperations(count, (index) => sequentialOperation("a", index + 1), reduce);
@@ -353,37 +366,31 @@ describe("operation core", () => {
   });
 
   test("keeps never-ready admission below quadratic scaling", () => {
-    const measure = (count: number): number => {
-      let state = initialApplyState();
-      const started = performance.now();
-      for (let index = 0; index < count; index += 1)
-        state = applyOperation(
-          state,
-          operation(`waiting-${index.toString()}`, 1n, { ghost: 1n }, "x"),
-          reducer,
-        );
-      expect(state.pending).toHaveLength(count);
-      return performance.now() - started;
-    };
+    const measure = (count: number) =>
+      measureAdmission(count, initialApplyState(), (index) =>
+        operation(`waiting-${index.toString()}`, 1n, { ghost: 1n }, "x"),
+      );
     measure(64);
     const smaller = measure(128);
     const larger = measure(512);
-    expect(larger / smaller).toBeLessThan(8);
+    expect(larger.state.pending).toHaveLength(512);
+    expect(larger.duration / smaller.duration).toBeLessThan(8);
   });
 
   test("keeps sequential admission below quadratic scaling", () => {
     const measure = (count: number): number => {
-      let state = testApplyState(0);
       const started = performance.now();
-      for (let sequence = 1; sequence <= count; sequence += 1) {
-        const item = operation(
-          "scale",
-          BigInt(sequence),
-          sequence === 1 ? {} : { scale: BigInt(sequence - 1) },
-          "x",
-        );
-        state = applyOperation(state, item, (value) => value + 1);
-      }
+      const state = Array.from({ length: count }).reduce<
+        OperationApplyState<number>
+      >(
+        (current, _, index) =>
+          applyOperation(
+            current,
+            sequentialOperation("scale", index + 1),
+            (value) => value + 1,
+          ),
+        testApplyState(0),
+      );
       expect(state.projection).toBe(count);
       return performance.now() - started;
     };
