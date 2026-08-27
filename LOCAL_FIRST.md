@@ -36,7 +36,12 @@
   per owner/partition, or a 4 MiB encoded checkpoint (HTTP 507 for either
   history capacity). These validation limits apply after the synchronization
   route has fully buffered and parsed its JSON body; stage 2 does not impose a
-  route-level request-byte bound. With 4 KiB payloads the 4 MiB checkpoint limit
+  route-level request-byte bound. Reads likewise have no route-level response-byte
+  bound: the fixed 256-envelope page and 16 KiB encoded-envelope limit permit up
+  to 4 MiB of envelope strings, plus JSON framing, in one response. A separate
+  byte cap would require either measuring encoded rows while paging or
+  serializing twice; the existing deterministic count and per-envelope caps are
+  retained for this temporary protocol instead. With 4 KiB payloads the 4 MiB
   is reached after about 300 operations, before the nominal 2,000-envelope cap,
   and this wedge is unrecoverable until the stability protocol permits
   compaction. These are temporary safety limits, not compaction. Reviewer
