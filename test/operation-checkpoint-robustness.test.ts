@@ -60,6 +60,37 @@ test("rejects pending identities conflicting with applied history", () => {
   );
 });
 
+const rejectPendingPair = (
+  second: (
+    pending: ReturnType<typeof testOperation>,
+  ) => ReturnType<typeof testOperation>,
+) => {
+  const pending = testOperation("b", 2n, { b: 1n }, "pending");
+  reject(
+    {
+      ...testApplyState<readonly string[]>([]),
+      pending: [pending, second(pending)],
+    },
+    /pending identity/,
+  );
+};
+
+test("rejects pending operation-ID equivocation", () => {
+  rejectPendingPair((pending) => ({
+    ...pending,
+    writerId: "c",
+    payload: "conflict",
+  }));
+});
+
+test("rejects pending writer-sequence equivocation", () => {
+  rejectPendingPair((pending) => ({
+    ...pending,
+    operationId: "other",
+    payload: "conflict",
+  }));
+});
+
 test("round trips replay depth beyond the former call-stack limit", () => {
   const depth = 25_000;
   const seed = state();

@@ -41,6 +41,7 @@ const PARENT_REPORT_MIGRATION_TIMESTAMP = 1_787_268_023_468;
 const TOOL_SETTINGS_MIGRATION_TIMESTAMP = 1_786_905_773_660;
 const CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP = 1_787_417_810_687;
 const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
+const OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP = 1_787_790_945_286;
 const OPERATION_STORAGE_MIGRATION_TIMESTAMP = 1_787_781_913_680;
 const ACCOUNT_EXPORT_INDEX_MIGRATION_TIMESTAMP = 1_787_659_701_217;
 const PROVIDER_REPLAY_MIGRATION_TIMESTAMP = 1_787_430_433_213;
@@ -123,11 +124,12 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   ).toContain("provider_replay");
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 8",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 9",
     )
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP,
     OPERATION_STORAGE_MIGRATION_TIMESTAMP,
     ACCOUNT_EXPORT_INDEX_MIGRATION_TIMESTAMP,
     PROVIDER_REPLAY_MIGRATION_TIMESTAMP,

@@ -292,6 +292,7 @@ const validateCheckpointConsistency = (
     ] = fingerprint;
   }
   const actualApplied = materializeApplied(state.applied);
+  const pendingIdentities: Record<string, string> = {};
   if (
     operationFingerprint(expectedFrontier) !==
       operationFingerprint(state.frontier) ||
@@ -306,11 +307,19 @@ const validateCheckpointConsistency = (
       `writer:${operation.writerId}:${operation.sequence.toString()}`,
     ];
     if (
-      identities.some(
-        (identity) =>
-          actualApplied[identity] !== undefined &&
-          actualApplied[identity] !== fingerprint,
-      )
+      identities.some((identity) => {
+        const appliedFingerprint = actualApplied[identity];
+        const pendingFingerprint = pendingIdentities[identity];
+        if (
+          (appliedFingerprint !== undefined &&
+            appliedFingerprint !== fingerprint) ||
+          (pendingFingerprint !== undefined &&
+            pendingFingerprint !== fingerprint)
+        )
+          return true;
+        pendingIdentities[identity] = fingerprint;
+        return false;
+      })
     )
       throw new Error("Invalid operation checkpoint pending identity");
   }

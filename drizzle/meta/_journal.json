@@ -288,6 +288,13 @@
       "when": 1787781913680,
       "tag": "0040_mixed_the_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 41,
+      "version": "6",
+      "when": 1787790945286,
+      "tag": "0041_magenta_puma",
+      "breakpoints": true
     }
   ]
 }

@@ -45,12 +45,13 @@
   `replayHead`, `replayCount`, `replayLastClock`, `baseProjection`, and
   `baseFrontier`; none of the replay fields is optional. Decoding fails closed
   unless replay count/head clock, derived frontier, applied identities, and
-  pending identities are mutually consistent. HLC components are non-negative
-  safe integers. The checkpoint codec currently supports only
-  `readonly string[]` projections; its exported types enforce that restriction
-  until a caller-supplied projection codec is introduced. Operation values
-  accept primitives, arrays, plain string-keyed objects, and valid Dates; other
-  object prototypes, symbol keys, and cycles are rejected. The auth bearer-token
+  pending identities are mutually consistent, including pending-against-pending
+  operation-ID and writer-sequence checks. HLC components are non-negative safe
+  integers. The checkpoint codec currently supports only `readonly string[]`
+  projections; its exported types enforce that restriction until a
+  caller-supplied projection codec is introduced. Operation values accept
+  primitives, arrays, plain string-keyed objects, and valid Dates; other object
+  prototypes, symbol keys, and cycles are rejected. The auth bearer-token
   `sessions`, encrypted `provider_credentials`, and setup-token-bearing
   `runners` tables are deliberately absent from operation replication because
   ordinary frames contain no secrets. The remaining closed allow-list was
@@ -67,18 +68,22 @@
   catch-up is background/non-fatal; its loopback app uses an ephemeral
   collision-free port unless configured. Stage-2 operation durability now stores
   owner-scoped, encoded envelopes with operation-ID and writer-sequence
-  equivocation checks, serves bounded ranges after a causal frontier, and
-  atomically replaces one encoded checkpoint per owner and partition. Engine
-  intake transactionally admits a bounded batch, drives the shared
-  `applyOperation` reducer path from a strictly decoded checkpoint, and persists
-  the complete projection, frontier, pending, identity, and replay state;
-  duplicates no-op and equivocation aborts the batch. The authenticated
+  equivocation checks scoped per partition, matching each partition’s
+  independent writer sequence space, serves bounded ranges after a causal
+  frontier, and atomically replaces one encoded checkpoint per owner and
+  partition. Engine intake transactionally admits a bounded batch, drives the
+  shared `applyOperation` reducer path from a strictly decoded checkpoint, and
+  persists the complete projection, frontier, pending, identity, and replay
+  state; duplicates no-op and equivocation aborts and rolls back the complete
+  batch. Client-caused intake scope and batch-bound failures are
+  protocol-invalid errors (HTTP 400), not internal errors. The authenticated
   owner-scoped `POST /api/local/operations` endpoint strictly accepts
   `{ ownerId, partition, envelopes }` with at most 512 encoded envelopes and
   returns only the advanced decimal-string frontier; durable server checkpoints
   stay server-side, while bounded envelope ranges provide resume and
-  anti-entropy. Every envelope binds both `entity.accountId` and `writerId` to
-  the authenticated account. Physical pairing is transcript-bound, five-minute,
+  anti-entropy in deterministic writer/sequence order before limiting. Every
+  envelope binds both `entity.accountId` and `writerId` to the authenticated
+  account. Physical pairing is transcript-bound, five-minute,
   one-use/rate-limited, constant-time checked; the browser grant and pairing
   transcript are never logged.
 

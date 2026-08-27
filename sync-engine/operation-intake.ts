@@ -8,6 +8,7 @@ import {
 import {
   MAX_OPERATION_BATCH_SIZE,
   applyOperation,
+  operationProtocolError,
   type CausalFrontier,
   type Operation,
   type OperationApplyState,
@@ -54,7 +55,10 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
       now: number,
     ): OperationIntakeResult {
       if (operations.length > MAX_OPERATION_BATCH_SIZE)
-        throw new Error("Operation intake batch is too large");
+        throw operationProtocolError(
+          "invalid",
+          "Operation intake batch is too large",
+        );
       return resources.database.transaction(() => {
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
@@ -63,7 +67,10 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             : decodeOperationCheckpoint(encoded);
         for (const operation of operations) {
           if (operation.partition !== partition)
-            throw new Error("Operation intake scope mismatch");
+            throw operationProtocolError(
+              "invalid",
+              "Operation intake scope mismatch",
+            );
           store.appendEnvelope(ownerId, operation, actorId, now);
           state = applyOperation(state, operation, reducer);
         }

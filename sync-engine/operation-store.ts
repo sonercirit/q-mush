@@ -57,6 +57,7 @@ export function createOperationStore(resources: OperationStoreResources) {
           .where(
             and(
               eq(operationEnvelopes.userId, ownerId),
+              eq(operationEnvelopes.partition, operation.partition),
               eq(operationEnvelopes.isDeleted, false),
               or(
                 eq(operationEnvelopes.operationId, operation.operationId),

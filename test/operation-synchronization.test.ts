@@ -16,9 +16,13 @@ const request = (body: unknown) =>
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   });
-const body = (ownerId = "owner-1", envelopes: readonly string[] = []) => ({
+const body = (
+  ownerId = "owner-1",
+  envelopes: readonly string[] = [],
+  partition: "non-session" | "session" = "non-session",
+) => ({
   ownerId,
-  partition: "non-session",
+  partition,
   envelopes,
 });
 const ownedOperation = (sequence = 1n) => ({
@@ -39,8 +43,15 @@ const handler = (authenticatedId?: string) => {
 };
 const synchronizationStatus = async (envelopes: readonly string[]) =>
   (await handler("owner-1")(request(body("owner-1", envelopes)))).status;
-const operationStatus = (operation: ReturnType<typeof ownedOperation>) =>
-  synchronizationStatus([encodeOperationEnvelope(operation)]);
+const operationResponse = (
+  operation: ReturnType<typeof ownedOperation>,
+  partition: "non-session" | "session" = "non-session",
+) =>
+  handler("owner-1")(
+    request(body("owner-1", [encodeOperationEnvelope(operation)], partition)),
+  );
+const operationStatus = async (operation: ReturnType<typeof ownedOperation>) =>
+  (await operationResponse(operation)).status;
 const repeatedOperationStatus = (length: number) =>
   synchronizationStatus(
     Array(length).fill(encodeOperationEnvelope(ownedOperation())),
@@ -107,9 +118,7 @@ test("operation synchronization rejects a well-formed batch above its maximum", 
 
 test("operation synchronization returns only the advanced frontier", async () => {
   const operation = ownedOperation();
-  const response = await handler("owner-1")(
-    request(body("owner-1", [encodeOperationEnvelope(operation)])),
-  );
+  const response = await operationResponse(operation);
   expect(response.status).toBe(200);
   const responseBody: unknown = await response.json();
   expect(isRecord(responseBody)).toBe(true);
@@ -119,6 +128,16 @@ test("operation synchronization returns only the advanced frontier", async () =>
 
 test("operation synchronization maps malformed envelopes to bad request", async () => {
   expect(await synchronizationStatus(["not-an-envelope"])).toBe(400);
+});
+
+test("operation synchronization maps partition scope mismatch to bad request", async () => {
+  const operation = ownedOperation(1n);
+  const response = await operationResponse(operation, "session");
+  const mismatchBody: unknown = await response.json();
+  expect({ status: response.status, body: mismatchBody }).toEqual({
+    status: 400,
+    body: { error: "Operation intake scope mismatch" },
+  });
 });
 
 test("operation synchronization maps identity equivocation to conflict", async () => {

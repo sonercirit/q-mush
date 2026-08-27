@@ -7,7 +7,11 @@ import {
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
 import { createOperationStore } from "../sync-engine/operation-store";
-import { testApplyState, testOperation } from "./operation-core-test-support";
+import {
+  testApplyState,
+  testOperation,
+  testSessionOperation,
+} from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
@@ -111,6 +115,45 @@ test("operation envelopes append idempotently and reject equivocation", () => {
   ).toThrow("Operation identity equivocation");
 });
 
+test("operation envelopes isolate identities by owner", () => {
+  const store = setup();
+  addSecondOwner();
+  const first = testOperation("writer-a", 1n, {}, "first");
+  const conflicting = { ...first, payload: { value: "other" } };
+  expect(conflicting.operationId).toBe(first.operationId);
+  expect([
+    append(store, "owner-1", first),
+    append(store, "owner-2", conflicting),
+  ]).toEqual([true, true]);
+  expect(store.readEnvelopeRange("owner-2", "non-session", {}, 10)).toEqual([
+    conflicting,
+  ]);
+});
+
+test("operation envelopes isolate identities by partition", () => {
+  const store = setup();
+  const first = testOperation("writer-a", BigInt(1), {}, "first");
+  const session = testSessionOperation("writer-a", 1n, "first");
+  expect([
+    append(store, "owner-1", first),
+    append(store, "owner-1", session),
+  ]).toEqual([true, true]);
+});
+
+test("operation envelope ranges have deterministic writer-sequence order", () => {
+  const store = setup();
+  const writerB = testOperation("writer-b", 1n, {}, "b");
+  const writerASecond = testOperation("writer-a", 2n, { "writer-a": 1n }, "a2");
+  const writerAFirst = testOperation("writer-a", 1n, {}, "a1");
+  for (const operation of [writerB, writerASecond, writerAFirst])
+    append(store, "owner-1", operation);
+  expect(readRange(store, {}, 3)).toEqual([
+    writerAFirst,
+    writerASecond,
+    writerB,
+  ]);
+});
+
 test("operation envelope ranges are owner scoped", () => {
   const store = setup();
   addSecondOwner();
@@ -126,12 +169,7 @@ test("operation envelope ranges are owner scoped", () => {
 test("operation envelope ranges are partition scoped", () => {
   const store = setup();
   const nonSession = testOperation("writer-a", 1n, {}, "non-session");
-  const sessionBase = testOperation("writer-b", 1n, {}, "session");
-  const session = {
-    ...sessionBase,
-    entity: { ...sessionBase.entity, type: "agent_sessions" },
-    partition: "session" as const,
-  };
+  const session = testSessionOperation("writer-b", 1n, "session");
   append(store, "owner-1", nonSession);
   append(store, "owner-1", session);
   expect(store.readEnvelopeRange("owner-1", "session", {}, 10)).toEqual([

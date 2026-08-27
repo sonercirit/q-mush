@@ -496,10 +496,10 @@ export const operationEnvelopes = sqliteTable(
   },
   (table) => [
     uniqueIndex("operation_envelopes_active_writer_sequence_unique")
-      .on(table.userId, table.writerId, table.sequence)
+      .on(table.userId, table.partition, table.writerId, table.sequence)
       .where(sql`NOT ${table.isDeleted}`),
     uniqueIndex("operation_envelopes_active_operation_id_unique")
-      .on(table.userId, table.operationId)
+      .on(table.userId, table.partition, table.operationId)
       .where(sql`NOT ${table.isDeleted}`),
     index("operation_envelopes_owner_partition_writer_index").on(
       table.userId,

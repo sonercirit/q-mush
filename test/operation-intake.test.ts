@@ -10,6 +10,7 @@ import { createOperationIntake } from "../sync-engine/operation-intake";
 import {
   appendOperationId,
   testOperation,
+  testSessionOperation,
 } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
@@ -45,20 +46,51 @@ const applyOperationCount = (
   intake: ReturnType<typeof createOperationIntake>,
   length: number,
 ) => apply(intake, operationsOfLength(length), 2);
-afterEach(harness.close);
-const apply = (
-  intake: ReturnType<typeof createOperationIntake>,
-  operations: Parameters<ReturnType<typeof createOperationIntake>["apply"]>[2],
+type Intake = ReturnType<typeof createOperationIntake>;
+type IntakeOperations = Parameters<Intake["apply"]>[2];
+const applyPartition = (
+  intake: Intake,
+  partition: "non-session" | "session",
+  operations: IntakeOperations,
   now: number,
 ) =>
   intake.apply(
     "owner-1",
-    "non-session",
+    partition,
     operations,
     appendOperationId,
     SYSTEM_ID,
     now,
   );
+afterEach(harness.close);
+const apply = (intake: Intake, operations: IntakeOperations, now: number) =>
+  applyPartition(intake, "non-session", operations, now);
+const expectPartitionSequenceSpaces = (
+  firstPartition: "non-session" | "session",
+) => {
+  const { intake } = setup();
+  const session = testSessionOperation("writer-a", 1n, "session");
+  const nonSession = testOperation("writer-a", 1n, {}, "workspace");
+  const byPartition = { "non-session": nonSession, session };
+  const secondPartition =
+    firstPartition === "session" ? "non-session" : "session";
+  expect(
+    applyPartition(intake, firstPartition, [byPartition[firstPartition]], 2)
+      .frontier,
+  ).toEqual({ "writer-a": 1n });
+  expect(
+    applyPartition(intake, secondPartition, [byPartition[secondPartition]], 3)
+      .frontier,
+  ).toEqual({ "writer-a": 1n });
+};
+
+test("operation intake advances non-session then session sequence spaces independently", () => {
+  expectPartitionSequenceSpaces("non-session");
+});
+
+test("operation intake advances session then non-session sequence spaces independently", () => {
+  expectPartitionSequenceSpaces("session");
+});
 
 test("operation intake is replay-idempotent", () => {
   const { database, intake, operation } = setupWithOperation();
@@ -94,12 +126,13 @@ test("operation intake retains out-of-order operations pending and drains them",
   ]);
 });
 
-test("operation intake rejects equivocation", () => {
-  const { intake, operation } = setupWithOperation();
-  apply(intake, [operation], 2);
-  expect(() =>
-    apply(intake, [{ ...operation, payload: { value: "other" } }], 3),
-  ).toThrow("equivocation");
+test("operation intake rejects equivocation and rolls back its batch", () => {
+  const { database, intake, operation } = setupWithOperation();
+  const conflicting = { ...operation, payload: { value: "other" } };
+  expect(() => apply(intake, [operation, conflicting], 3)).toThrow(
+    "equivocation",
+  );
+  expectNoStoredOperations(database);
 });
 
 test("operation intake rejects a mismatched operation partition", () => {

@@ -24,6 +24,19 @@ export const testOperation = (
     payload: { value },
   });
 
+export const testSessionOperation = (
+  writerId: string,
+  sequence: bigint,
+  value: string,
+): Operation => {
+  const operation = testOperation(writerId, sequence, {}, value);
+  return {
+    ...operation,
+    partition: "session",
+    entity: { ...operation.entity, type: "agent_sessions" },
+  };
+};
+
 export const testApplyState = <T>(projection: T): OperationApplyState<T> => ({
   frontier: {},
   pending: [],
