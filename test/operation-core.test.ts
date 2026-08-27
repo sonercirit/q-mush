@@ -79,18 +79,6 @@ const foldOperations = (
     state = applyOperation(state, make(index), reduce);
   return state;
 };
-const measureAdmission = (
-  count: number,
-  initial: OperationApplyState<Projection>,
-  make: (index: number) => Operation,
-): {
-  readonly duration: number;
-  readonly state: OperationApplyState<Projection>;
-} => {
-  const started = performance.now();
-  const state = foldOperations(count, make, reducer, initial);
-  return { duration: performance.now() - started, state };
-};
 const applySequential = (count: number, reduce: typeof reducer) =>
   foldOperations(count, (index) => sequentialOperation("a", index + 1), reduce);
 const appliedNodes = (
@@ -373,16 +361,29 @@ describe("operation core", () => {
     ).toThrow(/equivocation/);
   });
 
-  test("keeps never-ready admission below quadratic scaling", () => {
-    const measure = (count: number) =>
-      measureAdmission(count, initialApplyState(), (index) =>
-        operation(`waiting-${index.toString()}`, 1n, { ghost: 1n }, "x"),
-      );
-    measure(64);
-    const smaller = measure(128);
-    const larger = measure(512);
-    expect(larger.state.pending).toHaveLength(512);
-    expect(larger.duration / smaller.duration).toBeLessThan(8);
+  test("canonicalizes each never-ready candidate a bounded number of times", () => {
+    let payloadReads = 0;
+    const state = foldOperations(
+      MAX_OPERATION_BATCH_SIZE,
+      (index) => {
+        const payload = Object.defineProperty({}, "value", {
+          enumerable: true,
+          get: () => {
+            payloadReads += 1;
+            return "x";
+          },
+        });
+        return operation(
+          `waiting-${String(index)}`,
+          1n,
+          { ghost: 1n },
+          payload,
+        );
+      },
+      reducer,
+    );
+    expect(state.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE);
+    expect(payloadReads).toBe(MAX_OPERATION_BATCH_SIZE * 3);
   });
 
   test("preserves the applied index structurally during sequential admission", () => {
