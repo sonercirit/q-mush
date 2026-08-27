@@ -86,6 +86,15 @@ const expectSynchronizationStatus = async (
 const oversizedFrontierStatus = async (
   frontier: Readonly<Record<string, string>>,
 ) => (await handler("owner-1")(readRequest(frontier))).status;
+const decodedWriterIds = (value: unknown): readonly string[] => {
+  if (!isRecord(value)) throw new Error("Expected response record");
+  const envelopes = value["envelopes"];
+  if (!Array.isArray(envelopes)) throw new Error("Expected envelope array");
+  return envelopes
+    .filter((envelope): envelope is string => typeof envelope === "string")
+    .map(decodeOperationEnvelope)
+    .map(({ writerId }) => writerId);
+};
 const operationResponse = (
   operation: ReturnType<typeof ownedOperation>,
   partition: "non-session" | "session" = "non-session",
@@ -355,15 +364,7 @@ test("operation synchronization delivers a writer absent from the request fronti
     1,
   );
   const response = await synchronized(readRequest({ "owner-1": "1" }));
-  const responseBody: unknown = await response.json();
-  expect(isRecord(responseBody)).toBe(true);
-  if (!isRecord(responseBody)) throw new Error("Expected response record");
-  const envelopes = responseBody["envelopes"];
-  expect(Array.isArray(envelopes)).toBe(true);
-  if (!Array.isArray(envelopes)) throw new Error("Expected envelope array");
-  expect(
-    envelopes.map(decodeOperationEnvelope).map(({ writerId }) => writerId),
-  ).toEqual(["writer-b"]);
+  expect(decodedWriterIds(await response.json())).toEqual(["writer-b"]);
 });
 
 test("operation synchronization returns deterministic bounded missing pages", async () => {

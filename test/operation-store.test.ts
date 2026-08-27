@@ -49,6 +49,22 @@ const append = (
   ownerId: string,
   operation: ReturnType<typeof testOperation>,
 ) => store.appendEnvelope(ownerId, operation, SYSTEM_ID, 2);
+const readWriterIds = (
+  store: Store,
+  frontier: Readonly<Record<string, bigint>>,
+) =>
+  store
+    .readEnvelopes("owner-1", "non-session", frontier, 20)
+    .envelopes.map(({ writerId }) => writerId);
+const readFirstSequence = (store: Store) =>
+  store.readEnvelopes("owner-1", "non-session", {}, 1).envelopes[0]?.sequence;
+const appendOutOfOrder = (store: Store) => {
+  for (const [sequence, value] of [
+    [2n, "two"],
+    [1n, "one"],
+  ] as const)
+    append(store, "owner-1", testOperation("writer-a", sequence, {}, value));
+};
 const appendSequenceRange = (store: Store, count: number) => {
   for (let sequence = 1; sequence <= count; sequence += 1)
     append(
@@ -161,28 +177,22 @@ test("operation envelope pages preserve bigint and cross-writer ordering", () =>
 
 test("operation envelope frontier includes a writer absent from the frontier", () => {
   const store = setup();
-  append(store, "owner-1", testOperation("writer-a", 1n, {}, "a"));
-  append(store, "owner-1", testOperation("writer-b", 1n, {}, "b"));
-  expect(
-    store
-      .readEnvelopes("owner-1", "non-session", { "writer-a": 1n }, 20)
-      .envelopes.map(({ writerId }) => writerId),
-  ).toEqual(["writer-b"]);
+  for (const [writerId, value] of [
+    ["writer-a", "a"],
+    ["writer-b", "b"],
+  ] as const)
+    append(store, "owner-1", testOperation(writerId, 1n, {}, value));
+  expect(readWriterIds(store, { "writer-a": 1n })).toEqual(["writer-b"]);
 });
 
 test("operation envelope pages preserve explicit intra-writer sequence order", () => {
   const store = setup();
-  append(store, "owner-1", testOperation("writer-a", 2n, {}, "two"));
-  append(store, "owner-1", testOperation("writer-a", 1n, {}, "one"));
+  appendOutOfOrder(store);
   databaseForTest().$client.run(
     "DROP INDEX operation_envelopes_owner_partition_writer_index",
   );
   databaseForTest().$client.run("PRAGMA reverse_unordered_selects = ON");
-  expect(
-    store
-      .readEnvelopes("owner-1", "non-session", {}, 1)
-      .envelopes.map(({ sequence }) => sequence),
-  ).toEqual([1n]);
+  expect(readFirstSequence(store)).toBe(1n);
 });
 
 test("operation envelope frontier pages are complete and exactly bounded", () => {
