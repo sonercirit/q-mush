@@ -1,4 +1,4 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, asc, eq, ne, or, sql } from "drizzle-orm";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit";
 import type { AppDatabase } from "../shared/database";
 import {
@@ -13,6 +13,7 @@ import {
 } from "../shared/operation-checkpoint";
 import {
   operationFingerprint,
+  operationProtocolError,
   type CausalFrontier,
   type Operation,
   type OperationPartition,
@@ -71,7 +72,10 @@ export function createOperationStore(resources: OperationStoreResources) {
           )
           .all();
         if (existing.some((item) => item.fingerprint !== fingerprint))
-          throw new Error("Operation identity equivocation");
+          throw operationProtocolError(
+            "conflict",
+            "Operation identity equivocation",
+          );
         if (existing.length > 0) return false;
         transaction
           .insert(operationEnvelopes)
@@ -98,26 +102,24 @@ export function createOperationStore(resources: OperationStoreResources) {
     ): readonly Operation[] {
       if (!Number.isSafeInteger(limit) || limit < 1)
         throw new Error("Envelope range limit must be positive");
+      const beyondFrontier = Object.entries(frontier).map(
+        ([writerId, sequence]) =>
+          or(
+            ne(operationEnvelopes.writerId, writerId),
+            sql`cast(${operationEnvelopes.sequence} as integer) > ${sequence.toString()}`,
+          ),
+      );
       return database
         .select({ encodedEnvelope: operationEnvelopes.encodedEnvelope })
         .from(operationEnvelopes)
-        .where(activeEnvelopeScope(ownerId, partition))
+        .where(and(activeEnvelopeScope(ownerId, partition), ...beyondFrontier))
+        .orderBy(
+          asc(operationEnvelopes.writerId),
+          sql`cast(${operationEnvelopes.sequence} as integer)`,
+        )
+        .limit(limit)
         .all()
-        .map((row) => decodeOperationEnvelope(row.encodedEnvelope))
-        .filter(
-          (operation) =>
-            operation.sequence > (frontier[operation.writerId] ?? 0n),
-        )
-        .sort(
-          (left, right) =>
-            left.writerId.localeCompare(right.writerId) ||
-            (left.sequence < right.sequence
-              ? -1
-              : left.sequence > right.sequence
-                ? 1
-                : 0),
-        )
-        .slice(0, limit);
+        .map((row) => decodeOperationEnvelope(row.encodedEnvelope));
     },
     loadCheckpoint(
       ownerId: string,

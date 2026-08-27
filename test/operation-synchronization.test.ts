@@ -1,8 +1,5 @@
 import { expect, test } from "vitest";
-import {
-  decodeOperationCheckpoint,
-  encodeOperationEnvelope,
-} from "../shared/operation-checkpoint";
+import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_REMOTE_CLOCK_DRIFT_MS,
@@ -108,7 +105,7 @@ test("operation synchronization rejects a well-formed batch above its maximum", 
   expect(await repeatedOperationStatus(MAX_OPERATION_BATCH_SIZE + 1)).toBe(400);
 });
 
-test("operation synchronization returns advanced frontier and checkpoint", async () => {
+test("operation synchronization returns only the advanced frontier", async () => {
   const operation = ownedOperation();
   const response = await handler("owner-1")(
     request(body("owner-1", [encodeOperationEnvelope(operation)])),
@@ -117,11 +114,44 @@ test("operation synchronization returns advanced frontier and checkpoint", async
   const responseBody: unknown = await response.json();
   expect(isRecord(responseBody)).toBe(true);
   if (!isRecord(responseBody)) throw new Error("Expected response record");
-  const checkpoint = responseBody["checkpoint"];
-  expect(typeof checkpoint).toBe("string");
-  if (typeof checkpoint !== "string") throw new Error("Expected checkpoint");
-  expect(decodeOperationCheckpoint(checkpoint).frontier).toEqual({
-    "owner-1": 1n,
+  expect(responseBody).toEqual({ frontier: { "owner-1": "1" } });
+});
+
+test("operation synchronization maps malformed envelopes to bad request", async () => {
+  expect(await synchronizationStatus(["not-an-envelope"])).toBe(400);
+});
+
+test("operation synchronization maps identity equivocation to conflict", async () => {
+  const operation = ownedOperation();
+  const first = encodeOperationEnvelope(operation);
+  const changed = encodeOperationEnvelope({
+    ...operation,
+    payload: { value: "changed" },
   });
-  expect(responseBody["frontier"]).toEqual({ "owner-1": "1" });
+  expect(await synchronizationStatus([first, changed])).toBe(409);
+});
+
+test("operation synchronization maps storage faults to server errors", async () => {
+  const synchronized = handler("owner-1");
+  harness.close();
+  const originalError = console.error;
+  console.error = () => undefined;
+  try {
+    expect(await synchronized(request(body()))).toHaveProperty("status", 500);
+  } finally {
+    console.error = originalError;
+  }
+});
+
+test("operation synchronization response stays bounded as history grows", async () => {
+  const synchronized = handler("owner-1");
+  let responseLength = 0;
+  for (let sequence = 1; sequence <= 40; sequence += 1) {
+    const operation = ownedOperation(BigInt(sequence));
+    const response = await synchronized(
+      request(body("owner-1", [encodeOperationEnvelope(operation)])),
+    );
+    responseLength = (await response.text()).length;
+  }
+  expect(responseLength).toBeLessThan(100);
 });

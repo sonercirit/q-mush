@@ -352,6 +352,25 @@ describe("operation core", () => {
     ).toThrow(/equivocation/);
   });
 
+  test("keeps never-ready admission below quadratic scaling", () => {
+    const measure = (count: number): number => {
+      let state = initialApplyState();
+      const started = performance.now();
+      for (let index = 0; index < count; index += 1)
+        state = applyOperation(
+          state,
+          operation(`waiting-${index.toString()}`, 1n, { ghost: 1n }, "x"),
+          reducer,
+        );
+      expect(state.pending).toHaveLength(count);
+      return performance.now() - started;
+    };
+    measure(64);
+    const smaller = measure(128);
+    const larger = measure(512);
+    expect(larger / smaller).toBeLessThan(8);
+  });
+
   test("keeps sequential admission below quadratic scaling", () => {
     const measure = (count: number): number => {
       let state = testApplyState(0);

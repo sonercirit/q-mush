@@ -1,13 +1,15 @@
-import type { AppDatabase } from "../shared/database.ts";
-import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
+import type { AppDatabase } from "../shared/database";
+import { decodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
+  isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
   MAX_REMOTE_CLOCK_DRIFT_MS,
+  operationProtocolError,
   type OperationPartition,
-} from "../shared/operation-core.ts";
-import type { GoogleAuth } from "./auth.ts";
-import { parseRecordJsonForMethod } from "./http.ts";
-import { createOperationIntake } from "./operation-intake.ts";
+} from "../shared/operation-core";
+import type { GoogleAuth } from "./auth";
+import { parseRecordJsonForMethod } from "./http";
+import { createOperationIntake } from "./operation-intake";
 
 interface SynchronizationRequest {
   readonly ownerId: string;
@@ -57,7 +59,13 @@ export const createOperationSynchronization = (
     if (parsed.ownerId !== user.id)
       return new Response("Forbidden", { status: 403 });
     try {
-      const operations = parsed.envelopes.map(decodeOperationEnvelope);
+      const operations = parsed.envelopes.map((envelope) => {
+        try {
+          return decodeOperationEnvelope(envelope);
+        } catch {
+          throw operationProtocolError("invalid", "Invalid operation envelope");
+        }
+      });
       const now = Date.now();
       if (
         operations.some(
@@ -86,7 +94,6 @@ export const createOperationSynchronization = (
         now,
       );
       return Response.json({
-        checkpoint: result.encodedCheckpoint,
         frontier: Object.fromEntries(
           Object.entries(result.frontier).map(([writerId, sequence]) => [
             writerId,
@@ -94,10 +101,16 @@ export const createOperationSynchronization = (
           ]),
         ),
       });
-    } catch {
+    } catch (error) {
+      if (isOperationProtocolError(error))
+        return Response.json(
+          { error: error.message },
+          { status: error.operationError === "conflict" ? 409 : 400 },
+        );
+      console.error("Operation synchronization failed", error);
       return Response.json(
-        { error: "Invalid operation batch" },
-        { status: 400 },
+        { error: "Operation synchronization failed" },
+        { status: 500 },
       );
     }
   };
