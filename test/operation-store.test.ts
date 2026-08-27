@@ -58,7 +58,9 @@ const expectEnvelopeCount = (
   ownerId: string,
   partition: Partition,
   count: number,
-) => expect(store.countEnvelopes(ownerId, partition)).toBe(count);
+) => {
+  expect(store.countEnvelopes(ownerId, partition)).toBe(count);
+};
 const replaceCheckpoint = (
   store: Store,
   preservedOwner: string,

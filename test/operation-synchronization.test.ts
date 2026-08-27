@@ -47,7 +47,9 @@ const synchronizationStatus = async (envelopes: readonly string[]) =>
 const expectSynchronizationStatus = async (
   envelope: string,
   expected: number,
-) => expect(await synchronizationStatus([envelope])).toBe(expected);
+) => {
+  expect(await synchronizationStatus([envelope])).toBe(expected);
+};
 const operationResponse = (
   operation: ReturnType<typeof ownedOperation>,
   partition: "non-session" | "session" = "non-session",

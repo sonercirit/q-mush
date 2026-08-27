@@ -39,7 +39,9 @@ const storedRows = (
 const expectStoredEnvelopeCount = (
   database: ReturnType<typeof setup>["database"],
   count: number,
-) => expect(storedRows(database, operationEnvelopes)).toHaveLength(count);
+) => {
+  expect(storedRows(database, operationEnvelopes)).toHaveLength(count);
+};
 const expectNoStoredOperations = (
   database: ReturnType<typeof setup>["database"],
 ) => {
