@@ -1,4 +1,4 @@
-import { and, asc, eq, ne, or, sql } from "drizzle-orm";
+import { and, count, eq, or } from "drizzle-orm";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit";
 import type { AppDatabase } from "../shared/database";
 import {
@@ -8,13 +8,11 @@ import {
 import { createUuidV7, type IdGenerator } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
-  decodeOperationEnvelope,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
   operationFingerprint,
   operationProtocolError,
-  type CausalFrontier,
   type Operation,
   type OperationPartition,
 } from "../shared/operation-core";
@@ -95,32 +93,14 @@ export function createOperationStore(resources: OperationStoreResources) {
         return true;
       });
     },
-    readEnvelopeRange(
-      ownerId: string,
-      partition: OperationPartition,
-      frontier: CausalFrontier,
-      limit: number,
-    ): readonly Operation[] {
-      if (!Number.isSafeInteger(limit) || limit < 1)
-        throw new Error("Envelope range limit must be positive");
-      const beyondFrontier = Object.entries(frontier).map(
-        ([writerId, sequence]) =>
-          or(
-            ne(operationEnvelopes.writerId, writerId),
-            sql`cast(${operationEnvelopes.sequence} as integer) > ${sequence.toString()}`,
-          ),
+    countEnvelopes(ownerId: string, partition: OperationPartition): number {
+      return (
+        database
+          .select({ value: count() })
+          .from(operationEnvelopes)
+          .where(activeEnvelopeScope(ownerId, partition))
+          .get()?.value ?? 0
       );
-      return database
-        .select({ encodedEnvelope: operationEnvelopes.encodedEnvelope })
-        .from(operationEnvelopes)
-        .where(and(activeEnvelopeScope(ownerId, partition), ...beyondFrontier))
-        .orderBy(
-          asc(operationEnvelopes.writerId),
-          sql`cast(${operationEnvelopes.sequence} as integer)`,
-        )
-        .limit(limit)
-        .all()
-        .map((row) => decodeOperationEnvelope(row.encodedEnvelope));
     },
     loadCheckpoint(
       ownerId: string,

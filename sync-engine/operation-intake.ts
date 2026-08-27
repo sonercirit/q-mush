@@ -7,6 +7,8 @@ import {
 } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
+  MAX_OPERATION_CHECKPOINT_BYTES,
+  MAX_OWNER_PARTITION_OPERATIONS,
   applyOperation,
   operationProtocolError,
   type CausalFrontier,
@@ -60,6 +62,12 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           "Operation intake batch is too large",
         );
       return resources.database.transaction(() => {
+        const storedCount = store.countEnvelopes(ownerId, partition);
+        if (storedCount > MAX_OWNER_PARTITION_OPERATIONS - operations.length)
+          throw operationProtocolError(
+            "capacity",
+            "Operation history capacity reached",
+          );
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
@@ -75,6 +83,14 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           state = applyOperation(state, operation, reducer);
         }
         const encodedCheckpoint = encodeOperationCheckpoint(state);
+        if (
+          new TextEncoder().encode(encodedCheckpoint).byteLength >
+          MAX_OPERATION_CHECKPOINT_BYTES
+        )
+          throw operationProtocolError(
+            "capacity",
+            "Operation checkpoint capacity reached",
+          );
         store.storeCheckpoint(
           ownerId,
           partition,

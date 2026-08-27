@@ -22,9 +22,6 @@ import {
   applyOperation,
   classifyOperationPartition,
   compareClocks,
-  createHybridLogicalClock,
-  MAX_REMOTE_CLOCK_DRIFT_MS,
-  operationEntityPartitions,
 } from "../shared/operation-core";
 import { testApplyState, testOperation } from "./operation-core-test-support";
 
@@ -70,11 +67,8 @@ describe("operation frontier and clocks", () => {
       ["runner_workspaces", "non-session"],
       ["tool_settings", "non-session"],
     ] as const;
-    expect(operationEntityPartitions.session).toHaveLength(6);
-    expect(operationEntityPartitions["non-session"]).toHaveLength(9);
     for (const [entity, partition] of expectedEntities) {
       expect(classifyOperationPartition(entity)).toBe(partition);
-      expect(operationEntityPartitions[partition]).toContain(entity);
     }
     for (const excluded of ["sessions", "provider_credentials", "runners"])
       expect(() => classifyOperationPartition(excluded)).toThrow(
@@ -86,30 +80,6 @@ describe("operation frontier and clocks", () => {
     const schemaNames = new Set(replicatedTables.map(getTableName));
     for (const name of expectedEntities.map(([entity]) => entity))
       expect(schemaNames.has(name)).toBe(true);
-  });
-
-  test("covers every HLC receive winner and rejects far-future clocks", () => {
-    expect(MAX_REMOTE_CLOCK_DRIFT_MS).toBe(300_000);
-    const receive = (initial: number, now: number) =>
-      createHybridLogicalClock("a", initial).receive(
-        { physicalMs: 110, logical: 4, writerId: "b" },
-        now,
-      );
-    expect(receive(100, 105).logical).toBe(5);
-    expect(receive(110, 105)).toMatchObject({ physicalMs: 110, logical: 5 });
-    expect(receive(120, 105)).toMatchObject({ physicalMs: 120, logical: 1 });
-    expect(receive(100, 120)).toMatchObject({ physicalMs: 120, logical: 0 });
-    const nowWins = createHybridLogicalClock("a", 100);
-    expect(() =>
-      nowWins.receive(
-        {
-          physicalMs: 120 + MAX_REMOTE_CLOCK_DRIFT_MS + 1,
-          logical: 0,
-          writerId: "b",
-        },
-        120,
-      ),
-    ).toThrow(/future/);
   });
 
   test("uses a strict locale-independent clock and canonical key order", () => {

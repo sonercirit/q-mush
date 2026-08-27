@@ -208,25 +208,10 @@ const decodeOperation = (value: unknown): Operation => {
   return operation;
 };
 const decodeReplay = (value: unknown): ReplayEntry | undefined => {
-  if (Array.isArray(value)) {
-    let replay: ReplayEntry | undefined;
-    for (let index = value.length - 1; index >= 0; index -= 1)
-      replay = { operation: decodeOperation(value[index]), previous: replay };
-    return replay;
-  }
-  let encoded = value;
-  const operations: Operation[] = [];
-  while (encoded !== undefined) {
-    const entry = checkpointObject(encoded);
-    exactCheckpointKeys(entry, ["operation", "previous"]);
-    operations.push(decodeOperation(entry["operation"]));
-    encoded = entry["previous"];
-  }
+  if (!Array.isArray(value)) throw new Error("Invalid checkpoint replay");
   let replay: ReplayEntry | undefined;
-  for (let index = operations.length - 1; index >= 0; index -= 1) {
-    const operation = operations[index];
-    if (operation !== undefined) replay = { operation, previous: replay };
-  }
+  for (let index = value.length - 1; index >= 0; index -= 1)
+    replay = { operation: decodeOperation(value[index]), previous: replay };
   return replay;
 };
 const decodeEncoded = (encoded: string, label: string): unknown => {

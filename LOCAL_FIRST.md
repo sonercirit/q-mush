@@ -28,9 +28,17 @@
   measures 2,783,735 bytes (1,391.87 bytes/operation, 2.655 MiB total). Sizes
   use bytes per operation and binary MiB (1 MiB = 1,048,576 bytes). No safe
   compaction exists yet because a local replica cannot know whether a peer may
-  later send a valid earlier-clock operation. Unbounded history is an explicit
-  known gap; bounded compaction is deferred to stage 2 anti-entropy and durable
-  subscriber receipts, which can establish a stable boundary. Identity
+  later send a valid earlier-clock operation. The reachable authenticated route
+  therefore fails closed at 16 KiB per encoded envelope, 2,000 stored operations
+  per owner/partition, or a 4 MiB encoded checkpoint (HTTP 507 for either
+  history capacity); these are temporary safety limits, not compaction. Reviewer
+  in-memory single-operation measurements grew from 258 KB/9.8 ms at 200
+  operations through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200;
+  20,000 operations produced a 25.1 MB checkpoint whose decode alone took 564
+  ms. Bounded compaction remains deferred to stage 2 anti-entropy and durable
+  subscriber receipts, which can establish a stable boundary. Writer identity is
+  currently forced to the authenticated account ID; whether device keys should
+  introduce per-device writer IDs remains open for that later slice. Identity
   fingerprints remain plain enumerable checkpoint data: live state stores the
   serializable balanced identity tree, and checkpoint encoding (or
   `materializeApplied`) creates the flat record on demand. Sequential
@@ -75,12 +83,15 @@
   shared `applyOperation` reducer path from a strictly decoded checkpoint, and
   persists the complete projection, frontier, pending, identity, and replay
   state; duplicates no-op and equivocation aborts and rolls back the complete
-  batch. Client-caused intake scope and batch-bound failures are
-  protocol-invalid errors (HTTP 400), not internal errors. The authenticated
-  owner-scoped `POST /api/local/operations` endpoint strictly accepts
-  `{ ownerId, partition, envelopes }` with at most 512 encoded envelopes and
-  returns only the advanced decimal-string frontier; durable server checkpoints
-  stay server-side, while bounded envelope ranges provide resume and
+  batch. The envelope store exposes only append/count/checkpoint operations; the
+  unused cast-and-sort range reader was removed rather than retaining a
+  scan-prone API whose text sequence ordering was incorrect beyond SQLite's
+  signed 64-bit integer range. Client-caused intake scope and batch-bound
+  failures are protocol-invalid errors (HTTP 400), not internal errors. The
+  authenticated owner-scoped `POST /api/local/operations` endpoint strictly
+  accepts `{ ownerId, partition, envelopes }` with at most 512 encoded envelopes
+  and returns only the advanced decimal-string frontier; durable server
+  checkpoints stay server-side, while bounded envelope ranges provide resume and
   anti-entropy in deterministic writer/sequence order before limiting. Every
   envelope binds both `entity.accountId` and `writerId` to the authenticated
   account. Physical pairing is transcript-bound, five-minute,

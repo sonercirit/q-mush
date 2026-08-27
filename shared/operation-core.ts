@@ -1,5 +1,5 @@
 export interface OperationProtocolError extends Error {
-  readonly operationError: "invalid" | "conflict";
+  readonly operationError: "invalid" | "conflict" | "capacity";
 }
 export const operationProtocolError = (
   operationError: OperationProtocolError["operationError"],
@@ -11,7 +11,9 @@ export const isOperationProtocolError = (
 ): value is OperationProtocolError =>
   value instanceof Error &&
   "operationError" in value &&
-  (value.operationError === "invalid" || value.operationError === "conflict");
+  (value.operationError === "capacity" ||
+    value.operationError === "invalid" ||
+    value.operationError === "conflict");
 
 export type OperationPartition = "non-session" | "session";
 export type CausalFrontier = Readonly<Record<string, bigint>>;
@@ -40,12 +42,7 @@ export interface Operation<TPayload = unknown> {
   readonly payload: TPayload;
 }
 type OperationInput<TPayload> = Omit<Operation<TPayload>, "partition">;
-/** @public frontier relation type for replica ordering. */
-export type FrontierComparison =
-  "equal" | "ancestor" | "descendant" | "concurrent";
-
-/** @public entity partition catalog for schema routing. */
-export const operationEntityPartitions = {
+const operationEntityPartitions = {
   session: [
     "agent_sessions",
     "agent_session_operations",
@@ -139,45 +136,6 @@ export const compareClocks = (
   compareText(left.writerId, right.writerId);
 /** @public remote clock drift bound for authenticated intake. */
 export const MAX_REMOTE_CLOCK_DRIFT_MS = 5 * 60 * 1000;
-/** @public hybrid clock contract for replica writers. */
-export interface HybridLogicalClock {
-  readonly current: () => HybridTimestamp;
-  readonly tick: (physicalMs: number) => HybridTimestamp;
-  readonly receive: (
-    remote: HybridTimestamp,
-    physicalMs: number,
-  ) => HybridTimestamp;
-}
-/** @public hybrid clock constructor for replica writers. */
-export const createHybridLogicalClock = (
-  writerId: string,
-  initialPhysicalMs = 0,
-): HybridLogicalClock => {
-  let physicalMs = initialPhysicalMs;
-  let logical = 0;
-  const current = (): HybridTimestamp => ({ physicalMs, logical, writerId });
-  return {
-    current,
-    tick: (now) => {
-      logical = now > physicalMs ? 0 : logical + 1;
-      physicalMs = Math.max(physicalMs, now);
-      return current();
-    },
-    receive: (remote, now) => {
-      if (remote.physicalMs > now + MAX_REMOTE_CLOCK_DRIFT_MS)
-        throw new Error("Remote clock is too far in the future");
-      const nextPhysical = Math.max(physicalMs, remote.physicalMs, now);
-      if (nextPhysical === physicalMs && nextPhysical === remote.physicalMs)
-        logical = Math.max(logical, remote.logical) + 1;
-      else if (nextPhysical === physicalMs) logical += 1;
-      else if (nextPhysical === remote.physicalMs) logical = remote.logical + 1;
-      else logical = 0;
-      physicalMs = nextPhysical;
-      return current();
-    },
-  };
-};
-
 const frontierValue = (frontier: CausalFrontier, writerId: string): bigint =>
   frontier[writerId] ?? 0n;
 /** @public causal coverage predicate for anti-entropy. */
@@ -188,42 +146,6 @@ export const frontierCovers = (
   Object.entries(required).every(
     ([writerId, sequence]) => frontierValue(frontier, writerId) >= sequence,
   );
-/** @public frontier merge primitive for replica reconciliation. */
-export const mergeFrontiers = (
-  left: CausalFrontier,
-  right: CausalFrontier,
-): CausalFrontier => {
-  const merged: Record<string, bigint> = { ...left };
-  for (const [writerId, sequence] of Object.entries(right)) {
-    const previous = frontierValue(merged, writerId);
-    merged[writerId] = sequence > previous ? sequence : previous;
-  }
-  return merged;
-};
-/** @public frontier comparator for conflict detection. */
-export const compareFrontiers = (
-  left: CausalFrontier,
-  right: CausalFrontier,
-): FrontierComparison => {
-  const leftCovers = frontierCovers(left, right);
-  const rightCovers = frontierCovers(right, left);
-  if (leftCovers && rightCovers) return "equal";
-  if (leftCovers) return "descendant";
-  if (rightCovers) return "ancestor";
-  return "concurrent";
-};
-/** @public frontier advancement primitive for ordered writers. */
-export const advanceFrontier = (
-  frontier: CausalFrontier,
-  writerId: string,
-  sequence: bigint,
-): CausalFrontier => {
-  const previous = frontierValue(frontier, writerId);
-  if (sequence !== previous + 1n)
-    throw new Error(`Operation sequence gap for ${writerId}`);
-  return { ...frontier, [writerId]: sequence };
-};
-
 export interface ReplayEntry {
   readonly operation: Operation;
   readonly previous: ReplayEntry | undefined;
@@ -259,6 +181,10 @@ export interface OperationApplyState<TProjection> {
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
 }
+/** Live intake bounds until subscriber stability permits safe compaction. */
+export const MAX_OPERATION_ENVELOPE_BYTES = 16 * 1024;
+export const MAX_OWNER_PARTITION_OPERATIONS = 2_000;
+export const MAX_OPERATION_CHECKPOINT_BYTES = 4 * 1024 * 1024;
 /** @public batch admission bound shared with synchronization. */
 export const MAX_OPERATION_BATCH_SIZE = 512;
 const canonical = (value: unknown): string => {
@@ -404,11 +330,6 @@ export const materializeApplied = (
   const record: Record<string, string> = {};
   const visit = (node: AppliedIdentityNode | undefined): void => {
     if (node === undefined) return;
-    if (
-      (node.left !== undefined && node.left.priority < node.priority) ||
-      (node.right !== undefined && node.right.priority < node.priority)
-    )
-      throw new Error("Applied identity index invariant failed");
     visit(node.left);
     record[node.key] = node.value;
     visit(node.right);
@@ -416,17 +337,6 @@ export const materializeApplied = (
   visit(root);
   return record;
 };
-/** @public identity tree depth diagnostic for balance tests. */
-export const appliedIdentityDepth = (
-  root: AppliedIdentityNode | undefined,
-): number =>
-  root === undefined
-    ? 0
-    : 1 +
-      Math.max(
-        appliedIdentityDepth(root.left),
-        appliedIdentityDepth(root.right),
-      );
 const appliedFromRecord = (
   source: Readonly<Record<string, string>>,
 ): AppliedIdentityNode | undefined => {

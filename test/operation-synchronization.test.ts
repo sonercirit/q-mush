@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
+  MAX_OPERATION_ENVELOPE_BYTES,
   MAX_REMOTE_CLOCK_DRIFT_MS,
 } from "../shared/operation-core";
 import { isRecord } from "../shared/validation";
@@ -106,6 +107,11 @@ test("operation synchronization rejects remote clock drift in either direction",
         clock: { ...ownedOperation().clock, physicalMs },
       }),
     ).toBe(400);
+});
+
+test("operation synchronization rejects oversized envelopes", async () => {
+  const oversized = "x".repeat(MAX_OPERATION_ENVELOPE_BYTES + 1);
+  expect(await synchronizationStatus([oversized])).toBe(400);
 });
 
 test("operation synchronization accepts its maximum batch size", async () => {

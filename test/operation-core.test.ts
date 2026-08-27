@@ -3,16 +3,11 @@ import { describe, expect, test } from "vitest";
 import { testApplyState, testOperation } from "./operation-core-test-support";
 
 import {
-  advanceFrontier,
-  appliedIdentityDepth,
   applyOperation,
-  compareFrontiers,
-  createHybridLogicalClock,
   createOperation,
   frontierCovers,
   materializeApplied,
   MAX_OPERATION_BATCH_SIZE,
-  mergeFrontiers,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -98,6 +93,19 @@ const measureAdmission = (
 };
 const applySequential = (count: number, reduce: typeof reducer) =>
   foldOperations(count, (index) => sequentialOperation("a", index + 1), reduce);
+const appliedNodes = (
+  root: OperationApplyState<number>["applied"],
+): ReadonlySet<OperationApplyState<number>["applied"]> => {
+  const nodes = new Set<OperationApplyState<number>["applied"]>();
+  const visit = (node: OperationApplyState<number>["applied"]): void => {
+    if (node === undefined) return;
+    nodes.add(node);
+    visit(node.left);
+    visit(node.right);
+  };
+  visit(root);
+  return nodes;
+};
 const waitingForGhost = () => {
   const first = operation("a", 1n, { ghost: 1n }, "one");
   return {
@@ -377,28 +385,30 @@ describe("operation core", () => {
     expect(larger.duration / smaller.duration).toBeLessThan(8);
   });
 
-  test("keeps sequential admission below quadratic scaling", () => {
-    const measure = (count: number): number => {
-      const started = performance.now();
-      const state = Array.from({ length: count }).reduce<
-        OperationApplyState<number>
-      >(
-        (current, _, index) =>
-          applyOperation(
-            current,
-            sequentialOperation("scale", index + 1),
-            (value) => value + 1,
-          ),
-        testApplyState(0),
-      );
-      expect(state.projection).toBe(count);
-      return performance.now() - started;
-    };
-    measure(500);
-    const smaller = measure(4_000);
-    const larger = measure(8_000);
-    expect(larger / smaller).toBeLessThan(3.2);
-  }, 20_000);
+  test("preserves the applied index structurally during sequential admission", () => {
+    const before = Array.from({ length: 4_000 }).reduce<
+      OperationApplyState<number>
+    >(
+      (current, _, index) =>
+        applyOperation(
+          current,
+          sequentialOperation("scale", index + 1),
+          (value) => value + 1,
+        ),
+      testApplyState(0),
+    );
+    const previousNodes = appliedNodes(before.applied);
+    const after = applyOperation(
+      before,
+      sequentialOperation("scale", 4_001),
+      (value) => value + 1,
+    );
+    const retained = [...appliedNodes(after.applied)].filter((node) =>
+      previousNodes.has(node),
+    ).length;
+    expect(after.projection).toBe(4_001);
+    expect(retained / previousNodes.size).toBeGreaterThan(0.99);
+  });
 
   test("retains every applied identity through treap rotations", () => {
     let state = initialApplyState();
@@ -415,7 +425,6 @@ describe("operation core", () => {
         ])
         .sort(),
     );
-    expect(appliedIdentityDepth(state.applied)).toBeLessThanOrEqual(21);
     const original = operations[0];
     if (original === undefined) throw new Error("Missing operation fixture");
     expect(applyOperation(state, original, reducer)).toBe(state);
@@ -487,35 +496,13 @@ describe("operation core", () => {
     ).toEqual(resumed.projection);
   });
 
-  test("compares every frontier relation and rejects gaps and writer-sequence equivocation", () => {
-    expect(compareFrontiers({ a: 1n }, { a: 1n })).toBe("equal");
-    expect(compareFrontiers({ a: 1n }, { a: 2n })).toBe("ancestor");
-    expect(compareFrontiers({ a: 2n }, { a: 1n })).toBe("descendant");
-    expect(() => advanceFrontier({ a: 1n }, "a", 3n)).toThrow(/gap/);
-    const { first, waiting } = waitingForGhost();
+  test("buffers causal operations and rejects equivocation", () => {
+    const { first, waiting: ghostWaiting } = waitingForGhost();
     expectEquivocation(
-      waiting,
+      ghostWaiting,
       { ...first, operationId: "fresh", payload: { value: "changed" } },
       /writer:a:1/,
     );
-  });
-
-  test("ticks the local hybrid clock forward and logically", () => {
-    const clock = createHybridLogicalClock("a", 10);
-    expect([clock.tick(20), clock.tick(20), clock.tick(15)]).toEqual([
-      { physicalMs: 20, logical: 0, writerId: "a" },
-      { physicalMs: 20, logical: 1, writerId: "a" },
-      { physicalMs: 20, logical: 2, writerId: "a" },
-    ]);
-  });
-
-  test("compares, merges, advances, buffers, and rejects equivocation", () => {
-    expect(compareFrontiers({ a: 2n }, { b: 1n })).toBe("concurrent");
-    expect(mergeFrontiers({ a: 2n }, { a: 1n, c: 3n })).toEqual({
-      a: 2n,
-      c: 3n,
-    });
-    expect(advanceFrontier({ a: 2n }, "a", 3n)).toEqual({ a: 3n });
     const coversAncestor = frontierCovers({ a: 2n }, { a: 1n });
     expect(coversAncestor).toBe(true);
     const causalFirst = operation("a", 1n, {}, "one");

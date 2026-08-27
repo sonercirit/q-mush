@@ -5,7 +5,11 @@ import {
 } from "../shared/database/schema";
 import { SYSTEM_ID } from "../shared/ids";
 import { decodeOperationCheckpoint } from "../shared/operation-checkpoint";
-import { MAX_OPERATION_BATCH_SIZE } from "../shared/operation-core";
+import {
+  MAX_OPERATION_BATCH_SIZE,
+  MAX_OPERATION_CHECKPOINT_BYTES,
+  MAX_OWNER_PARTITION_OPERATIONS,
+} from "../shared/operation-core";
 import { createOperationIntake } from "../sync-engine/operation-intake";
 import {
   appendOperationId,
@@ -159,6 +163,65 @@ test("operation intake rejects a batch above its maximum size", () => {
   ).toThrow("batch is too large");
 });
 
+test("operation intake rejects owner-partition history above its capacity", () => {
+  const { intake } = setup();
+  for (
+    let offset = 0;
+    offset < MAX_OWNER_PARTITION_OPERATIONS;
+    offset += MAX_OPERATION_BATCH_SIZE
+  ) {
+    const length = Math.min(
+      MAX_OPERATION_BATCH_SIZE,
+      MAX_OWNER_PARTITION_OPERATIONS - offset,
+    );
+    apply(
+      intake,
+      operationsOfLength(length).map((operation, index) => ({
+        ...operation,
+        operationId: `operation-${String(offset + index)}`,
+        writerId: `writer-${String(offset + index)}`,
+      })),
+      2,
+    );
+  }
+  expect(() =>
+    apply(intake, [testOperation("overflow", 1n, {}, "one")], 3),
+  ).toThrow("history capacity reached");
+});
+
+test("operation intake history capacity is independent per partition", () => {
+  const { intake } = setup();
+  applyPartition(
+    intake,
+    "session",
+    [testSessionOperation("writer-a", 1n, "session")],
+    2,
+  );
+  expect(
+    apply(intake, [testOperation("writer-a", 1n, {}, "one")], 3).frontier,
+  ).toEqual({ "writer-a": 1n });
+});
+
+test("operation intake history capacity counts stored envelopes, not replays", () => {
+  const { database, intake, operation } = setupWithOperation();
+  apply(intake, [operation], 2);
+  apply(intake, [operation], 3);
+  expect(storedRows(database, operationEnvelopes)).toHaveLength(1);
+});
+
+test("operation intake rejects checkpoints above their byte capacity", () => {
+  const { database, intake } = setup();
+  const operation = testOperation(
+    "writer-a",
+    1n,
+    {},
+    "x".repeat(MAX_OPERATION_CHECKPOINT_BYTES),
+  );
+  expect(() => apply(intake, [operation], 2)).toThrow(
+    "checkpoint capacity reached",
+  );
+  expectNoStoredOperations(database);
+});
 test("operation intake rolls back envelopes when projection persistence fails", () => {
   const { database, intake, operation } = setupWithOperation();
   expect(() =>

@@ -3,6 +3,7 @@ import { decodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
+  MAX_OPERATION_ENVELOPE_BYTES,
   MAX_REMOTE_CLOCK_DRIFT_MS,
   operationProtocolError,
   type OperationPartition,
@@ -34,7 +35,12 @@ const parseRequest = (
     (partition !== "session" && partition !== "non-session") ||
     !Array.isArray(envelopes) ||
     envelopes.length > MAX_OPERATION_BATCH_SIZE ||
-    !envelopes.every((value) => typeof value === "string")
+    !envelopes.every(
+      (value) =>
+        typeof value === "string" &&
+        new TextEncoder().encode(value).byteLength <=
+          MAX_OPERATION_ENVELOPE_BYTES,
+    )
   )
     return undefined;
   return { ownerId, partition, envelopes };
@@ -105,7 +111,14 @@ export const createOperationSynchronization = (
       if (isOperationProtocolError(error))
         return Response.json(
           { error: error.message },
-          { status: error.operationError === "conflict" ? 409 : 400 },
+          {
+            status:
+              error.operationError === "conflict"
+                ? 409
+                : error.operationError === "capacity"
+                  ? 507
+                  : 400,
+          },
         );
       console.error("Operation synchronization failed", error);
       return Response.json(
