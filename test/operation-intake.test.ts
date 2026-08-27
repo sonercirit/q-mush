@@ -7,12 +7,12 @@ import { SYSTEM_ID } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
-  operationSequenceOrder,
 } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
+  operationSequenceOrder,
 } from "../shared/operation-core";
 import {
   createOperationIntake,
@@ -216,6 +216,9 @@ test("operation intake default path enforces the 2000-operation owner-partition 
   expect(
     apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,
   ).toEqual({ "final-writer": 1n });
+  expect(() =>
+    apply(intake, [testOperation("overflow-writer", 1n, {}, "overflow")], 3),
+  ).toThrow("history capacity reached");
 });
 
 test("operation intake rejects owner-partition history above its capacity", () => {

@@ -4,11 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
+import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
 import {
-  encodeOperationEnvelope,
+  createOperation,
   operationSequenceOrder,
-} from "../../shared/operation-checkpoint.ts";
-import { createOperation } from "../../shared/operation-core.ts";
+} from "../../shared/operation-core.ts";
 import { createOperationStore } from "../../sync-engine/operation-store.ts";
 
 const DRIZZLE_DIRECTORY = join(import.meta.dirname, "../../drizzle");

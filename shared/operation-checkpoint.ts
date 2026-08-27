@@ -228,11 +228,6 @@ const decodeEncoded = (encoded: string, label: string): unknown => {
     throw new Error(`Invalid ${label}`, { cause: error });
   }
 };
-export const operationSequenceOrder = (sequence: bigint): string => {
-  const decimal = sequence.toString();
-  return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
-};
-
 export const encodeOperationEnvelope = (operation: Operation): string =>
   JSON.stringify(encodeCheckpointValue(operation));
 export const decodeOperationEnvelope = (encoded: string): Operation =>

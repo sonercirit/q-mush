@@ -17,6 +17,7 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  OPERATION_SYNCHRONIZATION_PATH,
   promptPath,
   PROMPTS_PATH,
   providerCredentialDefaultPath,
@@ -240,6 +241,12 @@ async function expectProtectedApiAndOutsidePath(
 }
 
 describe("page server", () => {
+  test("routes operation synchronization requests through the production server", async () => {
+    const response = await sendRequest(OPERATION_SYNCHRONIZATION_PATH);
+
+    expect(response.status).toBe(401);
+  });
+
   test("server renders the home page", async () => {
     const { body, response } = await request("/");
 

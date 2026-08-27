@@ -10,11 +10,11 @@ import {
   decodeOperationCheckpoint,
   decodeOperationEnvelope,
   encodeOperationEnvelope,
-  operationSequenceOrder,
 } from "../shared/operation-checkpoint";
 import {
   operationFingerprint,
   operationProtocolError,
+  operationSequenceOrder,
   type Operation,
   type OperationPartition,
 } from "../shared/operation-core";

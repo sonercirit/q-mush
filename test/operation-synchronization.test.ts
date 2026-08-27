@@ -10,6 +10,7 @@ import {
   MAX_OWNER_PARTITION_OPERATIONS,
   MAX_REMOTE_CLOCK_DRIFT_MS,
 } from "../shared/operation-core";
+import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes";
 import { isRecord } from "../shared/validation";
 import { type OperationIntakeLimits } from "../sync-engine/operation-intake";
 import { createOperationStore } from "../sync-engine/operation-store";
@@ -19,7 +20,7 @@ import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
 const jsonRequest = (method: "POST" | "PUT", payload: unknown) =>
-  new Request("http://localhost/api/local/operations", {
+  new Request(`http://localhost${OPERATION_SYNCHRONIZATION_PATH}`, {
     method,
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),
@@ -341,11 +342,14 @@ test("operation synchronization accepts inclusive frontier component limits", as
 });
 
 test("operation synchronization rejects prototype frontier keys", async () => {
-  const read = new Request("http://localhost/api/local/operations", {
-    method: "PUT",
-    headers: { "content-type": "application/json" },
-    body: '{"ownerId":"owner-1","partition":"non-session","frontier":{"__proto__":"0"}}',
-  });
+  const read = new Request(
+    `http://localhost${OPERATION_SYNCHRONIZATION_PATH}`,
+    {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: '{"ownerId":"owner-1","partition":"non-session","frontier":{"__proto__":"0"}}',
+    },
+  );
   expect((await handler("owner-1")(read)).status).toBe(400);
 });
 
@@ -406,7 +410,9 @@ test("operation synchronization limits missing-envelope pages to 256", async () 
 
 test("operation synchronization advertises both supported methods", async () => {
   const response = await handler("owner-1")(
-    new Request("http://localhost/api/local/operations", { method: "GET" }),
+    new Request(`http://localhost${OPERATION_SYNCHRONIZATION_PATH}`, {
+      method: "GET",
+    }),
   );
   expect({
     status: response.status,

@@ -116,6 +116,11 @@ const validateOperationValue = (
   }
   seen.delete(value);
 };
+export const operationSequenceOrder = (sequence: bigint): string => {
+  const decimal = sequence.toString();
+  return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
+};
+
 export const createOperation = <TPayload>(
   input: OperationInput<TPayload>,
 ): Operation<TPayload> => {
