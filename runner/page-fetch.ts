@@ -5,6 +5,7 @@ import { isRecord } from "../shared/auth-model.ts";
 import { PAGE_FETCH_TOOL_NAME } from "../shared/page-fetch.ts";
 import { runBoundedPageOperation } from "./page-fetch-bounded.ts";
 import {
+  assertChromiumExecutableAccessible,
   chromiumArguments,
   chromiumChildIdentity,
   discoverChromiumExecutable,
@@ -43,6 +44,7 @@ const MAXIMUM_URL_LENGTH = 8_192;
 const MAXIMUM_REDIRECTS = 10;
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const SETTLE_MILLISECONDS = 100;
+// Root's TMPDIR may not be traversable by nobody; /tmp is the shared system location.
 const ROOT_CHROMIUM_TEMPORARY_DIRECTORY = "/tmp";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
@@ -408,55 +410,90 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
   }
 }
 
+type ChromiumProfileDependencies = Readonly<{
+  chownPath?:
+    ((path: string, uid: number, gid: number) => Promise<void>) | undefined;
+  createTemporaryDirectory?: ((prefix: string) => Promise<string>) | undefined;
+  removeProfile?: ((path: string) => Promise<void>) | undefined;
+}>;
+
+export async function createChromiumProfile(
+  identity: Awaited<ReturnType<typeof chromiumChildIdentity>>,
+  dependencies: ChromiumProfileDependencies = {},
+): Promise<string> {
+  const createTemporaryDirectory =
+    dependencies.createTemporaryDirectory ?? mkdtemp;
+  const profilePath = await createTemporaryDirectory(
+    join(
+      identity === undefined ? tmpdir() : ROOT_CHROMIUM_TEMPORARY_DIRECTORY,
+      "q-mush-page-fetch-",
+    ),
+  );
+  if (identity === undefined) {
+    return profilePath;
+  }
+  try {
+    await (dependencies.chownPath ?? chown)(
+      profilePath,
+      identity.uid,
+      identity.gid,
+    );
+    return profilePath;
+  } catch (error) {
+    await (dependencies.removeProfile ?? removeChromiumProfile)(profilePath);
+    throw new Error(
+      "Could not prepare an unprivileged Chromium profile for the root Q Mush runner",
+      { cause: error },
+    );
+  }
+}
+
+type ChromiumSpawn = (
+  command: string[],
+  options: Parameters<typeof Bun.spawn>[1],
+) => Bun.ReadableSubprocess;
+
+export function spawnChromium(
+  executablePath: string,
+  profilePath: string,
+  proxyPort: number,
+  identity: Awaited<ReturnType<typeof chromiumChildIdentity>>,
+  spawn: ChromiumSpawn = Bun.spawn,
+): Bun.ReadableSubprocess {
+  return spawn([...chromiumArguments(executablePath, profilePath, proxyPort)], {
+    cwd: profilePath,
+    detached: process.platform !== "win32",
+    env: {
+      HOME: profilePath,
+      LANG: process.env["LANG"] ?? "C.UTF-8",
+      PATH: process.env["PATH"] ?? "",
+      TMPDIR: profilePath,
+      XDG_CACHE_HOME: join(profilePath, "cache"),
+      XDG_CONFIG_HOME: join(profilePath, "config"),
+      XDG_DATA_HOME: join(profilePath, "data"),
+      XDG_STATE_HOME: join(profilePath, "state"),
+    },
+    ...(identity ?? {}),
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+}
+
 function defaultRenderer(
-  options: ChromiumDiscoveryOptions,
+  options: PageFetchDependencies,
   resolveAddress: PageAddressResolver,
 ): PageRenderer {
   return (request) =>
     retryChromiumStartup(async () => {
       const executablePath = await discoverChromiumExecutable(options);
       const identity = await chromiumChildIdentity();
-      const profilePath = await mkdtemp(
-        join(
-          identity === undefined ? tmpdir() : ROOT_CHROMIUM_TEMPORARY_DIRECTORY,
-          "q-mush-page-fetch-",
-        ),
-      );
-      if (identity !== undefined) {
-        try {
-          await chown(profilePath, identity.uid, identity.gid);
-        } catch (error) {
-          await removeChromiumProfile(profilePath);
-          throw new Error(
-            "Could not prepare an unprivileged Chromium profile for the root Q Mush runner",
-            { cause: error },
-          );
-        }
-      }
+      await assertChromiumExecutableAccessible(executablePath, identity);
+      const profilePath = await createChromiumProfile(identity);
       const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {
         const proxyPort = await proxy.start();
-        child = Bun.spawn(
-          [...chromiumArguments(executablePath, profilePath, proxyPort)],
-          {
-            cwd: profilePath,
-            detached: process.platform !== "win32",
-            env: {
-              HOME: profilePath,
-              LANG: process.env["LANG"] ?? "C.UTF-8",
-              PATH: process.env["PATH"] ?? "",
-              TMPDIR: profilePath,
-              XDG_CACHE_HOME: join(profilePath, "cache"),
-              XDG_CONFIG_HOME: join(profilePath, "config"),
-              XDG_DATA_HOME: join(profilePath, "data"),
-              XDG_STATE_HOME: join(profilePath, "state"),
-            },
-            ...(identity ?? {}),
-            stderr: "pipe",
-            stdout: "pipe",
-          },
-        );
+        child = spawnChromium(executablePath, profilePath, proxyPort, identity);
       } catch (error) {
         try {
           await proxy.close();

@@ -13,6 +13,7 @@ export default {
     "scripts/restart-development-server.ts!",
     "scripts/test-browser.ts!",
   ],
+  ignoreExportsUsedInFile: true,
   ignoreFiles: [
     "knip.config.ts",
     "headless-browser-provider.ts",

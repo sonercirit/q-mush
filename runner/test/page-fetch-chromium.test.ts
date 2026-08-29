@@ -1,5 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
-import { chromiumChildIdentity } from "../page-fetch-chromium.ts";
+import {
+  assertChromiumExecutableAccessible,
+  chromiumChildIdentity,
+} from "../page-fetch-chromium.ts";
 
 const EXPECTED_ERROR =
   "Chromium needs the unprivileged nobody account when the Q Mush runner is running as root";
@@ -56,5 +59,33 @@ describe("Chromium child identity", () => {
     await expect(
       simulatedRootIdentity(Promise.reject(new Error("read failed"))),
     ).rejects.toThrow(EXPECTED_ERROR);
+  });
+
+  test("keeps injected passwd reads independent of production memoization", async () => {
+    await expect(simulatedRootIdentity(PASSWD)).resolves.toBeDefined();
+    await expect(
+      simulatedRootIdentity("root:x:0:0:root:/root:/bin/sh"),
+    ).rejects.toThrow(EXPECTED_ERROR);
+  });
+
+  test("fails clearly when nobody cannot traverse the executable path", async () => {
+    const statPath = vi.fn((path: string) =>
+      Promise.resolve({
+        gid: 0,
+        mode: path === "/opt/private" ? 0o700 : 0o755,
+        uid: 0,
+      }),
+    );
+
+    await expect(
+      assertChromiumExecutableAccessible(
+        "/opt/private/chromium",
+        { gid: 65_534, uid: 65_534 },
+        { statPath },
+      ),
+    ).rejects.toThrow(
+      "not traversable and executable by the unprivileged nobody account",
+    );
+    expect(statPath).toHaveBeenCalledWith("/opt/private");
   });
 });

@@ -13,9 +13,11 @@ import {
   type UpstreamConnector,
 } from "../page-fetch-process.ts";
 import {
+  createChromiumProfile,
   createPageFetchRunnerTool,
   fetchRenderedPage,
   PAGE_FETCH_TOOL_NAME,
+  spawnChromium,
   type PageFetchDependencies,
 } from "../page-fetch.ts";
 
@@ -143,6 +145,52 @@ async function documentRequest(
 ): Promise<void> {
   await request.policy.document(request.url.toString());
 }
+
+describe("default Chromium renderer setup", () => {
+  test("owns root profiles under /tmp and cleans up ownership failures", async () => {
+    const createTemporaryDirectory = vi.fn(() =>
+      Promise.resolve("/tmp/profile"),
+    );
+    const chownPath = vi.fn(() => Promise.resolve());
+    const identity = { gid: 65_534, uid: 65_534 };
+    const profileDependencies = { chownPath, createTemporaryDirectory };
+    await expect(
+      createChromiumProfile(identity, profileDependencies),
+    ).resolves.toBe("/tmp/profile");
+    expect(createTemporaryDirectory).toHaveBeenCalledWith(
+      "/tmp/q-mush-page-fetch-",
+    );
+    expect(chownPath).toHaveBeenCalledWith("/tmp/profile", 65_534, 65_534);
+
+    const removeProfile = vi.fn(() => Promise.resolve());
+    await expect(
+      createChromiumProfile(
+        identity,
+        Object.assign(
+          { chownPath: () => Promise.reject(new Error("denied")) },
+          { createTemporaryDirectory, removeProfile },
+        ),
+      ),
+    ).rejects.toThrow("Could not prepare an unprivileged Chromium profile");
+    expect(removeProfile).toHaveBeenCalledWith("/tmp/profile");
+  });
+  test("passes the identity through the Chromium spawn options", () => {
+    let options: unknown;
+    const spawn = (...arguments_: Parameters<typeof Bun.spawn>) => {
+      options = arguments_[1];
+      return Bun.spawn(["true"], { stderr: "pipe", stdout: "pipe" });
+    };
+    const child = spawnChromium(
+      "/chromium",
+      "/tmp/profile",
+      1234,
+      { gid: 2345, uid: 1234 },
+      spawn,
+    );
+    expect(options).toMatchObject({ gid: 2345, uid: 1234 });
+    child.kill();
+  });
+});
 
 describe("page_fetch", () => {
   test("returns bounded browser-rendered content through its runner registration surface", async () => {

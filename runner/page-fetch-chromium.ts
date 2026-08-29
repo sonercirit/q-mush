@@ -1,5 +1,5 @@
 import { constants, existsSync, realpathSync } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
@@ -39,7 +39,13 @@ interface ChromiumIdentityDependencies {
   readonly readPasswd?: (() => Promise<string>) | undefined;
 }
 
-type ChromiumChildIdentity = Readonly<{ gid: number; uid: number }>;
+export type ChromiumChildIdentity = Readonly<{ gid: number; uid: number }>;
+
+type PathStat = Readonly<{ gid: number; mode: number; uid: number }>;
+
+interface ChromiumAccessDependencies {
+  readonly statPath?: ((path: string) => Promise<PathStat>) | undefined;
+}
 
 const ROOT_USER_ID = 0;
 const MAXIMUM_POSIX_ID = 0xffff_fffe;
@@ -74,6 +80,13 @@ function nobodyRequired(cause?: unknown): Error {
   return new Error(NOBODY_REQUIRED_MESSAGE, { cause });
 }
 
+let defaultPasswd: Promise<string> | undefined;
+
+function readDefaultPasswd(): Promise<string> {
+  defaultPasswd ??= readFile("/etc/passwd", "utf8");
+  return defaultPasswd;
+}
+
 export async function chromiumChildIdentity(
   dependencies: ChromiumIdentityDependencies = {},
 ): Promise<ChromiumChildIdentity | undefined> {
@@ -87,9 +100,7 @@ export async function chromiumChildIdentity(
 
   let passwd: string;
   try {
-    passwd = await (
-      dependencies.readPasswd ?? (() => readFile("/etc/passwd", "utf8"))
-    )();
+    passwd = await (dependencies.readPasswd ?? readDefaultPasswd)();
   } catch (error) {
     throw nobodyRequired(error);
   }
@@ -98,6 +109,47 @@ export async function chromiumChildIdentity(
     throw nobodyRequired();
   }
   return identity;
+}
+
+function identityCanExecute(
+  metadata: PathStat,
+  identity: ChromiumChildIdentity,
+): boolean {
+  const bit =
+    metadata.uid === identity.uid
+      ? 0o100
+      : metadata.gid === identity.gid
+        ? 0o010
+        : 0o001;
+  return (metadata.mode & bit) !== 0;
+}
+
+export async function assertChromiumExecutableAccessible(
+  executablePath: string,
+  identity: ChromiumChildIdentity | undefined,
+  dependencies: ChromiumAccessDependencies = {},
+): Promise<void> {
+  if (identity === undefined || process.platform === "win32") {
+    return;
+  }
+  const statPath = dependencies.statPath ?? stat;
+  const parts = executablePath.split("/").filter((part) => part.length > 0);
+  const paths = [
+    "/",
+    ...parts.map((_, index) => `/${parts.slice(0, index + 1).join("/")}`),
+  ];
+  try {
+    for (const path of paths) {
+      if (!identityCanExecute(await statPath(path), identity)) {
+        throw new Error("not accessible");
+      }
+    }
+  } catch (error) {
+    throw new Error(
+      `Chromium executable is not traversable and executable by the unprivileged nobody account (${executablePath})`,
+      { cause: error },
+    );
+  }
 }
 
 async function executableExists(path: string): Promise<boolean> {
