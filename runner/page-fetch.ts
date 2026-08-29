@@ -5,10 +5,10 @@ import { isRecord } from "../shared/auth-model.ts";
 import { PAGE_FETCH_TOOL_NAME } from "../shared/page-fetch.ts";
 import { runBoundedPageOperation } from "./page-fetch-bounded.ts";
 import {
-  assertChromiumExecutableAccessible,
   chromiumArguments,
-  chromiumChildIdentity,
   discoverChromiumExecutable,
+  prepareChromium,
+  type ChromiumChildIdentity,
   type ChromiumDiscoveryOptions,
 } from "./page-fetch-chromium.ts";
 import {
@@ -418,7 +418,7 @@ type ChromiumProfileDependencies = Readonly<{
 }>;
 
 export async function createChromiumProfile(
-  identity: Awaited<ReturnType<typeof chromiumChildIdentity>>,
+  identity: ChromiumChildIdentity | undefined,
   dependencies: ChromiumProfileDependencies = {},
 ): Promise<string> {
   const createTemporaryDirectory =
@@ -457,7 +457,7 @@ export function spawnChromium(
   executablePath: string,
   profilePath: string,
   proxyPort: number,
-  identity: Awaited<ReturnType<typeof chromiumChildIdentity>>,
+  identity: ChromiumChildIdentity | undefined,
   spawn: ChromiumSpawn = Bun.spawn,
 ): Bun.ReadableSubprocess {
   return spawn([...chromiumArguments(executablePath, profilePath, proxyPort)], {
@@ -486,9 +486,10 @@ function defaultRenderer(
   return (request) =>
     retryChromiumStartup(async () => {
       const executablePath = await discoverChromiumExecutable(options);
-      const identity = await chromiumChildIdentity();
-      await assertChromiumExecutableAccessible(executablePath, identity);
-      const profilePath = await createChromiumProfile(identity);
+      const { identity, profilePath } = await prepareChromium(
+        executablePath,
+        createChromiumProfile,
+      );
       const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {

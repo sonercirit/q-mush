@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from "vitest";
 import {
   assertChromiumExecutableAccessible,
   chromiumChildIdentity,
+  createPasswdReader,
 } from "../page-fetch-chromium.ts";
 
 const EXPECTED_ERROR =
@@ -61,11 +62,17 @@ describe("Chromium child identity", () => {
     ).rejects.toThrow(EXPECTED_ERROR);
   });
 
-  test("keeps injected passwd reads independent of production memoization", async () => {
-    await expect(simulatedRootIdentity(PASSWD)).resolves.toBeDefined();
-    await expect(
-      simulatedRootIdentity("root:x:0:0:root:/root:/bin/sh"),
-    ).rejects.toThrow(EXPECTED_ERROR);
+  test("retries failed passwd reads and caches only success", async () => {
+    const readPasswdFile = vi
+      .fn<() => Promise<string>>()
+      .mockRejectedValueOnce(new Error("transient read failure"))
+      .mockResolvedValue(PASSWD);
+    const readPasswd = createPasswdReader(readPasswdFile);
+
+    await expect(readPasswd()).rejects.toThrow("transient read failure");
+    await expect(readPasswd()).resolves.toBe(PASSWD);
+    await expect(readPasswd()).resolves.toBe(PASSWD);
+    expect(readPasswdFile).toHaveBeenCalledTimes(2);
   });
 
   test("fails clearly when nobody cannot traverse the executable path", async () => {
@@ -84,8 +91,21 @@ describe("Chromium child identity", () => {
         { statPath },
       ),
     ).rejects.toThrow(
-      "not traversable and executable by the unprivileged nobody account",
+      "not stat-accessible for traversal and executable reading by the unprivileged nobody account",
     );
     expect(statPath).toHaveBeenCalledWith("/opt/private");
+  });
+
+  test("requires read and execute bits on the Chromium executable", async () => {
+    const statPath = vi.fn((path: string) => {
+      const mode = path.endsWith("chromium") ? 0o711 : 0o755;
+      return Promise.resolve({ gid: 0, mode, uid: 0 });
+    });
+    const accessibility = assertChromiumExecutableAccessible(
+      "/usr/bin/chromium",
+      { gid: 65_534, uid: 65_534 },
+      { statPath },
+    );
+    await expect(accessibility).rejects.toThrow("executable reading");
   });
 });

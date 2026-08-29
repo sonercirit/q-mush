@@ -1,6 +1,6 @@
 import { connect, Socket } from "node:net";
 import { describe, expect, test, vi } from "vitest";
-import { chromiumArguments } from "../page-fetch-chromium.ts";
+import { chromiumArguments, prepareChromium } from "../page-fetch-chromium.ts";
 import {
   MAXIMUM_RESPONSE_BYTES,
   type PageCapture,
@@ -164,13 +164,11 @@ describe("default Chromium renderer setup", () => {
 
     const removeProfile = vi.fn(() => Promise.resolve());
     await expect(
-      createChromiumProfile(
-        identity,
-        Object.assign(
-          { chownPath: () => Promise.reject(new Error("denied")) },
-          { createTemporaryDirectory, removeProfile },
-        ),
-      ),
+      createChromiumProfile(identity, {
+        chownPath: () => Promise.reject(new Error("denied")),
+        createTemporaryDirectory,
+        removeProfile,
+      }),
     ).rejects.toThrow("Could not prepare an unprivileged Chromium profile");
     expect(removeProfile).toHaveBeenCalledWith("/tmp/profile");
   });
@@ -188,6 +186,45 @@ describe("default Chromium renderer setup", () => {
       spawn,
     );
     expect(options).toMatchObject({ gid: 2345, uid: 1234 });
+    child.kill();
+  });
+  test("sequences identity, accessibility, profile, and spawn identity", async () => {
+    const calls: string[] = [];
+    const identity = { gid: 65_534, uid: 65_534 };
+    const setup = await prepareChromium(
+      "/chromium",
+      (receivedIdentity) => {
+        calls.push(`profile:${String(receivedIdentity === identity)}`);
+        return Promise.resolve("/tmp/profile");
+      },
+      {
+        resolveIdentity: () => {
+          calls.push("identity");
+          return Promise.resolve(identity);
+        },
+        assertAccessible: (_path, receivedIdentity) => {
+          calls.push(`accessible:${String(receivedIdentity === identity)}`);
+          return Promise.resolve();
+        },
+      },
+    );
+    let spawnOptions: Parameters<typeof Bun.spawn>[1] | undefined;
+    const setupProfile = setup.profilePath;
+    const child = spawnChromium(
+      "/chromium",
+      setupProfile,
+      1234,
+      setup.identity,
+      (command, options) => {
+        void command;
+        spawnOptions = options;
+        const executable = ["true"];
+        return Bun.spawn(executable, { stderr: "pipe", stdout: "pipe" });
+      },
+    );
+
+    expect(calls).toEqual(["identity", "accessible:true", "profile:true"]);
+    expect(spawnOptions).toMatchObject(identity);
     child.kill();
   });
 });
