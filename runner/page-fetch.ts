@@ -44,7 +44,6 @@ const MAXIMUM_URL_LENGTH = 8_192;
 const MAXIMUM_REDIRECTS = 10;
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const SETTLE_MILLISECONDS = 100;
-const ROOT_CHROMIUM_TEMPORARY_DIRECTORY = "/tmp";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
 type PageCapture = Pick<PageRenderRequest, "captureExpression" | "url">;
@@ -405,7 +404,7 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
     }
     await reader.cancel();
   } catch {
-    // Chromium can close its pipes during cleanup.
+    // Chromium may close its pipes.
   }
 }
 
@@ -416,6 +415,7 @@ type ChromiumProfileDependencies = Readonly<{
   removeProfile?: ((path: string) => Promise<void>) | undefined;
 }>;
 
+/** @public Test seam. */
 export async function createChromiumProfile(
   identity: ChromiumChildIdentity | undefined,
   dependencies: ChromiumProfileDependencies = {},
@@ -423,10 +423,7 @@ export async function createChromiumProfile(
   const createTemporaryDirectory =
     dependencies.createTemporaryDirectory ?? mkdtemp;
   const profilePath = await createTemporaryDirectory(
-    join(
-      identity === undefined ? tmpdir() : ROOT_CHROMIUM_TEMPORARY_DIRECTORY,
-      "q-mush-page-fetch-",
-    ),
+    join(identity === undefined ? tmpdir() : "/tmp", "q-mush-page-fetch-"),
   );
   if (identity === undefined) {
     return profilePath;
@@ -447,12 +444,16 @@ export async function createChromiumProfile(
   }
 }
 
-function spawnChromium(
+/** @public Test seam. */
+export function spawnChromium(
   executablePath: string,
   profilePath: string,
   proxyPort: number,
   identity: ChromiumChildIdentity | undefined,
-  spawn: typeof Bun.spawn = Bun.spawn,
+  spawn: (
+    command: string[],
+    options: Parameters<typeof Bun.spawn>[1],
+  ) => Bun.ReadableSubprocess = Bun.spawn,
 ): Bun.ReadableSubprocess {
   return spawn([...chromiumArguments(executablePath, profilePath, proxyPort)], {
     cwd: profilePath,
@@ -480,6 +481,7 @@ interface ChromiumLaunchDependencies {
   readonly spawn?: typeof spawnChromium;
 }
 
+/** @public Test seam. */
 export function defaultRenderer(
   options: ChromiumDiscoveryOptions,
   resolveAddress: PageAddressResolver,
@@ -603,7 +605,7 @@ function createPageCapture(arguments_: ToolArguments): PageCapture {
   };
 }
 
-/** @public Low-level page fetch entry retained for deterministic integration tests. */
+/** @public Integration test seam. */
 export async function fetchRenderedPage(
   arguments_: ToolArguments,
   signal?: AbortSignal,

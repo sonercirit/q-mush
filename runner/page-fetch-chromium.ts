@@ -80,6 +80,7 @@ function nobodyRequired(cause?: unknown): Error {
   return new Error(NOBODY_REQUIRED_MESSAGE, { cause });
 }
 
+/** @public Test-only passwd seam. */
 export function createPasswdReader(
   readPasswdFile: () => Promise<string>,
 ): () => Promise<string> {

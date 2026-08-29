@@ -13,10 +13,6 @@ export default {
     "scripts/restart-development-server.ts!",
     "scripts/test-browser.ts!",
   ],
-  ignoreIssues: {
-    "runner/page-fetch-chromium.ts": ["exports"],
-    "runner/page-fetch.ts": ["exports"],
-  },
   ignoreFiles: [
     "knip.config.ts",
     "headless-browser-provider.ts",

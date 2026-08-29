@@ -18,6 +18,7 @@ import {
   defaultRenderer,
   fetchRenderedPage,
   PAGE_FETCH_TOOL_NAME,
+  spawnChromium,
   type PageFetchDependencies,
 } from "../page-fetch.ts";
 
@@ -147,6 +148,40 @@ async function documentRequest(
 }
 
 describe("default Chromium renderer setup", () => {
+  test("passes the prepared identity only to Bun.spawn options", () => {
+    const options: unknown[] = [];
+    const spawn = vi.fn(
+      (
+        _command: string[],
+        receivedOptions: Parameters<typeof Bun.spawn>[1],
+      ) => {
+        options[options.length] = receivedOptions;
+        return Bun.spawn(["true"], { stderr: "pipe", stdout: "pipe" });
+      },
+    );
+
+    const privileged = spawnChromium(
+      "/chromium",
+      "/tmp/profile",
+      12_345,
+      { gid: 65_534, uid: 65_534 },
+      spawn,
+    );
+    privileged.kill();
+    const ordinary = spawnChromium(
+      "/chromium",
+      "/tmp/profile",
+      12_345,
+      undefined,
+      spawn,
+    );
+    ordinary.kill();
+
+    expect(options[0]).toMatchObject({ gid: 65_534, uid: 65_534 });
+    expect(options[1]).not.toHaveProperty("gid");
+    expect(options[1]).not.toHaveProperty("uid");
+  });
+
   test("owns root profiles under /tmp and cleans up ownership failures", async () => {
     const createTemporaryDirectory = vi.fn(() =>
       Promise.resolve("/tmp/profile"),

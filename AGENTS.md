@@ -249,9 +249,9 @@
   sandbox: on Linux a root runner launches only Chromium as `/etc/passwd`'s
   non-root `nobody` identity with an owned `/tmp` profile; other `nobody`
   processes share that ephemeral profile trust boundary. It fails closed if that
-  account is unavailable. Executable accessibility preflight is a best-effort
-  stat check of the launcher path; deeper wrapper or payload failures surface as
-  Chromium startup errors.
+  account is unavailable. Executable accessibility preflight best-effort stats
+  the launcher and ancestor traversal permissions; deeper wrapper or payload
+  failures surface as Chromium startup errors.
 - Knip severities don't activate default-off issue types; keep the included list
   complete. Don't run the full test suite with lint/repo scans; tooling-policy
   tests probe `solid`.
