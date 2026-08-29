@@ -79,6 +79,7 @@ test("rejects pending operation-ID equivocation", () => {
   rejectPendingPair((pending) => ({
     ...pending,
     writerId: "c",
+    clock: { ...pending.clock, writerId: "c" },
     payload: "conflict",
   }));
 });

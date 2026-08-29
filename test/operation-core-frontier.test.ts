@@ -22,6 +22,7 @@ import {
   applyOperation,
   classifyOperationPartition,
   compareClocks,
+  frontierCovers,
 } from "../shared/operation-core";
 import { testApplyState, testOperation } from "./operation-core-test-support";
 
@@ -80,6 +81,14 @@ describe("operation frontier and clocks", () => {
     const schemaNames = new Set(replicatedTables.map(getTableName));
     for (const name of expectedEntities.map(([entity]) => entity))
       expect(schemaNames.has(name)).toBe(true);
+  });
+
+  test("advances prototype-named writer keys as own frontier properties", () => {
+    const item = operation("__proto__", 1n, {}, "one");
+    const state = applyOperation(initialApplyState(), item, reducer);
+    expect(Object.hasOwn(state.frontier, "__proto__")).toBe(true);
+    expect(state.frontier["__proto__"]).toBe(1n);
+    expect(frontierCovers(state.frontier, { __proto__: 1n })).toBe(true);
   });
 
   test("uses a strict locale-independent clock and canonical key order", () => {

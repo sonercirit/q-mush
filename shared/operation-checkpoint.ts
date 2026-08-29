@@ -3,6 +3,7 @@ import {
   materializeApplied,
   operationFingerprint,
   restoreAppliedIdentityIndex,
+  validateOperationWriterClocks,
   type HybridTimestamp,
   type Operation,
   type OperationApplyState,
@@ -262,6 +263,11 @@ const clocksEqual = (
     : left.physicalMs === right?.physicalMs &&
       left.logical === right.logical &&
       left.writerId === right.writerId;
+const nullPrototypeBigintRecord = (): Record<string, bigint> => {
+  const record: Record<string, bigint> = {};
+  Object.setPrototypeOf(record, null);
+  return record;
+};
 const validateCheckpointConsistency = (
   state: OperationApplyState<OperationCheckpointProjection>,
 ): void => {
@@ -271,18 +277,29 @@ const validateCheckpointConsistency = (
     !clocksEqual(state.replayLastClock, state.replayHead?.operation.clock)
   )
     throw new Error("Invalid operation checkpoint replay metadata");
-  const expectedFrontier: Record<string, bigint> = { ...state.baseFrontier };
+  const expectedFrontier = Object.assign(
+    nullPrototypeBigintRecord(),
+    state.baseFrontier,
+  );
   const expectedApplied: Record<string, string> = {};
   for (const operation of replay) {
-    const previous = expectedFrontier[operation.writerId] ?? 0n;
+    const previous = Object.hasOwn(expectedFrontier, operation.writerId)
+      ? (expectedFrontier[operation.writerId] ?? 0n)
+      : 0n;
     if (operation.sequence > previous)
-      expectedFrontier[operation.writerId] = operation.sequence;
+      Object.defineProperty(expectedFrontier, operation.writerId, {
+        configurable: true,
+        enumerable: true,
+        value: operation.sequence,
+        writable: true,
+      });
     const fingerprint = operationFingerprint(operation);
     expectedApplied[`id:${operation.operationId}`] = fingerprint;
     expectedApplied[
       `writer:${operation.writerId}:${operation.sequence.toString()}`
     ] = fingerprint;
   }
+  validateOperationWriterClocks([...replay, ...state.pending]);
   const actualApplied = materializeApplied(state.applied);
   const pendingIdentities: Record<string, string> = {};
   if (

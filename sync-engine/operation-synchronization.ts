@@ -1,8 +1,5 @@
 import type { AppDatabase } from "../shared/database";
-import {
-  decodeOperationEnvelope,
-  encodeOperationEnvelope,
-} from "../shared/operation-checkpoint";
+import { decodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
@@ -145,14 +142,14 @@ export const createOperationSynchronization = (
       return new Response("Forbidden", { status: 403 });
     try {
       if ("frontier" in parsed) {
-        const page = store.readEnvelopes(
+        const page = store.readEncodedEnvelopes(
           user.id,
           parsed.partition,
           parsed.frontier,
           MAX_ENVELOPE_PAGE_SIZE,
         );
         return Response.json({
-          envelopes: page.envelopes.map(encodeOperationEnvelope),
+          envelopes: page.envelopes,
           hasMore: page.hasMore,
         });
       }
@@ -168,7 +165,8 @@ export const createOperationSynchronization = (
         operations.some(
           (operation) =>
             operation.entity.accountId !== user.id ||
-            operation.writerId !== user.id,
+            operation.writerId !== user.id ||
+            operation.clock.writerId !== operation.writerId,
         )
       )
         return new Response("Forbidden", { status: 403 });

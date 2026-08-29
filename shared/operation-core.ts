@@ -127,6 +127,17 @@ export const createOperation = <TPayload>(
   if (!Number.isInteger(input.schemaVersion) || input.schemaVersion < 1)
     throw new Error("schemaVersion must be positive");
   if (input.sequence < 1n) throw new Error("sequence must be positive");
+  if (
+    !Number.isSafeInteger(input.clock.physicalMs) ||
+    input.clock.physicalMs < 0 ||
+    !Number.isSafeInteger(input.clock.logical) ||
+    input.clock.logical < 0
+  )
+    throw new Error(
+      "Operation clock components must be non-negative safe integers",
+    );
+  if (input.clock.writerId !== input.writerId)
+    throw new Error("Operation clock writer must match envelope writer");
   validateOperationValue(input);
   return { ...input, partition: classifyOperationPartition(input.entity.type) };
 };
@@ -142,7 +153,7 @@ export const compareClocks = (
 /** @public remote clock drift bound for authenticated intake. */
 export const MAX_REMOTE_CLOCK_DRIFT_MS = 5 * 60 * 1000;
 const frontierValue = (frontier: CausalFrontier, writerId: string): bigint =>
-  frontier[writerId] ?? 0n;
+  Object.hasOwn(frontier, writerId) ? (frontier[writerId] ?? 0n) : 0n;
 /** @public causal coverage predicate for anti-entropy. */
 export const frontierCovers = (
   frontier: CausalFrontier,
@@ -199,7 +210,6 @@ const canonical = (value: unknown): string => {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value !== null && typeof value === "object")
     return `{${Object.entries(value)
-      .filter(([, item]) => item !== undefined)
       .sort(([left], [right]) => compareText(left, right))
       .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
       .join(",")}}`;
@@ -273,14 +283,59 @@ const reduceOperations = <TProjection>(
 ): TProjection =>
   operations.reduce((projection, item) => reducer(projection, item), initial);
 
+const validateWriterClocks = (operations: readonly Operation[]): void => {
+  const byWriter = new Map<string, Operation[]>();
+  for (const operation of operations) {
+    const writer = byWriter.get(operation.writerId) ?? [];
+    writer.push(operation);
+    byWriter.set(operation.writerId, writer);
+  }
+  for (const writer of byWriter.values()) {
+    writer.sort((left, right) =>
+      left.sequence < right.sequence
+        ? -1
+        : left.sequence > right.sequence
+          ? 1
+          : 0,
+    );
+    for (let index = 1; index < writer.length; index += 1) {
+      const previous = writer[index - 1];
+      const current = writer[index];
+      if (
+        previous !== undefined &&
+        current !== undefined &&
+        previous.sequence < current.sequence &&
+        compareClocks(previous.clock, current.clock) >= 0
+      )
+        throw operationProtocolError(
+          "invalid",
+          "Writer clock must strictly advance with sequence",
+        );
+    }
+  }
+};
+export const validateOperationWriterClocks = validateWriterClocks;
+
+const nullPrototypeBigintRecord = (): Record<string, bigint> => {
+  const record: Record<string, bigint> = {};
+  Object.setPrototypeOf(record, null);
+  return record;
+};
+
 const advanceOperations = (
   initial: CausalFrontier,
   operations: readonly Operation[],
 ): CausalFrontier => {
-  const advanced: Record<string, bigint> = { ...initial };
+  const advanced = Object.assign(nullPrototypeBigintRecord(), initial);
   for (const item of operations) {
     const previous = frontierValue(advanced, item.writerId);
-    if (item.sequence > previous) advanced[item.writerId] = item.sequence;
+    if (item.sequence > previous)
+      Object.defineProperty(advanced, item.writerId, {
+        configurable: true,
+        enumerable: true,
+        value: item.sequence,
+        writable: true,
+      });
   }
   return advanced;
 };
@@ -358,6 +413,16 @@ export const applyOperation = <TProjection>(
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
   validateOperationValue(candidate);
+  if (candidate.clock.writerId !== candidate.writerId)
+    throw operationProtocolError("invalid", "Operation clock writer mismatch");
+  const history: Operation[] = [];
+  for (
+    let entry = state.replayHead;
+    entry !== undefined;
+    entry = entry.previous
+  )
+    history.push(entry.operation);
+  validateWriterClocks([...history, ...state.pending, candidate]);
   const fingerprint = canonical(candidate);
   const pendingIndex = pendingIdentityIndex(state);
   for (const key of identityKeys(candidate)) {
@@ -414,11 +479,11 @@ export const applyOperation = <TProjection>(
       replayLastClock !== undefined &&
       compareClocks(earliest.clock, replayLastClock) < 0
     ) {
-      const history: Operation[] = [];
+      const replayHistory: Operation[] = [];
       for (let entry = replayHead; entry !== undefined; entry = entry.previous)
-        history.push(entry.operation);
-      history.reverse();
-      const replay = [...history, ...ready].sort((left, right) =>
+        replayHistory.push(entry.operation);
+      replayHistory.reverse();
+      const replay = [...replayHistory, ...ready].sort((left, right) =>
         compareClocks(left.clock, right.clock),
       );
       projection = reduceOperations(baseProjection, replay, reducer);
@@ -440,11 +505,9 @@ export const applyOperation = <TProjection>(
     remaining = remaining.filter((item) => !readyIds.has(item.operationId));
     ready = orderedReady(remaining, frontier);
   }
-  const nextPendingIndex = addIdentityKeys(
-    pendingIndex,
-    candidate,
-    fingerprint,
-  );
+  let nextPendingIndex: AppliedIdentityNode | undefined;
+  for (const item of remaining)
+    nextPendingIndex = addIdentityKeys(nextPendingIndex, item);
   const nextState: OperationApplyState<TProjection> = {
     frontier,
     pending: remaining,

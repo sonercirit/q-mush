@@ -28,6 +28,10 @@ export interface OperationEnvelopePage {
   readonly envelopes: readonly Operation[];
   readonly hasMore: boolean;
 }
+export interface EncodedOperationEnvelopePage {
+  readonly envelopes: readonly string[];
+  readonly hasMore: boolean;
+}
 
 function activeEnvelopeScope(ownerId: string, partition: OperationPartition) {
   return and(
@@ -142,16 +146,21 @@ export function createOperationStore(resources: OperationStoreResources) {
         return true;
       });
     },
+    readEncodedEnvelopes(
+      ...parameters: EnvelopeQueryParameters
+    ): EncodedOperationEnvelopePage {
+      const limit = parameters[3];
+      const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
+      const envelopes = rows.slice(0, limit).map(({ encoded }) => encoded);
+      return { envelopes, hasMore: rows.length > limit };
+    },
     readEnvelopes(
       ...parameters: EnvelopeQueryParameters
     ): OperationEnvelopePage {
-      const limit = parameters[3];
-      const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
+      const encodedPage = this.readEncodedEnvelopes(...parameters);
       return {
-        envelopes: rows
-          .slice(0, limit)
-          .map(({ encoded }) => decodeOperationEnvelope(encoded)),
-        hasMore: rows.length > limit,
+        envelopes: encodedPage.envelopes.map(decodeOperationEnvelope),
+        hasMore: encodedPage.hasMore,
       };
     },
     countEnvelopes(ownerId: string, partition: OperationPartition): number {
@@ -179,8 +188,9 @@ export function createOperationStore(resources: OperationStoreResources) {
       encodedCheckpoint: string,
       actorId: string,
       now: number,
+      alreadyValidated = false,
     ): void {
-      decodeOperationCheckpoint(encodedCheckpoint);
+      if (!alreadyValidated) decodeOperationCheckpoint(encodedCheckpoint);
       database.transaction((transaction) => {
         const existing = transaction.query.operationCheckpoints
           .findFirst({

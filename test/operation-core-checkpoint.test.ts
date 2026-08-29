@@ -250,12 +250,15 @@ describe("operation checkpoints", () => {
     expect(applyOperation(complete, a3, append)).toBe(complete);
   });
 
-  test("keeps a same-writer frontier monotonic during clock-order replay", () => {
+  test("rejects a regressing same-writer clock", () => {
     const a1 = sequentialOperation("a", 1, 100);
     const a2 = sequentialOperation("a", 2, 50);
-    const state = applyAll([a1, a2]);
-    expect(state.projection).toEqual(["a-2", "a-1"]);
-    expect(state.frontier).toEqual({ a: 2n });
+    const state = applyAll([a1]);
+    expect(() => applyOperation(state, a2, append)).toThrow(
+      /clock must strictly advance/,
+    );
+    expect(state.projection).toEqual(["a-1"]);
+    expect(state.frontier).toEqual({ a: 1n });
   });
 
   test("accepts a concurrent earlier-clock operation and converges", () => {

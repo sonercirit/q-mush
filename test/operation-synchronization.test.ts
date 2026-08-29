@@ -45,13 +45,17 @@ const body = (
   partition,
   envelopes,
 });
-const ownedOperation = (sequence = 1n) => ({
-  ...testOperation("owner-1", sequence, {}, "one", Date.now()),
-  entity: {
-    ...testOperation("owner-1", sequence, {}, "one", Date.now()).entity,
-    accountId: "owner-1",
-  },
-});
+const ownedOperation = (sequence = 1n) => {
+  const operation = testOperation("owner-1", sequence, {}, "one", Date.now());
+  return {
+    ...operation,
+    clock: { ...operation.clock, logical: Number(sequence) },
+    entity: {
+      ...operation.entity,
+      accountId: "owner-1",
+    },
+  };
+};
 const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
   const resources = harness.setup();
   return createOperationSynchronization(
@@ -165,8 +169,26 @@ test("operation synchronization rejects an operation for another account", async
 });
 
 test("operation synchronization rejects another writer identity", async () => {
-  const operation = { ...ownedOperation(), writerId: "owner-2" };
-  expect(await operationStatus(operation)).toBe(403);
+  const operation = ownedOperation();
+  const otherWriter = {
+    ...operation,
+    writerId: "owner-2",
+    clock: { ...operation.clock, writerId: "owner-2" },
+  };
+  expect(await operationStatus(otherWriter)).toBe(403);
+});
+
+test("operation synchronization safely accepts own prototype-named parents", async () => {
+  const operation = ownedOperation();
+  const parents: Record<string, bigint> = {};
+  Object.defineProperty(parents, "__proto__", {
+    enumerable: true,
+    value: 0n,
+  });
+  const response = await operationResponse({ ...operation, parents });
+  expect(response.status).toBe(200);
+  const text = await response.text();
+  expect(text).toContain('"frontier":{"owner-1":"1"}');
 });
 
 test("operation synchronization rejects remote clock drift in either direction", async () => {
@@ -363,7 +385,12 @@ test("operation synchronization delivers a writer absent from the request fronti
   store.appendEnvelope("owner-1", ownedOperation(), "owner-1", 1);
   store.appendEnvelope(
     "owner-1",
-    { ...ownedOperation(), writerId: "writer-b", operationId: "writer-b-1" },
+    {
+      ...ownedOperation(),
+      writerId: "writer-b",
+      operationId: "writer-b-1",
+      clock: { ...ownedOperation().clock, writerId: "writer-b" },
+    },
     "owner-1",
     1,
   );

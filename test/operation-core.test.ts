@@ -239,7 +239,7 @@ describe("operation core", () => {
     expect(healed.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE - 1);
   });
 
-  test("omits undefined object properties but distinguishes null from non-finite numbers", () => {
+  test("distinguishes undefined object property presence from omission", () => {
     const { first } = waitingForGhost();
     const entity = { ...first.entity };
     Object.defineProperty(entity, "workspaceId", {
@@ -248,7 +248,7 @@ describe("operation core", () => {
     });
     const withUndefined: Operation = { ...first, entity };
     const waiting = applyOperation(initialApplyState(), withUndefined, reducer);
-    expect(
+    expect(() =>
       applyOperation(
         waiting,
         {
@@ -257,7 +257,7 @@ describe("operation core", () => {
         },
         reducer,
       ),
-    ).toBe(waiting);
+    ).toThrow(/equivocation/);
     for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY])
       expect(() =>
         createOperation({
@@ -276,6 +276,19 @@ describe("operation core", () => {
     expect(() =>
       createOperation({ ...validationSeed, schemaVersion: 0 }),
     ).toThrow(/schemaVersion/);
+    expect(() =>
+      createOperation({
+        ...validationSeed,
+        clock: { ...validationSeed.clock, writerId: "other" },
+      }),
+    ).toThrow(/clock writer/);
+    for (const clock of [
+      { ...validationSeed.clock, physicalMs: 1.5 },
+      { ...validationSeed.clock, logical: -3 },
+    ])
+      expect(() => createOperation({ ...validationSeed, clock })).toThrow(
+        /non-negative safe integers/,
+      );
     const invalidPayloads = [
       [new Date(Number.NaN), /dates must be valid/],
       [new Map(), /must be plain/],
@@ -345,6 +358,7 @@ describe("operation core", () => {
       ...validationSeed,
       operationId: "array",
       writerId: "array",
+      clock: { ...validationSeed.clock, writerId: "array" },
       payload: [undefined],
     });
     const arrayWaiting = applyOperation(
