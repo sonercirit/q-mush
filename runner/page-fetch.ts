@@ -44,7 +44,6 @@ const MAXIMUM_URL_LENGTH = 8_192;
 const MAXIMUM_REDIRECTS = 10;
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const SETTLE_MILLISECONDS = 100;
-// Root's TMPDIR may not be traversable by nobody; /tmp is the shared system location.
 const ROOT_CHROMIUM_TEMPORARY_DIRECTORY = "/tmp";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
@@ -448,17 +447,12 @@ export async function createChromiumProfile(
   }
 }
 
-type ChromiumSpawn = (
-  command: string[],
-  options: Parameters<typeof Bun.spawn>[1],
-) => Bun.ReadableSubprocess;
-
-export function spawnChromium(
+function spawnChromium(
   executablePath: string,
   profilePath: string,
   proxyPort: number,
   identity: ChromiumChildIdentity | undefined,
-  spawn: ChromiumSpawn = Bun.spawn,
+  spawn: typeof Bun.spawn = Bun.spawn,
 ): Bun.ReadableSubprocess {
   return spawn([...chromiumArguments(executablePath, profilePath, proxyPort)], {
     cwd: profilePath,
@@ -479,22 +473,36 @@ export function spawnChromium(
   });
 }
 
-function defaultRenderer(
-  options: PageFetchDependencies,
+interface ChromiumLaunchDependencies {
+  readonly createProfile?: typeof createChromiumProfile;
+  readonly discoverExecutable?: typeof discoverChromiumExecutable;
+  readonly prepare?: typeof prepareChromium;
+  readonly spawn?: typeof spawnChromium;
+}
+
+export function defaultRenderer(
+  options: ChromiumDiscoveryOptions,
   resolveAddress: PageAddressResolver,
+  dependencies: ChromiumLaunchDependencies = {},
 ): PageRenderer {
   return (request) =>
     retryChromiumStartup(async () => {
-      const executablePath = await discoverChromiumExecutable(options);
-      const { identity, profilePath } = await prepareChromium(
-        executablePath,
-        createChromiumProfile,
-      );
+      const executablePath = await (
+        dependencies.discoverExecutable ?? discoverChromiumExecutable
+      )(options);
+      const { identity, profilePath } = await (
+        dependencies.prepare ?? prepareChromium
+      )(executablePath, dependencies.createProfile ?? createChromiumProfile);
       const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {
         const proxyPort = await proxy.start();
-        child = spawnChromium(executablePath, profilePath, proxyPort, identity);
+        child = (dependencies.spawn ?? spawnChromium)(
+          executablePath,
+          profilePath,
+          proxyPort,
+          identity,
+        );
       } catch (error) {
         try {
           await proxy.close();

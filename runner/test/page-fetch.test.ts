@@ -15,9 +15,9 @@ import {
 import {
   createChromiumProfile,
   createPageFetchRunnerTool,
+  defaultRenderer,
   fetchRenderedPage,
   PAGE_FETCH_TOOL_NAME,
-  spawnChromium,
   type PageFetchDependencies,
 } from "../page-fetch.ts";
 
@@ -172,60 +172,64 @@ describe("default Chromium renderer setup", () => {
     ).rejects.toThrow("Could not prepare an unprivileged Chromium profile");
     expect(removeProfile).toHaveBeenCalledWith("/tmp/profile");
   });
-  test("passes the identity through the Chromium spawn options", () => {
-    let options: unknown;
-    const spawn = (...arguments_: Parameters<typeof Bun.spawn>) => {
-      options = arguments_[1];
-      return Bun.spawn(["true"], { stderr: "pipe", stdout: "pipe" });
-    };
-    const child = spawnChromium(
-      "/chromium",
-      "/tmp/profile",
-      1234,
-      { gid: 2345, uid: 1234 },
-      spawn,
-    );
-    expect(options).toMatchObject({ gid: 2345, uid: 1234 });
-    child.kill();
-  });
-  test("sequences identity, accessibility, profile, and spawn identity", async () => {
-    const calls: string[] = [];
+  test("launches with the prepared profile and unprivileged identity", async () => {
     const identity = { gid: 65_534, uid: 65_534 };
-    const setup = await prepareChromium(
-      "/chromium",
-      (receivedIdentity) => {
-        calls.push(`profile:${String(receivedIdentity === identity)}`);
-        return Promise.resolve("/tmp/profile");
-      },
-      {
-        resolveIdentity: () => {
-          calls.push("identity");
-          return Promise.resolve(identity);
-        },
-        assertAccessible: (_path, receivedIdentity) => {
-          calls.push(`accessible:${String(receivedIdentity === identity)}`);
-          return Promise.resolve();
-        },
+    const createProfile = vi.fn(
+      (receivedIdentity: typeof identity | undefined) =>
+        Promise.resolve(
+          receivedIdentity === identity
+            ? "/tmp/chowned-profile"
+            : "/tmp/wrong-profile",
+        ),
+    );
+    const spawn = vi.fn(
+      (
+        executablePath: string,
+        profilePath: string,
+        proxyPort: number,
+        receivedIdentity: typeof identity | undefined,
+      ) => {
+        void executablePath;
+        void profilePath;
+        void proxyPort;
+        void receivedIdentity;
+        return Bun.spawn(["false"], { stderr: "pipe", stdout: "pipe" });
       },
     );
-    let spawnOptions: Parameters<typeof Bun.spawn>[1] | undefined;
-    const setupProfile = setup.profilePath;
-    const child = spawnChromium(
-      "/chromium",
-      setupProfile,
-      1234,
-      setup.identity,
-      (command, options) => {
-        void command;
-        spawnOptions = options;
-        const executable = ["true"];
-        return Bun.spawn(executable, { stderr: "pipe", stdout: "pipe" });
-      },
-    );
+    const renderer = defaultRenderer({}, publicResolver, {
+      createProfile,
+      discoverExecutable: () => Promise.resolve("/chromium"),
+      prepare: (executablePath, receivedCreateProfile) =>
+        prepareChromium(executablePath, receivedCreateProfile, {
+          assertAccessible: () => Promise.resolve(),
+          resolveIdentity: () => Promise.resolve(identity),
+        }),
+      spawn,
+    });
+    const signal = new AbortController().signal;
 
-    expect(calls).toEqual(["identity", "accessible:true", "profile:true"]);
-    expect(spawnOptions).toMatchObject(identity);
-    child.kill();
+    await expect(
+      renderer({
+        captureExpression: "document.title",
+        policy: {
+          bytes: vi.fn(),
+          document: () => Promise.resolve(),
+          redirect: () => Promise.resolve(),
+          request: () => Promise.resolve(),
+          response: vi.fn(),
+        },
+        signal,
+        url: new URL("https://example.com"),
+      }),
+    ).rejects.toThrow();
+
+    expect(createProfile).toHaveBeenCalledWith(identity);
+    expect(spawn).toHaveBeenCalledWith(
+      "/chromium",
+      "/tmp/chowned-profile",
+      expect.any(Number),
+      identity,
+    );
   });
 });
 

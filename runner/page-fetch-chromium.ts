@@ -230,7 +230,10 @@ export async function prepareChromium(
     assertAccessible: assertChromiumExecutableAccessible,
     resolveIdentity: chromiumChildIdentity,
   },
-) {
+): Promise<{
+  identity: ChromiumChildIdentity | undefined;
+  profilePath: string;
+}> {
   const identity = await dependencies.resolveIdentity();
   await dependencies.assertAccessible(executablePath, identity);
   return { identity, profilePath: await createProfile(identity) };
