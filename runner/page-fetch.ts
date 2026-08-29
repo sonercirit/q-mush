@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { chown, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRecord } from "../shared/auth-model.ts";
@@ -7,6 +7,8 @@ import { runBoundedPageOperation } from "./page-fetch-bounded.ts";
 import {
   chromiumArguments,
   discoverChromiumExecutable,
+  prepareChromium,
+  type ChromiumChildIdentity,
   type ChromiumDiscoveryOptions,
 } from "./page-fetch-chromium.ts";
 import {
@@ -402,40 +404,106 @@ async function drainStream(stream: ReadableStream<Uint8Array>): Promise<void> {
     }
     await reader.cancel();
   } catch {
-    // Chromium can close its pipes during cleanup.
+    // Chromium may close its pipes.
   }
 }
 
-function defaultRenderer(
+type ChromiumProfileDependencies = Readonly<{
+  chownPath?:
+    ((path: string, uid: number, gid: number) => Promise<void>) | undefined;
+  createTemporaryDirectory?: ((prefix: string) => Promise<string>) | undefined;
+  removeProfile?: ((path: string) => Promise<void>) | undefined;
+}>;
+
+/** @public Test seam. */
+export async function createChromiumProfile(
+  identity: ChromiumChildIdentity | undefined,
+  dependencies: ChromiumProfileDependencies = {},
+): Promise<string> {
+  const createTemporaryDirectory =
+    dependencies.createTemporaryDirectory ?? mkdtemp;
+  const profilePath = await createTemporaryDirectory(
+    join(identity === undefined ? tmpdir() : "/tmp", "q-mush-page-fetch-"),
+  );
+  if (identity === undefined) {
+    return profilePath;
+  }
+  try {
+    await (dependencies.chownPath ?? chown)(
+      profilePath,
+      identity.uid,
+      identity.gid,
+    );
+    return profilePath;
+  } catch (error) {
+    await (dependencies.removeProfile ?? removeChromiumProfile)(profilePath);
+    throw new Error(
+      "Could not prepare an unprivileged Chromium profile for the root Q Mush runner",
+      { cause: error },
+    );
+  }
+}
+
+/** @public Test seam. */
+export function spawnChromium(
+  executablePath: string,
+  profilePath: string,
+  proxyPort: number,
+  identity: ChromiumChildIdentity | undefined,
+  spawn: (
+    command: string[],
+    options: Parameters<typeof Bun.spawn>[1],
+  ) => Bun.ReadableSubprocess = Bun.spawn,
+): Bun.ReadableSubprocess {
+  return spawn([...chromiumArguments(executablePath, profilePath, proxyPort)], {
+    cwd: profilePath,
+    detached: process.platform !== "win32",
+    env: {
+      HOME: profilePath,
+      LANG: process.env["LANG"] ?? "C.UTF-8",
+      PATH: process.env["PATH"] ?? "",
+      TMPDIR: profilePath,
+      XDG_CACHE_HOME: join(profilePath, "cache"),
+      XDG_CONFIG_HOME: join(profilePath, "config"),
+      XDG_DATA_HOME: join(profilePath, "data"),
+      XDG_STATE_HOME: join(profilePath, "state"),
+    },
+    ...(identity ?? {}),
+    stderr: "pipe",
+    stdout: "pipe",
+  });
+}
+
+interface ChromiumLaunchDependencies {
+  readonly createProfile?: typeof createChromiumProfile;
+  readonly discoverExecutable?: typeof discoverChromiumExecutable;
+  readonly prepare?: typeof prepareChromium;
+  readonly spawn?: typeof spawnChromium;
+}
+
+/** @public Test seam. */
+export function defaultRenderer(
   options: ChromiumDiscoveryOptions,
   resolveAddress: PageAddressResolver,
+  dependencies: ChromiumLaunchDependencies = {},
 ): PageRenderer {
   return (request) =>
     retryChromiumStartup(async () => {
-      const executablePath = await discoverChromiumExecutable(options);
-      const profilePath = await mkdtemp(join(tmpdir(), "q-mush-page-fetch-"));
+      const executablePath = await (
+        dependencies.discoverExecutable ?? discoverChromiumExecutable
+      )(options);
+      const { identity, profilePath } = await (
+        dependencies.prepare ?? prepareChromium
+      )(executablePath, dependencies.createProfile ?? createChromiumProfile);
       const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {
         const proxyPort = await proxy.start();
-        child = Bun.spawn(
-          [...chromiumArguments(executablePath, profilePath, proxyPort)],
-          {
-            cwd: profilePath,
-            detached: process.platform !== "win32",
-            env: {
-              HOME: profilePath,
-              LANG: process.env["LANG"] ?? "C.UTF-8",
-              PATH: process.env["PATH"] ?? "",
-              TMPDIR: profilePath,
-              XDG_CACHE_HOME: join(profilePath, "cache"),
-              XDG_CONFIG_HOME: join(profilePath, "config"),
-              XDG_DATA_HOME: join(profilePath, "data"),
-              XDG_STATE_HOME: join(profilePath, "state"),
-            },
-            stderr: "pipe",
-            stdout: "pipe",
-          },
+        child = (dependencies.spawn ?? spawnChromium)(
+          executablePath,
+          profilePath,
+          proxyPort,
+          identity,
         );
       } catch (error) {
         try {
@@ -537,7 +605,7 @@ function createPageCapture(arguments_: ToolArguments): PageCapture {
   };
 }
 
-/** @public Low-level page fetch entry retained for deterministic integration tests. */
+/** @public Integration test seam. */
 export async function fetchRenderedPage(
   arguments_: ToolArguments,
   signal?: AbortSignal,
