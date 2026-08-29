@@ -32,7 +32,7 @@
   `scripts/test-browser.ts` (Bun no-orphans rejects `./`/absolute paths), pins
   headless, clears `PWDEBUG`. `.github/workflows/checks.yml` runs CI.
 - `bun run check` runs static checks; `format`/`lint:fix` write. CI runs tests,
-  checks, build, whitespace on Bun 1.3.14 with frozen lockfile.
+  checks, build, whitespace on Bun 1.4.0 with frozen lockfile.
 
 ## Architecture
 
@@ -251,7 +251,7 @@
   tests probe `solid`.
 - Install commands use request origin: connect other machines through a
   reachable one, not `localhost`. Removal leaves `~/.q-mush/runner`.
-- Bun 1.3.14's `Bun.build({ compile: ... })` writes the binary only to
+- Bun 1.4.0's `Bun.build({ compile: ... })` writes the binary only to
   `compile.outfile` (`outputs[0]` is bundled JS): build in temp, read it
   pre-cleanup.
 - Bare-metal tools accept any runner-account-accessible path (an
