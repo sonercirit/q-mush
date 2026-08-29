@@ -1,6 +1,6 @@
 import { connect, Socket } from "node:net";
 import { describe, expect, test, vi } from "vitest";
-import { chromiumArguments } from "../page-fetch-chromium.ts";
+import { chromiumArguments, prepareChromium } from "../page-fetch-chromium.ts";
 import {
   MAXIMUM_RESPONSE_BYTES,
   type PageCapture,
@@ -13,9 +13,12 @@ import {
   type UpstreamConnector,
 } from "../page-fetch-process.ts";
 import {
+  createChromiumProfile,
   createPageFetchRunnerTool,
+  defaultRenderer,
   fetchRenderedPage,
   PAGE_FETCH_TOOL_NAME,
+  spawnChromium,
   type PageFetchDependencies,
 } from "../page-fetch.ts";
 
@@ -143,6 +146,127 @@ async function documentRequest(
 ): Promise<void> {
   await request.policy.document(request.url.toString());
 }
+
+describe("default Chromium renderer setup", () => {
+  test("passes the prepared identity only to Bun.spawn options", () => {
+    const options: unknown[] = [];
+    const spawn = vi.fn(
+      (
+        _command: string[],
+        receivedOptions: Parameters<typeof Bun.spawn>[1],
+      ) => {
+        options[options.length] = receivedOptions;
+        return Bun.spawn(["true"], { stderr: "pipe", stdout: "pipe" });
+      },
+    );
+
+    const privileged = spawnChromium(
+      "/chromium",
+      "/tmp/profile",
+      12_345,
+      { gid: 65_534, uid: 65_534 },
+      spawn,
+    );
+    privileged.kill();
+    const ordinary = spawnChromium(
+      "/chromium",
+      "/tmp/profile",
+      12_345,
+      undefined,
+      spawn,
+    );
+    ordinary.kill();
+
+    expect(options[0]).toMatchObject({ gid: 65_534, uid: 65_534 });
+    expect(options[1]).not.toHaveProperty("gid");
+    expect(options[1]).not.toHaveProperty("uid");
+  });
+
+  test("owns root profiles under /tmp and cleans up ownership failures", async () => {
+    const createTemporaryDirectory = vi.fn(() =>
+      Promise.resolve("/tmp/profile"),
+    );
+    const chownPath = vi.fn(() => Promise.resolve());
+    const identity = { gid: 65_534, uid: 65_534 };
+    const profileDependencies = { chownPath, createTemporaryDirectory };
+    await expect(
+      createChromiumProfile(identity, profileDependencies),
+    ).resolves.toBe("/tmp/profile");
+    expect(createTemporaryDirectory).toHaveBeenCalledWith(
+      "/tmp/q-mush-page-fetch-",
+    );
+    expect(chownPath).toHaveBeenCalledWith("/tmp/profile", 65_534, 65_534);
+
+    const removeProfile = vi.fn(() => Promise.resolve());
+    await expect(
+      createChromiumProfile(identity, {
+        chownPath: () => Promise.reject(new Error("denied")),
+        createTemporaryDirectory,
+        removeProfile,
+      }),
+    ).rejects.toThrow("Could not prepare an unprivileged Chromium profile");
+    expect(removeProfile).toHaveBeenCalledWith("/tmp/profile");
+  });
+  test("launches with the prepared profile and unprivileged identity", async () => {
+    const identity = { gid: 65_534, uid: 65_534 };
+    const createProfile = vi.fn(
+      (receivedIdentity: typeof identity | undefined) =>
+        Promise.resolve(
+          receivedIdentity === identity
+            ? "/tmp/chowned-profile"
+            : "/tmp/wrong-profile",
+        ),
+    );
+    const spawn = vi.fn(
+      (
+        executablePath: string,
+        profilePath: string,
+        proxyPort: number,
+        receivedIdentity: typeof identity | undefined,
+      ) => {
+        void executablePath;
+        void profilePath;
+        void proxyPort;
+        void receivedIdentity;
+        return Bun.spawn(["false"], { stderr: "pipe", stdout: "pipe" });
+      },
+    );
+    const renderer = defaultRenderer({}, publicResolver, {
+      createProfile,
+      discoverExecutable: () => Promise.resolve("/chromium"),
+      prepare: (executablePath, receivedCreateProfile) =>
+        prepareChromium(executablePath, receivedCreateProfile, {
+          assertAccessible: () => Promise.resolve(),
+          resolveIdentity: () => Promise.resolve(identity),
+        }),
+      spawn,
+    });
+    const signal = new AbortController().signal;
+
+    await expect(
+      renderer({
+        captureExpression: "document.title",
+        policy: {
+          bytes: vi.fn(),
+          document: () => Promise.resolve(),
+          redirect: () => Promise.resolve(),
+          request: () => Promise.resolve(),
+          response: vi.fn(),
+        },
+        signal,
+        url: new URL("https://example.com"),
+      }),
+    ).rejects.toThrow();
+
+    expect(createProfile).toHaveBeenCalledWith(identity);
+    expect(spawn).toHaveBeenCalledWith(
+      "/chromium",
+      "/tmp/chowned-profile",
+      expect.any(Number),
+      identity,
+    );
+  });
+});
 
 describe("page_fetch", () => {
   test("returns bounded browser-rendered content through its runner registration surface", async () => {
