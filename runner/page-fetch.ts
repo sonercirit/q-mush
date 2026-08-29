@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { chown, mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRecord } from "../shared/auth-model.ts";
@@ -6,6 +6,7 @@ import { PAGE_FETCH_TOOL_NAME } from "../shared/page-fetch.ts";
 import { runBoundedPageOperation } from "./page-fetch-bounded.ts";
 import {
   chromiumArguments,
+  chromiumChildIdentity,
   discoverChromiumExecutable,
   type ChromiumDiscoveryOptions,
 } from "./page-fetch-chromium.ts";
@@ -42,6 +43,7 @@ const MAXIMUM_URL_LENGTH = 8_192;
 const MAXIMUM_REDIRECTS = 10;
 const MAXIMUM_BROWSER_DIAGNOSTIC_BYTES = 4_096;
 const SETTLE_MILLISECONDS = 100;
+const ROOT_CHROMIUM_TEMPORARY_DIRECTORY = "/tmp";
 
 type ToolArguments = Readonly<Record<string, unknown>>;
 type PageCapture = Pick<PageRenderRequest, "captureExpression" | "url">;
@@ -413,7 +415,24 @@ function defaultRenderer(
   return (request) =>
     retryChromiumStartup(async () => {
       const executablePath = await discoverChromiumExecutable(options);
-      const profilePath = await mkdtemp(join(tmpdir(), "q-mush-page-fetch-"));
+      const identity = await chromiumChildIdentity();
+      const profilePath = await mkdtemp(
+        join(
+          identity === undefined ? tmpdir() : ROOT_CHROMIUM_TEMPORARY_DIRECTORY,
+          "q-mush-page-fetch-",
+        ),
+      );
+      if (identity !== undefined) {
+        try {
+          await chown(profilePath, identity.uid, identity.gid);
+        } catch (error) {
+          await removeChromiumProfile(profilePath);
+          throw new Error(
+            "Could not prepare an unprivileged Chromium profile for the root Q Mush runner",
+            { cause: error },
+          );
+        }
+      }
       const proxy = createPageFetchProxy(resolveAddress);
       let child: Bun.ReadableSubprocess;
       try {
@@ -433,6 +452,7 @@ function defaultRenderer(
               XDG_DATA_HOME: join(profilePath, "data"),
               XDG_STATE_HOME: join(profilePath, "state"),
             },
+            ...(identity ?? {}),
             stderr: "pipe",
             stdout: "pipe",
           },

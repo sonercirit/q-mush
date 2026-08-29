@@ -245,7 +245,10 @@
   `updatedAt`, `updatedById`, exclude deleted rows from active queries. Audit
   actor fields aren't foreign keys — `SYSTEM` is no user.
 - Keep HTTP `deflate` zlib-wrapped; Bun's is raw. page_fetch proxy upstream
-  connects bound at 10s, within the tool deadline.
+  connects bound at 10s, within the tool deadline. It never disables Chromium's
+  sandbox: on Linux a root runner launches only Chromium as `/etc/passwd`'s
+  non-root `nobody` identity with an owned `/tmp` profile, failing closed if
+  that account is unavailable.
 - Knip severities don't activate default-off issue types; keep the included list
   complete. Don't run the full test suite with lint/repo scans; tooling-policy
   tests probe `solid`.

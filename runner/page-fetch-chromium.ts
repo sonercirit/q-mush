@@ -1,5 +1,5 @@
 import { constants, existsSync, realpathSync } from "node:fs";
-import { access } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
@@ -31,6 +31,73 @@ const CHROMIUM_EXECUTABLE_NAMES = [
 
 export interface ChromiumDiscoveryOptions {
   readonly executablePath?: string | undefined;
+}
+
+interface ChromiumIdentityDependencies {
+  readonly effectiveUserId?: (() => number | undefined) | undefined;
+  readonly platform?: NodeJS.Platform | undefined;
+  readonly readPasswd?: (() => Promise<string>) | undefined;
+}
+
+type ChromiumChildIdentity = Readonly<{ gid: number; uid: number }>;
+
+const ROOT_USER_ID = 0;
+const MAXIMUM_POSIX_ID = 0xffff_fffe;
+const NOBODY_ACCOUNT = "nobody";
+const NOBODY_REQUIRED_MESSAGE =
+  "Chromium needs the unprivileged nobody account when the Q Mush runner is running as root";
+
+function positivePosixId(value: string | undefined): number | undefined {
+  if (value === undefined || !/^\d+$/u.test(value)) {
+    return undefined;
+  }
+  const id = Number(value);
+  return Number.isSafeInteger(id) && id > ROOT_USER_ID && id <= MAXIMUM_POSIX_ID
+    ? id
+    : undefined;
+}
+
+function nobodyIdentity(passwd: string): ChromiumChildIdentity | undefined {
+  for (const line of passwd.split(/\r?\n/u)) {
+    const fields = line.split(":");
+    if (fields[0] !== NOBODY_ACCOUNT) {
+      continue;
+    }
+    const uid = positivePosixId(fields[2]);
+    const gid = positivePosixId(fields[3]);
+    return uid === undefined || gid === undefined ? undefined : { gid, uid };
+  }
+  return undefined;
+}
+
+function nobodyRequired(cause?: unknown): Error {
+  return new Error(NOBODY_REQUIRED_MESSAGE, { cause });
+}
+
+export async function chromiumChildIdentity(
+  dependencies: ChromiumIdentityDependencies = {},
+): Promise<ChromiumChildIdentity | undefined> {
+  const platform = dependencies.platform ?? process.platform;
+  const effectiveUserId = (
+    dependencies.effectiveUserId ?? (() => process.geteuid?.())
+  )();
+  if (platform !== "linux" || effectiveUserId !== ROOT_USER_ID) {
+    return undefined;
+  }
+
+  let passwd: string;
+  try {
+    passwd = await (
+      dependencies.readPasswd ?? (() => readFile("/etc/passwd", "utf8"))
+    )();
+  } catch (error) {
+    throw nobodyRequired(error);
+  }
+  const identity = nobodyIdentity(passwd);
+  if (identity === undefined) {
+    throw nobodyRequired();
+  }
+  return identity;
 }
 
 async function executableExists(path: string): Promise<boolean> {
