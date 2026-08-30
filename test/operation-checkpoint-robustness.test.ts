@@ -141,7 +141,7 @@ test("round trips replay depth beyond the former call-stack limit", () => {
   let replayHead: OperationApplyState<readonly string[]>["replayHead"];
   const applied: Record<string, string> = {};
   const frontier: Record<string, bigint> = {};
-  for (let index = depth; index >= 1; index -= 1) {
+  for (let index = 1; index <= depth; index += 1) {
     const distinct = testOperation(
       `writer-${index.toString()}`,
       1n,
@@ -166,16 +166,37 @@ test("round trips replay depth beyond the former call-stack limit", () => {
   expect(decodeOperationCheckpoint(encoded).replayCount).toBe(depth);
 });
 
-test("checkpoint decoding rejects negative sequence, parents, and frontier", () => {
+test("checkpoint decoding rejects negative sequence, parents, and frontiers", () => {
   const empty = testApplyState<readonly string[]>([]);
   reject({ ...empty, pending: [{ ...operation, sequence: -1n }] }, /positive/);
   reject(
     { ...empty, pending: [{ ...operation, parents: { a: -1n } }] },
     /record/,
   );
+  reject({ ...empty, frontier: { a: -1n } }, /record/);
+  reject({ ...empty, baseFrontier: { a: -1n } }, /record/);
+});
+
+test("checkpoint decoding rejects replay outside canonical clock order", () => {
+  const ordered = applyOperationList(
+    [operation, testOperation("b", 1n, {}, "y", 2)],
+    testApplyState<readonly string[]>([]),
+    appendOperationId,
+  );
+  const newest = ordered.replayHead;
+  const oldest = newest?.previous;
+  if (newest === undefined || oldest === undefined)
+    throw new Error("Expected two replay entries");
   reject(
-    { ...testApplyState<readonly string[]>([]), frontier: { a: -1n } },
-    /record/,
+    {
+      ...ordered,
+      replayHead: {
+        operation: oldest.operation,
+        previous: { operation: newest.operation, previous: undefined },
+      },
+      replayLastClock: oldest.operation.clock,
+    },
+    /clock order/,
   );
 });
 

@@ -129,6 +129,9 @@ export const createOperation = <TPayload>(
   if (!Number.isInteger(input.schemaVersion) || input.schemaVersion < 1)
     throw new Error("schemaVersion must be positive");
   if (input.sequence < 1n) throw new Error("sequence must be positive");
+  for (const parent of Object.values(input.parents))
+    if (typeof parent !== "bigint" || parent < 0n)
+      throw new Error("Operation parents must be non-negative bigints");
   if (
     !Number.isSafeInteger(input.clock.physicalMs) ||
     input.clock.physicalMs < 0 ||
@@ -351,7 +354,12 @@ export const materializeApplied = (
   const visit = (node: AppliedIdentityNode | undefined): void => {
     if (node === undefined) return;
     visit(node.left);
-    record[node.key] = node.value;
+    Object.defineProperty(record, node.key, {
+      configurable: true,
+      enumerable: true,
+      value: node.value,
+      writable: true,
+    });
     visit(node.right);
   };
   visit(root);

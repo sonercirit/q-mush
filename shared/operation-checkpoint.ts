@@ -1,4 +1,5 @@
 import {
+  compareClocks,
   createOperation,
   materializeApplied,
   operationFingerprint,
@@ -273,6 +274,16 @@ const validateCheckpointConsistency = (
   state: OperationApplyState<OperationCheckpointProjection>,
 ): void => {
   const replay = replayOperations(state.replayHead);
+  for (let index = 1; index < replay.length; index += 1) {
+    const newer = replay[index - 1];
+    const older = replay[index];
+    if (
+      newer !== undefined &&
+      older !== undefined &&
+      compareClocks(newer.clock, older.clock) < 0
+    )
+      throw new Error("Invalid operation checkpoint replay clock order");
+  }
   if (
     replay.length !== state.replayCount ||
     !clocksEqual(state.replayLastClock, state.replayHead?.operation.clock)

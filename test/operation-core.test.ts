@@ -123,6 +123,14 @@ describe("operation core", () => {
     expect(appliedNodes(updated).size).toBe(1);
   });
 
+  test("materializes __proto__ as an own applied identity", () => {
+    const applied = materializeApplied(
+      setAppliedNode(undefined, "__proto__", "fingerprint"),
+    );
+    expect(Object.hasOwn(applied, "__proto__")).toBe(true);
+    expect(applied["__proto__"]).toBe("fingerprint");
+  });
+
   test("converges concurrent non-commutative updates across arrival permutations", () => {
     const setPayloadValue = (_projection: string, item: Operation) => {
       if (
@@ -282,6 +290,25 @@ describe("operation core", () => {
     expect(() => createOperation({ ...validationSeed, sequence: 0n })).toThrow(
       /sequence/,
     );
+    for (const invalidParent of [-1n, 3]) {
+      const parents: Readonly<Record<string, bigint>> = Object.defineProperty(
+        {},
+        "writer",
+        { enumerable: true, value: invalidParent },
+      );
+      expect(() => createOperation({ ...validationSeed, parents })).toThrow(
+        /parents/,
+      );
+    }
+    const validParents: Record<string, bigint> = {};
+    Object.setPrototypeOf(validParents, null);
+    Object.defineProperty(validParents, "__proto__", {
+      enumerable: true,
+      value: 3n,
+    });
+    expect(
+      createOperation({ ...validationSeed, parents: validParents }).parents,
+    ).toBe(validParents);
     expect(() =>
       createOperation({ ...validationSeed, schemaVersion: 0 }),
     ).toThrow(/schemaVersion/);
