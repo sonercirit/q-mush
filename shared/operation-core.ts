@@ -334,12 +334,17 @@ const orderedReady = (
   operations
     .filter((item) => isReady(item, frontier))
     .sort((left, right) => compareClocks(left.clock, right.clock));
+const reducerOperationCopy = (operation: Operation): Operation =>
+  freezeOperationValue(snapshotOperationValue(operation));
 const reduceOperations = <TProjection>(
   initial: TProjection,
   operations: readonly Operation[],
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): TProjection =>
-  operations.reduce((projection, item) => reducer(projection, item), initial);
+  operations.reduce(
+    (projection, item) => reducer(projection, reducerOperationCopy(item)),
+    initial,
+  );
 
 const validateWriterClocks = (operations: readonly Operation[]): void => {
   const byWriter = new Map<string, Operation[]>();

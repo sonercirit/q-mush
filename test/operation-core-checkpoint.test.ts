@@ -14,6 +14,7 @@ import {
 import {
   applyOperation,
   materializeApplied,
+  operationFingerprint,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -161,6 +162,46 @@ describe("operation checkpoints", () => {
     expect(decodedReplayWasFrozen).toBe(true);
     expect(resorted.projection).toEqual(["b-1", "a-1"]);
     expect(() => roundTrip(resorted)).not.toThrow();
+  });
+
+  test("protects retained Date payloads during a late-arrival resort", () => {
+    const original = {
+      ...operation("a", 1n, {}, "a", 100),
+      payload: { at: new Date(5) },
+    };
+    const first = roundTrip(applyOperation(arrayState(), original, append));
+    const retainedFingerprint = operationFingerprint(
+      first.replayHead?.operation ?? original,
+    );
+    let replayProjection: Operation | undefined;
+    const lateArrival = concurrentPair()[1];
+    const resorted = applyOperation(first, lateArrival, (projection, item) => {
+      const payload = item.payload;
+      if (
+        typeof payload === "object" &&
+        payload !== null &&
+        "at" in payload &&
+        payload.at instanceof Date
+      ) {
+        payload.at.setTime(99);
+        replayProjection = item;
+      }
+      return projection.concat(item.operationId);
+    });
+    const retained = resorted.replayHead?.operation;
+    expect(retained?.operationId).toBe(original.operationId);
+    expect(operationFingerprint(retained ?? original)).toBe(
+      retainedFingerprint,
+    );
+    expect(retained?.payload).toEqual({ at: new Date(5) });
+    expect(replayProjection).toEqual({
+      ...original,
+      payload: { at: new Date(99) },
+    });
+    expect(replayProjection).not.toBe(retained);
+    expect(resorted.projection.join(",")).toBe("b-1,a-1");
+    const encoded = encodeOperationCheckpoint(resorted);
+    expect(() => decodeOperationCheckpoint(encoded)).not.toThrow();
   });
 
   test("replays twice from the stable base with an order-sensitive reducer", () => {

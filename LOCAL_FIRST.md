@@ -100,9 +100,12 @@
   arrays, plain string-keyed objects, and valid Dates; other object prototypes
   and symbol keys are rejected. Every validated or decoded operation snapshot is
   transitively frozen before retention, including payload, parents, clock, and
-  entity. Reducers receive these frozen inputs and must be pure with respect to
-  operations: build projections without mutating an operation or anything
-  reachable from it. The auth bearer-token `sessions`, encrypted
+  entity. Each reducer invocation receives a separate transitively frozen deep
+  copy rebuilt from that pristine retained snapshot; retained snapshots are
+  never exposed to reducers. Reducers must remain pure with respect to their
+  operation input's object properties, while internal-slot mutation such as
+  `Date.setTime()` can affect only the invocation's defensive copy and cannot
+  corrupt fingerprints, replay history, or later encoding. The auth bearer-token `sessions`, encrypted
   `provider_credentials`, and setup-token-bearing `runners` tables are
   deliberately absent from operation replication because ordinary frames contain
   no secrets. The remaining closed allow-list was audited against schema

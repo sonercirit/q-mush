@@ -149,12 +149,13 @@ test("operation intake persists one snapshot consistently and replays it as a du
   expectStoredEnvelopeCount(database, 1);
 });
 
-test("operation intake freezes reducer inputs before durable admission", () => {
+test("operation intake gives reducers frozen defensive copies", () => {
   const { database, intake } = setup();
   const operation = createOperation({
     ...testOperation("frozen-writer", 1n, {}, "immutable"),
-    payload: { value: "immutable" },
+    payload: { at: new Date(5), value: "immutable" },
   });
+  const originalFingerprint = operationFingerprint(operation);
   const reducer = (projection: readonly string[], candidate: Operation) => {
     expect(
       [
@@ -168,10 +169,15 @@ test("operation intake freezes reducer inputs before durable admission", () => {
     const payload = candidate.payload;
     if (typeof payload !== "object" || payload === null)
       throw new Error("Missing reducer payload fixture");
+    if (!("at" in payload) || !(payload.at instanceof Date))
+      throw new Error("Missing reducer Date fixture");
+    payload.at.setTime(99);
     expect(() => Object.assign(payload, { value: "corrupted" })).toThrow(
       TypeError,
     );
-    return projection.concat(candidate.operationId);
+    return projection.concat(
+      `${candidate.operationId}:${String(payload.at.getTime())}`,
+    );
   };
 
   const first = intake.apply(
@@ -187,11 +193,12 @@ test("operation intake freezes reducer inputs before durable admission", () => {
   const stored = decodeOperationEnvelope(encodedEnvelope);
   const checkpoint = decodeOperationCheckpoint(first.encodedCheckpoint);
   const fingerprint = operationFingerprint(stored);
-  expect(row?.fingerprint).toBe(fingerprint);
+  expect(row?.fingerprint).toBe(originalFingerprint);
+  expect(fingerprint).toBe(originalFingerprint);
   expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
     fingerprint,
   );
-  expect(checkpoint.projection).toEqual(["frozen-writer-1"]);
+  expect(checkpoint.projection).toEqual(["frozen-writer-1:99"]);
   const replay = intake.apply(
     "owner-1",
     "non-session",
