@@ -2,6 +2,7 @@ import {
   createOperation,
   materializeApplied,
   operationFingerprint,
+  operationIdentityKeys,
   restoreAppliedIdentityIndex,
   validateOperationWriterClocks,
   type HybridTimestamp,
@@ -137,12 +138,12 @@ const stringCheckpointRecord = (
     value,
     (item): item is string => typeof item === "string",
   );
-const bigintCheckpointRecord = (
+const nonNegativeBigintCheckpointRecord = (
   value: unknown,
 ): Readonly<Record<string, bigint>> =>
   typedCheckpointRecord(
     value,
-    (item): item is bigint => typeof item === "bigint",
+    (item): item is bigint => typeof item === "bigint" && item >= 0n,
   );
 const decodeClock = (value: unknown): HybridTimestamp => {
   const clock = checkpointObject(value);
@@ -206,7 +207,7 @@ const decodeOperation = (value: unknown): Operation => {
     writerId: item["writerId"],
     sequence: item["sequence"],
     clock: decodeClock(item["clock"]),
-    parents: bigintCheckpointRecord(item["parents"]),
+    parents: nonNegativeBigintCheckpointRecord(item["parents"]),
     entity: decodedEntity,
     kind: item["kind"],
     payload: item["payload"],
@@ -282,6 +283,7 @@ const validateCheckpointConsistency = (
     state.baseFrontier,
   );
   const expectedApplied: Record<string, string> = {};
+  const replayIdentities = new Set<string>();
   for (const operation of replay) {
     const previous = Object.hasOwn(expectedFrontier, operation.writerId)
       ? (expectedFrontier[operation.writerId] ?? 0n)
@@ -293,11 +295,13 @@ const validateCheckpointConsistency = (
         value: operation.sequence,
         writable: true,
       });
-    const fingerprint = operationFingerprint(operation);
-    expectedApplied[`id:${operation.operationId}`] = fingerprint;
-    expectedApplied[
-      `writer:${operation.writerId}:${operation.sequence.toString()}`
-    ] = fingerprint;
+    const replayFingerprint = operationFingerprint(operation);
+    for (const identity of operationIdentityKeys(operation)) {
+      if (replayIdentities.has(identity))
+        throw new Error("Invalid operation checkpoint replay identity");
+      replayIdentities.add(identity);
+      expectedApplied[identity] = replayFingerprint;
+    }
   }
   validateOperationWriterClocks([...replay, ...state.pending]);
   const actualApplied = materializeApplied(state.applied);
@@ -311,10 +315,7 @@ const validateCheckpointConsistency = (
     throw new Error("Invalid operation checkpoint derived state");
   for (const operation of state.pending) {
     const fingerprint = operationFingerprint(operation);
-    const identities = [
-      `id:${operation.operationId}`,
-      `writer:${operation.writerId}:${operation.sequence.toString()}`,
-    ];
+    const identities = operationIdentityKeys(operation);
     if (
       identities.some((identity) => {
         const appliedFingerprint = actualApplied[identity];
@@ -362,7 +363,7 @@ export const decodeOperationCheckpoint = (
   if (!validProjection(state["baseProjection"]))
     throw new Error("Invalid operation checkpoint base projection");
   const result: OperationApplyState<OperationCheckpointProjection> = {
-    frontier: bigintCheckpointRecord(state["frontier"]),
+    frontier: nonNegativeBigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map(decodeOperation),
     projection: state["projection"],
     applied: restoreAppliedIdentityIndex(
@@ -375,7 +376,7 @@ export const decodeOperationCheckpoint = (
         ? undefined
         : decodeClock(state["replayLastClock"]),
     baseProjection: state["baseProjection"],
-    baseFrontier: bigintCheckpointRecord(state["baseFrontier"]),
+    baseFrontier: nonNegativeBigintCheckpointRecord(state["baseFrontier"]),
   };
   validateCheckpointConsistency(result);
   return result;

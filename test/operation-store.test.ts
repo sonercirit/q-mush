@@ -296,14 +296,6 @@ test("encoded checkpoint replacement is partition scoped", () => {
   expect(loadedProjection(store, "owner-1", "non-session")).toEqual(["other"]);
 });
 
-test("undecodable checkpoints are rejected before persistence", () => {
-  const store = setup();
-  expect(() => {
-    store.storeCheckpoint("owner-1", "session", "invalid", SYSTEM_ID, 2);
-  }).toThrow();
-  expect(store.loadCheckpoint("owner-1", "session")).toBeUndefined();
-});
-
 test("soft-deleted envelopes do not dedupe or count", () => {
   const store = setup();
   const operation = testOperation("writer-a", 1n, {}, "first");

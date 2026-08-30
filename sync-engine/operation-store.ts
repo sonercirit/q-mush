@@ -6,10 +6,7 @@ import {
   operationEnvelopes,
 } from "../shared/database/schema";
 import { createUuidV7, type IdGenerator } from "../shared/ids";
-import {
-  decodeOperationCheckpoint,
-  encodeOperationEnvelope,
-} from "../shared/operation-checkpoint";
+import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
   operationFingerprint,
   operationProtocolError,
@@ -174,9 +171,7 @@ export function createOperationStore(resources: OperationStoreResources) {
       encodedCheckpoint: string,
       actorId: string,
       now: number,
-      alreadyValidated = false,
     ): void {
-      if (!alreadyValidated) decodeOperationCheckpoint(encodedCheckpoint);
       database.transaction((transaction) => {
         const existing = transaction.query.operationCheckpoints
           .findFirst({

@@ -4,7 +4,11 @@ import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
-import type { OperationApplyState } from "../shared/operation-core";
+import {
+  operationFingerprint,
+  restoreAppliedIdentityIndex,
+  type OperationApplyState,
+} from "../shared/operation-core";
 import {
   appendOperationId,
   applyOperationList,
@@ -48,6 +52,31 @@ test("rejects applied identities unrelated to replay history", () => {
 
 test("rejects a frontier inconsistent with replay history", () => {
   reject({ ...state(), frontier: { a: 2n } }, /derived state/);
+});
+
+const replayDuplicateState = (
+  duplicate: ReturnType<typeof testOperation>,
+): OperationApplyState<readonly string[]> => {
+  const replayed = state();
+  return {
+    ...replayed,
+    replayHead: { operation: duplicate, previous: replayed.replayHead },
+    replayCount: 2,
+  };
+};
+
+test("rejects repeated identical replay identities", () => {
+  reject(
+    { ...replayDuplicateState(operation), projection: ["a-1", "a-1"] },
+    /replay identity/,
+  );
+});
+
+test("rejects replay operation-ID and writer-sequence equivocation", () => {
+  reject(
+    replayDuplicateState({ ...operation, payload: "conflict" }),
+    /replay identity/,
+  );
 });
 
 test("rejects pending identities conflicting with applied history", () => {
@@ -109,16 +138,56 @@ test("rejects clocks that regress across replay and pending state", () => {
 
 test("round trips replay depth beyond the former call-stack limit", () => {
   const depth = 25_000;
-  const seed = state();
-  let replayHead = seed.replayHead;
-  for (let index = 1; index < depth; index += 1)
-    replayHead = { operation, previous: replayHead };
+  let replayHead: OperationApplyState<readonly string[]>["replayHead"];
+  const applied: Record<string, string> = {};
+  const frontier: Record<string, bigint> = {};
+  for (let index = depth; index >= 1; index -= 1) {
+    const distinct = testOperation(
+      `writer-${index.toString()}`,
+      1n,
+      {},
+      "x",
+      index,
+    );
+    replayHead = { operation: distinct, previous: replayHead };
+    const fingerprint = operationFingerprint(distinct);
+    applied[`id:${distinct.operationId}`] = fingerprint;
+    applied[`writer:${distinct.writerId}:1`] = fingerprint;
+    frontier[distinct.writerId] = 1n;
+  }
   const encoded = encodeOperationCheckpoint({
-    ...seed,
+    ...testApplyState<readonly string[]>([]),
+    frontier,
+    applied: restoreAppliedIdentityIndex(applied),
     replayHead,
     replayCount: depth,
+    replayLastClock: replayHead?.operation.clock,
   });
   expect(decodeOperationCheckpoint(encoded).replayCount).toBe(depth);
+});
+
+test("checkpoint decoding rejects negative sequence, parents, and frontier", () => {
+  const empty = testApplyState<readonly string[]>([]);
+  reject({ ...empty, pending: [{ ...operation, sequence: -1n }] }, /positive/);
+  reject(
+    { ...empty, pending: [{ ...operation, parents: { a: -1n } }] },
+    /record/,
+  );
+  reject(
+    { ...testApplyState<readonly string[]>([]), frontier: { a: -1n } },
+    /record/,
+  );
+});
+
+test("negative payload bigints round trip", () => {
+  const pending = { ...operation, parents: { missing: 1n }, payload: -9n };
+  const decoded = decodeOperationCheckpoint(
+    encodeOperationCheckpoint({
+      ...testApplyState<readonly string[]>([]),
+      pending: [pending],
+    }),
+  );
+  expect(decoded.pending[0]?.payload).toBe(-9n);
 });
 
 test("checkpoint decoding rejects negative physical clocks", () => {

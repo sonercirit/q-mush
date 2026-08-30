@@ -1,3 +1,5 @@
+import { setAppliedNode } from "./operation-applied-index";
+
 export interface OperationProtocolError extends Error {
   readonly operationError: "invalid" | "conflict" | "capacity";
 }
@@ -216,7 +218,9 @@ const canonical = (value: unknown): string => {
   return JSON.stringify(value);
 };
 export const operationFingerprint = canonical;
-const identityKeys = (candidate: Operation): readonly string[] => [
+export const operationIdentityKeys = (
+  candidate: Operation,
+): readonly string[] => [
   `id:${candidate.operationId}`,
   `writer:${candidate.writerId}:${candidate.sequence.toString()}`,
 ];
@@ -256,7 +260,7 @@ const addIdentityKeys = (
   fingerprint = canonical(item),
 ): AppliedIdentityNode | undefined => {
   let next = root;
-  for (const key of identityKeys(item))
+  for (const key of operationIdentityKeys(item))
     next = setAppliedNode(next, key, fingerprint);
   return next;
 };
@@ -340,50 +344,6 @@ const advanceOperations = (
   return advanced;
 };
 
-const appliedPriority = (key: string): number => {
-  let hash = 2_166_136_261;
-  for (let index = 0; index < key.length; index += 1) {
-    hash ^= key.charCodeAt(index);
-    hash = Math.imul(hash, 16_777_619);
-  }
-  return hash >>> 0;
-};
-const rotateAppliedLeft = (node: AppliedIdentityNode): AppliedIdentityNode => {
-  const right = node.right;
-  if (right === undefined) return node;
-  return {
-    ...right,
-    left: { ...node, right: right.left },
-  };
-};
-const rotateAppliedRight = (node: AppliedIdentityNode): AppliedIdentityNode => {
-  const left = node.left;
-  if (left === undefined) return node;
-  return {
-    ...left,
-    right: { ...node, left: left.right },
-  };
-};
-const setAppliedNode = (
-  node: AppliedIdentityNode | undefined,
-  key: string,
-  value: string,
-): AppliedIdentityNode => {
-  if (node === undefined)
-    return {
-      key,
-      value,
-      priority: appliedPriority(key),
-      left: undefined,
-      right: undefined,
-    };
-  if (compareText(key, node.key) < 0) {
-    const next = { ...node, left: setAppliedNode(node.left, key, value) };
-    return next.left.priority < next.priority ? rotateAppliedRight(next) : next;
-  }
-  const next = { ...node, right: setAppliedNode(node.right, key, value) };
-  return next.right.priority < next.priority ? rotateAppliedLeft(next) : next;
-};
 export const materializeApplied = (
   root: AppliedIdentityNode | undefined,
 ): Readonly<Record<string, string>> => {
@@ -425,7 +385,7 @@ export const applyOperation = <TProjection>(
   validateWriterClocks([...history, ...state.pending, candidate]);
   const fingerprint = canonical(candidate);
   const pendingIndex = pendingIdentityIndex(state);
-  for (const key of identityKeys(candidate)) {
+  for (const key of operationIdentityKeys(candidate)) {
     const existing =
       findApplied(state.applied, key) ?? findApplied(pendingIndex, key);
     if (existing !== undefined && existing !== fingerprint)
@@ -435,7 +395,7 @@ export const applyOperation = <TProjection>(
       );
   }
   if (
-    identityKeys(candidate).some(
+    operationIdentityKeys(candidate).some(
       (key) => findApplied(state.applied, key) === fingerprint,
     ) ||
     state.pending.some((item) => item.operationId === candidate.operationId)

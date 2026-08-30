@@ -1,5 +1,7 @@
 import { describe, expect, test } from "vitest";
 
+import { setAppliedNode } from "../shared/operation-applied-index";
+
 import { testApplyState, testOperation } from "./operation-core-test-support";
 
 import {
@@ -114,6 +116,13 @@ const fillPending = (
   );
 
 describe("operation core", () => {
+  test("applied identity insertion replaces an existing key", () => {
+    const stale = setAppliedNode(undefined, "same", "stale");
+    const updated = setAppliedNode(stale, "same", "updated");
+    expect(materializeApplied(updated)).toEqual({ same: "updated" });
+    expect(appliedNodes(updated).size).toBe(1);
+  });
+
   test("converges concurrent non-commutative updates across arrival permutations", () => {
     const setPayloadValue = (_projection: string, item: Operation) => {
       if (

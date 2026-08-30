@@ -113,7 +113,6 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           encodedCheckpoint,
           actorId,
           now,
-          true,
         );
         return { frontier: state.frontier, encodedCheckpoint };
       });
