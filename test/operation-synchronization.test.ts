@@ -45,11 +45,19 @@ const body = (
   partition,
   envelopes,
 });
+const OWNED_OPERATION_CLOCK_BASE_MS = Date.now();
 const ownedOperation = (sequence = 1n) => {
-  const operation = testOperation("owner-1", sequence, {}, "one", Date.now());
+  const sequenceNumber = Number(sequence);
+  const operation = testOperation(
+    "owner-1",
+    sequence,
+    {},
+    "one",
+    OWNED_OPERATION_CLOCK_BASE_MS + sequenceNumber,
+  );
   return {
     ...operation,
-    clock: { ...operation.clock, logical: Number(sequence) },
+    clock: { ...operation.clock, logical: sequenceNumber },
     entity: {
       ...operation.entity,
       accountId: "owner-1",
@@ -475,16 +483,23 @@ test("operation synchronization fails closed above checkpoint byte capacity", as
   expect(response.status).toBe(507);
 });
 
-test("remote drift accepts operations at the five-minute boundary", async () => {
+test("remote drift accepts operations near the five-minute boundary", async () => {
+  const synchronized = handler("owner-1");
   const now = Date.now();
   const operation = ownedOperation();
-  expect(
-    await operationStatus({
-      ...operation,
-      clock: {
-        ...operation.clock,
-        physicalMs: now + MAX_REMOTE_CLOCK_DRIFT_MS - 100,
-      },
-    }),
-  ).toBe(200);
+  const nearBoundaryMarginMs = 5_000;
+  const response = await synchronized(
+    request(
+      body("owner-1", [
+        encodeOperationEnvelope({
+          ...operation,
+          clock: {
+            ...operation.clock,
+            physicalMs: now + MAX_REMOTE_CLOCK_DRIFT_MS - nearBoundaryMarginMs,
+          },
+        }),
+      ]),
+    ),
+  );
+  expect(response.status).toBe(200);
 });

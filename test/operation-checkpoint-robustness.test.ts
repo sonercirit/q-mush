@@ -163,6 +163,29 @@ test("rejects a pending operation that parents itself", () => {
   reject({ ...checkpoint, pending: [pending] }, /pending parent/);
 });
 
+test("checkpoint decoding ignores inherited own-writer parent entries", () => {
+  const writerId = "inherited-checkpoint-parent";
+  const pending = testOperation(writerId, 1n, { missing: 1n }, "pending", 1);
+  const checkpoint = testApplyState<readonly string[]>([]);
+  const encoded = encodeOperationCheckpoint(
+    Object.assign(checkpoint, { pending: [pending] }),
+  );
+  const inheritedParentDescriptor: PropertyDescriptor = {
+    configurable: true,
+    get: () => {
+      throw new Error("consulted inherited parent");
+    },
+  };
+  Reflect.defineProperty(Object.prototype, writerId, inheritedParentDescriptor);
+  try {
+    expect(decodeOperationCheckpoint(encoded).pending[0]?.writerId).toBe(
+      writerId,
+    );
+  } finally {
+    Reflect.deleteProperty(Object.prototype, writerId);
+  }
+});
+
 test("accepts an own-writer parent at the preceding sequence end-to-end", () => {
   const replayed = applyOperationList(
     [

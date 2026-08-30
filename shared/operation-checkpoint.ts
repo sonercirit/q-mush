@@ -206,7 +206,9 @@ const decodeOperation = (
     ...(typeof workspaceId === "string" ? { workspaceId } : {}),
   };
   const parents = nonNegativeBigintCheckpointRecord(item["parents"]);
-  const ownParent = parents[item["writerId"]];
+  const ownParent = Object.hasOwn(parents, item["writerId"])
+    ? parents[item["writerId"]]
+    : undefined;
   const operation = createOperation({
     operationId: item["operationId"],
     schemaVersion: item["schemaVersion"],
