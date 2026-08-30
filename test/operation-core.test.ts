@@ -354,15 +354,14 @@ describe("operation core", () => {
       /sparse/,
     );
     const shared = { value: "shared" };
-    expect(
-      createOperation({ ...validationSeed, payload: { a: shared, b: shared } })
-        .payload,
-    ).toEqual({ a: shared, b: shared });
+    expect(() =>
+      createOperation({ ...validationSeed, payload: { a: shared, b: shared } }),
+    ).toThrow(/reference-free trees/);
     const cyclic: { self?: unknown } = {};
     cyclic.self = cyclic;
     expect(() =>
       createOperation({ ...validationSeed, payload: cyclic }),
-    ).toThrow(/must not be cyclic/);
+    ).toThrow(/reference-free trees/);
     for (const unsupported of [() => undefined, Symbol("x")])
       expect(() =>
         createOperation({ ...validationSeed, payload: unsupported }),
@@ -376,7 +375,7 @@ describe("operation core", () => {
       nonFinite: { value: Number.NEGATIVE_INFINITY },
     };
     const invalidApplyMessages: Readonly<Record<string, RegExp>> = {
-      cyclic: /must not be cyclic/,
+      cyclic: /reference-free trees/,
       nonPlain: /must be plain/,
       nonFinite: /finite/,
     };

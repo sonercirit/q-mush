@@ -13,6 +13,7 @@ import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
+  operationFingerprint,
   operationSequenceOrder,
 } from "../shared/operation-core";
 import {
@@ -47,11 +48,13 @@ const storedRows = (
   database: ReturnType<typeof setup>["database"],
   table: typeof operationEnvelopes | typeof operationCheckpoints,
 ) => database.select().from(table).all();
+const storedEnvelopeRows = (database: ReturnType<typeof setup>["database"]) =>
+  database.select().from(operationEnvelopes).all();
 const expectStoredEnvelopeCount = (
   database: ReturnType<typeof setup>["database"],
   count: number,
 ) => {
-  expect(storedRows(database, operationEnvelopes)).toHaveLength(count);
+  expect(storedEnvelopeRows(database)).toHaveLength(count);
 };
 const expectNoStoredOperations = (
   database: ReturnType<typeof setup>["database"],
@@ -111,6 +114,37 @@ test("operation intake advances non-session then session sequence spaces indepen
 
 test("operation intake advances session then non-session sequence spaces independently", () => {
   expectPartitionSequenceSpaces("session");
+});
+
+test("operation intake persists one snapshot consistently and replays it as a duplicate", () => {
+  const resources = harness.setup();
+  const database = resources.database;
+  const intake = createOperationIntake(resources);
+  const operation = testOperation("writer-a", 1n, {}, "one");
+  const originalPayload = { value: "one" };
+  const payload = new Proxy(originalPayload, {
+    get: () => "get-trap-value",
+    getOwnPropertyDescriptor(target, property) {
+      const descriptor = Reflect.getOwnPropertyDescriptor(target, property);
+      return descriptor === undefined
+        ? undefined
+        : { ...descriptor, value: "snapshot-value" };
+    },
+  });
+  const candidate = { ...operation, payload };
+  const first = apply(intake, [candidate], 2);
+  const [row] = storedEnvelopeRows(database);
+  const stored = decodeOperationEnvelope(row?.encodedEnvelope ?? "");
+  const checkpoint = decodeOperationCheckpoint(first.encodedCheckpoint);
+  expect(stored.payload).toEqual({ value: "snapshot-value" });
+  expect(row?.fingerprint).toBe(operationFingerprint(stored));
+  expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
+    row?.fingerprint,
+  );
+  expect(apply(intake, [stored], 3).encodedCheckpoint).toBe(
+    first.encodedCheckpoint,
+  );
+  expectStoredEnvelopeCount(database, 1);
 });
 
 test("operation intake is replay-idempotent", () => {
@@ -250,7 +284,7 @@ test("operation intake history capacity counts stored envelopes, not replays", (
 test("operation intake rejects checkpoints above their byte capacity", () => {
   const { database, intake } = setup();
   const operation = testOperation(
-    "writer-a",
+    "capacity-writer",
     1n,
     {},
     "x".repeat(MAX_OPERATION_CHECKPOINT_BYTES),

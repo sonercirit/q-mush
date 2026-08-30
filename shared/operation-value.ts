@@ -31,7 +31,8 @@ export function snapshotOperationValue(value: unknown): unknown {
     }
     if (typeof item !== "object")
       throw new Error("Unsupported operation value");
-    if (seen.has(item)) throw new Error("Operation values must not be cyclic");
+    if (seen.has(item))
+      throw new Error("Operation values must be reference-free trees");
     seen.add(item);
     let snapshot: unknown;
     if (item instanceof Date) {
@@ -50,7 +51,6 @@ export function snapshotOperationValue(value: unknown): unknown {
         throw new Error("Operation arrays must have a numeric length");
       const length = lengthValue;
       if (
-        typeof length !== "number" ||
         keys.length !== length + 1 ||
         keys.some(
           (key) =>
@@ -82,9 +82,10 @@ export function snapshotOperationValue(value: unknown): unknown {
           "Operation objects must be plain, string-keyed, and enumerable",
         );
       const entries: [string, unknown][] = [];
-      for (const key of keys) {
-        if (typeof key !== "string")
-          throw new Error("Operation objects must be string-keyed");
+      const stringKeys = keys.filter(
+        (key): key is string => typeof key === "string",
+      );
+      for (const key of stringKeys) {
         const descriptor = dataDescriptor(item, key);
         if (!descriptor.enumerable)
           throw new Error("Operation objects must contain enumerable data");
@@ -92,7 +93,6 @@ export function snapshotOperationValue(value: unknown): unknown {
       }
       snapshot = Object.fromEntries(entries);
     }
-    seen.delete(item);
     return snapshot;
   };
   return visit(value);

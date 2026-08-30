@@ -88,10 +88,55 @@ export const operationSequenceOrder = (sequence: bigint): string => {
   return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
 };
 
-const validateAndSnapshotOperation = <TPayload>(
+const exactOperationKeys = (
+  value: object,
+  expected: readonly string[],
+): void => {
+  const keys = Object.keys(value);
+  if (
+    keys.length !== expected.length ||
+    expected.some((key) => !Object.hasOwn(value, key))
+  )
+    throw new Error("Operation values must contain exact keys");
+};
+const inputKeys = [
+  "operationId",
+  "schemaVersion",
+  "writerId",
+  "sequence",
+  "clock",
+  "parents",
+  "entity",
+  "kind",
+  "payload",
+] as const;
+
+const validatedOperationSnapshots = new WeakSet<object>();
+function validateAndSnapshotOperation<TPayload>(
   input: OperationInput<TPayload>,
-): OperationInput<TPayload> => {
+  includesPartition?: false,
+): OperationInput<TPayload>;
+function validateAndSnapshotOperation<TPayload>(
+  input: Operation<TPayload>,
+  includesPartition: true,
+): Operation<TPayload>;
+function validateAndSnapshotOperation<TPayload>(
+  input: OperationInput<TPayload> | Operation<TPayload>,
+  includesPartition = false,
+): OperationInput<TPayload> | Operation<TPayload> {
   const snapshot = snapshotOperationValue(input);
+  const hasPartition = Object.hasOwn(snapshot, "partition");
+  exactOperationKeys(
+    snapshot,
+    includesPartition || hasPartition ? [...inputKeys, "partition"] : inputKeys,
+  );
+  exactOperationKeys(snapshot.clock, ["physicalMs", "logical", "writerId"]);
+  exactOperationKeys(
+    snapshot.entity,
+    Object.hasOwn(snapshot.entity, "workspaceId")
+      ? ["type", "id", "accountId", "workspaceId"]
+      : ["type", "id", "accountId"],
+  );
   if (!Number.isInteger(snapshot.schemaVersion) || snapshot.schemaVersion < 1)
     throw new Error("schemaVersion must be positive");
   if (snapshot.sequence < 1n) throw new Error("sequence must be positive");
@@ -119,17 +164,24 @@ const validateAndSnapshotOperation = <TPayload>(
     typeof snapshot.entity.workspaceId !== "string"
   )
     throw new Error("Operation workspaceId must be omitted or a string");
+  validatedOperationSnapshots.add(snapshot);
   return snapshot;
-};
+}
+
+/** Validates an operation envelope and returns its durable read-once snapshot. */
+export const snapshotOperationEnvelope = (operation: Operation): Operation =>
+  validateAndSnapshotOperation(operation, true);
 
 export const createOperation = <TPayload>(
   input: OperationInput<TPayload>,
 ): Operation<TPayload> => {
   const snapshot = validateAndSnapshotOperation(input);
-  return {
+  const operation = {
     ...snapshot,
     partition: classifyOperationPartition(snapshot.entity.type),
   };
+  validatedOperationSnapshots.add(operation);
+  return operation;
 };
 
 /** @public clock comparator for deterministic replay. */
@@ -365,7 +417,9 @@ export const applyOperation = <TProjection>(
   candidate: Operation,
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
-  const snapshot = createOperation(candidate);
+  const snapshot = validatedOperationSnapshots.has(candidate)
+    ? candidate
+    : snapshotOperationEnvelope(candidate);
   if (snapshot.partition !== candidate.partition)
     throw operationProtocolError("invalid", "Operation partition mismatch");
   candidate = snapshot;

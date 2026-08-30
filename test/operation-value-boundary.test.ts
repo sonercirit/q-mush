@@ -22,6 +22,20 @@ const rejectPayload = (payload: unknown): void => {
   );
 };
 
+test("operation admission requires codec-exact structural keys and round trips", () => {
+  const operation = testOperation("writer-a", 1n, {}, "one");
+  for (const candidate of [
+    { ...operation, extra: true },
+    { ...operation, clock: { ...operation.clock, extra: true } },
+    { ...operation, entity: { ...operation.entity, extra: true } },
+  ])
+    expect(() => createOperation(candidate)).toThrow(/exact keys/);
+  const accepted = createOperation(operation);
+  expect(decodeOperationEnvelope(encodeOperationEnvelope(accepted))).toEqual(
+    accepted,
+  );
+});
+
 describe("operation read-once value boundary", () => {
   test("rejects getters, setters, and nested or array accessors", () => {
     const getter = Object.defineProperty({}, "value", {
@@ -67,21 +81,43 @@ describe("operation read-once value boundary", () => {
     expect(decoded.payload).toEqual({ value: 1 });
   });
 
-  test("apply uses full envelope validation and stores its snapshot", () => {
-    const invalid: ReturnType<typeof testOperation> = {
-      ...seed,
-      entity: Object.defineProperty({ ...seed.entity }, "workspaceId", {
-        enumerable: true,
-        value: undefined,
-      }),
-    };
+  test("apply snapshots every envelope property once and stores plain snapshot data", () => {
+    const reads = new Map<PropertyKey, number>();
+    const candidate = new Proxy(seed, {
+      getOwnPropertyDescriptor(target, property) {
+        reads.set(property, (reads.get(property) ?? 0) + 1);
+        return Reflect.getOwnPropertyDescriptor(target, property);
+      },
+    });
+    const state = applyOperation(
+      testApplyState<readonly string[]>([]),
+      candidate,
+      appendOperationId,
+    );
+    expect([...reads.values()].every((count) => count === 1)).toBe(true);
+    expect(state.replayHead?.operation).not.toBe(candidate);
+    expect(state.replayHead?.operation).toEqual(seed);
+  });
+
+  test("rejects operation values that are not reference-free trees", () => {
+    const shared = { value: 1 };
     expect(() =>
-      applyOperation(
-        testApplyState<readonly string[]>([]),
-        invalid,
-        appendOperationId,
-      ),
-    ).toThrow(/workspaceId/);
+      createOperation({ ...seed, payload: { left: shared, right: shared } }),
+    ).toThrow(/reference-free trees/);
+    const cyclic: { self?: unknown } = {};
+    cyclic.self = cyclic;
+    expect(() => createOperation({ ...seed, payload: cyclic })).toThrow(
+      /reference-free trees/,
+    );
+    expect(
+      createOperation({
+        ...seed,
+        payload: { repeated: [1, 1], distinct: [{ value: 1 }, { value: 1 }] },
+      }).payload,
+    ).toEqual({
+      repeated: [1, 1],
+      distinct: [{ value: 1 }, { value: 1 }],
+    });
   });
 
   test("rejects a clean Date with a derived prototype", () => {

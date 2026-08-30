@@ -11,6 +11,7 @@ import {
   MAX_OWNER_PARTITION_OPERATIONS,
   applyOperation,
   operationProtocolError,
+  snapshotOperationEnvelope,
   type CausalFrontier,
   type Operation,
   type OperationApplyState,
@@ -79,14 +80,15 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             ? initialState()
             : decodeOperationCheckpoint(encoded);
         for (const operation of operations) {
-          if (operation.partition !== partition)
+          const snapshot = snapshotOperationEnvelope(operation);
+          if (snapshot.partition !== partition)
             throw operationProtocolError(
               "invalid",
               "Operation intake scope mismatch",
             );
           const appended = store.appendEnvelope(
             ownerId,
-            operation,
+            snapshot,
             actorId,
             now,
           );
@@ -96,7 +98,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
               "capacity",
               "Operation history capacity reached",
             );
-          state = applyOperation(state, operation, reducer);
+          state = applyOperation(state, snapshot, reducer);
         }
         const encodedCheckpoint = encodeOperationCheckpoint(state);
         if (
