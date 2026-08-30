@@ -35,6 +35,39 @@ const recordDelay =
     if (delays.length === count) stop();
     return instantDelay();
   };
+const waitForDelays = async (
+  delays: readonly number[],
+  expected: readonly number[],
+) => {
+  await vi.waitFor(() => {
+    expect(delays).toEqual(expected);
+  });
+};
+const abortAt = (
+  delays: number[],
+  count: number,
+  controller: () => AbortController,
+) =>
+  recordDelay(
+    delays,
+    () => {
+      controller().abort();
+    },
+    count,
+  );
+const controllerHolder = () => {
+  const holder: { current?: AbortController } = {};
+  return {
+    assign(controller: AbortController) {
+      holder.current = controller;
+    },
+    get: () => {
+      if (holder.current === undefined)
+        throw new Error("Synchronization controller unavailable");
+      return holder.current;
+    },
+  };
+};
 const start = (
   options: Parameters<typeof startRunnerOperationSynchronization>[3],
 ) =>
@@ -68,24 +101,18 @@ test("resets failures to steady-state scheduling after success", async () => {
   let request = 0;
   installFetch(() => {
     request += 1;
-    if (request <= 4) return Promise.reject(new Error("offline"));
+    if (request < 5) return Promise.reject(new Error("offline"));
     return successfulResponse();
   });
   const delays: number[] = [];
+  const holder = controllerHolder();
   const controller = start({
-    delay: recordDelay(
-      delays,
-      () => {
-        controller.abort();
-      },
-      3,
-    ),
+    delay: abortAt(delays, 3, holder.get),
     log: () => undefined,
     random: midpointRandom,
   });
-  await vi.waitFor(() => {
-    expect(delays).toEqual([1_000, 2_000, 5_000]);
-  });
+  holder.assign(controller);
+  await waitForDelays(delays, [1_000, 2_000, 5_000]);
 });
 
 test("retries engine failures with capped exponential backoff", async () => {
@@ -113,10 +140,15 @@ test("retries engine failures with capped exponential backoff", async () => {
 test("counts one partition failure as a failed cycle while its peer advances", async () => {
   let cycle = 0;
   installFetch((_input, init) => {
-    const partition = JSON.parse(String(init?.body))["partition"] as string;
-    if (partition === "non-session" && cycle === 0)
-      return Promise.reject(new Error("partition offline"));
-    return successfulResponse();
+    const body = typeof init?.body === "string" ? init.body : "";
+    const partition = body.includes('"partition":"non-session"')
+      ? "non-session"
+      : "session";
+    if (partition === "non-session" && cycle === 0) {
+      const failure = new Error("partition offline");
+      return Promise.reject(failure);
+    }
+    return successfulResponse().then((response) => response);
   });
   const delays: number[] = [];
   const logs: string[] = [];
@@ -130,9 +162,7 @@ test("counts one partition failure as a failed cycle while its peer advances", a
     log: (message) => logs.push(message),
     random: midpointRandom,
   });
-  await vi.waitFor(() => {
-    expect(delays).toEqual([1_000, 5_000]);
-  });
+  await waitForDelays(delays, [1_000, 5_000]);
   expect(logs).toHaveLength(1);
   expect(logs[0]).toContain("partition offline");
 });
@@ -147,28 +177,23 @@ test("repeated 403 retains outbox and uses capped failure backoff", async () => 
       ? Promise.resolve(new Response(null, { status: 403 }))
       : successfulResponse(),
   );
-  const delays: number[] = [];
+  const retryDelays: number[] = [];
+  const holder = controllerHolder();
   const controller = startRunnerOperationSynchronization(
     pendingStore,
     "http://engine.test",
     "token",
     {
-      delay: recordDelay(delays, () => controller.abort(), 7),
+      delay: abortAt(retryDelays, 7, holder.get),
       log: () => undefined,
       random: midpointRandom,
     },
   );
-  await vi.waitFor(() => {
-    expect(delays).toEqual([
-      1_000,
-      2_000,
-      4_000,
-      8_000,
-      16_000,
-      30_000,
-      30_000,
-    ]);
-  });
+  holder.assign(controller);
+  await waitForDelays(
+    retryDelays,
+    [1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000],
+  );
 });
 
 test("shutdown aborts an in-flight engine request", async () => {

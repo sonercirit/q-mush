@@ -64,41 +64,50 @@ const outboxIdentity = (encoded: string): string => {
     return encoded;
   }
 };
-const pushSinglyAfterBadRequest = async (request: {
-  readonly envelopes: readonly string[];
+interface PartitionRequest {
   readonly partition: OperationPartition;
   readonly signal: AbortSignal;
   readonly store: OperationStore;
   readonly transport: OperationTransport;
-}): Promise<boolean> => {
-  let stalled = false;
-  for (const envelope of request.envelopes) {
-    try {
-      await request.transport.writeBatch(
-        request.partition,
-        [envelope],
-        request.signal,
-      );
-      request.store.acknowledge(ownerAlias, request.partition, [envelope]);
-    } catch (error) {
-      if (!isOperationSynchronizationBadRequest(error)) throw error;
-      request.store.stallOutbox(
-        ownerAlias,
-        request.partition,
-        envelope,
-        error.message,
-      );
-      stalled = true;
-    }
+}
+const acceptedPush = async (
+  request: PartitionRequest,
+  envelopes: readonly string[],
+): Promise<void> => {
+  await request.transport.writeBatch(
+    request.partition,
+    envelopes,
+    request.signal,
+  );
+  request.store.acknowledge(ownerAlias, request.partition, envelopes);
+};
+const pushOne = async (
+  request: PartitionRequest,
+  envelope: string,
+): Promise<boolean> => {
+  try {
+    await acceptedPush(request, [envelope]);
+    return false;
+  } catch (error) {
+    if (!isOperationSynchronizationBadRequest(error)) throw error;
+    request.store.stallOutbox(
+      ownerAlias,
+      request.partition,
+      envelope,
+      error.message,
+    );
+    return true;
   }
+};
+const pushSinglyAfterBadRequest = async (
+  request: PartitionRequest & { readonly envelopes: readonly string[] },
+): Promise<boolean> => {
+  let stalled = false;
+  for (const envelope of request.envelopes)
+    stalled = (await pushOne(request, envelope)) || stalled;
   return stalled;
 };
-const pushOutbox = async (request: {
-  readonly partition: OperationPartition;
-  readonly signal: AbortSignal;
-  readonly store: OperationStore;
-  readonly transport: OperationTransport;
-}): Promise<boolean> => {
+const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   const { partition, store } = request;
   const pending = store.pending(ownerAlias, partition);
   const existingStallIds = new Set(
@@ -110,27 +119,14 @@ const pushOutbox = async (request: {
     existingStallIds.has(outboxIdentity(encoded)),
   );
   let remainsStalled = false;
-  for (const envelope of stalled) {
-    try {
-      await request.transport.writeBatch(partition, [envelope], request.signal);
-      store.acknowledge(ownerAlias, partition, [envelope]);
-    } catch (error) {
-      if (!isOperationSynchronizationBadRequest(error)) throw error;
-      store.stallOutbox(ownerAlias, partition, envelope, error.message);
-      remainsStalled = true;
-    }
-  }
+  for (const envelope of stalled)
+    remainsStalled = (await pushOne(request, envelope)) || remainsStalled;
   const pushable = pending.filter(
     (encoded) => !existingStallIds.has(outboxIdentity(encoded)),
   );
   if (pushable.length === 0) return remainsStalled;
   try {
-    await request.transport.writeBatch(
-      request.partition,
-      pushable,
-      request.signal,
-    );
-    request.store.acknowledge(ownerAlias, request.partition, pushable);
+    await acceptedPush(request, pushable);
     return remainsStalled;
   } catch (error) {
     if (!isOperationSynchronizationBadRequest(error)) throw error;
@@ -140,12 +136,9 @@ const pushOutbox = async (request: {
     );
   }
 };
-const synchronizePartition = async (request: {
-  readonly partition: OperationPartition;
-  readonly signal: AbortSignal;
-  readonly store: OperationStore;
-  readonly transport: OperationTransport;
-}): Promise<void> => {
+const synchronizePartition = async (
+  request: PartitionRequest,
+): Promise<void> => {
   const { partition, signal, store, transport } = request;
   const outboxStalled = await pushOutbox(request);
   let hasMore: boolean;
@@ -166,7 +159,9 @@ const synchronizePartition = async (request: {
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];
   if (outboxStalled || outboxStalls.length > 0) {
-    const identities = outboxStalls.map(({ operationId }) => operationId).join(", ");
+    const identities = outboxStalls
+      .map(({ operationId }) => operationId)
+      .join(", ");
     throw new Error(
       `Operation synchronization outbox stalled: ${partition}${identities === "" ? "" : ` (${identities})`}`,
     );

@@ -32,26 +32,27 @@ const harness = (initial: Partial<HarnessState> = {}) => {
     state,
     store: {
       acknowledge: (
-        _ownerId: string,
-        _partition: OperationPartition,
-        envelopes: readonly string[],
+        _owner: string,
+        _scope: OperationPartition,
+        acknowledged: readonly string[],
       ) => {
         events.push("ack");
         state.pending = state.pending.filter(
-          (pending) => !envelopes.includes(pending),
+          (pending) => !acknowledged.includes(pending),
         );
       },
       apply: (
         _ownerId: string,
         _partition: OperationPartition,
-        envelopes: readonly string[],
+        incoming: readonly string[],
       ) => {
-        const poisoned = envelopes.some((envelope) => envelope === "poison");
+        void _ownerId;
+        const poisoned = incoming.some((envelope) => envelope === "poison");
         if (poisoned) state.stalled = true;
-        events.push(`apply:${envelopes.join(",")}`);
+        events.push(`apply:${incoming.join(",")}`);
         if (poisoned) return;
         state.frontier = {
-          writer: (state.frontier["writer"] ?? 0n) + BigInt(envelopes.length),
+          writer: (state.frontier["writer"] ?? 0n) + BigInt(incoming.length),
         };
       },
       pending: () => state.pending,
@@ -73,23 +74,82 @@ const harness = (initial: Partial<HarnessState> = {}) => {
   };
 };
 
+const synchronizeStore = (
+  store: Parameters<typeof synchronizeRunnerOperations>[0],
+  transport: Parameters<typeof synchronizeRunnerOperations>[1],
+) =>
+  synchronizeRunnerOperations(store, transport, new AbortController().signal);
 const runSynchronization = (
   replica: ReturnType<typeof harness>,
   transport: Parameters<typeof synchronizeRunnerOperations>[1],
-) =>
-  synchronizeRunnerOperations(
-    replica.store,
-    transport,
-    new AbortController().signal,
-  );
+) => synchronizeStore(replica.store, transport);
 
+const engineHarness = () => {
+  const engine = createOperationDatabaseHarness();
+  const resources = engine.setup();
+  return {
+    engine,
+    resources,
+    handler: createOperationSynchronization(
+      resources.database,
+      { authenticatedUser: () => null },
+      undefined,
+      { runnerAccount: () => ({ userId: "owner-1" }) },
+    ),
+  };
+};
+const postToEngine = async (
+  handler: ReturnType<typeof createOperationSynchronization>,
+  partition: OperationPartition,
+  envelopes: readonly string[],
+): Promise<Response> =>
+  handler(
+    new Request("http://engine.test/api/operations/synchronize", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ ownerId: "self", partition, envelopes }),
+    }),
+  );
+const engineEnvelopes = (
+  database: Parameters<typeof createOperationStore>[0]["database"],
+) =>
+  createOperationStore({ database }).readEncodedEnvelopes(
+    "owner-1",
+    "non-session",
+    {},
+    10,
+  ).envelopes;
+const withEngineAndRunner = async (
+  run: (context: {
+    readonly engineDatabase: Parameters<
+      typeof createOperationStore
+    >[0]["database"];
+    readonly handler: ReturnType<typeof createOperationSynchronization>;
+    readonly store: ReturnType<typeof createRunnerOperationStore>;
+  }) => Promise<void>,
+) => {
+  const { engine, handler, resources } = engineHarness();
+  const runner = new Database(":memory:");
+  try {
+    await run({
+      engineDatabase: resources.database,
+      handler,
+      store: createRunnerOperationStore(runner),
+    });
+  } finally {
+    runner.close();
+    engine.close();
+  }
+};
 const pendingForNonSession = (
   store: ReturnType<typeof createRunnerOperationStore>,
 ) => store.pending("self", "non-session");
 const noEnvelopes: readonly string[] = [];
 const emptyPage = () =>
   Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
-const ownedEngineOperation = <Operation extends ReturnType<typeof testOperation>>(
+const ownedEngineOperation = <
+  Operation extends ReturnType<typeof testOperation>,
+>(
   operation: Operation,
 ): Operation =>
   Object.assign(operation, {
@@ -173,17 +233,7 @@ test("a durably stalled partition leaves its frontier fixed while its peer compl
 });
 
 test("isolates a batch 400, commits good neighbors, and durably stalls without discarding poison", async () => {
-  const engine = createOperationDatabaseHarness();
-  const resources = engine.setup();
-  const handler = createOperationSynchronization(
-    resources.database,
-    { authenticatedUser: () => null },
-    undefined,
-    { runnerAccount: () => ({ userId: "owner-1" }) },
-  );
-  const runnerDatabase = new Database(":memory:");
-  try {
-    const store = createRunnerOperationStore(runnerDatabase);
+  await withEngineAndRunner(async ({ engineDatabase, handler, store }) => {
     const now = Date.now();
     const encoded = [
       encodeOperationEnvelope(
@@ -209,50 +259,29 @@ test("isolates a batch 400, commits good neighbors, and durably stalls without d
     store.apply("self", "non-session", encoded, "local");
     const writes: number[] = [];
     const transport = {
-      async writeBatch(
-        partition: OperationPartition,
-        envelopes: readonly string[],
-      ) {
-        writes.push(envelopes.length);
-        const response = await handler(
-          new Request("http://engine.test/api/operations/synchronize", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ownerId: "self", partition, envelopes }),
-          }),
-        );
+      writeBatch: async (
+        scope: OperationPartition,
+        batch: readonly string[],
+      ) => {
+        writes.push(batch.length);
+        const response = await postToEngine(handler, scope, batch);
         if (!response.ok)
           throw Object.assign(new Error(`HTTP ${String(response.status)}`), {
             operationSynchronizationStatus: response.status,
           });
       },
-      readPage: () => emptyPage(),
+      readPage: emptyPage,
     };
-
-    await expect(
-      synchronizeRunnerOperations(
-        store,
-        transport,
-        new AbortController().signal,
-      ),
-    ).rejects.toThrow("outbox stalled");
+    await expect(synchronizeStore(store, transport)).rejects.toThrow(
+      "outbox stalled",
+    );
     expect(writes).toEqual([3, 1, 1, 1]);
     expect(pendingForNonSession(store)).toEqual([encoded[2]]);
     expect(store.state("self", "non-session").outboxStalls).toEqual([
       expect.objectContaining({ operationId: "owner-1-3" }),
     ]);
-    expect(
-      createOperationStore({ database: resources.database }).readEncodedEnvelopes(
-        "owner-1",
-        "non-session",
-        {},
-        10,
-      ).envelopes,
-    ).toEqual(encoded.slice(0, 2));
-  } finally {
-    runnerDatabase.close();
-    engine.close();
-  }
+    expect(engineEnvelopes(engineDatabase)).toEqual(encoded.slice(0, 2));
+  });
 });
 
 test("a batch 400 stalls only rejected singles, retains them, and continues pulling", async () => {
@@ -303,58 +332,31 @@ test("retains capacity-rejected outbox entries for retry", async () => {
 });
 
 test("re-pushes idempotently after engine commit and a dropped local acknowledgement", async () => {
-  const engine = createOperationDatabaseHarness();
-  const resources = engine.setup();
-  const handler = createOperationSynchronization(
-    resources.database,
-    { authenticatedUser: () => null },
-    undefined,
-    { runnerAccount: () => ({ userId: "owner-1" }) },
-  );
-  const runnerDatabase = new Database(":memory:");
-  try {
-    const store = createRunnerOperationStore(runnerDatabase);
+  await withEngineAndRunner(async (context) => {
     const encoded = engineOwnedEnvelope();
-    store.apply("self", "non-session", [encoded], "local");
+    context.store.apply("self", "non-session", [encoded], "local");
     let pushes = 0;
-    const transport = {
-      async writeBatch(
-        partition: OperationPartition,
-        envelopes: readonly string[],
-      ) {
-        pushes += 1;
-        const response = await handler(
-          new Request("http://engine.test/api/operations/synchronize", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({ ownerId: "self", partition, envelopes }),
-          }),
-        );
-        expect(response.status).toBe(200);
-        if (pushes === 1) throw new Error("ack dropped");
-      },
-      readPage: () => emptyPage(),
+    const pushAfterCommit = async (
+      scope: OperationPartition,
+      batch: readonly string[],
+    ) => {
+      pushes += 1;
+      const response = await postToEngine(context.handler, scope, batch);
+      expect(response.status).toBe(200);
+      if (pushes === 1) throw new Error("ack dropped");
     };
-    const synchronize = () =>
-      synchronizeRunnerOperations(
-        store,
-        transport,
-        new AbortController().signal,
-      );
+    const transport = {
+      writeBatch: pushAfterCommit,
+      readPage: emptyPage,
+    };
+    const synchronize = () => synchronizeStore(context.store, transport);
     await expect(synchronize()).rejects.toThrow("ack dropped");
-    expect(pendingForNonSession(store)).toEqual([encoded]);
+    expect(pendingForNonSession(context.store)).toEqual([encoded]);
     await synchronize();
-    expect(pendingForNonSession(store)).toEqual([]);
+    expect(pendingForNonSession(context.store)).toEqual([]);
     expect(pushes).toBe(2);
-    expect(
-      createOperationStore({
-        database: resources.database,
-      }).readEncodedEnvelopes("owner-1", "non-session", {}, 10).envelopes,
-    ).toEqual([encoded]);
-  } finally {
-    runnerDatabase.close();
-    engine.close();
-  }
+    expect(engineEnvelopes(context.engineDatabase)).toEqual([encoded]);
+  });
 });
 
 test("acknowledges pushed outbox only after transport success", async () => {

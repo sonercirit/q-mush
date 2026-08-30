@@ -144,7 +144,6 @@ test("does not rewrite a checkpoint when a stalled page accepts no prefix", () =
   });
 });
 
-
 test("does not advance or retain later operations across a rejected identity", () => {
   withStore((store) => {
     const poison = poisonEnvelope(2n);

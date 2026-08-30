@@ -24,6 +24,17 @@ const undecodableIdentity = (encoded: string): QuarantineIdentity => {
   };
 };
 
+const operationIdentity = (
+  ownerId: string,
+  operation: Operation,
+): [string, OperationPartition, string, string, string] => [
+  ownerId,
+  operation.partition,
+  operation.operationId,
+  operation.writerId,
+  operation.sequence.toString(),
+];
+
 export const createRunnerOperationLog = (database: Database) => {
   database.run(
     "CREATE TABLE IF NOT EXISTS operation_envelopes (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, verification_state TEXT NOT NULL, source TEXT NOT NULL, rejection_reason TEXT, outbox_pending INTEGER NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
@@ -81,11 +92,7 @@ export const createRunnerOperationLog = (database: Database) => {
       source: OperationReplicaSource,
     ) {
       append.run(
-        ownerId,
-        operation.partition,
-        operation.operationId,
-        operation.writerId,
-        operation.sequence.toString(),
+        ...operationIdentity(ownerId, operation),
         encoded,
         source,
         source === "local" ? 1 : 0,
@@ -157,12 +164,10 @@ export const createRunnerOperationLog = (database: Database) => {
       reason: string,
     ) {
       const operation = decodeOperationEnvelope(encoded);
+      if (operation.partition !== partition)
+        throw new Error("Outbox stall partition mismatch");
       stallOutbox.run(
-        ownerId,
-        partition,
-        operation.operationId,
-        operation.writerId,
-        operation.sequence.toString(),
+        ...operationIdentity(ownerId, operation),
         encoded,
         reason,
       );
