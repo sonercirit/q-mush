@@ -74,7 +74,6 @@ export interface SessionIntegration extends SessionDetailReader {
   openRouterProviders(request: Request): Promise<Response>;
   pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate;
   readonly realtimeCommands: SessionRealtimeCommands;
-  onChange(listener: (userId: string, sessionId: string) => void): void;
   onChanges(
     listener: (userId: string, sessionIds: readonly string[]) => void,
   ): void;

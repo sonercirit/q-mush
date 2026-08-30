@@ -406,9 +406,11 @@ export function connectedSessionSetup(
     },
   );
   sessions.runnerOperational(RUNNER_ID);
-  sessions.onChange((userId, sessionId) => {
-    notifications.push({ sessionId, userId });
-    options.onChange?.(userId, sessionId);
+  sessions.onChanges((userId, sessionIds) => {
+    for (const sessionId of sessionIds) {
+      notifications.push({ sessionId, userId });
+      options.onChange?.(userId, sessionId);
+    }
   });
   return {
     cleanupCommands,

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 import {
   createRunnerCommandBroker,
@@ -134,6 +135,14 @@ function coordinator(
 }
 
 describe("removed session runners", () => {
+  test("registers restart visibility on the batched session change path", () => {
+    const indexSource = readFileSync(
+      new URL("../index.ts", import.meta.url),
+      "utf8",
+    );
+
+    expect(indexSource).toContain("sessions.onChanges((userId, sessionIds)");
+  });
   test("rechecks command authority at dispatch", async () => {
     let authorized = true;
     const broker = createRunnerCommandBroker();
@@ -181,20 +190,22 @@ describe("removed session runners", () => {
     ).toBe(false);
   });
 
-  test("batches notifications for every affected session before waiting for cleanup", async () => {
+  test("batches notifications for every affected session after cleanup settles", async () => {
     const sessions = Array.from({ length: 100 }, (_, index) => ({
       ...testSession(),
       id: "session-" + String(index),
     }));
     const settled = Promise.withResolvers<undefined>();
     const notifyMany = vi.fn();
+    const abort = vi.fn();
+    const appendInterruptedRunnerTool = vi.fn();
     const removal = createRunnerRemovalCoordinator({
       broker: createRunnerCommandBroker(),
       notifyMany,
       now: () => 2,
-      runtimes: { abort: vi.fn(), settled: () => settled.promise },
+      runtimes: { abort, settled: () => settled.promise },
       store: {
-        appendInterruptedRunnerTool: vi.fn(),
+        appendInterruptedRunnerTool,
         get: () => undefined,
         list: () => sessions,
       },
@@ -202,11 +213,9 @@ describe("removed session runners", () => {
 
     const cleanup = removal.removed("user-1", REMOVED_RUNNER_ID);
 
-    expect(notifyMany).toHaveBeenCalledOnce();
-    expect(notifyMany).toHaveBeenCalledWith(
-      "user-1",
-      sessions.map(({ id }) => id),
-    );
+    expect(abort).toHaveBeenCalledTimes(sessions.length);
+    expect(appendInterruptedRunnerTool).not.toHaveBeenCalled();
+    expect(notifyMany).not.toHaveBeenCalled();
     let cleanupComplete = false;
     void cleanup.then(() => {
       cleanupComplete = true;
@@ -215,6 +224,21 @@ describe("removed session runners", () => {
     expect(cleanupComplete).toBe(false);
     settled.resolve();
     await cleanup;
+    expect(notifyMany).toHaveBeenCalledOnce();
+    expect(notifyMany).toHaveBeenCalledWith(
+      "user-1",
+      sessions.map(({ id }) => id),
+    );
+  });
+
+  test("treats duplicate staging for the same removal as idempotent", () => {
+    const removal = coordinator(createRunnerCommandBroker(), []);
+
+    removal.removing("user-1", REMOVED_RUNNER_ID);
+
+    expect(() => {
+      removal.removing("user-1", REMOVED_RUNNER_ID);
+    }).not.toThrow();
   });
 
   test("fences commands before waiting for the database removal callback", async () => {

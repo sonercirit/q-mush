@@ -321,7 +321,6 @@ export type RealtimeSessionOverrides = Partial<
     | "drainRunner"
     | "escalateRunnerDrain"
     | "listForUser"
-    | "onChange"
     | "onChanges"
     | "pendingQuestionForUser"
     | "pendingRunnerRestart"
@@ -360,7 +359,6 @@ export function realtimeTestSessions(
     listForUser: () => [],
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
-    onChange: () => undefined,
     onChanges: () => undefined,
     openRouterProviders: () => Promise.resolve(new Response()),
     pendingQuestionForUser: () => null,

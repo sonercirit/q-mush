@@ -73,22 +73,14 @@ function detachRemovedListeners(
   userId: string,
   runnerId: string,
 ): void {
-  for (const listener of listeners) {
-    detachRemovedListener(listener.removed, userId, runnerId);
-  }
-}
-
-function detachRemovedListener(
-  removed: RunnerRemovedListener,
-  userId: string,
-  runnerId: string,
-): void {
-  try {
-    void Promise.resolve(removed(userId, runnerId)).catch(() => {
-      // Removal is committed; asynchronous cleanup cannot change its outcome.
-    });
-  } catch {
-    // Removal is committed; cleanup failures cannot change its outcome.
+  for (const { removed } of listeners) {
+    try {
+      void Promise.resolve(removed(userId, runnerId)).catch(() => {
+        // Removal is committed; asynchronous cleanup cannot change its outcome.
+      });
+    } catch {
+      // Removal is committed; cleanup failures cannot change its outcome.
+    }
   }
 }
 
@@ -459,21 +451,25 @@ export function createRunnerIntegration(
         for (const { removing } of removalListeners) {
           removing(user.id, runnerId);
         }
-        notifyRemoved(user.id, runnerId);
+        detachRemovedListeners(removalListeners, user.id, runnerId);
         return createNoContentResponse();
       }),
     );
   }
 
-  function notifyRemoved(userId: string, runnerId: string): void {
-    setTimeout(detachRemovedListeners, 0, removalListeners, userId, runnerId);
-  }
-
-  function receiptState(
-    ...parameters: readonly [string, RunnerMetadata, string]
-  ): RunnerActivationReceiptValidation | undefined {
-    return store.registration.receiptState(...parameters);
-  }
+  const receiptState = (
+    token: string,
+    metadata: RunnerMetadata,
+    receipt: string,
+  ): RunnerActivationReceiptValidation | undefined => {
+    const argumentsForReceipt = { metadata, receipt, token };
+    const state = store.registration.receiptState(
+      argumentsForReceipt.token,
+      argumentsForReceipt.metadata,
+      argumentsForReceipt.receipt,
+    );
+    return state;
+  };
 
   function settleActivationLifecycle(
     ...parameters: RunnerLifecycleParameters

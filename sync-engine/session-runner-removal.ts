@@ -35,7 +35,9 @@ export function createRunnerRemovalCoordinator(
   const stagedRemovals = new Map<string, StagedRunnerRemoval>();
 
   function removing(userId: string, runnerId: string): void {
-    if (stagedRemovals.has(runnerId)) {
+    const staged = stagedRemovals.get(runnerId);
+    if (staged !== undefined) {
+      if (staged.userId === userId) return;
       throw new Error("The runner is already being removed");
     }
     const interrupted = dependencies.broker
@@ -88,12 +90,12 @@ export function createRunnerRemovalCoordinator(
         );
       }
     }
+    await Promise.allSettled(
+      affected.map((session) => dependencies.runtimes.settled(session.id)),
+    );
     dependencies.notifyMany(
       userId,
       affected.map((session) => session.id),
-    );
-    await Promise.allSettled(
-      affected.map((session) => dependencies.runtimes.settled(session.id)),
     );
   }
 

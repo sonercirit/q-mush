@@ -211,17 +211,21 @@ if (usesOpenAiLoopbackCallback(Bun.env)) {
 }
 
 const restartVisibleSessionIds: RestartProgressVisibilityCache = new Map();
-sessions.onChange((userId, sessionId) => {
+sessions.onChanges((userId, sessionIds) => {
   if (!lifecycle.restarting) return;
   for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
-    if (sessions.detailForUser(userId, sessionId, workspaceId) === undefined) {
-      continue;
+    for (const sessionId of sessionIds) {
+      if (
+        sessions.detailForUser(userId, sessionId, workspaceId) === undefined
+      ) {
+        continue;
+      }
+      addVisibleRestartSession(
+        restartVisibleSessionIds,
+        restartProgressVisibilityKey(userId, workspaceId),
+        sessionId,
+      );
     }
-    addVisibleRestartSession(
-      restartVisibleSessionIds,
-      restartProgressVisibilityKey(userId, workspaceId),
-      sessionId,
-    );
   }
 });
 

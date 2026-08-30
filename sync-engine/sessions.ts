@@ -74,7 +74,6 @@ function createDrizzleSessionIntegration(
   providersInput: SessionCredentialReaders,
   dependencies: SessionDependencies,
 ): DrizzleSessionIntegration {
-  const onChange = new Set<(userId: string, sessionId: string) => void>();
   const onChanges = new Set<
     (userId: string, sessionIds: readonly string[]) => void
   >();
@@ -307,8 +306,7 @@ function createDrizzleSessionIntegration(
   queuedOwnerIds.forEach(launchQueued);
 
   function notify(userId: string, sessionId: string): void {
-    for (const listener of onChange) listener(userId, sessionId);
-    for (const listener of onChanges) listener(userId, [sessionId]);
+    notifyMany(userId, [sessionId]);
   }
 
   function notifyMany(userId: string, sessionIds: readonly string[]): void {
@@ -476,9 +474,6 @@ function createDrizzleSessionIntegration(
     attachmentFallbacks: (request: Request) =>
       fallbacks.api.collection(request),
     hasPendingDatabaseWrites: () => failureReconciler.hasPending(),
-    onChange: (listener: (userId: string, sessionId: string) => void) => {
-      onChange.add(listener);
-    },
     onChanges: (
       listener: (userId: string, sessionIds: readonly string[]) => void,
     ) => {

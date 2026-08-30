@@ -563,16 +563,15 @@ describe("runner connections", () => {
   });
 
   test("notifies the session domain after transactional removal", async () => {
-    const removed: string[] = [];
+    const removed = Promise.withResolvers<string>();
     const setup = createSetup((userId, runnerId) => {
-      removed.push(`${userId}:${runnerId}`);
+      removed.resolve(`${userId}:${runnerId}`);
     });
     connectFirstRunner(setup);
 
     await removeFirstRunnerAndExpect(setup);
-    await Bun.sleep(10);
 
-    expect(removed).toEqual([`${TEST_USER_ID}:${FIRST_RUNNER_ID}`]);
+    expect(await removed.promise).toBe(`${TEST_USER_ID}:${FIRST_RUNNER_ID}`);
     setup.database.$client.close();
   });
 

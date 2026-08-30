@@ -245,8 +245,9 @@ export function createRealtimeIntegration(
     publishRunnerActivity(userId);
   });
   options.sessions.onChanges((userId, sessionIds) => {
-    for (const workspaceId of options.hub.userWorkspaces(userId)) {
-      for (const sessionId of sessionIds) {
+    const changedWorkspaces = new Set<string>();
+    for (const sessionId of sessionIds) {
+      for (const workspaceId of options.hub.userWorkspaces(userId)) {
         const session = options.sessions.detailForUser(
           userId,
           sessionId,
@@ -269,7 +270,11 @@ export function createRealtimeIntegration(
           },
           workspaceId,
         );
+        changedWorkspaces.add(workspaceId);
+        break;
       }
+    }
+    for (const workspaceId of changedWorkspaces) {
       publishSessions(userId, workspaceId);
     }
   });
