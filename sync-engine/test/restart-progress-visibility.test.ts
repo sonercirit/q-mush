@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import {
-  addVisibleRestartSession,
+  registerRestartProgressVisibilityListener,
   type RestartProgressVisibilityCache,
   visibleRestartProgress,
 } from "../restart-progress-visibility.ts";
@@ -32,6 +32,71 @@ function visibilityCache(): RestartProgressVisibilityCache {
   return new Map();
 }
 
+type ChangeListener = (userId: string, sessionIds: readonly string[]) => void;
+
+function visibilityListener(
+  cache: RestartProgressVisibilityCache,
+  workspaceId: string,
+  detailIsVisible: (sessionId: string) => boolean = () => true,
+): ChangeListener {
+  let listener: ChangeListener | undefined;
+  registerRestartProgressVisibilityListener({
+    cache,
+    detailIsVisible: (_userId, sessionId) => detailIsVisible(sessionId),
+    isRestarting: () => true,
+    subscribe: (registered) => {
+      listener = registered;
+    },
+    userWorkspaces: () => [workspaceId],
+  });
+  if (listener === undefined) throw new Error("listener was not registered");
+  return listener;
+}
+
+function addSession(
+  cache: RestartProgressVisibilityCache,
+  key: string,
+  sessionId: string,
+): void {
+  const [userId = "", workspaceId = ""] = key.split("\0");
+  visibilityListener(cache, workspaceId)(userId, [sessionId]);
+}
+
+test("does not register visible sessions outside a restart", () => {
+  const cache = visibilityCache();
+  const listeners: ChangeListener[] = [];
+  registerRestartProgressVisibilityListener({
+    cache,
+    detailIsVisible: () => true,
+    isRestarting: () => false,
+    subscribe: (registered) => {
+      listeners.push(registered);
+    },
+    userWorkspaces: () => ["workspace"],
+  });
+  const listener = listeners[0];
+  if (listener === undefined) throw new Error("listener was not registered");
+
+  listener("user", ["session-one", "session-two"]);
+
+  expect(cache).toEqual(new Map());
+});
+
+test("registers every visible session in a batched restart change", () => {
+  const cache = visibilityCache();
+  const listener = visibilityListener(
+    cache,
+    "workspace",
+    (sessionId) => sessionId !== "hidden",
+  );
+
+  listener("user", ["session-one", "hidden", "session-two"]);
+
+  expect(
+    visibleRestartProgress(cache, "user\0workspace", () => [], progressForIds),
+  ).toEqual([progress("session-one", 1), progress("session-two", 1)]);
+});
+
 test("publishes late visible drain progress without repeating the listing", () => {
   const cache = visibilityCache();
   const key = "user\0workspace";
@@ -60,7 +125,7 @@ test("publishes late visible drain progress without repeating the listing", () =
     visibleRestartProgress(cache, otherKey, listOtherSessionIds, readProgress),
   ).toEqual([progress("session-other", 3)]);
   draining.set("session-late", progress("session-late", 2));
-  addVisibleRestartSession(cache, key, "session-late");
+  addSession(cache, key, "session-late");
   publish();
 
   expect(browserPublications).toEqual([
@@ -75,7 +140,7 @@ test("publishes late visible drain progress without repeating the listing", () =
 test("keeps a session added before the initial visibility listing", () => {
   const cache = visibilityCache();
   const key = "user\0workspace";
-  addVisibleRestartSession(cache, key, "session-late");
+  addSession(cache, key, "session-late");
   const listSessionIds = vi.fn(() => sessionIds("session-initial"));
   const readProgress = vi.fn(progressForIds);
 

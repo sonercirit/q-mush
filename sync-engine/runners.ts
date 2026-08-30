@@ -68,6 +68,22 @@ interface RunnerRemovalListeners {
   readonly removing: RunnerRemovingListener;
 }
 
+function detachRemovedListeners(
+  listeners: ReadonlySet<RunnerRemovalListeners>,
+  userId: string,
+  runnerId: string,
+): void {
+  for (const { removed } of listeners) {
+    try {
+      void Promise.resolve(removed(userId, runnerId)).catch(() => {
+        // Removal is committed; asynchronous cleanup cannot change its outcome.
+      });
+    } catch {
+      // Removal is committed; cleanup failures cannot change its outcome.
+    }
+  }
+}
+
 interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
@@ -435,30 +451,10 @@ export function createRunnerIntegration(
         for (const { removing } of removalListeners) {
           removing(user.id, runnerId);
         }
-        notifyRemoved(user.id, runnerId);
+        detachRemovedListeners(removalListeners, user.id, runnerId);
         return createNoContentResponse();
       }),
     );
-  }
-
-  function notifyRemoved(userId: string, runnerId: string): void {
-    for (const { removed } of removalListeners) {
-      try {
-        void Promise.resolve(removed(userId, runnerId)).catch(() => {
-          // Removal is committed; asynchronous cleanup must not hold its response.
-        });
-      } catch {
-        // Removal is committed; cleanup failures cannot change its outcome.
-      }
-    }
-  }
-
-  function receiptState(
-    token: string,
-    metadata: RunnerMetadata,
-    receipt: string,
-  ): RunnerActivationReceiptValidation | undefined {
-    return store.registration.receiptState(token, metadata, receipt);
   }
 
   function settleActivationLifecycle(
@@ -607,7 +603,7 @@ export function createRunnerIntegration(
     onRemoving,
     onlineForUser,
     preflightRegistration,
-    receiptState,
+    receiptState: store.registration.receiptState.bind(store.registration),
     remove,
     runnerAccount,
     runnerIsAvailable,

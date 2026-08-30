@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createRunnerCommandBroker,
   type RunnerCommandBroker,
@@ -120,7 +120,7 @@ function coordinator(
 ): RunnerRemovalCoordinator {
   return createRunnerRemovalCoordinator({
     broker,
-    notify: () => undefined,
+    notifyMany: () => undefined,
     now: () => 2,
     runtimes: { abort: () => undefined, settled },
     store: {
@@ -179,6 +179,57 @@ describe("removed session runners", () => {
         state: "completed",
       }),
     ).toBe(false);
+  });
+
+  test("batches notifications for every affected session after cleanup settles", async () => {
+    const sessions = Array.from({ length: 100 }, (_, index) => ({
+      ...testSession(),
+      id: "session-" + String(index),
+    }));
+    const settled = Promise.withResolvers<undefined>();
+    const notifyMany = vi.fn();
+    const abort = vi.fn();
+    const appendInterruptedRunnerTool = vi.fn();
+    const removal = createRunnerRemovalCoordinator({
+      broker: createRunnerCommandBroker(),
+      notifyMany,
+      now: () => 2,
+      runtimes: { abort, settled: () => settled.promise },
+      store: {
+        appendInterruptedRunnerTool,
+        get: () => undefined,
+        list: () => sessions,
+      },
+    });
+
+    const cleanup = removal.removed("user-1", REMOVED_RUNNER_ID);
+
+    expect(abort).toHaveBeenCalledTimes(sessions.length);
+    expect(appendInterruptedRunnerTool).not.toHaveBeenCalled();
+    expect(notifyMany).not.toHaveBeenCalled();
+    let cleanupComplete = false;
+    void cleanup.then(() => {
+      cleanupComplete = true;
+    });
+    await Promise.resolve();
+    expect(cleanupComplete).toBe(false);
+    settled.resolve();
+    await cleanup;
+    expect(notifyMany).toHaveBeenCalledOnce();
+    expect(notifyMany).toHaveBeenCalledWith(
+      "user-1",
+      sessions.map(({ id }) => id),
+    );
+  });
+
+  test("rejects duplicate staging for a runner removal", () => {
+    const removal = coordinator(createRunnerCommandBroker(), []);
+
+    removal.removing("user-1", REMOVED_RUNNER_ID);
+
+    expect(() => {
+      removal.removing("user-1", REMOVED_RUNNER_ID);
+    }).toThrow("The runner is already being removed");
   });
 
   test("fences commands before waiting for the database removal callback", async () => {

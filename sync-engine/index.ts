@@ -49,7 +49,7 @@ import {
   type QmushWebSocketData,
 } from "./realtime.ts";
 import {
-  addVisibleRestartSession,
+  registerRestartProgressVisibilityListener,
   type RestartProgressVisibilityCache,
   restartProgressVisibilityKey,
   visibleRestartProgress,
@@ -211,18 +211,15 @@ if (usesOpenAiLoopbackCallback(Bun.env)) {
 }
 
 const restartVisibleSessionIds: RestartProgressVisibilityCache = new Map();
-sessions.onChange((userId, sessionId) => {
-  if (!lifecycle.restarting) return;
-  for (const workspaceId of realtimeHub.userWorkspaces(userId)) {
-    if (sessions.detailForUser(userId, sessionId, workspaceId) === undefined) {
-      continue;
-    }
-    addVisibleRestartSession(
-      restartVisibleSessionIds,
-      restartProgressVisibilityKey(userId, workspaceId),
-      sessionId,
-    );
-  }
+registerRestartProgressVisibilityListener({
+  cache: restartVisibleSessionIds,
+  detailIsVisible: (userId, sessionId, workspaceId) =>
+    sessions.detailForUser(userId, sessionId, workspaceId) !== undefined,
+  isRestarting: () => lifecycle.restarting,
+  subscribe: (listener) => {
+    sessions.onChanges(listener);
+  },
+  userWorkspaces: (userId) => realtimeHub.userWorkspaces(userId),
 });
 
 function startMaintenance(): void {

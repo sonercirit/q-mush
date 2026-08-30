@@ -10,6 +10,38 @@ export type RestartProgressVisibilityCache = Map<
   RestartProgressVisibility
 >;
 
+interface RestartVisibilityListenerOptions {
+  readonly cache: RestartProgressVisibilityCache;
+  readonly detailIsVisible: (
+    userId: string,
+    sessionId: string,
+    workspaceId: string,
+  ) => boolean;
+  readonly isRestarting: () => boolean;
+  readonly subscribe: (
+    callback: (userId: string, sessionIds: readonly string[]) => void,
+  ) => void;
+  readonly userWorkspaces: (userId: string) => readonly string[];
+}
+
+export function registerRestartProgressVisibilityListener(
+  options: RestartVisibilityListenerOptions,
+): void {
+  options.subscribe((userId, sessionIds) => {
+    if (!options.isRestarting()) return;
+    for (const workspaceId of options.userWorkspaces(userId)) {
+      for (const sessionId of sessionIds) {
+        if (!options.detailIsVisible(userId, sessionId, workspaceId)) continue;
+        addVisibleRestartSession(
+          options.cache,
+          restartProgressVisibilityKey(userId, workspaceId),
+          sessionId,
+        );
+      }
+    }
+  });
+}
+
 export function restartProgressVisibilityKey(
   userId: string,
   workspaceId: string,
@@ -28,7 +60,7 @@ function visibility(
   return created;
 }
 
-export function addVisibleRestartSession(
+function addVisibleRestartSession(
   cache: RestartProgressVisibilityCache,
   key: string,
   sessionId: string,

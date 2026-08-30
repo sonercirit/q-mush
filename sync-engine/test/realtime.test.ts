@@ -106,14 +106,15 @@ function openedSessionPublisher(
   detail: () => AgentSessionDetail,
   sessionOverrides: RealtimeSessionOverrides = {},
 ) {
-  let listener: ((userId: string, sessionId: string) => void) | undefined;
+  let listener:
+    ((userId: string, sessionIds: readonly string[]) => void) | undefined;
   const realtime = configuredRealtimeTestIntegration({
     auth: realtimeTestAuth(USER),
     hub: createRealtimeHub(),
     sessions: realtimeTestSessions({
       detailForUser: detail,
       listForUser: () => [detail()],
-      onChange: (nextListener) => {
+      onChanges: (nextListener) => {
         listener = nextListener;
       },
       ...sessionOverrides,
@@ -121,9 +122,9 @@ function openedSessionPublisher(
   });
   return {
     connection: openUserRealtimeTestSocket(realtime),
-    publish: () => {
+    publish: (sessionIds?: readonly string[]) => {
       const selected = detail();
-      listener?.(USER.id, selected.id);
+      listener?.(USER.id, sessionIds ?? [selected.id]);
     },
   };
 }
@@ -501,8 +502,12 @@ test("runner removal closes its socket, publishes the list, and responds before 
   hub.setRunner(runnerId, runner.socket, true);
 
   const cleanup = Promise.withResolvers<undefined>();
+  const cleanupStarted = Promise.withResolvers<undefined>();
+  let cleanupComplete = false;
   runners.onRemoved(async () => {
+    cleanupStarted.resolve();
     await cleanup.promise;
+    cleanupComplete = true;
   });
   const removal = runners.remove(
     createAuthenticatedRequest(
@@ -518,10 +523,14 @@ test("runner removal closes its socket, publishes the list, and responds before 
       setTimeout(resolve, 100);
     }),
   ]);
-  cleanup.resolve();
+  await cleanupStarted.promise;
   const response = await removal;
 
-  expect(promptResponse).toBe(response);
+  expect(response).toBe(promptResponse);
+  expect(cleanupComplete).toBe(false);
+  cleanup.resolve();
+  await cleanup.promise;
+  await Promise.resolve();
   expect(response.status).toBe(204);
   expect(runner.record.closed).toEqual([1000, "Runner removed"]);
   expect(parseRealtimeMessages(browser.record.sent)).toEqual([
@@ -558,6 +567,33 @@ test("publishes and clears pending questions", () => {
     { pending, sessionId: detail.id, type: "session_questions" },
     { pending: null, sessionId: detail.id, type: "session_questions" },
   ]);
+});
+
+test("batches session-list snapshots for multi-session changes", () => {
+  const detail = { ...REALTIME_TEST_SESSION_DETAIL, id: "session-1" };
+  let listReads = 0;
+  const { connection, publish } = openedSessionPublisher(() => detail, {
+    detailForUser: (_userId, sessionId) => ({ ...detail, id: sessionId }),
+    listForUser: () => {
+      listReads += 1;
+      return [detail];
+    },
+  });
+
+  publish(["session-1", "session-2", "session-3"]);
+
+  const events = parseRealtimeMessages(connection.record.sent);
+  const eventTypes = events.map((event): unknown =>
+    typeof event === "object" && event !== null
+      ? Reflect.get(event, "type")
+      : undefined,
+  );
+  expect(eventTypes.filter((type) => type === "session")).toHaveLength(3);
+  expect(
+    eventTypes.filter((type) => type === "session_questions"),
+  ).toHaveLength(3);
+  expect(eventTypes.filter((type) => type === "sessions")).toHaveLength(1);
+  expect(listReads).toBe(2); // Initial socket snapshot plus one batch snapshot.
 });
 
 test("publishes reassigned session snapshots", () => {

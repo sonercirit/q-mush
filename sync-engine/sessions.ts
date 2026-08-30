@@ -74,7 +74,9 @@ function createDrizzleSessionIntegration(
   providersInput: SessionCredentialReaders,
   dependencies: SessionDependencies,
 ): DrizzleSessionIntegration {
-  const onChange = new Set<(userId: string, sessionId: string) => void>();
+  const onChanges = new Set<
+    (userId: string, sessionIds: readonly string[]) => void
+  >();
   const failureReconciler = createSessionFailureReconciler();
   const restartController = createSessionRestartAbort();
 
@@ -151,7 +153,7 @@ function createDrizzleSessionIntegration(
   const removal = createRunnerRemovalCoordinator({
     broker: broker,
     now: now,
-    notify: notify,
+    notifyMany: notifyMany,
     runtimes: runtimes,
     store: store,
   });
@@ -304,7 +306,11 @@ function createDrizzleSessionIntegration(
   queuedOwnerIds.forEach(launchQueued);
 
   function notify(userId: string, sessionId: string): void {
-    for (const listener of onChange) listener(userId, sessionId);
+    notifyMany(userId, [sessionId]);
+  }
+
+  function notifyMany(userId: string, sessionIds: readonly string[]): void {
+    for (const listener of onChanges) listener(userId, sessionIds);
   }
 
   async function modelsResponse(
@@ -468,8 +474,10 @@ function createDrizzleSessionIntegration(
     attachmentFallbacks: (request: Request) =>
       fallbacks.api.collection(request),
     hasPendingDatabaseWrites: () => failureReconciler.hasPending(),
-    onChange: (listener: (userId: string, sessionId: string) => void) => {
-      onChange.add(listener);
+    onChanges: (
+      listener: (userId: string, sessionIds: readonly string[]) => void,
+    ) => {
+      onChanges.add(listener);
     },
     realtimeCommands,
     reconcileDatabaseWrites: () => failureReconciler.reconcile(finisher),

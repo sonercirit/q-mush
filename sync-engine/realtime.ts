@@ -244,32 +244,38 @@ export function createRealtimeIntegration(
     }
     publishRunnerActivity(userId);
   });
-  options.sessions.onChange((userId, sessionId) => {
-    for (const workspaceId of options.hub.userWorkspaces(userId)) {
-      const session = options.sessions.detailForUser(
-        userId,
-        sessionId,
-        workspaceId,
-      );
-      if (session === undefined) {
-        continue;
-      }
-      options.hub.publishUser(
-        userId,
-        { session, type: "session" },
-        workspaceId,
-      );
-      options.hub.publishUser(
-        userId,
-        {
-          pending: options.sessions.pendingQuestionForUser(userId, sessionId),
+  options.sessions.onChanges((userId, sessionIds) => {
+    const changedWorkspaces = new Set<string>();
+    for (const sessionId of sessionIds) {
+      for (const workspaceId of options.hub.userWorkspaces(userId)) {
+        const session = options.sessions.detailForUser(
+          userId,
           sessionId,
-          type: "session_questions",
-        },
-        workspaceId,
-      );
+          workspaceId,
+        );
+        if (session === undefined) {
+          continue;
+        }
+        options.hub.publishUser(
+          userId,
+          { session, type: "session" },
+          workspaceId,
+        );
+        options.hub.publishUser(
+          userId,
+          {
+            pending: options.sessions.pendingQuestionForUser(userId, sessionId),
+            sessionId,
+            type: "session_questions",
+          },
+          workspaceId,
+        );
+        changedWorkspaces.add(workspaceId);
+        break;
+      }
+    }
+    for (const workspaceId of changedWorkspaces) {
       publishSessions(userId, workspaceId);
-      break;
     }
   });
 
