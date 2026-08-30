@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite";
 
+import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
 import type {
   Operation,
   OperationPartition,
@@ -14,8 +15,11 @@ export const createRunnerOperationLog = (database: Database) => {
   database.run(
     "CREATE TABLE IF NOT EXISTS operation_checkpoints (owner_id TEXT NOT NULL, partition TEXT NOT NULL, encoded TEXT NOT NULL, PRIMARY KEY (owner_id, partition))",
   );
+  database.run(
+    "CREATE TABLE IF NOT EXISTS operation_synchronization_frontiers (owner_id TEXT NOT NULL, partition TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, PRIMARY KEY (owner_id, partition, writer_id))",
+  );
   const append = database.query(
-    "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, ?, ?, ?, 'verified', ?, NULL, ?) ON CONFLICT DO NOTHING",
+    "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, ?, ?, ?, 'accepted', ?, NULL, ?) ON CONFLICT DO NOTHING",
   );
   return {
     append(
@@ -63,6 +67,31 @@ export const createRunnerOperationLog = (database: Database) => {
       );
       query.run(ownerId, partition, crypto.randomUUID(), encoded, reason);
     },
+    recordSynchronizationFrontier(
+      ownerId: string,
+      partition: OperationPartition,
+      writerId: string,
+      sequence: bigint,
+    ) {
+      database
+        .query(
+          "INSERT INTO operation_synchronization_frontiers (owner_id, partition, writer_id, sequence) VALUES (?, ?, ?, ?) ON CONFLICT (owner_id, partition, writer_id) DO UPDATE SET sequence = excluded.sequence WHERE length(excluded.sequence) > length(sequence) OR (length(excluded.sequence) = length(sequence) AND excluded.sequence > sequence)",
+        )
+        .run(ownerId, partition, writerId, sequence.toString());
+    },
+    synchronizationFrontier(
+      ownerId: string,
+      partition: OperationPartition,
+    ): Readonly<Record<string, bigint>> {
+      return Object.fromEntries(
+        database
+          .query<{ sequence: string; writerId: string }, [string, string]>(
+            "SELECT writer_id AS writerId, sequence FROM operation_synchronization_frontiers WHERE owner_id = ? AND partition = ?",
+          )
+          .all(ownerId, partition)
+          .map(({ sequence, writerId }) => [writerId, BigInt(sequence)]),
+      );
+    },
     pending(ownerId: string, partition: OperationPartition) {
       return database
         .query<{ encoded: string }, [string, string]>(
@@ -77,11 +106,13 @@ export const createRunnerOperationLog = (database: Database) => {
       envelopes: readonly string[],
     ) {
       const update = database.query(
-        "UPDATE operation_envelopes SET outbox_pending = 0 WHERE owner_id = ? AND partition = ? AND encoded = ?",
+        "UPDATE operation_envelopes SET outbox_pending = 0 WHERE owner_id = ? AND partition = ? AND operation_id = ?",
       );
       database.transaction(() => {
-        for (const encoded of envelopes)
-          update.run(ownerId, partition, encoded);
+        for (const encoded of envelopes) {
+          const operation = decodeOperationEnvelope(encoded);
+          update.run(ownerId, partition, operation.operationId);
+        }
       })();
     },
     inspect(ownerId: string, partition: OperationPartition) {

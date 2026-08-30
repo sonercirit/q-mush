@@ -26,6 +26,8 @@ const jsonRequest = (method: "POST" | "PUT", payload: unknown) =>
     body: JSON.stringify(payload),
   });
 const request = (body: unknown) => jsonRequest("POST", body);
+const responseStatus = async (response: Promise<Response>): Promise<number> =>
+  (await response).status;
 const readRequest = (
   frontier: unknown,
   extra: Readonly<Record<string, unknown>> = {},
@@ -143,15 +145,17 @@ test("operation synchronization rejects unauthenticated requests", async () => {
 
 test("operation synchronization isolates runner aliases from browser owner IDs", async () => {
   const statuses = await Promise.all([
-    handler(undefined, undefined, "owner-1")(request(body("self"))),
-    handler(undefined, undefined, "owner-1")(request(body("owner-1"))),
-    handler("owner-1")(request(body("self"))),
-    handler("owner-1")(request(body("owner-1"))),
-    handler("owner-1")(request(body("owner-2"))),
+    responseStatus(
+      handler(undefined, undefined, "owner-1")(request(body("self"))),
+    ),
+    responseStatus(
+      handler(undefined, undefined, "owner-1")(request(body("owner-1"))),
+    ),
+    responseStatus(handler("owner-1")(request(body("self")))),
+    responseStatus(handler("owner-1")(request(body("owner-1")))),
+    responseStatus(handler("owner-1")(request(body("owner-2")))),
   ]);
-  expect(statuses.map(({ status }) => status)).toEqual([
-    200, 403, 403, 200, 403,
-  ]);
+  expect(statuses).toEqual([200, 403, 403, 200, 403]);
 });
 
 test("operation synchronization rejects malformed payloads", async () => {

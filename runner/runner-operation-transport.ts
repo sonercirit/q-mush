@@ -53,10 +53,7 @@ export const createRunnerOperationTransport = (
       typeof value["hasMore"] !== "boolean"
     )
       throw new Error("Invalid operation synchronization response");
-    const envelopes: string[] = [];
-    for (const item of value["envelopes"])
-      if (typeof item === "string") envelopes.push(item);
-    return { envelopes, hasMore: value["hasMore"] };
+    return { envelopes: value["envelopes"], hasMore: value["hasMore"] };
   },
   async writeBatch(
     partition: OperationPartition,

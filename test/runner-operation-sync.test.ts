@@ -37,6 +37,16 @@ const harness = (initial: Partial<HarnessState> = {}) => {
   };
 };
 
+const runSynchronization = (
+  replica: ReturnType<typeof harness>,
+  transport: Parameters<typeof synchronizeRunnerOperations>[1],
+) =>
+  synchronizeRunnerOperations(
+    replica.store,
+    transport,
+    new AbortController().signal,
+  );
+
 const noEnvelopes: readonly string[] = [];
 const emptyPage = () =>
   Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
@@ -45,23 +55,43 @@ test("resumes pull pages from each durably applied frontier", async () => {
   const replica = harness();
   const frontiers: bigint[] = [];
   let page = 0;
-  await synchronizeRunnerOperations(
-    replica.store,
-    {
-      readPage: ({ frontier }) => {
-        frontiers.push(frontier["writer"] ?? 0n);
-        page += 1;
-        return Promise.resolve({
-          envelopes: page === 1 ? ["one"] : page === 2 ? ["two"] : noEnvelopes,
-          hasMore: page < 2,
-        });
-      },
-      writeBatch: () => Promise.resolve(),
+  await runSynchronization(replica, {
+    readPage: ({ frontier }) => {
+      frontiers.push(frontier["writer"] ?? 0n);
+      page += 1;
+      return Promise.resolve({
+        envelopes: page === 1 ? ["one"] : page === 2 ? ["two"] : noEnvelopes,
+        hasMore: page < 2,
+      });
     },
-    new AbortController().signal,
-  );
-  expect(frontiers).toEqual([0n, 1n, 2n]);
-  expect(replica.events).toEqual(["apply:one", "apply:two", "apply:"]);
+    writeBatch: () => Promise.resolve(),
+  });
+  expect(frontiers).toEqual([0n, 0n, 1n]);
+  expect(replica.events).toEqual(["apply:one", "apply:two"]);
+});
+
+test("skips empty pages without opening store writes", async () => {
+  const replica = harness();
+  await runSynchronization(replica, {
+    writeBatch: () => Promise.resolve(undefined),
+    readPage: emptyPage,
+  });
+  expect(replica.events).toEqual([]);
+});
+
+test("continues the other partition after one partition fails", async () => {
+  const replica = harness();
+  const partitions: OperationPartition[] = [];
+  await runSynchronization(replica, {
+    readPage: ({ partition }) => {
+      partitions.push(partition);
+      return partition === "non-session"
+        ? Promise.reject(new Error("poisoned partition"))
+        : emptyPage();
+    },
+    writeBatch: () => Promise.resolve(undefined),
+  });
+  expect(partitions).toEqual(["non-session", "session"]);
 });
 
 test("acknowledges pushed outbox only after transport success", async () => {

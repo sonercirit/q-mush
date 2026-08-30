@@ -6,7 +6,11 @@ import {
   encodeOperationCheckpoint,
   type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint.ts";
-import { type OperationPartition } from "../shared/operation-core.ts";
+import {
+  isOperationProtocolError,
+  type OperationApplyState,
+  type OperationPartition,
+} from "../shared/operation-core.ts";
 import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
@@ -18,11 +22,31 @@ import {
 
 export const createRunnerOperationStore = (database: Database) => {
   const log = createRunnerOperationLog(database);
-  const state = (ownerId: string, partition: OperationPartition) => {
+  const checkpointState = (
+    ownerId: string,
+    partition: OperationPartition,
+  ): OperationApplyState<OperationCheckpointProjection> => {
     const encoded = log.checkpoint(ownerId, partition);
     return encoded === undefined
       ? initialOperationApplyState<OperationCheckpointProjection>([])
       : decodeOperationCheckpoint(encoded);
+  };
+  const state = (ownerId: string, partition: OperationPartition) => {
+    const checkpoint = checkpointState(ownerId, partition);
+    const synchronized = log.synchronizationFrontier(ownerId, partition);
+    const frontier: Record<string, bigint> = {};
+    for (const writerId of new Set([
+      ...Object.keys(checkpoint.frontier),
+      ...Object.keys(synchronized),
+    ])) {
+      const checkpointSequence = checkpoint.frontier[writerId] ?? 0n;
+      const synchronizedSequence = synchronized[writerId] ?? 0n;
+      frontier[writerId] =
+        checkpointSequence > synchronizedSequence
+          ? checkpointSequence
+          : synchronizedSequence;
+    }
+    return { ...checkpoint, frontier };
   };
   return {
     apply(
@@ -31,41 +55,54 @@ export const createRunnerOperationStore = (database: Database) => {
       envelopes: readonly string[],
       source: OperationReplicaSource,
     ) {
-      const valid: {
-        encoded: string;
-        operation: ReturnType<typeof decodeOperationEnvelope>;
-      }[] = [];
-      for (const encoded of envelopes) {
-        try {
-          valid.push({ encoded, operation: decodeOperationEnvelope(encoded) });
-        } catch (error) {
-          log.quarantine(
-            ownerId,
-            partition,
-            encoded,
-            error instanceof Error
-              ? error.message
-              : "Invalid operation envelope",
-          );
-        }
-      }
+      if (envelopes.length === 0) return;
       database.transaction(() => {
-        const successor = applyOperationIntakeBatch(
-          partition,
-          state(ownerId, partition),
-          valid,
-          {
-            append: (encoded, operation) => {
-              log.append(ownerId, operation, encoded, source);
-            },
-            ownsOperation: (operation) =>
-              ownerId === "self" || operation.entity.accountId === ownerId,
-            reducer: (projection, operation) => [
-              ...projection,
-              operation.operationId,
-            ],
-          },
-        );
+        let successor = checkpointState(ownerId, partition);
+        for (const encoded of envelopes) {
+          let operation: ReturnType<typeof decodeOperationEnvelope>;
+          try {
+            operation = decodeOperationEnvelope(encoded);
+          } catch (error) {
+            log.quarantine(
+              ownerId,
+              partition,
+              encoded,
+              error instanceof Error
+                ? error.message
+                : "Invalid operation envelope",
+            );
+            continue;
+          }
+          try {
+            successor = applyOperationIntakeBatch(
+              partition,
+              successor,
+              [{ encoded, operation }],
+              {
+                append: (candidate, accepted) => {
+                  log.append(ownerId, accepted, candidate, source);
+                },
+                ownsOperation: (accepted) =>
+                  accepted.entity.accountId === accepted.writerId,
+                reducer: (projection, accepted) => [
+                  ...projection,
+                  accepted.operationId,
+                ],
+              },
+            );
+          } catch (error) {
+            if (source !== "remote" || !isOperationProtocolError(error))
+              throw error;
+            log.quarantine(ownerId, partition, encoded, error.message);
+          }
+          if (source === "remote")
+            log.recordSynchronizationFrontier(
+              ownerId,
+              partition,
+              operation.writerId,
+              operation.sequence,
+            );
+        }
         log.storeCheckpoint(
           ownerId,
           partition,

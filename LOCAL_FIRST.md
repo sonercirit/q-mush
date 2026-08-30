@@ -168,14 +168,25 @@
   replica APIs remain browser-grant protected. Unlike the engine active view,
   the runner checks that grant before method handling, so an unpaired non-GET
   `/api/local/*` request deliberately returns 401 rather than revealing 405.
-- Runner operation replicas keep immutable encoded envelopes plus verification,
-  source, rejection, and outbox metadata in the per-account SQLite. Valid batch
-  log/projection/checkpoint writes share one transaction; malformed encodings
-  are quarantined separately so later envelopes continue. Post-ready sync pushes
-  up to 512 pending rows and pulls 256-row pages by durable frontier until
-  `hasMore` clears, then repeats with capped non-fatal backoff and shutdown
-  abort. The HTTP operation route now accepts the native runner bearer token;
-  runner owner alias `self` resolves only after token authentication, avoiding
-  account identity in runner configuration, while browser session auth remains.
-  No runner-local command producer exists yet; which command first emits local
-  operations remains open.
+- Runner operation replicas keep immutable encoded envelopes plus acceptance,
+  source, rejection, and outbox metadata in the per-account SQLite. `accepted`
+  means schema/intake admission, not cryptographic verification. Valid batch
+  log/projection/checkpoint writes share one transaction; malformed or decoded
+  remote intake rejections are quarantined with their reason and a separate
+  durable synchronization frontier advances past them, so later envelopes
+  continue. Genuine storage failures still roll back the whole batch, and each
+  partition synchronizes independently. Quarantine is fail-safe for replica
+  availability but records possible engine corruption; an operator should
+  inspect/export rejected rows, repair the engine source, then rebuild the local
+  replica to retry them—there is intentionally no automatic re-admission.
+  Synchronization starts only from the WebSocket operational/ready callback,
+  aborts on disconnect, and restarts after the next ready handshake. It pushes
+  up to 512 pending rows and pulls 256-row pages until `hasMore` clears. Empty
+  pages do not open write transactions. Successful cycles poll every 5 seconds
+  with ±20% jitter (slower than the former 1-second herd); failures use 1-second
+  exponential backoff capped at 30 seconds and success resets it. Shutdown
+  aborts requests. The HTTP operation route accepts the native runner bearer
+  token only with owner alias `self`, avoiding account identity in the runner
+  protocol; browser sessions require their exact account UUID and reject the
+  alias. No runner-local command producer exists yet; which command first emits
+  local operations remains open.

@@ -8,7 +8,6 @@ import {
 } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { setTimeout } from "node:timers/promises";
 import { describeError } from "../shared/error.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import {
@@ -25,7 +24,6 @@ import {
 } from "./runner-command-executions.ts";
 import {
   createRunnerCommandExecutor,
-  readRunnerCommand,
   type RunnerCommandExecutor,
 } from "./runner-command.ts";
 import {
@@ -39,6 +37,11 @@ import {
 import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
 import { reportRunnerFatalError } from "./runner-fatal-error.ts";
 import { startRunnerOperationSynchronization } from "./runner-operation-start.ts";
+import { bindOperationalRunnerSocket } from "./runner-operational-socket.ts";
+import {
+  createRunnerReadySynchronization,
+  waitForRunnerReconnect,
+} from "./runner-ready-synchronization.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { recordReplicaRetry } from "./runner-replica-retry.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
@@ -50,7 +53,6 @@ import {
   isRunnerRegistrationRejectedError,
   isRunnerSupersededError,
   observeOperationalRunnerSocket,
-  parseSocketJsonRecord,
 } from "./runner-socket.ts";
 import { createRunnerUpdateTrigger } from "./runner-update-trigger.ts";
 import {
@@ -62,7 +64,6 @@ declare const Q_MUSH_RUNNER_TARGET: string;
 declare const Q_MUSH_RUNNER_VERSION: string;
 declare const Q_MUSH_CLIENT_RELEASE: string;
 const HEARTBEAT_INTERVAL_MILLISECONDS = 15_000;
-const RETRY_INTERVAL_MILLISECONDS = 5_000;
 const UPDATE_INTERVAL_MILLISECONDS = 5 * 60_000;
 const TOKEN_PATTERN = /^qmr_[A-Za-z\d_-]{8,200}$/u;
 const RUNNER_PROCESS_NONCE = randomBytes(32).toString("base64url");
@@ -238,43 +239,6 @@ function waitForSocket(socket: WebSocket): Promise<void> {
     });
   });
 }
-function bindOperationalSocket(
-  connected: WebSocket,
-  active: RunnerCommandExecutions,
-): void {
-  connected.addEventListener("message", (event) => {
-    if (typeof event.data !== "string") {
-      connected.close(1003, "Text messages required");
-      return;
-    }
-    const message = parseSocketJsonRecord(event.data);
-    if (message === undefined) {
-      connected.close(1003, "Invalid server message");
-      return;
-    }
-    if (message["type"] === "superseded") {
-      return;
-    }
-    if (message["type"] === "command") {
-      active.execute(
-        connected,
-        readRunnerCommand({ command: message["command"] }),
-      );
-    } else if (
-      message["type"] === "cancel" &&
-      typeof message["commandId"] === "string"
-    ) {
-      active.cancel(connected, message["commandId"]);
-    } else if (
-      message["type"] === "result_received" &&
-      typeof message["commandId"] === "string"
-    ) {
-      active.resultReceived(message["commandId"]);
-    } else if (message["type"] !== "restart_ready") {
-      connected.close(1003, "Invalid server message");
-    }
-  });
-}
 async function connectRunner(
   configuration: RunnerConfiguration,
   configurationPath: string,
@@ -347,7 +311,7 @@ async function connectRunner(
         throw error;
       }
       console.warn("Could not reach Q Mush; retrying setup…");
-      await setTimeout(RETRY_INTERVAL_MILLISECONDS);
+      await waitForRunnerReconnect();
     }
   }
 }
@@ -452,12 +416,13 @@ async function maintainConnection(
   configuration: RunnerConfiguration,
   configurationPath: string,
   startupRestart: RunnerStartupRestart,
+  synchronization: ReturnType<typeof createRunnerReadySynchronization>,
 ): Promise<void> {
   const active = createRunnerCommandExecutions(
     activeRunnerExecution().commands,
   );
   const installOperationalHandlers = (connected: WebSocket): void => {
-    bindOperationalSocket(connected, active);
+    bindOperationalRunnerSocket(connected, active);
   };
   const establishConnection = () =>
     connectRunner(
@@ -467,6 +432,7 @@ async function maintainConnection(
       installOperationalHandlers,
       (connected) => {
         active.connected(connected);
+        synchronization.ready();
       },
     );
   let socket = await establishConnection();
@@ -476,6 +442,7 @@ async function maintainConnection(
 
   for (;;) {
     if (socket.readyState !== WebSocket.OPEN) {
+      synchronization.disconnected();
       const failure = await socketFailure;
       if (isRunnerSupersededError(failure)) {
         await throwSocketFailure(socket, active, failure);
@@ -573,14 +540,15 @@ async function run(): Promise<void> {
 
   const replicaDirectory = join(runnerDirectory, "replica");
   const replica = createRunnerReplicaStore(replicaDirectory);
-  const sync =
+  const synchronization =
     configuration === undefined
-      ? new AbortController()
-      : startRunnerOperationSynchronization(
-          replica.operations,
-          configuration.serverOrigin,
-          configuration.token,
-        );
+      ? undefined
+      : createRunnerReadySynchronization({
+          start: startRunnerOperationSynchronization,
+          store: replica.operations,
+          origin: configuration.serverOrigin,
+          token: configuration.token,
+        });
   if (configuration !== undefined && configurationPath !== undefined) {
     void catchUpAccountExport(
       replicaDirectory,
@@ -626,14 +594,17 @@ async function run(): Promise<void> {
     if (configuration === undefined || configurationPath === undefined) {
       await new Promise<void>(() => undefined);
     } else {
+      if (synchronization === undefined)
+        throw new Error("Operation synchronization is not configured");
       await maintainConnection(
         configuration,
         configurationPath,
         startupRestart,
+        synchronization,
       );
     }
   } finally {
-    sync.abort();
+    synchronization?.disconnected();
     await app.stop();
     replica.close();
   }

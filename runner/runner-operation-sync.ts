@@ -41,26 +41,44 @@ export interface RunnerOperationRead {
   readonly signal: AbortSignal;
 }
 
+const ownerAlias = "self";
+const synchronizePartition = async (request: {
+  readonly partition: OperationPartition;
+  readonly signal: AbortSignal;
+  readonly store: OperationStore;
+  readonly transport: OperationTransport;
+}): Promise<void> => {
+  const { partition, signal, store, transport } = request;
+  const pending = store.pending(ownerAlias, partition);
+  if (pending.length > 0) {
+    await transport.writeBatch(partition, pending, signal);
+    store.acknowledge(ownerAlias, partition, pending);
+  }
+  let hasMore: boolean;
+  do {
+    const page = await transport.readPage({
+      signal,
+      partition,
+      frontier: store.state(ownerAlias, partition).frontier,
+    });
+    if (page.envelopes.length > 0)
+      store.apply(ownerAlias, partition, page.envelopes, "remote");
+    hasMore = page.hasMore;
+  } while (hasMore);
+};
+
 export const synchronizeRunnerOperations = async (
   store: OperationStore,
   transport: OperationTransport,
   signal: AbortSignal,
 ): Promise<void> => {
-  for (const partition of partitions) {
-    const pending = store.pending("self", partition);
-    if (pending.length > 0) {
-      await transport.writeBatch(partition, pending, signal);
-      store.acknowledge("self", partition, pending);
-    }
-    let hasMore: boolean;
-    do {
-      const page = await transport.readPage({
-        signal,
-        partition,
-        frontier: store.state("self", partition).frontier,
-      });
-      store.apply("self", partition, page.envelopes, "remote");
-      hasMore = page.hasMore;
-    } while (hasMore);
-  }
+  const results = await Promise.allSettled(
+    partitions.map((partition) =>
+      synchronizePartition({ partition, signal, store, transport }),
+    ),
+  );
+  const failures: unknown[] = [];
+  for (const result of results)
+    if (result.status === "rejected") failures.push(result.reason);
+  if (failures.length === partitions.length) throw failures[0];
 };
