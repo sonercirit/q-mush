@@ -116,7 +116,9 @@ const decodeCheckpointValue = (value: unknown): unknown => {
     (body === null ||
       typeof body === "string" ||
       typeof body === "boolean" ||
-      (typeof body === "number" && Number.isFinite(body)))
+      (typeof body === "number" &&
+        Number.isFinite(body) &&
+        !Object.is(body, -0)))
   )
     return body;
   throw new Error("Invalid encoded checkpoint tag");

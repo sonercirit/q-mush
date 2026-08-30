@@ -97,6 +97,8 @@ const validateOperationValue = (
   if (typeof value === "number") {
     if (!Number.isFinite(value))
       throw new Error("Operation numbers must be finite");
+    if (Object.is(value, -0))
+      throw new Error("Operation numbers must not be negative zero");
     return;
   }
   if (typeof value !== "object") throw new Error("Unsupported operation value");
@@ -105,7 +107,26 @@ const validateOperationValue = (
   if (value instanceof Date) {
     if (!Number.isFinite(value.getTime()))
       throw new Error("Operation dates must be valid");
+    if (
+      Object.getPrototypeOf(value) !== Date.prototype ||
+      Reflect.ownKeys(value).length > 0
+    )
+      throw new Error("Operation dates must not have own properties");
   } else if (Array.isArray(value)) {
+    const keys = Reflect.ownKeys(value);
+    if (
+      keys.length !== value.length + 1 ||
+      keys.some(
+        (key) =>
+          key !== "length" &&
+          (typeof key !== "string" ||
+            !/^(0|[1-9]\d*)$/.test(key) ||
+            Number(key) >= value.length),
+      )
+    )
+      throw new Error(
+        "Operation arrays must not be sparse or contain extra properties",
+      );
     for (let index = 0; index < value.length; index += 1) {
       if (!Object.hasOwn(value, index))
         throw new Error("Operation arrays must not be sparse");
@@ -115,9 +136,12 @@ const validateOperationValue = (
     const prototype: unknown = Object.getPrototypeOf(value);
     if (
       (prototype !== Object.prototype && prototype !== null) ||
-      Object.getOwnPropertySymbols(value).length > 0
+      Object.getOwnPropertySymbols(value).length > 0 ||
+      Object.getOwnPropertyNames(value).length !== Object.keys(value).length
     )
-      throw new Error("Operation objects must be plain and string-keyed");
+      throw new Error(
+        "Operation objects must be plain, string-keyed, and enumerable",
+      );
     for (const item of Object.values(value)) validateOperationValue(item, seen);
   }
   seen.delete(value);
@@ -152,6 +176,11 @@ export const createOperation = <TPayload>(
     );
   if (input.clock.writerId !== input.writerId)
     throw new Error("Operation clock writer must match envelope writer");
+  if (
+    Object.hasOwn(input.entity, "workspaceId") &&
+    typeof input.entity.workspaceId !== "string"
+  )
+    throw new Error("Operation workspaceId must be omitted or a string");
   validateOperationValue(input);
   return { ...input, partition: classifyOperationPartition(input.entity.type) };
 };

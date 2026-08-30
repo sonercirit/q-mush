@@ -1,10 +1,13 @@
-import { expect, test } from "vitest";
+import { describe, expect, test } from "vitest";
 
 import {
   decodeOperationCheckpoint,
+  decodeOperationEnvelope,
   encodeOperationCheckpoint,
+  encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
+  createOperation,
   operationFingerprint,
   restoreAppliedIdentityIndex,
   type OperationApplyState,
@@ -31,6 +34,17 @@ const reject = (
 ) => {
   expect(() => decoded(checkpoint)).toThrow(pattern);
 };
+
+test("operation envelopes reject encoded negative zero and preserve zero", () => {
+  const zero = { ...operation, payload: { nested: 0 } };
+  const encoded = encodeOperationEnvelope(zero);
+  expect(decodeOperationEnvelope(encoded).payload).toEqual({ nested: 0 });
+  const negativeZero = encoded.replace('["primitive",0]', '["primitive",-0]');
+  expect(negativeZero).not.toBe(encoded);
+  expect(() => decodeOperationEnvelope(negativeZero)).toThrow(
+    /operation envelope/,
+  );
+});
 
 test("rejects a replay count inconsistent with replay-chain length", () => {
   reject({ ...state(), replayCount: 2 }, /replay metadata/);
@@ -363,4 +377,59 @@ test("checkpoint decoding rejects negative physical clocks", () => {
   expect(() => decodeOperationCheckpoint(encoded)).toThrow(
     "Invalid checkpoint clock",
   );
+});
+
+describe("operation value domain", () => {
+  test("rejects values the canonical codec cannot preserve", () => {
+    const seed = testOperation("shape", 1n, {}, "seed");
+    const symbol = Symbol("extra");
+    const arrayWithStringProperty = [1];
+    Object.defineProperty(arrayWithStringProperty, "extra", { value: "lost" });
+    const arrayWithSymbol = [1];
+    Object.defineProperty(arrayWithSymbol, symbol, { value: "lost" });
+    const dateWithProperty = new Date(1);
+    Object.defineProperty(dateWithProperty, "extra", { value: "lost" });
+    const dateWithSymbol = new Date(1);
+    Object.defineProperty(dateWithSymbol, symbol, { value: "lost" });
+    const hiddenObject = { visible: true };
+    Object.defineProperty(hiddenObject, "hidden", { value: "lost" });
+    const symbolObject = { visible: true };
+    Object.defineProperty(symbolObject, symbol, { value: "lost" });
+
+    for (const payload of [
+      -0,
+      [-0],
+      { nested: -0 },
+      { nested: arrayWithStringProperty },
+      { nested: arrayWithSymbol },
+      { nested: dateWithProperty },
+      { nested: dateWithSymbol },
+      { nested: hiddenObject },
+      { nested: symbolObject },
+    ])
+      expect(() => createOperation({ ...seed, payload })).toThrow();
+
+    for (const payload of [0, [0], { nested: 0 }, [1], new Date(1), { a: 1 }])
+      expect(createOperation({ ...seed, payload }).payload).toBe(payload);
+  });
+
+  test("rejects undefined workspace IDs and round-trips accepted entities", () => {
+    const seed = testOperation("workspace", 1n, {}, "seed");
+    const entity = { ...seed.entity };
+    Object.defineProperty(entity, "workspaceId", {
+      enumerable: true,
+      value: undefined,
+    });
+    expect(() => createOperation({ ...seed, entity })).toThrow(/workspaceId/);
+
+    for (const acceptedEntity of [
+      seed.entity,
+      { ...seed.entity, workspaceId: "workspace-1" },
+    ]) {
+      const created = createOperation({ ...seed, entity: acceptedEntity });
+      expect(decodeOperationEnvelope(encodeOperationEnvelope(created))).toEqual(
+        created,
+      );
+    }
+  });
 });

@@ -17,11 +17,6 @@ import {
 
 type Projection = Readonly<Record<string, string>>;
 
-const workspaceEntity = () => ({
-  type: "workspaces",
-  id: "workspace-1",
-  accountId: "account-1",
-});
 const operation = testOperation;
 
 const reducer = (projection: Projection, candidate: Operation): Projection => ({
@@ -257,24 +252,23 @@ describe("operation core", () => {
     expect(healed.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE - 1);
   });
 
-  test("distinguishes undefined object property presence from omission", () => {
+  test("distinguishes payload undefined presence while rejecting undefined workspaceId", () => {
     const { first } = waitingForGhost();
     const entity = { ...first.entity };
     Object.defineProperty(entity, "workspaceId", {
       enumerable: true,
       value: undefined,
     });
-    const withUndefined: Operation = { ...first, entity };
+    expect(() =>
+      createOperation({
+        ...first,
+        entity,
+      }),
+    ).toThrow(/workspaceId/);
+    const withUndefined = { ...first, payload: { value: undefined } };
     const waiting = applyOperation(initialApplyState(), withUndefined, reducer);
     expect(() =>
-      applyOperation(
-        waiting,
-        {
-          ...first,
-          entity: workspaceEntity(),
-        },
-        reducer,
-      ),
+      applyOperation(waiting, { ...first, payload: {} }, reducer),
     ).toThrow(/equivocation/);
     for (const invalid of [Number.NaN, Number.POSITIVE_INFINITY])
       expect(() =>

@@ -80,7 +80,10 @@
   components are non-negative safe integers. Frontier/parent access is
   own-property-safe, including `__proto__`; canonical identity explicitly
   preserves `undefined` object-property and dense array-element presence, while
-  operation validation rejects sparse arrays. The checkpoint codec currently
+  operation validation rejects sparse arrays, negative zero, extra array/Date
+  own properties, and non-enumerable or symbol object properties. Entity
+  `workspaceId` must be omitted or a string; explicit `undefined` is rejected.
+  The checkpoint codec currently
   supports only `readonly string[]` projections; its exported types enforce that
   restriction until a caller-supplied projection codec is introduced. Operation
   values accept primitives, arrays, plain string-keyed objects, and valid Dates;
