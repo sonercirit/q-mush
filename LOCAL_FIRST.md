@@ -73,8 +73,9 @@
   `baseProjection`, and `baseFrontier`; none of the replay fields is optional.
   Decoding fails closed unless replay count/head clock, global canonical clock
   order, per-writer sequence contiguity from the base frontier, replay-parent
-  coverage by the final derived frontier, derived frontier, applied identities,
-  and pending identities are mutually consistent, including
+  coverage by the final derived frontier, own-writer parents strictly below
+  their operation sequence in replay and pending state, derived frontier,
+  applied identities, and pending identities are mutually consistent, including
   pending-against-pending operation-ID and writer-sequence checks. HLC
   components are non-negative safe integers. Frontier/parent access is
   own-property-safe, including `__proto__`; canonical identity explicitly

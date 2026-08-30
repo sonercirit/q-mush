@@ -133,6 +133,11 @@ export const createOperation = <TPayload>(
     if (typeof parent !== "bigint" || parent < 0n)
       throw new Error("Operation parents must be non-negative bigints");
   if (
+    Object.hasOwn(input.parents, input.writerId) &&
+    (input.parents[input.writerId] ?? 0n) >= input.sequence
+  )
+    throw new Error("Operation own-writer parent must precede sequence");
+  if (
     !Number.isSafeInteger(input.clock.physicalMs) ||
     input.clock.physicalMs < 0 ||
     !Number.isSafeInteger(input.clock.logical) ||

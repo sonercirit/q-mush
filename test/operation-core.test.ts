@@ -290,6 +290,9 @@ describe("operation core", () => {
     expect(() => createOperation({ ...validationSeed, sequence: 0n })).toThrow(
       /sequence/,
     );
+    expect(() =>
+      createOperation({ ...validationSeed, parents: { validator: 1n } }),
+    ).toThrow(/own-writer parent/);
     for (const invalidParent of [-1n, 3]) {
       const parents: Readonly<Record<string, bigint>> = Object.defineProperty(
         {},

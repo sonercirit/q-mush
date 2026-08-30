@@ -23,13 +23,13 @@ const state = () =>
     testApplyState<readonly string[]>([]),
     appendOperationId,
   );
+const decoded = (checkpoint: OperationApplyState<readonly string[]>) =>
+  decodeOperationCheckpoint(encodeOperationCheckpoint(checkpoint));
 const reject = (
   checkpoint: OperationApplyState<readonly string[]>,
   pattern: RegExp,
 ) => {
-  expect(() =>
-    decodeOperationCheckpoint(encodeOperationCheckpoint(checkpoint)),
-  ).toThrow(pattern);
+  expect(() => decoded(checkpoint)).toThrow(pattern);
 };
 
 test("rejects a replay count inconsistent with replay-chain length", () => {
@@ -63,10 +63,8 @@ test("accepts contiguous replay above a non-empty base with parents covered afte
   const child = testOperation("b", 1n, { a: 6n }, "child", 1);
   const parent = testOperation("a", 6n, { a: 5n }, "parent", 10);
   const replayed = applyOperationList([child, parent], base, appendOperationId);
-  expect(replayed.projection).toEqual(["base", "b-1", "a-6"]);
-  expect(
-    decodeOperationCheckpoint(encodeOperationCheckpoint(replayed)).frontier,
-  ).toEqual({ a: 6n, b: 1n });
+  expect(decoded(replayed).projection).toEqual(["base", "b-1", "a-6"]);
+  expect(decoded(replayed).frontier).toEqual({ a: 6n, b: 1n });
 });
 
 const singleReplayState = (
@@ -95,11 +93,86 @@ test("rejects a replay writer-sequence gap above the base frontier", () => {
   );
 });
 
+test("rejects a replay writer-sequence gap of more than one", () => {
+  reject(
+    singleReplayState(testOperation("a", 3n, {}, "x", 3)),
+    /replay sequence/,
+  );
+});
+
 test("rejects a replay operation with an uncovered cross-writer parent", () => {
   reject(
     singleReplayState(testOperation("a", 1n, { b: 1n }, "x", 1)),
     /replay parent/,
   );
+});
+
+test("rejects a replay parent exceeding coverage by more than one", () => {
+  reject(
+    singleReplayState(testOperation("a", 1n, { b: 2n }, "x", 1)),
+    /replay parent/,
+  );
+});
+
+test("rejects a replay operation that parents itself", () => {
+  const replayed = testOperation("a", 1n, {}, "x", 1);
+  reject(
+    singleReplayState({ ...replayed, parents: { a: 1n } }),
+    /replay parent/,
+  );
+});
+
+test("rejects a replay future own-writer parent covered by later replay", () => {
+  const first = testOperation("a", 1n, {}, "first", 1);
+  const second = testOperation("a", 2n, { a: 1n }, "second", 2);
+  const replayed = applyOperationList(
+    [first, second],
+    testApplyState<readonly string[]>([]),
+    appendOperationId,
+  );
+  const invalidFirst = { ...first, parents: { a: 2n } };
+  const firstFingerprint = operationFingerprint(invalidFirst);
+  const secondFingerprint = operationFingerprint(second);
+  reject(
+    {
+      ...replayed,
+      applied: restoreAppliedIdentityIndex({
+        "id:a-1": firstFingerprint,
+        "writer:a:1": firstFingerprint,
+        "id:a-2": secondFingerprint,
+        "writer:a:2": secondFingerprint,
+      }),
+      replayHead: {
+        operation: second,
+        previous: {
+          operation: invalidFirst,
+          previous: undefined,
+        },
+      },
+    },
+    /replay parent/,
+  );
+});
+
+test("rejects a pending operation that parents itself", () => {
+  const pending = {
+    ...testOperation("self-parent-writer", 7n, {}, "impossible", 7),
+    parents: { "self-parent-writer": 7n },
+  };
+  const checkpoint = testApplyState<readonly string[]>(["unchanged"]);
+  reject({ ...checkpoint, pending: [pending] }, /pending parent/);
+});
+
+test("accepts an own-writer parent at the preceding sequence end-to-end", () => {
+  const replayed = applyOperationList(
+    [
+      testOperation("a", 1n, {}, "first", 1),
+      testOperation("a", 2n, { a: 1n }, "second", 2),
+    ],
+    testApplyState<readonly string[]>([]),
+    appendOperationId,
+  );
+  expect(decoded(replayed).frontier).toEqual({ a: 2n });
 });
 
 const replayDuplicateState = (

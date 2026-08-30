@@ -163,7 +163,10 @@ const decodeClock = (value: unknown): HybridTimestamp => {
     writerId: clock["writerId"],
   };
 };
-const decodeOperation = (value: unknown): Operation => {
+const decodeOperation = (
+  value: unknown,
+  deferOwnWriterParentValidation = false,
+): Operation => {
   const item = checkpointObject(value);
   exactCheckpointKeys(item, [
     "operationId",
@@ -202,26 +205,43 @@ const decodeOperation = (value: unknown): Operation => {
     accountId: entity["accountId"],
     ...(typeof workspaceId === "string" ? { workspaceId } : {}),
   };
+  const parents = nonNegativeBigintCheckpointRecord(item["parents"]);
+  const ownParent = parents[item["writerId"]];
   const operation = createOperation({
     operationId: item["operationId"],
     schemaVersion: item["schemaVersion"],
     writerId: item["writerId"],
     sequence: item["sequence"],
     clock: decodeClock(item["clock"]),
-    parents: nonNegativeBigintCheckpointRecord(item["parents"]),
+    parents:
+      deferOwnWriterParentValidation &&
+      ownParent !== undefined &&
+      ownParent >= item["sequence"]
+        ? Object.fromEntries(
+            Object.entries(parents).filter(
+              ([writerId]) => writerId !== item["writerId"],
+            ),
+          )
+        : parents,
     entity: decodedEntity,
     kind: item["kind"],
     payload: item["payload"],
   });
-  if (item["partition"] !== operation.partition)
+  const decodedOperation = deferOwnWriterParentValidation
+    ? { ...operation, parents }
+    : operation;
+  if (item["partition"] !== decodedOperation.partition)
     throw new Error("Invalid checkpoint partition");
-  return operation;
+  return decodedOperation;
 };
 const decodeReplay = (value: unknown): ReplayEntry | undefined => {
   if (!Array.isArray(value)) throw new Error("Invalid checkpoint replay");
   let replay: ReplayEntry | undefined;
   for (let index = value.length - 1; index >= 0; index -= 1)
-    replay = { operation: decodeOperation(value[index]), previous: replay };
+    replay = {
+      operation: decodeOperation(value[index], true),
+      previous: replay,
+    };
   return replay;
 };
 const decodeEncoded = (encoded: string, label: string): unknown => {
@@ -324,7 +344,10 @@ const validateCheckpointConsistency = (
       const covered = Object.hasOwn(expectedFrontier, writerId)
         ? (expectedFrontier[writerId] ?? 0n)
         : 0n;
-      if (sequence > covered)
+      if (
+        sequence > covered ||
+        (writerId === operation.writerId && sequence >= operation.sequence)
+      )
         throw new Error("Invalid operation checkpoint replay parent");
     }
   }
@@ -339,6 +362,11 @@ const validateCheckpointConsistency = (
   )
     throw new Error("Invalid operation checkpoint derived state");
   for (const operation of state.pending) {
+    if (
+      Object.hasOwn(operation.parents, operation.writerId) &&
+      (operation.parents[operation.writerId] ?? 0n) >= operation.sequence
+    )
+      throw new Error("Invalid operation checkpoint pending parent");
     const fingerprint = operationFingerprint(operation);
     const identities = operationIdentityKeys(operation);
     if (
@@ -389,7 +417,9 @@ export const decodeOperationCheckpoint = (
     throw new Error("Invalid operation checkpoint base projection");
   const result: OperationApplyState<OperationCheckpointProjection> = {
     frontier: nonNegativeBigintCheckpointRecord(state["frontier"]),
-    pending: state["pending"].map(decodeOperation),
+    pending: state["pending"].map((operation) =>
+      decodeOperation(operation, true),
+    ),
     projection: state["projection"],
     applied: restoreAppliedIdentityIndex(
       stringCheckpointRecord(state["applied"]),
