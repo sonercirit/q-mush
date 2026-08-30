@@ -12,6 +12,7 @@ import {
   type OperationEntity,
   type ReplayEntry,
 } from "./operation-core";
+import { freezeOperationValue } from "./operation-value";
 
 type EncodedCheckpointValue = readonly [string, unknown];
 const isCheckpointObject = (value: unknown): value is Record<string, unknown> =>
@@ -236,7 +237,7 @@ const decodeOperation = (
     : operation;
   if (item["partition"] !== decodedOperation.partition)
     throw new Error("Invalid checkpoint partition");
-  return decodedOperation;
+  return freezeOperationValue(decodedOperation);
 };
 const decodeReplay = (value: unknown): ReplayEntry | undefined => {
   if (!Array.isArray(value)) throw new Error("Invalid checkpoint replay");

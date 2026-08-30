@@ -1,5 +1,8 @@
 import { setAppliedNode } from "./operation-applied-index";
-import { snapshotOperationValue } from "./operation-value";
+import {
+  freezeOperationValue,
+  snapshotOperationValue,
+} from "./operation-value";
 
 export interface OperationProtocolError extends Error {
   readonly operationError: "invalid" | "conflict" | "capacity";
@@ -181,9 +184,9 @@ function validateAndSnapshotOperation<TPayload>(
   return snapshot;
 }
 
-/** Validates an operation envelope and returns its durable read-once snapshot. */
+/** Validates an operation envelope and returns its frozen durable snapshot. */
 export const snapshotOperationEnvelope = (operation: Operation): Operation =>
-  validateAndSnapshotOperation(operation, true);
+  freezeOperationValue(validateAndSnapshotOperation(operation, true));
 
 export const createOperation = <TPayload>(
   input: OperationInput<TPayload>,

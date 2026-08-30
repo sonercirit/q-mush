@@ -98,7 +98,11 @@
   exact key sets at admission. Values must be reference-free trees: shared
   object references and cycles are rejected. Operation values accept primitives,
   arrays, plain string-keyed objects, and valid Dates; other object prototypes
-  and symbol keys are rejected. The auth bearer-token `sessions`, encrypted
+  and symbol keys are rejected. Every validated or decoded operation snapshot is
+  transitively frozen before retention, including payload, parents, clock, and
+  entity. Reducers receive these frozen inputs and must be pure with respect to
+  operations: build projections without mutating an operation or anything
+  reachable from it. The auth bearer-token `sessions`, encrypted
   `provider_credentials`, and setup-token-bearing `runners` tables are
   deliberately absent from operation replication because ordinary frames contain
   no secrets. The remaining closed allow-list was audited against schema

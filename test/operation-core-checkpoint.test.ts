@@ -65,6 +65,23 @@ describe("operation checkpoints", () => {
     expect(() => decodeOperationCheckpoint(encoded)).toThrow(/checkpoint/);
   });
 
+  test("does not apply an operation below a decoded base frontier", () => {
+    const checkpoint = roundTrip({
+      ...arrayState(),
+      frontier: { a: 2n },
+      baseFrontier: { a: 2n },
+    });
+    const state = applyOperation(
+      checkpoint,
+      operation("a", 1n, {}, "stale"),
+      append,
+    );
+    expect(state.projection).toEqual([]);
+    expect(state.frontier).toEqual({ a: 2n });
+    expect(state.pending).toHaveLength(1);
+    expect(() => roundTrip(state)).not.toThrow();
+  });
+
   test("serializes complete checkpoints and rejects resent equivocation", () => {
     let state = arrayState();
     for (let sequence = 1; sequence <= 3; sequence += 1)
@@ -115,6 +132,35 @@ describe("operation checkpoints", () => {
     expect(run([late, early, parent]).projection).toBe(
       run([early, late, parent]).projection,
     );
+  });
+
+  test("freezes decoded replay operations during a late-arrival resort", () => {
+    const first = applyOperation(
+      arrayState(),
+      operation("a", 1n, {}, "a", 100),
+      append,
+    );
+    const decoded = roundTrip(first);
+    let decodedReplayWasFrozen = false;
+    const resorted = applyOperation(
+      decoded,
+      operation("b", 1n, {}, "b", 50),
+      (projection, item) => {
+        if (item.operationId === "a-1") {
+          decodedReplayWasFrozen = Object.isFrozen(item.payload);
+          const payload = item.payload;
+          if (typeof payload !== "object" || payload === null)
+            throw new Error("Missing object payload fixture");
+          expect(() => Object.assign(payload, { value: "changed" })).toThrow(
+            TypeError,
+          );
+        }
+        return [...projection, item.operationId];
+      },
+    );
+    expect(decodedReplayWasFrozen).toBe(true);
+    expect(resorted.projection).toEqual(["b-1", "a-1"]);
+    expect(() => roundTrip(resorted)).not.toThrow();
   });
 
   test("replays twice from the stable base with an order-sensitive reducer", () => {

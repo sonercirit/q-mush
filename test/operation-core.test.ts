@@ -11,6 +11,7 @@ import {
   materializeApplied,
   MAX_OPERATION_BATCH_SIZE,
   operationFingerprint,
+  snapshotOperationEnvelope,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -218,6 +219,19 @@ describe("operation core", () => {
       { ...first, payload: { value: 1 } },
       /equivocation/,
     );
+  });
+
+  test("deduplicates an identical pending redelivery before dependency release", () => {
+    const second = sequentialOperation("a", 2);
+    const appendId = (projection: string, item: Operation) =>
+      `${projection}[${item.operationId}]`;
+    let state = applyOperation(stringApplyState(), second, appendId);
+    const redelivery = snapshotOperationEnvelope(second);
+    state = applyOperation(state, redelivery, appendId);
+    expect(state.pending).toHaveLength(1);
+
+    state = applyOperation(state, operation("a", 1n, {}, "one"), appendId);
+    expect(state.projection).toBe("[a-1][a-2]");
   });
 
   test("bounds never-ready admission without reducer work", () => {

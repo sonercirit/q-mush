@@ -10,11 +10,13 @@ import {
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
+  createOperation,
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
   operationFingerprint,
   operationSequenceOrder,
+  type Operation,
 } from "../shared/operation-core";
 import {
   createOperationIntake,
@@ -145,6 +147,64 @@ test("operation intake persists one snapshot consistently and replays it as a du
     first.encodedCheckpoint,
   );
   expectStoredEnvelopeCount(database, 1);
+});
+
+test("operation intake freezes reducer inputs before durable admission", () => {
+  const { database, intake } = setup();
+  const operation = createOperation({
+    ...testOperation("frozen-writer", 1n, {}, "immutable"),
+    payload: { value: "immutable" },
+  });
+  const reducer = (projection: readonly string[], candidate: Operation) => {
+    expect(
+      [
+        candidate,
+        candidate.payload,
+        candidate.parents,
+        candidate.clock,
+        candidate.entity,
+      ].every(Object.isFrozen),
+    ).toBe(true);
+    const payload = candidate.payload;
+    if (typeof payload !== "object" || payload === null)
+      throw new Error("Missing reducer payload fixture");
+    expect(() => Object.assign(payload, { value: "corrupted" })).toThrow(
+      TypeError,
+    );
+    return projection.concat(candidate.operationId);
+  };
+
+  const first = intake.apply(
+    "owner-1",
+    "non-session",
+    [operation],
+    reducer,
+    SYSTEM_ID,
+    2,
+  );
+  const row = storedEnvelopeRows(database).at(0);
+  const encodedEnvelope = row?.encodedEnvelope ?? "";
+  const stored = decodeOperationEnvelope(encodedEnvelope);
+  const checkpoint = decodeOperationCheckpoint(first.encodedCheckpoint);
+  const fingerprint = operationFingerprint(stored);
+  expect(row?.fingerprint).toBe(fingerprint);
+  expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
+    fingerprint,
+  );
+  expect(checkpoint.projection).toEqual(["frozen-writer-1"]);
+  const replay = intake.apply(
+    "owner-1",
+    "non-session",
+    [stored],
+    reducer,
+    SYSTEM_ID,
+    3,
+  );
+  expect(replay.encodedCheckpoint).toBe(first.encodedCheckpoint);
+  expect(storedEnvelopeRows(database)).toHaveLength(1);
+  expect(() =>
+    decodeOperationCheckpoint(replay.encodedCheckpoint),
+  ).not.toThrow();
 });
 
 test("operation intake is replay-idempotent", () => {

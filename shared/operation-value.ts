@@ -1,3 +1,14 @@
+export const freezeOperationValue = <T>(value: T): T => {
+  const visit = (item: unknown): void => {
+    if (typeof item !== "object" || item === null || Object.isFrozen(item))
+      return;
+    for (const child of Object.values(item)) visit(child);
+    Object.freeze(item);
+  };
+  visit(value);
+  return value;
+};
+
 const dataDescriptor = (
   value: object,
   key: PropertyKey,
