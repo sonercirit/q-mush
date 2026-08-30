@@ -12,6 +12,8 @@ import {
   agentSessions,
   agentSessionTurns,
   attachmentFallbacks,
+  operationCheckpoints,
+  operationEnvelopes,
   prompts,
   providerCredentials,
   providerCredentialWorkspaces,
@@ -36,6 +38,8 @@ const databaseSchema = {
   agentSessions,
   agentSessionTurns,
   attachmentFallbacks,
+  operationCheckpoints,
+  operationEnvelopes,
   prompts,
   providerCredentials,
   providerCredentialWorkspaces,
@@ -53,17 +57,20 @@ export type AppDatabase = BunSQLiteDatabase<typeof databaseSchema> & {
   noncriticalWrite(action: () => void): void;
 };
 
+const attachDatabase = (client: Database): AppDatabase =>
+  Object.assign(drizzle(client, { schema: databaseSchema }), {
+    noncriticalWrite(action: () => void): void {
+      action();
+    },
+  });
+
 export function createDatabase(path: string): AppDatabase {
   if (path !== ":memory:") {
     mkdirSync(dirname(resolve(path)), { recursive: true });
   }
 
   const client = new Database(path, { create: true });
-  const database = Object.assign(drizzle(client, { schema: databaseSchema }), {
-    noncriticalWrite(action: () => void): void {
-      action();
-    },
-  });
+  const database = attachDatabase(client);
 
   try {
     // Drizzle wraps migrations in a transaction, where SQLite ignores changes

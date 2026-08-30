@@ -14,6 +14,7 @@ import {
   OPENROUTER_CREDENTIALS_PATH,
   OPENROUTER_OAUTH_CALLBACK_PATH,
   OPENROUTER_OAUTH_PATH,
+  OPERATION_SYNCHRONIZATION_PATH,
   promptPath,
   PROMPTS_PATH,
   providerCredentialDefaultPath,
@@ -34,6 +35,7 @@ test("places every endpoint beneath its expected base path", () => {
   expect(AUTH_GOOGLE_CALLBACK_PATH).toBe("/api/auth/google/callback");
   expect(AUTH_LOGOUT_PATH).toBe("/api/auth/logout");
   expect(AUTH_SESSION_PATH).toBe("/api/auth/session");
+  expect(OPERATION_SYNCHRONIZATION_PATH).toBe("/api/local/operations");
   expect(BRAVE_SEARCH_KEYS_PATH).toBe("/api/skills/brave-search/keys");
   expect(FAVICON_PATH).toBe("/favicon.svg");
   expect(GENERIC_CREDENTIALS_PATH).toBe("/api/generic/credentials");

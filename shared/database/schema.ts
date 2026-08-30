@@ -481,6 +481,50 @@ export const agentMessages = sqliteTable(
     ),
   ],
 );
+const operationPartitionColumn = () =>
+  text("partition", { enum: ["non-session", "session"] }).notNull();
+export const operationEnvelopes = sqliteTable(
+  "operation_envelopes",
+  {
+    ...userOwnedAuditColumns(),
+    partition: operationPartitionColumn(),
+    writerId: text("writer_id").notNull(),
+    sequence: text("sequence").notNull(),
+    sequenceOrder: text("sequence_order").notNull().default(""),
+    operationId: text("operation_id").notNull(),
+    fingerprint: text("fingerprint").notNull(),
+    encodedEnvelope: text("encoded_envelope").notNull(),
+  },
+  (table) => [
+    uniqueIndex("operation_envelopes_active_writer_sequence_unique")
+      .on(table.userId, table.partition, table.writerId, table.sequence)
+      .where(sql`NOT ${table.isDeleted}`),
+    uniqueIndex("operation_envelopes_active_operation_id_unique")
+      .on(table.userId, table.partition, table.operationId)
+      .where(sql`NOT ${table.isDeleted}`),
+    index("operation_envelopes_owner_partition_writer_index").on(
+      table.userId,
+      table.partition,
+      table.isDeleted,
+      table.writerId,
+      table.sequenceOrder,
+    ),
+  ],
+);
+export const operationCheckpoints = sqliteTable(
+  "operation_checkpoints",
+  {
+    ...userOwnedAuditColumns(),
+    partition: operationPartitionColumn(),
+    encodedCheckpoint: text("encoded_checkpoint").notNull(),
+  },
+  (table) => [
+    uniqueIndex("operation_checkpoints_active_owner_partition_unique")
+      .on(table.userId, table.partition)
+      .where(sql`NOT ${table.isDeleted}`),
+  ],
+);
+
 export const sessions = sqliteTable(
   "sessions",
   {

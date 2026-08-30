@@ -4,6 +4,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
+import {
+  decodeOperationEnvelope,
+  encodeOperationEnvelope,
+} from "../../shared/operation-checkpoint.ts";
+import {
+  createOperation,
+  operationSequenceOrder,
+} from "../../shared/operation-core.ts";
+import { createOperationStore } from "../../sync-engine/operation-store.ts";
 
 const DRIZZLE_DIRECTORY = join(import.meta.dirname, "../../drizzle");
 const CURRENT_BASE_MIGRATIONS = [
@@ -41,6 +50,9 @@ const PARENT_REPORT_MIGRATION_TIMESTAMP = 1_787_268_023_468;
 const TOOL_SETTINGS_MIGRATION_TIMESTAMP = 1_786_905_773_660;
 const CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP = 1_787_417_810_687;
 const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
+const OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP = 1_787_798_425_604;
+const OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP = 1_787_790_945_286;
+const OPERATION_STORAGE_MIGRATION_TIMESTAMP = 1_787_781_913_680;
 const ACCOUNT_EXPORT_INDEX_MIGRATION_TIMESTAMP = 1_787_659_701_217;
 const PROVIDER_REPLAY_MIGRATION_TIMESTAMP = 1_787_430_433_213;
 
@@ -68,6 +80,13 @@ function tableColumnNames(
     `PRAGMA table_info(${table})`,
   );
   return query.all().map((column) => column.name);
+}
+
+function pragmaNames(database: Database, pragma: string): readonly string[] {
+  return database
+    .query<{ readonly name: string }, []>(pragma)
+    .all()
+    .map(({ name }) => name);
 }
 
 test("upgrades migration 0027 through the latest migrations", async () => {
@@ -122,11 +141,14 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   ).toContain("provider_replay");
   const migrationTimestamps = upgradedDatabase.$client
     .query<{ readonly createdAt: number }, []>(
-      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 7",
+      "SELECT created_at AS createdAt FROM __drizzle_migrations ORDER BY created_at DESC LIMIT 10",
     )
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP,
+    OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP,
+    OPERATION_STORAGE_MIGRATION_TIMESTAMP,
     ACCOUNT_EXPORT_INDEX_MIGRATION_TIMESTAMP,
     PROVIDER_REPLAY_MIGRATION_TIMESTAMP,
     CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP,
@@ -135,5 +157,74 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     TOOL_SETTINGS_MIGRATION_TIMESTAMP,
     ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
   ]);
+  const envelopeColumns = pragmaNames(
+    upgradedDatabase.$client,
+    "SELECT name FROM pragma_table_info('operation_envelopes')",
+  );
+  expect(envelopeColumns).toContain("sequence_order");
+  const envelopeIndexes = pragmaNames(
+    upgradedDatabase.$client,
+    "SELECT name FROM pragma_index_list('operation_envelopes')",
+  );
+  expect(envelopeIndexes).toContain(
+    "operation_envelopes_owner_partition_writer_index",
+  );
   upgradedDatabase.$client.close();
+});
+
+test("backfills sequence order while upgrading populated operation storage", async () => {
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "q-mush-operation-upgrade-"));
+  const database = new Database(join(temporaryDirectory, "operations.sqlite"), {
+    create: true,
+  });
+  database.run("CREATE TABLE users (id text PRIMARY KEY NOT NULL)");
+  await applyMigration(database, "0040_mixed_the_leader.sql");
+  await applyMigration(database, "0041_magenta_puma.sql");
+  database.run(
+    `INSERT INTO operation_envelopes
+      (id, user_id, created_at, created_by_id, updated_at, updated_by_id, partition,
+       writer_id, sequence, operation_id, fingerprint, encoded_envelope)
+     VALUES ('envelope-1', 'owner-1', 1, 'owner-1', 1, 'owner-1', 'non-session',
+       'writer-1', '12345', 'operation-1', 'fingerprint-1', 'encoded-1')`,
+  );
+  await applyMigration(database, "0042_clammy_shadow_king.sql");
+  const row = database
+    .query<{ readonly sequenceOrder: string }, []>(
+      "SELECT sequence_order AS sequenceOrder FROM operation_envelopes",
+    )
+    .get();
+  expect(row?.sequenceOrder).toBe(operationSequenceOrder(12_345n));
+  const operation = createOperation({
+    operationId: "operation-1",
+    schemaVersion: 1,
+    writerId: "writer-1",
+    sequence: 12_345n,
+    clock: { physicalMs: 1, logical: 0, writerId: "writer-1" },
+    parents: {},
+    entity: {
+      type: "workspaces",
+      id: "workspace-1",
+      accountId: "owner-1",
+    },
+    kind: "workspace.name.set",
+    payload: { value: "migrated" },
+  });
+  database.run(
+    "UPDATE operation_envelopes SET encoded_envelope = ? WHERE id = ?",
+    [encodeOperationEnvelope(operation), "envelope-1"],
+  );
+  const upgraded = createDatabase(join(temporaryDirectory, "fresh.sqlite"));
+  upgraded.$client.run("ATTACH DATABASE ? AS migrated", [
+    join(temporaryDirectory, "operations.sqlite"),
+  ]);
+  upgraded.$client.run("PRAGMA foreign_keys = OFF");
+  upgraded.$client.run("DELETE FROM operation_envelopes");
+  upgraded.$client.run(
+    "INSERT INTO operation_envelopes SELECT * FROM migrated.operation_envelopes",
+  );
+  const page = createOperationStore({
+    database: upgraded,
+  }).readEncodedEnvelopes("owner-1", "non-session", { "writer-1": 5n }, 1);
+  expect(page.envelopes.map(decodeOperationEnvelope)).toEqual([operation]);
+  upgraded.$client.close();
 });

@@ -1,4 +1,5 @@
 export const API_BASE_PATH = "/api";
+export const OPERATION_SYNCHRONIZATION_PATH = `${API_BASE_PATH}/local/operations`;
 export const REALTIME_PATH = `${API_BASE_PATH}/realtime`;
 export const APP_PATH = "/app";
 export const APP_SCRIPT_PATH = "/app.js";
