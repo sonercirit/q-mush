@@ -1,9 +1,13 @@
 import { Database } from "bun:sqlite";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { createRunnerOperationStore } from "../runner/runner-operation-store.ts";
+import { createRunnerOperationTransport } from "../runner/runner-operation-transport.ts";
 import { synchronizeRunnerOperations } from "../runner/runner-operation-sync.ts";
-import { encodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
+import {
+  decodeOperationCheckpoint,
+  encodeOperationEnvelope,
+} from "../shared/operation-checkpoint.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
 import { createOperationStore } from "../sync-engine/operation-store.ts";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization.ts";
@@ -172,6 +176,46 @@ const expectOutboxRetained = (
   expect(replica.events).toEqual([]);
 };
 
+test("captures only a bounded engine rejection reason", async () => {
+  const detail = `safe reason ${"x".repeat(1_000)}`;
+  const fetchMock = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response(JSON.stringify({ error: detail }), { status: 400 }));
+  try {
+    const transport = createRunnerOperationTransport("http://engine.test", "token");
+    const error = await transport
+      .writeBatch("non-session", ["encoded"], new AbortController().signal)
+      .catch((reason: unknown) => reason);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toContain("safe reason");
+    expect((error as Error).message.length).toBeLessThan(460);
+    expect((error as Error).message).not.toContain("x".repeat(500));
+    expect(fetchMock).toHaveBeenCalledOnce();
+  } finally {
+    fetchMock.mockRestore();
+  }
+});
+
+test("bounds reported stall identities while retaining total depth", async () => {
+  const replica = harness({
+    pending: [],
+    outboxStalls: Array.from({ length: 512 }, (_, index) => ({
+      operationId: `operation-${String(index).padStart(3, "0")}`,
+      reason: "rejected",
+    })),
+  });
+  const error = await runSynchronization(
+    replica,
+    emptyTransport(resolvedWrite),
+  ).catch((reason: unknown) => reason);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toContain("operation-000, operation-001");
+  expect((error as Error).message).toContain("+507 more");
+  expect((error as Error).message).toContain("512 stalled");
+  expect((error as Error).message.length).toBeLessThan(200);
+  expect((error as Error).message).not.toContain("operation-006");
+});
+
 test("resumes pull pages from each durably applied frontier", async () => {
   const replica = harness();
   const frontiers: bigint[] = [];
@@ -232,27 +276,29 @@ test("a durably stalled partition leaves its frontier fixed while its peer compl
   expect(replica.state.frontier).toEqual({});
 });
 
-test("isolates a batch 400, commits good neighbors, and durably stalls without discarding poison", async () => {
+test("a permanent head poison never pushes or acknowledges causal successors", async () => {
   await withEngineAndRunner(async ({ engineDatabase, handler, store }) => {
     const now = Date.now();
     const encoded = [
       encodeOperationEnvelope(
-        ownedEngineOperation(testOperation("owner-1", 1n, {}, "good-1", now)),
-      ),
-      encodeOperationEnvelope(
         ownedEngineOperation(
-          testOperation("owner-1", 2n, { "owner-1": 1n }, "good-2", now + 1),
+          testOperation(
+            "owner-1",
+            1n,
+            {},
+            "past-poison",
+            now - 7 * 24 * 60 * 60 * 1_000,
+          ),
         ),
       ),
       encodeOperationEnvelope(
         ownedEngineOperation(
-          testOperation(
-            "owner-1",
-            3n,
-            { "owner-1": 2n },
-            "clock-skew",
-            now + 7 * 24 * 60 * 60 * 1_000,
-          ),
+          testOperation("owner-1", 2n, { "owner-1": 1n }, "good-2", now),
+        ),
+      ),
+      encodeOperationEnvelope(
+        ownedEngineOperation(
+          testOperation("owner-1", 3n, { "owner-1": 2n }, "good-3", now + 1),
         ),
       ),
     ];
@@ -272,15 +318,87 @@ test("isolates a batch 400, commits good neighbors, and durably stalls without d
       },
       readPage: emptyPage,
     };
-    await expect(synchronizeStore(store, transport)).rejects.toThrow(
-      "outbox stalled",
-    );
+    for (let cycle = 0; cycle < 3; cycle += 1)
+      await expect(synchronizeStore(store, transport)).rejects.toThrow(
+        /outbox stalled.*2 queued behind/,
+      );
     expect(writes).toEqual([3, 1, 1, 1]);
-    expect(pendingForNonSession(store)).toEqual([encoded[2]]);
+    expect(pendingForNonSession(store)).toEqual(encoded);
     expect(store.state("self", "non-session").outboxStalls).toEqual([
-      expect.objectContaining({ operationId: "owner-1-3" }),
+      expect.objectContaining({ operationId: "owner-1-1", queuedBehind: 2 }),
     ]);
-    expect(engineEnvelopes(engineDatabase)).toEqual(encoded.slice(0, 2));
+    expect(engineEnvelopes(engineDatabase)).toEqual([]);
+  });
+});
+
+test("a permanent head bounds retries and drains all successors in order after repair", async () => {
+  await withEngineAndRunner(async ({ engineDatabase, handler, store }) => {
+    const now = Date.now();
+    const encoded = Array.from({ length: 9 }, (_, index) => {
+      const sequence = BigInt(index + 1);
+      return encodeOperationEnvelope(
+        ownedEngineOperation(
+          testOperation(
+            "owner-1",
+            sequence,
+            sequence === 1n ? {} : { "owner-1": sequence - 1n },
+            `value-${String(sequence)}`,
+            now + index,
+          ),
+        ),
+      );
+    });
+    store.apply("self", "non-session", encoded.slice(0, 3), "local");
+    let rejectHead = true;
+    const writesByCycle: number[][] = [];
+    let cycleWrites: number[] = [];
+    const transport = {
+      writeBatch: async (
+        scope: OperationPartition,
+        batch: readonly string[],
+      ) => {
+        cycleWrites.push(batch.length);
+        if (rejectHead && batch.includes(encoded[0] ?? ""))
+          throw Object.assign(new Error("injected permanent rejection"), {
+            operationSynchronizationStatus: 400,
+          });
+        const response = await postToEngine(handler, scope, batch);
+        if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+      },
+      readPage: emptyPage,
+    };
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      if (cycle > 0)
+        store.apply(
+          "self",
+          "non-session",
+          encoded.slice(cycle * 3, cycle * 3 + 3),
+          "local",
+        );
+      cycleWrites = [];
+      await expect(synchronizeStore(store, transport)).rejects.toThrow(
+        new RegExp(`${String((cycle + 1) * 3 - 1)} queued behind`),
+      );
+      writesByCycle.push(cycleWrites);
+      expect(store.state("self", "non-session").outboxStalls).toHaveLength(1);
+      expect(engineEnvelopes(engineDatabase)).toEqual([]);
+    }
+    expect(writesByCycle).toEqual([[3, 1], [1], [1]]);
+    rejectHead = false;
+    cycleWrites = [];
+    await synchronizeStore(store, transport);
+    expect(cycleWrites).toEqual([1, 8]);
+    expect(pendingForNonSession(store)).toEqual([]);
+    expect(store.state("self", "non-session").outboxStalls).toEqual([]);
+    expect(engineEnvelopes(engineDatabase)).toEqual(encoded);
+    const checkpoint = decodeOperationCheckpoint(
+      createOperationStore({ database: engineDatabase }).loadCheckpoint(
+        "owner-1",
+        "non-session",
+      ) ?? "",
+    );
+    expect(checkpoint.frontier).toEqual({ "owner-1": 9n });
+    expect(checkpoint.pending).toEqual([]);
   });
 });
 
@@ -307,10 +425,8 @@ test("a batch 400 stalls only rejected singles, retains them, and continues pull
     "ack",
     "stall:poison:protocol rejected",
     "stall:poison:protocol rejected",
-    "ack",
-    "ack",
   ]);
-  expect(replica.state.pending).toEqual(["poison"]);
+  expect(replica.state.pending).toEqual(["poison", "also-good"]);
   expect(replica.state.outboxStalls).toEqual([
     { operationId: "poison", reason: "protocol rejected" },
   ]);

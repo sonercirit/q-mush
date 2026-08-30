@@ -9,6 +9,7 @@ import {
 import {
   isOperationProtocolError,
   MAX_OPERATION_CHECKPOINT_BYTES,
+  MAX_OPERATION_ENVELOPE_BYTES,
   operationProtocolError,
   type OperationApplyState,
   type OperationPartition,
@@ -44,6 +45,17 @@ export const createRunnerOperationStore = (database: Database) => {
       source: OperationReplicaSource,
     ) {
       if (envelopes.length === 0) return;
+      if (
+        source === "local" &&
+        envelopes.some(
+          (encoded) =>
+            Buffer.byteLength(encoded, "utf8") > MAX_OPERATION_ENVELOPE_BYTES,
+        )
+      )
+        throw operationProtocolError(
+          "capacity",
+          "Operation envelope capacity reached",
+        );
       database.transaction(() => {
         let successor = checkpointState(ownerId, partition);
         let changed = false;

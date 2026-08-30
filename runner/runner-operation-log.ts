@@ -64,10 +64,15 @@ export const createRunnerOperationLog = (database: Database) => {
     "SELECT 1 AS found FROM operation_quarantines WHERE owner_id = ? AND partition = ? LIMIT 1",
   );
   const outboxStalls = database.query<
-    { operationId: string; reason: string },
+    {
+      operationId: string;
+      queuedBehind: number;
+      reason: string;
+      writerId: string;
+    },
     [string, OperationPartition]
   >(
-    "SELECT operation_id AS operationId, rejection_reason AS reason FROM operation_outbox_stalls WHERE owner_id = ? AND partition = ? ORDER BY rowid",
+    "SELECT stalls.operation_id AS operationId, stalls.writer_id AS writerId, stalls.rejection_reason AS reason, (SELECT count(*) FROM operation_envelopes AS queued WHERE queued.owner_id = stalls.owner_id AND queued.partition = stalls.partition AND queued.writer_id = stalls.writer_id AND queued.outbox_pending = 1 AND queued.rowid > envelopes.rowid) AS queuedBehind FROM operation_outbox_stalls AS stalls JOIN operation_envelopes AS envelopes ON envelopes.owner_id = stalls.owner_id AND envelopes.partition = stalls.partition AND envelopes.operation_id = stalls.operation_id WHERE stalls.owner_id = ? AND stalls.partition = ? ORDER BY envelopes.rowid",
   );
   const pendingOutbox = database.query<
     { encoded: string },

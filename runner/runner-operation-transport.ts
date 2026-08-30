@@ -15,13 +15,22 @@ export const isOperationSynchronizationBadRequest = (
   "operationSynchronizationStatus" in error &&
   error.operationSynchronizationStatus === 400;
 
+const MAX_SYNCHRONIZATION_ERROR_BODY_CHARACTERS = 400;
 const synchronizationHttpError = (
   status: number,
-): OperationSynchronizationHttpError =>
-  Object.assign(
-    new Error(`Operation synchronization failed (${String(status)})`),
+  responseBody: string,
+): OperationSynchronizationHttpError => {
+  const detail = responseBody
+    .slice(0, MAX_SYNCHRONIZATION_ERROR_BODY_CHARACTERS)
+    .replaceAll(/\s+/g, " ")
+    .trim();
+  return Object.assign(
+    new Error(
+      `Operation synchronization failed (${String(status)})${detail === "" ? "" : `: ${detail}`}`,
+    ),
     { operationSynchronizationStatus: status },
   );
+};
 
 const requestJson = async (
   origin: string,
@@ -42,7 +51,8 @@ const requestJson = async (
       signal,
     },
   );
-  if (!response.ok) throw synchronizationHttpError(response.status);
+  if (!response.ok)
+    throw synchronizationHttpError(response.status, await response.text());
   return response.json();
 };
 

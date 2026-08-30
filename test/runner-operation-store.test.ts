@@ -6,6 +6,7 @@ import {
   decodeOperationEnvelope,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint.ts";
+import { MAX_OPERATION_ENVELOPE_BYTES } from "../shared/operation-core.ts";
 import {
   testOperation,
   testSessionOperation,
@@ -218,6 +219,20 @@ test("migrates legacy verified rows to accepted idempotently", () => {
     database.close();
   }
 });
+test("rejects an oversized local envelope before durable queueing", () => {
+  withStore((store) => {
+    const oversized = envelope(1n, "x".repeat(MAX_OPERATION_ENVELOPE_BYTES));
+    expect(Buffer.byteLength(oversized, "utf8")).toBeGreaterThan(
+      MAX_OPERATION_ENVELOPE_BYTES,
+    );
+    expect(() =>
+      store.apply("owner-1", "non-session", [oversized], "local"),
+    ).toThrow("envelope capacity");
+    expect(store.pending("owner-1", "non-session")).toEqual([]);
+    expect(rows(store)).toEqual([]);
+  });
+});
+
 test("keeps local envelopes pending until durable acknowledgement", () => {
   withStore((store) => {
     const local = envelope(1n, "outbox");

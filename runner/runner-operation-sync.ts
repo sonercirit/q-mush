@@ -4,7 +4,9 @@ import { isOperationSynchronizationBadRequest } from "./runner-operation-transpo
 
 interface OutboxStall {
   readonly operationId: string;
+  readonly queuedBehind?: number;
   readonly reason: string;
+  readonly writerId?: string;
 }
 interface OperationStore {
   readonly acknowledge: (
@@ -57,11 +59,19 @@ export interface RunnerOperationRead {
 }
 
 const ownerAlias = "self";
-const outboxIdentity = (encoded: string): string => {
+interface OutboxIdentity {
+  readonly operationId: string;
+  readonly writerId: string;
+}
+const outboxIdentity = (encoded: string): OutboxIdentity => {
   try {
-    return decodeOperationEnvelope(encoded).operationId;
+    const operation = decodeOperationEnvelope(encoded);
+    return {
+      operationId: operation.operationId,
+      writerId: operation.writerId,
+    };
   } catch {
-    return encoded;
+    return { operationId: encoded, writerId: "unknown-writer" };
   }
 };
 interface PartitionRequest {
@@ -102,28 +112,49 @@ const pushOne = async (
 const pushSinglyAfterBadRequest = async (
   request: PartitionRequest & { readonly envelopes: readonly string[] },
 ): Promise<boolean> => {
+  const blockedWriters = new Set<string>();
   let stalled = false;
-  for (const envelope of request.envelopes)
-    stalled = (await pushOne(request, envelope)) || stalled;
+  for (const envelope of request.envelopes) {
+    const { writerId } = outboxIdentity(envelope);
+    if (blockedWriters.has(writerId)) continue;
+    const rejected = await pushOne(request, envelope);
+    if (rejected) blockedWriters.add(writerId);
+    stalled = rejected || stalled;
+  }
   return stalled;
 };
 const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   const { partition, store } = request;
   const pending = store.pending(ownerAlias, partition);
-  const existingStallIds = new Set(
+  const existingStalls = store.state(ownerAlias, partition).outboxStalls ?? [];
+  const stalledByWriter = new Map(
+    existingStalls.map((stall) => [
+      stall.writerId ?? "unknown-writer",
+      stall.operationId,
+    ]),
+  );
+  const stalledHeads = pending.filter((encoded) => {
+    const identity = outboxIdentity(encoded);
+    return stalledByWriter.get(identity.writerId) === identity.operationId;
+  });
+  let remainsStalled = false;
+  const retriedHeadIds = new Set<string>();
+  for (const envelope of stalledHeads) {
+    retriedHeadIds.add(outboxIdentity(envelope).operationId);
+    remainsStalled = (await pushOne(request, envelope)) || remainsStalled;
+  }
+  const stillBlockedWriters = new Set(
     (store.state(ownerAlias, partition).outboxStalls ?? []).map(
-      ({ operationId }) => operationId,
+      (stall) => stall.writerId ?? "unknown-writer",
     ),
   );
-  const stalled = pending.filter((encoded) =>
-    existingStallIds.has(outboxIdentity(encoded)),
-  );
-  let remainsStalled = false;
-  for (const envelope of stalled)
-    remainsStalled = (await pushOne(request, envelope)) || remainsStalled;
-  const pushable = pending.filter(
-    (encoded) => !existingStallIds.has(outboxIdentity(encoded)),
-  );
+  const pushable = pending.filter((encoded) => {
+    const identity = outboxIdentity(encoded);
+    return (
+      !retriedHeadIds.has(identity.operationId) &&
+      !stillBlockedWriters.has(identity.writerId)
+    );
+  });
   if (pushable.length === 0) return remainsStalled;
   try {
     await acceptedPush(request, pushable);
@@ -135,6 +166,20 @@ const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
       remainsStalled
     );
   }
+};
+const MAX_REPORTED_STALL_IDENTITIES = 5;
+const describeOutboxStalls = (outboxStalls: readonly OutboxStall[]): string => {
+  const shown = outboxStalls
+    .slice(0, MAX_REPORTED_STALL_IDENTITIES)
+    .map(({ operationId }) => operationId)
+    .join(", ");
+  const omitted = outboxStalls.length - MAX_REPORTED_STALL_IDENTITIES;
+  const identities = omitted > 0 ? `${shown}, +${String(omitted)} more` : shown;
+  const queuedBehind = outboxStalls.reduce(
+    (total, stall) => total + (stall.queuedBehind ?? 0),
+    0,
+  );
+  return ` (${identities}; ${String(queuedBehind)} queued behind; ${String(outboxStalls.length)} stalled)`;
 };
 const synchronizePartition = async (
   request: PartitionRequest,
@@ -159,11 +204,8 @@ const synchronizePartition = async (
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];
   if (outboxStalled || outboxStalls.length > 0) {
-    const identities = outboxStalls
-      .map(({ operationId }) => operationId)
-      .join(", ");
     throw new Error(
-      `Operation synchronization outbox stalled: ${partition}${identities === "" ? "" : ` (${identities})`}`,
+      `Operation synchronization outbox stalled: ${partition}${outboxStalls.length === 0 ? "" : describeOutboxStalls(outboxStalls)}`,
     );
   }
 };
