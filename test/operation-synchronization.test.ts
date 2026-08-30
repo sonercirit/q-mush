@@ -64,7 +64,11 @@ const ownedOperation = (sequence = 1n) => {
     },
   };
 };
-const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
+const handler = (
+  authenticatedId?: string,
+  limits?: OperationIntakeLimits,
+  runnerId?: string,
+) => {
   const resources = harness.setup();
   return createOperationSynchronization(
     resources.database,
@@ -75,6 +79,9 @@ const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
           : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
     },
     limits,
+    runnerId === undefined
+      ? undefined
+      : { runnerAccount: () => ({ userId: runnerId }) },
   );
 };
 const statusAfterClosedDatabase = async (request: Request) => {
@@ -132,6 +139,15 @@ test.afterEach(harness.close);
 
 test("operation synchronization rejects unauthenticated requests", async () => {
   expect((await handler()(request(body()))).status).toBe(401);
+});
+
+test("operation synchronization resolves runner self only after token auth", async () => {
+  const response = await handler(
+    undefined,
+    undefined,
+    "owner-1",
+  )(request(body("self")));
+  expect(response.status).toBe(200);
 });
 
 test("operation synchronization rejects cross-owner requests", async () => {
