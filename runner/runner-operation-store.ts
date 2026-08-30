@@ -46,6 +46,7 @@ export const createRunnerOperationStore = (database: Database) => {
       if (envelopes.length === 0) return;
       database.transaction(() => {
         let successor = checkpointState(ownerId, partition);
+        let changed = false;
         let stalled = source === "remote" && log.stalled(ownerId, partition);
         for (const encoded of envelopes) {
           let operation: ReturnType<typeof decodeOperationEnvelope>;
@@ -61,6 +62,7 @@ export const createRunnerOperationStore = (database: Database) => {
                 ? error.message
                 : "Invalid operation envelope",
             );
+            changed = true;
             stalled = true;
             continue;
           }
@@ -92,8 +94,10 @@ export const createRunnerOperationStore = (database: Database) => {
                 "capacity",
                 "Operation checkpoint capacity reached",
               );
-            if (acceptedOperation !== undefined)
+            if (acceptedOperation !== undefined) {
               log.append(ownerId, acceptedOperation, encoded, source);
+              changed = true;
+            }
             successor = candidate;
           } catch (error) {
             if (source !== "remote" || !isOperationProtocolError(error))
@@ -105,14 +109,16 @@ export const createRunnerOperationStore = (database: Database) => {
               error.message,
               operation,
             );
+            changed = true;
             stalled = true;
           }
         }
-        log.storeCheckpoint(
-          ownerId,
-          partition,
-          encodeOperationCheckpoint(successor),
-        );
+        if (changed)
+          log.storeCheckpoint(
+            ownerId,
+            partition,
+            encodeOperationCheckpoint(successor),
+          );
       })();
     },
     acknowledge: (...arguments_: Parameters<typeof log.acknowledge>) => {
@@ -122,13 +128,14 @@ export const createRunnerOperationStore = (database: Database) => {
       log.inspect(...arguments_),
     pending: (...arguments_: Parameters<typeof log.pending>) =>
       log.pending(...arguments_),
-    rejectOutbox: (...rejection: Parameters<typeof log.rejectOutbox>) => {
-      log.rejectOutbox(...rejection);
+    stallOutbox: (...arguments_: Parameters<typeof log.stallOutbox>) => {
+      log.stallOutbox(...arguments_);
     },
     state(ownerId: string, partition: OperationPartition) {
       return {
         ...checkpointState(ownerId, partition),
         stalled: log.stalled(ownerId, partition),
+        outboxStalls: log.outboxStalls(ownerId, partition),
       };
     },
   };

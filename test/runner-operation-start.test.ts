@@ -11,8 +11,8 @@ const store = {
   acknowledge: () => undefined,
   apply: () => undefined,
   pending: () => [],
-  rejectOutbox: () => undefined,
-  state: () => ({ frontier: {} }),
+  stallOutbox: () => undefined,
+  state: () => ({ frontier: {}, outboxStalls: [] }),
 };
 const installFetch = (
   fetch: (
@@ -108,6 +108,67 @@ test("retries engine failures with capped exponential backoff", async () => {
   await finished.promise;
   controller.abort();
   expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+});
+
+test("counts one partition failure as a failed cycle while its peer advances", async () => {
+  let cycle = 0;
+  installFetch((_input, init) => {
+    const partition = JSON.parse(String(init?.body))["partition"] as string;
+    if (partition === "non-session" && cycle === 0)
+      return Promise.reject(new Error("partition offline"));
+    return successfulResponse();
+  });
+  const delays: number[] = [];
+  const logs: string[] = [];
+  const controller = start({
+    delay: (milliseconds) => {
+      delays.push(milliseconds);
+      cycle += 1;
+      if (delays.length === 2) controller.abort();
+      return instantDelay();
+    },
+    log: (message) => logs.push(message),
+    random: midpointRandom,
+  });
+  await vi.waitFor(() => {
+    expect(delays).toEqual([1_000, 5_000]);
+  });
+  expect(logs).toHaveLength(1);
+  expect(logs[0]).toContain("partition offline");
+});
+
+test("repeated 403 retains outbox and uses capped failure backoff", async () => {
+  const pendingStore = {
+    ...store,
+    pending: () => ["local"],
+  };
+  installFetch((_input, init) =>
+    init?.method === "POST"
+      ? Promise.resolve(new Response(null, { status: 403 }))
+      : successfulResponse(),
+  );
+  const delays: number[] = [];
+  const controller = startRunnerOperationSynchronization(
+    pendingStore,
+    "http://engine.test",
+    "token",
+    {
+      delay: recordDelay(delays, () => controller.abort(), 7),
+      log: () => undefined,
+      random: midpointRandom,
+    },
+  );
+  await vi.waitFor(() => {
+    expect(delays).toEqual([
+      1_000,
+      2_000,
+      4_000,
+      8_000,
+      16_000,
+      30_000,
+      30_000,
+    ]);
+  });
 });
 
 test("shutdown aborts an in-flight engine request", async () => {

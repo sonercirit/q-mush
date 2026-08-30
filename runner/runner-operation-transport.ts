@@ -8,7 +8,7 @@ export interface OperationSynchronizationHttpError extends Error {
   readonly operationSynchronizationStatus: number;
 }
 
-export const isPermanentOperationSynchronizationRejection = (
+export const isOperationSynchronizationBadRequest = (
   error: unknown,
 ): error is OperationSynchronizationHttpError =>
   error instanceof Error &&

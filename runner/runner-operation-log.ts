@@ -37,6 +37,9 @@ export const createRunnerOperationLog = (database: Database) => {
   database.run(
     "CREATE TABLE IF NOT EXISTS operation_quarantines (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, rejection_reason TEXT NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
   );
+  database.run(
+    "CREATE TABLE IF NOT EXISTS operation_outbox_stalls (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, rejection_reason TEXT NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
+  );
   const loadCheckpoint = database.query<
     { encoded: string },
     [string, OperationPartition]
@@ -49,11 +52,20 @@ export const createRunnerOperationLog = (database: Database) => {
   >(
     "SELECT 1 AS found FROM operation_quarantines WHERE owner_id = ? AND partition = ? LIMIT 1",
   );
+  const outboxStalls = database.query<
+    { operationId: string; reason: string },
+    [string, OperationPartition]
+  >(
+    "SELECT operation_id AS operationId, rejection_reason AS reason FROM operation_outbox_stalls WHERE owner_id = ? AND partition = ? ORDER BY rowid",
+  );
   const pendingOutbox = database.query<
     { encoded: string },
     [string, OperationPartition]
   >(
     "SELECT encoded FROM operation_envelopes WHERE owner_id = ? AND partition = ? AND outbox_pending = 1 ORDER BY rowid LIMIT 512",
+  );
+  const stallOutbox = database.query(
+    "INSERT INTO operation_outbox_stalls (owner_id, partition, operation_id, writer_id, sequence, encoded, rejection_reason) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (owner_id, partition, operation_id) DO UPDATE SET rejection_reason = excluded.rejection_reason",
   );
   const append = database.query(
     "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, ?, ?, ?, 'accepted', ?, NULL, ?) ON CONFLICT DO NOTHING",
@@ -124,6 +136,9 @@ export const createRunnerOperationLog = (database: Database) => {
       partition: OperationPartition,
       envelopes: readonly string[],
     ) {
+      const clearStall = database.query(
+        "DELETE FROM operation_outbox_stalls WHERE owner_id = ? AND partition = ? AND operation_id = ?",
+      );
       const update = database.query(
         "UPDATE operation_envelopes SET outbox_pending = 0 WHERE owner_id = ? AND partition = ? AND operation_id = ?",
       );
@@ -131,27 +146,29 @@ export const createRunnerOperationLog = (database: Database) => {
         for (const encoded of envelopes) {
           const operation = decodeOperationEnvelope(encoded);
           update.run(ownerId, partition, operation.operationId);
+          clearStall.run(ownerId, partition, operation.operationId);
         }
       })();
     },
-    rejectOutbox(
+    stallOutbox(
       ownerId: string,
       partition: OperationPartition,
-      envelopes: readonly string[],
+      encoded: string,
       reason: string,
     ) {
-      const update = database.query(
-        "UPDATE operation_envelopes SET outbox_pending = 0, verification_state = 'rejected', rejection_reason = ? WHERE owner_id = ? AND partition = ? AND operation_id = ? AND source = 'local'",
+      const operation = decodeOperationEnvelope(encoded);
+      stallOutbox.run(
+        ownerId,
+        partition,
+        operation.operationId,
+        operation.writerId,
+        operation.sequence.toString(),
+        encoded,
+        reason,
       );
-      database.transaction(() => {
-        for (const encoded of envelopes)
-          update.run(
-            reason,
-            ownerId,
-            partition,
-            decodeOperationEnvelope(encoded).operationId,
-          );
-      })();
+    },
+    outboxStalls(ownerId: string, partition: OperationPartition) {
+      return outboxStalls.all(ownerId, partition);
     },
     inspect(ownerId: string, partition: OperationPartition) {
       return database

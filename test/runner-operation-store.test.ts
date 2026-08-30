@@ -126,6 +126,25 @@ test("redelivery of one undecodable envelope remains one quarantine row", () => 
   });
 });
 
+test("does not rewrite a checkpoint when a stalled page accepts no prefix", () => {
+  withStore((store, database) => {
+    remote(store, ["poison"]);
+    database.run("CREATE TABLE checkpoint_writes (value INTEGER)");
+    database.run(
+      "CREATE TRIGGER count_checkpoint_write BEFORE UPDATE ON operation_checkpoints BEGIN INSERT INTO checkpoint_writes VALUES (1); END",
+    );
+    remote(store, [envelope(1n)]);
+    const writes = database
+      .query<{ count: number }, []>(
+        "SELECT count(*) AS count FROM checkpoint_writes",
+      )
+      .get()?.count;
+    expect(writes).toBe(0);
+    expectNonSessionFrontier(store, {});
+  });
+});
+
+
 test("does not advance or retain later operations across a rejected identity", () => {
   withStore((store) => {
     const poison = poisonEnvelope(2n);
