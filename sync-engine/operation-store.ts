@@ -8,7 +8,6 @@ import {
 import { createUuidV7, type IdGenerator } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
-  decodeOperationEnvelope,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
@@ -24,10 +23,6 @@ interface OperationStoreResources {
   readonly generateId?: IdGenerator;
 }
 
-export interface OperationEnvelopePage {
-  readonly envelopes: readonly Operation[];
-  readonly hasMore: boolean;
-}
 export interface EncodedOperationEnvelopePage {
   readonly envelopes: readonly string[];
   readonly hasMore: boolean;
@@ -153,15 +148,6 @@ export function createOperationStore(resources: OperationStoreResources) {
       const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
       const envelopes = rows.slice(0, limit).map(({ encoded }) => encoded);
       return { envelopes, hasMore: rows.length > limit };
-    },
-    readEnvelopes(
-      ...parameters: EnvelopeQueryParameters
-    ): OperationEnvelopePage {
-      const encodedPage = this.readEncodedEnvelopes(...parameters);
-      return {
-        envelopes: encodedPage.envelopes.map(decodeOperationEnvelope),
-        hasMore: encodedPage.hasMore,
-      };
     },
     countEnvelopes(ownerId: string, partition: OperationPartition): number {
       return (

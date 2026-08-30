@@ -88,7 +88,8 @@ describe("operation frontier and clocks", () => {
     const state = applyOperation(initialApplyState(), item, reducer);
     expect(Object.hasOwn(state.frontier, "__proto__")).toBe(true);
     expect(state.frontier["__proto__"]).toBe(1n);
-    expect(frontierCovers(state.frontier, { __proto__: 1n })).toBe(true);
+    const required = Object.fromEntries([["__proto__", 1n]]);
+    expect(frontierCovers(state.frontier, required)).toBe(true);
   });
 
   test("uses a strict locale-independent clock and canonical key order", () => {

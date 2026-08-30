@@ -320,10 +320,8 @@ const validateCheckpointConsistency = (
         const appliedFingerprint = actualApplied[identity];
         const pendingFingerprint = pendingIdentities[identity];
         if (
-          (appliedFingerprint !== undefined &&
-            appliedFingerprint !== fingerprint) ||
-          (pendingFingerprint !== undefined &&
-            pendingFingerprint !== fingerprint)
+          appliedFingerprint !== undefined ||
+          pendingFingerprint !== undefined
         )
           return true;
         pendingIdentities[identity] = fingerprint;

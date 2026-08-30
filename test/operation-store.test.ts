@@ -8,6 +8,7 @@ import {
 import { SYSTEM_ID } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
+  decodeOperationEnvelope,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
 import { createOperationStore } from "../sync-engine/operation-store";
@@ -18,6 +19,16 @@ import {
 } from "./operation-core-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
+const readEnvelopes = (
+  store: Store,
+  ...parameters: Parameters<Store["readEncodedEnvelopes"]>
+) => {
+  const page = store.readEncodedEnvelopes(...parameters);
+  return {
+    envelopes: page.envelopes.map(decodeOperationEnvelope),
+    hasMore: page.hasMore,
+  };
+};
 const changedOperation = (
   operation: ReturnType<typeof testOperation>,
   changes: Readonly<Partial<ReturnType<typeof testOperation>>>,
@@ -53,11 +64,11 @@ const readWriterIds = (
   store: Store,
   frontier: Readonly<Record<string, bigint>>,
 ) =>
-  store
-    .readEnvelopes("owner-1", "non-session", frontier, 20)
-    .envelopes.map(({ writerId }) => writerId);
+  readEnvelopes(store, "owner-1", "non-session", frontier, 20).envelopes.map(
+    ({ writerId }) => writerId,
+  );
 const readFirstSequence = (store: Store) =>
-  store.readEnvelopes("owner-1", "non-session", {}, 1).envelopes[0]?.sequence;
+  readEnvelopes(store, "owner-1", "non-session", {}, 1).envelopes[0]?.sequence;
 const appendOutOfOrder = (store: Store) => {
   for (const [sequence, value] of [
     [2n, "two"],
@@ -165,9 +176,9 @@ test("operation envelope pages preserve bigint and cross-writer ordering", () =>
     for (const sequence of sequences.slice().reverse())
       append(store, "owner-1", testOperation(writer, sequence, {}, "value", 1));
   expect(
-    store
-      .readEnvelopes("owner-1", "non-session", {}, 20)
-      .envelopes.map(({ writerId, sequence }) => [writerId, sequence]),
+    readEnvelopes(store, "owner-1", "non-session", {}, 20).envelopes.map(
+      ({ writerId, sequence }) => [writerId, sequence],
+    ),
   ).toEqual(
     ["writer-a", "writer-b"].flatMap((writer) =>
       sequences.map((sequence) => [writer, sequence]),
@@ -198,14 +209,15 @@ test("operation envelope pages preserve explicit intra-writer sequence order", (
 test("operation envelope frontier pages are complete and exactly bounded", () => {
   const store = setup();
   appendSequenceRange(store, 300);
-  const first = store.readEnvelopes("owner-1", "non-session", {}, 256);
+  const first = readEnvelopes(store, "owner-1", "non-session", {}, 256);
   expect({ length: first.envelopes.length, hasMore: first.hasMore }).toEqual({
     length: 256,
     hasMore: true,
   });
   const lastSequence = first.envelopes.at(-1)?.sequence;
   expect(lastSequence).toBe(256n);
-  const second = store.readEnvelopes(
+  const second = readEnvelopes(
+    store,
     "owner-1",
     "non-session",
     { "writer-a": lastSequence ?? 0n },
@@ -313,7 +325,7 @@ test("soft-deleted checkpoints are not loaded or replaced", () => {
 test("operation envelope page at its exact limit is complete", () => {
   const store = setup();
   appendSequenceRange(store, 3);
-  expect(store.readEnvelopes("owner-1", "non-session", {}, 3).hasMore).toBe(
+  expect(readEnvelopes(store, "owner-1", "non-session", {}, 3).hasMore).toBe(
     false,
   );
 });
@@ -323,8 +335,8 @@ test("operation envelope ordering crosses four-to-five-digit sequences", () => {
   for (const sequence of [10_000n, 9_999n])
     append(store, "owner-1", testOperation("writer-a", sequence, {}, "value"));
   expect(
-    store
-      .readEnvelopes("owner-1", "non-session", {}, 2)
-      .envelopes.map(({ sequence }) => sequence),
+    readEnvelopes(store, "owner-1", "non-session", {}, 2).envelopes.map(
+      ({ sequence }) => sequence,
+    ),
   ).toEqual([9_999n, 10_000n]);
 });

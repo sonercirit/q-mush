@@ -92,6 +92,21 @@ test("rejects pending writer-sequence equivocation", () => {
   }));
 });
 
+test("rejects repeated identical pending identities", () => {
+  rejectPendingPair((pending) => pending);
+});
+
+test("rejects clocks that regress across replay and pending state", () => {
+  const replayed = state();
+  reject(
+    {
+      ...replayed,
+      pending: [testOperation("a", 2n, { a: 1n }, "pending", 0)],
+    },
+    /strictly advance with sequence/,
+  );
+});
+
 test("round trips replay depth beyond the former call-stack limit", () => {
   const depth = 25_000;
   const seed = state();

@@ -30,33 +30,35 @@
   IDs `a-<sequence>`, plain JSON with decimal bigint strings measures 2,099,540
   bytes (1,049.77 bytes/operation, 2.002 MiB total); the production tagged
   checkpoint encoding measures 2,783,735 bytes (1,391.87 bytes/operation, 2.655
-  MiB total). Sizes use bytes per operation and binary MiB (1 MiB = 1,048,576
-  bytes). No safe compaction exists yet because a local replica cannot know
-  whether a peer may later send a valid earlier-clock operation. The reachable
-  authenticated route therefore fails closed at 16 KiB per encoded envelope,
-  2,000 stored operations per owner/partition, or a 4 MiB encoded checkpoint
-  (HTTP 507 for either history capacity). These validation limits apply after
-  the synchronization route has fully buffered and parsed its JSON body; stage 2
-  does not impose a route-level request-byte bound. Reads likewise have no
-  route-level response-byte bound: the fixed 256-envelope page and 16 KiB
-  encoded-envelope limit permit up to 4 MiB of envelope string contents. JSON
-  string escaping can nearly double that size in the worst case, so the server
-  may materialize an approximately 8 MiB response body for one full page,
-  including framing. A separate byte cap would require either measuring encoded
-  rows while paging or serializing twice; the existing deterministic count and
-  per-envelope caps are retained for this temporary protocol instead. With 4 KiB
-  payloads the 4 MiB is reached after about 300 operations, before the nominal
-  2,000-envelope cap, and this wedge is unrecoverable until the stability
-  protocol permits compaction. These are temporary safety limits, not
-  compaction. Reviewer in-memory single-operation measurements grew from 258
-  KB/9.8 ms at 200 operations through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4
-  ms at 3,200; 20,000 operations produced a 25.1 MB checkpoint whose decode
-  alone took 564 ms. Bounded compaction remains deferred to stage 2 anti-entropy
-  and durable subscriber receipts, which can establish a stable boundary. Writer
-  identity is currently forced to the authenticated account ID; whether device
-  keys should introduce per-device writer IDs remains open for that later slice.
-  Identity fingerprints remain plain enumerable checkpoint data: live state
-  stores the serializable balanced identity tree, and checkpoint encoding (or
+  MiB total). Checkpoint decoding rejects repeated pending operation-ID or
+  writer-sequence identities, including byte-identical duplicates. Sizes use
+  bytes per operation and binary MiB (1 MiB = 1,048,576 bytes). No safe
+  compaction exists yet because a local replica cannot know whether a peer may
+  later send a valid earlier-clock operation. The reachable authenticated route
+  therefore fails closed at 16 KiB per encoded envelope, 2,000 stored operations
+  per owner/partition, or a 4 MiB encoded checkpoint (HTTP 507 for either
+  history capacity). These validation limits apply after the synchronization
+  route has fully buffered and parsed its JSON body; stage 2 does not impose a
+  route-level request-byte bound. Reads likewise have no route-level
+  response-byte bound: the fixed 256-envelope page and 16 KiB encoded-envelope
+  limit permit up to 4 MiB of envelope string contents. JSON string escaping can
+  nearly double that size in the worst case, so the server may materialize an
+  approximately 8 MiB response body for one full page, including framing. A
+  separate byte cap would require either measuring encoded rows while paging or
+  serializing twice; the existing deterministic count and per-envelope caps are
+  retained for this temporary protocol instead. With 4 KiB payloads the 4 MiB is
+  reached after about 300 operations, before the nominal 2,000-envelope cap, and
+  this wedge is unrecoverable until the stability protocol permits compaction.
+  These are temporary safety limits, not compaction. Reviewer in-memory
+  single-operation measurements grew from 258 KB/9.8 ms at 200 operations
+  through 1.03 MB/39.1 ms at 800 and 4.14 MB/134.4 ms at 3,200; 20,000
+  operations produced a 25.1 MB checkpoint whose decode alone took 564 ms.
+  Bounded compaction remains deferred to stage 2 anti-entropy and durable
+  subscriber receipts, which can establish a stable boundary. Writer identity is
+  currently forced to the authenticated account ID; whether device keys should
+  introduce per-device writer IDs remains open for that later slice. Identity
+  fingerprints remain plain enumerable checkpoint data: live state stores the
+  serializable balanced identity tree, and checkpoint encoding (or
   `materializeApplied`) creates the flat record on demand. Sequential
   steady-state admission is expected O(log n) per operation and O(n log n)
   overall, rather than repeatedly materializing O(n) records. Unready operations

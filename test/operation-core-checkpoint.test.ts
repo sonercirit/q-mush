@@ -83,6 +83,23 @@ describe("operation checkpoints", () => {
     ).toThrow(/equivocation/);
   });
 
+  test("does not admit a decoded checkpoint with duplicate reducer effects", () => {
+    const pending = sequentialOperation("a", 2);
+    const encoded = encodeOperationCheckpoint({
+      ...arrayState(),
+      pending: [pending, pending],
+    });
+    let reducerCalls = 0;
+    expect(() => {
+      const restored = decodeOperationCheckpoint(encoded);
+      applyOperation(restored, sequentialOperation("a", 1), (projection) => {
+        reducerCalls += 1;
+        return projection;
+      });
+    }).toThrow(/pending identity/);
+    expect(reducerCalls).toBe(0);
+  });
+
   test("orders simultaneously released children independently of arrival", () => {
     const append = (projection: string, item: Operation) =>
       `${projection}${item.operationId}`;

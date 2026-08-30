@@ -6,6 +6,7 @@ import {
 import { SYSTEM_ID } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
+  decodeOperationEnvelope,
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
 import {
@@ -206,12 +207,9 @@ test("operation intake default path enforces the 2000-operation owner-partition 
     ],
   );
   expect(
-    createOperationStore({ database }).readEnvelopes(
-      "owner-1",
-      "non-session",
-      {},
-      1,
-    ).envelopes,
+    createOperationStore({ database })
+      .readEncodedEnvelopes("owner-1", "non-session", {}, 1)
+      .envelopes.map(decodeOperationEnvelope),
   ).toEqual([testOperation("bulk-writer", 1n, {}, "seeded")]);
   expect(
     apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,

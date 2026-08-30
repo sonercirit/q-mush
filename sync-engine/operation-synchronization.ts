@@ -165,8 +165,7 @@ export const createOperationSynchronization = (
         operations.some(
           (operation) =>
             operation.entity.accountId !== user.id ||
-            operation.writerId !== user.id ||
-            operation.clock.writerId !== operation.writerId,
+            operation.writerId !== user.id,
         )
       )
         return new Response("Forbidden", { status: 403 });

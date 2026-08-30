@@ -4,7 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, test } from "vitest";
 import { createDatabase } from "../../shared/database.ts";
-import { encodeOperationEnvelope } from "../../shared/operation-checkpoint.ts";
+import {
+  decodeOperationEnvelope,
+  encodeOperationEnvelope,
+} from "../../shared/operation-checkpoint.ts";
 import {
   createOperation,
   operationSequenceOrder,
@@ -219,12 +222,9 @@ test("backfills sequence order while upgrading populated operation storage", asy
   upgraded.$client.run(
     "INSERT INTO operation_envelopes SELECT * FROM migrated.operation_envelopes",
   );
-  const page = createOperationStore({ database: upgraded }).readEnvelopes(
-    "owner-1",
-    "non-session",
-    { "writer-1": 5n },
-    1,
-  );
-  expect(page.envelopes).toEqual([operation]);
+  const page = createOperationStore({
+    database: upgraded,
+  }).readEncodedEnvelopes("owner-1", "non-session", { "writer-1": 5n }, 1);
+  expect(page.envelopes.map(decodeOperationEnvelope)).toEqual([operation]);
   upgraded.$client.close();
 });
