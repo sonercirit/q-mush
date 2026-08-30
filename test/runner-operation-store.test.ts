@@ -225,9 +225,9 @@ test("rejects an oversized local envelope before durable queueing", () => {
     expect(Buffer.byteLength(oversized, "utf8")).toBeGreaterThan(
       MAX_OPERATION_ENVELOPE_BYTES,
     );
-    expect(() =>
-      store.apply("owner-1", "non-session", [oversized], "local"),
-    ).toThrow("envelope capacity");
+    expect(() => {
+      store.apply("owner-1", "non-session", [oversized], "local");
+    }).toThrow("envelope capacity");
     expect(store.pending("owner-1", "non-session")).toEqual([]);
     expect(rows(store)).toEqual([]);
   });

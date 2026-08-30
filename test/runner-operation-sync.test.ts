@@ -2,8 +2,8 @@ import { Database } from "bun:sqlite";
 import { expect, test, vi } from "vitest";
 
 import { createRunnerOperationStore } from "../runner/runner-operation-store.ts";
-import { createRunnerOperationTransport } from "../runner/runner-operation-transport.ts";
 import { synchronizeRunnerOperations } from "../runner/runner-operation-sync.ts";
+import { createRunnerOperationTransport } from "../runner/runner-operation-transport.ts";
 import {
   decodeOperationCheckpoint,
   encodeOperationEnvelope,
@@ -168,6 +168,22 @@ const emptyTransport = (
   writeBatch: Parameters<typeof synchronizeRunnerOperations>[1]["writeBatch"],
 ) => ({ writeBatch, readPage: emptyPage });
 
+const expectError = (value: unknown): Error => {
+  expect(value).toBeInstanceOf(Error);
+  if (!(value instanceof Error)) throw new Error("Expected an Error");
+  return value;
+};
+const postBatchOrThrow = async (
+  handler: ReturnType<typeof createOperationSynchronization>,
+  partition: OperationPartition,
+  envelopes: readonly string[],
+): Promise<void> => {
+  const response = await postToEngine(handler, partition, envelopes);
+  if (!response.ok)
+    throw Object.assign(new Error(`HTTP ${String(response.status)}`), {
+      operationSynchronizationStatus: response.status,
+    });
+};
 const expectOutboxRetained = (
   replica: ReturnType<typeof harness>,
   expected: readonly string[],
@@ -180,16 +196,21 @@ test("captures only a bounded engine rejection reason", async () => {
   const detail = `safe reason ${"x".repeat(1_000)}`;
   const fetchMock = vi
     .spyOn(globalThis, "fetch")
-    .mockResolvedValue(new Response(JSON.stringify({ error: detail }), { status: 400 }));
+    .mockResolvedValue(
+      new Response(JSON.stringify({ error: detail }), { status: 400 }),
+    );
   try {
-    const transport = createRunnerOperationTransport("http://engine.test", "token");
-    const error = await transport
+    const transport = createRunnerOperationTransport(
+      "http://engine.test",
+      "token",
+    );
+    const caught = await transport
       .writeBatch("non-session", ["encoded"], new AbortController().signal)
       .catch((reason: unknown) => reason);
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toContain("safe reason");
-    expect((error as Error).message.length).toBeLessThan(460);
-    expect((error as Error).message).not.toContain("x".repeat(500));
+    const message = expectError(caught).message;
+    expect(message).toContain("safe reason");
+    expect(message.length).toBeLessThan(460);
+    expect(message).not.toContain("x".repeat(500));
     expect(fetchMock).toHaveBeenCalledOnce();
   } finally {
     fetchMock.mockRestore();
@@ -204,16 +225,16 @@ test("bounds reported stall identities while retaining total depth", async () =>
       reason: "rejected",
     })),
   });
-  const error = await runSynchronization(
+  const caught = await runSynchronization(
     replica,
     emptyTransport(resolvedWrite),
   ).catch((reason: unknown) => reason);
-  expect(error).toBeInstanceOf(Error);
-  expect((error as Error).message).toContain("operation-000, operation-001");
-  expect((error as Error).message).toContain("+507 more");
-  expect((error as Error).message).toContain("512 stalled");
-  expect((error as Error).message.length).toBeLessThan(200);
-  expect((error as Error).message).not.toContain("operation-006");
+  const message = expectError(caught).message;
+  expect(message).toContain("operation-000, operation-001");
+  expect(message).toContain("+507 more");
+  expect(message).toContain("512 stalled");
+  expect(message.length).toBeLessThan(200);
+  expect(message).not.toContain("operation-006");
 });
 
 test("resumes pull pages from each durably applied frontier", async () => {
@@ -310,11 +331,7 @@ test("a permanent head poison never pushes or acknowledges causal successors", a
         batch: readonly string[],
       ) => {
         writes.push(batch.length);
-        const response = await postToEngine(handler, scope, batch);
-        if (!response.ok)
-          throw Object.assign(new Error(`HTTP ${String(response.status)}`), {
-            operationSynchronizationStatus: response.status,
-          });
+        await postBatchOrThrow(handler, scope, batch);
       },
       readPage: emptyPage,
     };
@@ -362,8 +379,7 @@ test("a permanent head bounds retries and drains all successors in order after r
           throw Object.assign(new Error("injected permanent rejection"), {
             operationSynchronizationStatus: 400,
           });
-        const response = await postToEngine(handler, scope, batch);
-        if (!response.ok) throw new Error(`HTTP ${String(response.status)}`);
+        await postBatchOrThrow(handler, scope, batch);
       },
       readPage: emptyPage,
     };
