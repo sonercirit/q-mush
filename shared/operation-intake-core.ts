@@ -61,8 +61,8 @@ export const applyOperationIntakeBatch = <Projection>(
         "invalid",
         "Operation intake scope mismatch",
       );
-    resources.append(encoded, snapshot);
     successor = applyOperation(successor, snapshot, resources.reducer);
+    resources.append(encoded, snapshot);
   }
   return successor;
 };

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
 
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
@@ -7,6 +8,21 @@ import type {
 } from "../shared/operation-core.ts";
 
 export type OperationReplicaSource = "local" | "remote";
+
+interface QuarantineIdentity {
+  readonly operationId: string;
+  readonly sequence: bigint;
+  readonly writerId: string;
+}
+
+const undecodableIdentity = (encoded: string): QuarantineIdentity => {
+  const digest = createHash("sha256").update(encoded).digest("hex");
+  return {
+    operationId: `undecodable:${digest}`,
+    writerId: `undecodable:${digest}`,
+    sequence: 0n,
+  };
+};
 
 export const createRunnerOperationLog = (database: Database) => {
   database.run(
@@ -19,10 +35,13 @@ export const createRunnerOperationLog = (database: Database) => {
     "CREATE TABLE IF NOT EXISTS operation_checkpoints (owner_id TEXT NOT NULL, partition TEXT NOT NULL, encoded TEXT NOT NULL, PRIMARY KEY (owner_id, partition))",
   );
   database.run(
-    "CREATE TABLE IF NOT EXISTS operation_synchronization_frontiers (owner_id TEXT NOT NULL, partition TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, PRIMARY KEY (owner_id, partition, writer_id))",
+    "CREATE TABLE IF NOT EXISTS operation_quarantines (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, rejection_reason TEXT NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
   );
   const append = database.query(
     "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, ?, ?, ?, 'accepted', ?, NULL, ?) ON CONFLICT DO NOTHING",
+  );
+  const quarantine = database.query(
+    "INSERT INTO operation_quarantines (owner_id, partition, operation_id, writer_id, sequence, encoded, rejection_reason) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
   );
   return {
     append(
@@ -43,10 +62,11 @@ export const createRunnerOperationLog = (database: Database) => {
       );
     },
     checkpoint(ownerId: string, partition: OperationPartition) {
-      const query = database.query<{ encoded: string }, [string, string]>(
-        "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
-      );
-      return query.get(ownerId, partition)?.encoded;
+      return database
+        .query<{ encoded: string }, [string, string]>(
+          "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
+        )
+        .get(ownerId, partition)?.encoded;
     },
     storeCheckpoint(
       ownerId: string,
@@ -64,35 +84,26 @@ export const createRunnerOperationLog = (database: Database) => {
       partition: OperationPartition,
       encoded: string,
       reason: string,
+      identity?: QuarantineIdentity,
     ) {
-      const query = database.query(
-        "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, '', '', ?, 'rejected', 'remote', ?, 0)",
+      const key = identity ?? undecodableIdentity(encoded);
+      quarantine.run(
+        ownerId,
+        partition,
+        key.operationId,
+        key.writerId,
+        key.sequence.toString(),
+        encoded,
+        reason,
       );
-      query.run(ownerId, partition, crypto.randomUUID(), encoded, reason);
     },
-    recordSynchronizationFrontier(
-      ownerId: string,
-      partition: OperationPartition,
-      writerId: string,
-      sequence: bigint,
-    ) {
-      database
-        .query(
-          "INSERT INTO operation_synchronization_frontiers (owner_id, partition, writer_id, sequence) VALUES (?, ?, ?, ?) ON CONFLICT (owner_id, partition, writer_id) DO UPDATE SET sequence = excluded.sequence WHERE length(excluded.sequence) > length(sequence) OR (length(excluded.sequence) = length(sequence) AND excluded.sequence > sequence)",
-        )
-        .run(ownerId, partition, writerId, sequence.toString());
-    },
-    synchronizationFrontier(
-      ownerId: string,
-      partition: OperationPartition,
-    ): Readonly<Record<string, bigint>> {
-      return Object.fromEntries(
+    stalled(ownerId: string, partition: OperationPartition): boolean {
+      return (
         database
-          .query<{ sequence: string; writerId: string }, [string, string]>(
-            "SELECT writer_id AS writerId, sequence FROM operation_synchronization_frontiers WHERE owner_id = ? AND partition = ?",
+          .query<{ found: number }, [string, string]>(
+            "SELECT 1 AS found FROM operation_quarantines WHERE owner_id = ? AND partition = ? LIMIT 1",
           )
-          .all(ownerId, partition)
-          .map(({ sequence, writerId }) => [writerId, BigInt(sequence)]),
+          .get(ownerId, partition) !== null
       );
     },
     pending(ownerId: string, partition: OperationPartition) {
@@ -118,6 +129,25 @@ export const createRunnerOperationLog = (database: Database) => {
         }
       })();
     },
+    rejectOutbox(
+      ownerId: string,
+      partition: OperationPartition,
+      envelopes: readonly string[],
+      reason: string,
+    ) {
+      const update = database.query(
+        "UPDATE operation_envelopes SET outbox_pending = 0, verification_state = 'rejected', rejection_reason = ? WHERE owner_id = ? AND partition = ? AND operation_id = ? AND source = 'local'",
+      );
+      database.transaction(() => {
+        for (const encoded of envelopes)
+          update.run(
+            reason,
+            ownerId,
+            partition,
+            decodeOperationEnvelope(encoded).operationId,
+          );
+      })();
+    },
     inspect(ownerId: string, partition: OperationPartition) {
       return database
         .query<
@@ -127,11 +157,11 @@ export const createRunnerOperationLog = (database: Database) => {
             source: string;
             verificationState: string;
           },
-          [string, string]
+          [string, string, string, string]
         >(
-          "SELECT encoded, rejection_reason AS rejectionReason, source, verification_state AS verificationState FROM operation_envelopes WHERE owner_id = ? AND partition = ? ORDER BY rowid",
+          "SELECT encoded, rejection_reason AS rejectionReason, source, verification_state AS verificationState FROM operation_envelopes WHERE owner_id = ? AND partition = ? UNION ALL SELECT encoded, rejection_reason, 'remote', 'rejected' FROM operation_quarantines WHERE owner_id = ? AND partition = ?",
         )
-        .all(ownerId, partition);
+        .all(ownerId, partition, ownerId, partition);
     },
   };
 };

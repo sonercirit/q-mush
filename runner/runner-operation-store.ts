@@ -8,6 +8,8 @@ import {
 } from "../shared/operation-checkpoint.ts";
 import {
   isOperationProtocolError,
+  MAX_OPERATION_CHECKPOINT_BYTES,
+  operationProtocolError,
   type OperationApplyState,
   type OperationPartition,
 } from "../shared/operation-core.ts";
@@ -20,6 +22,9 @@ import {
   type OperationReplicaSource,
 } from "./runner-operation-log.ts";
 
+const encodedBytes = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
+
 export const createRunnerOperationStore = (database: Database) => {
   const log = createRunnerOperationLog(database);
   const checkpointState = (
@@ -31,23 +36,6 @@ export const createRunnerOperationStore = (database: Database) => {
       ? initialOperationApplyState<OperationCheckpointProjection>([])
       : decodeOperationCheckpoint(encoded);
   };
-  const state = (ownerId: string, partition: OperationPartition) => {
-    const checkpoint = checkpointState(ownerId, partition);
-    const synchronized = log.synchronizationFrontier(ownerId, partition);
-    const frontier: Record<string, bigint> = {};
-    for (const writerId of new Set([
-      ...Object.keys(checkpoint.frontier),
-      ...Object.keys(synchronized),
-    ])) {
-      const checkpointSequence = checkpoint.frontier[writerId] ?? 0n;
-      const synchronizedSequence = synchronized[writerId] ?? 0n;
-      frontier[writerId] =
-        checkpointSequence > synchronizedSequence
-          ? checkpointSequence
-          : synchronizedSequence;
-    }
-    return { ...checkpoint, frontier };
-  };
   return {
     apply(
       ownerId: string,
@@ -58,11 +46,13 @@ export const createRunnerOperationStore = (database: Database) => {
       if (envelopes.length === 0) return;
       database.transaction(() => {
         let successor = checkpointState(ownerId, partition);
+        let stalled = source === "remote" && log.stalled(ownerId, partition);
         for (const encoded of envelopes) {
           let operation: ReturnType<typeof decodeOperationEnvelope>;
           try {
             operation = decodeOperationEnvelope(encoded);
           } catch (error) {
+            if (source === "local") throw error;
             log.quarantine(
               ownerId,
               partition,
@@ -71,8 +61,10 @@ export const createRunnerOperationStore = (database: Database) => {
                 ? error.message
                 : "Invalid operation envelope",
             );
+            stalled = true;
             continue;
           }
+          if (stalled) continue;
           try {
             successor = applyOperationIntakeBatch(
               partition,
@@ -90,18 +82,18 @@ export const createRunnerOperationStore = (database: Database) => {
                 ],
               },
             );
+            const encodedCheckpoint = encodeOperationCheckpoint(successor);
+            if (encodedBytes(encodedCheckpoint) > MAX_OPERATION_CHECKPOINT_BYTES)
+              throw operationProtocolError(
+                "capacity",
+                "Operation checkpoint capacity reached",
+              );
           } catch (error) {
             if (source !== "remote" || !isOperationProtocolError(error))
               throw error;
-            log.quarantine(ownerId, partition, encoded, error.message);
+            log.quarantine(ownerId, partition, encoded, error.message, operation);
+            stalled = true;
           }
-          if (source === "remote")
-            log.recordSynchronizationFrontier(
-              ownerId,
-              partition,
-              operation.writerId,
-              operation.sequence,
-            );
         }
         log.storeCheckpoint(
           ownerId,
@@ -117,6 +109,14 @@ export const createRunnerOperationStore = (database: Database) => {
       log.inspect(...arguments_),
     pending: (...arguments_: Parameters<typeof log.pending>) =>
       log.pending(...arguments_),
-    state,
+    rejectOutbox: (...arguments_: Parameters<typeof log.rejectOutbox>) => {
+      log.rejectOutbox(...arguments_);
+    },
+    state(ownerId: string, partition: OperationPartition) {
+      return {
+        ...checkpointState(ownerId, partition),
+        stalled: log.stalled(ownerId, partition),
+      };
+    },
   };
 };
