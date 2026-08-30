@@ -222,14 +222,14 @@ describe("removed session runners", () => {
     );
   });
 
-  test("treats duplicate staging for the same removal as idempotent", () => {
+  test("rejects duplicate staging for a runner removal", () => {
     const removal = coordinator(createRunnerCommandBroker(), []);
 
     removal.removing("user-1", REMOVED_RUNNER_ID);
 
     expect(() => {
       removal.removing("user-1", REMOVED_RUNNER_ID);
-    }).not.toThrow();
+    }).toThrow("The runner is already being removed");
   });
 
   test("fences commands before waiting for the database removal callback", async () => {

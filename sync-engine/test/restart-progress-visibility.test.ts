@@ -62,6 +62,26 @@ function addSession(
   visibilityListener(cache, workspaceId)(userId, [sessionId]);
 }
 
+test("does not register visible sessions outside a restart", () => {
+  const cache = visibilityCache();
+  const listeners: ChangeListener[] = [];
+  registerRestartProgressVisibilityListener({
+    cache,
+    detailIsVisible: () => true,
+    isRestarting: () => false,
+    subscribe: (registered) => {
+      listeners.push(registered);
+    },
+    userWorkspaces: () => ["workspace"],
+  });
+  const listener = listeners[0];
+  if (listener === undefined) throw new Error("listener was not registered");
+
+  listener("user", ["session-one", "session-two"]);
+
+  expect(cache).toEqual(new Map());
+});
+
 test("registers every visible session in a batched restart change", () => {
   const cache = visibilityCache();
   const listener = visibilityListener(

@@ -37,7 +37,6 @@ export function createRunnerRemovalCoordinator(
   function removing(userId: string, runnerId: string): void {
     const staged = stagedRemovals.get(runnerId);
     if (staged !== undefined) {
-      if (staged.userId === userId) return;
       throw new Error("The runner is already being removed");
     }
     const interrupted = dependencies.broker
