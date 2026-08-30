@@ -8,7 +8,11 @@ interface StagedRunnerRemoval {
   readonly userId: string;
 }
 
-export interface RunnerRemovalCoordinatorDependencies extends SessionLifecycleDependencies {
+export interface RunnerRemovalCoordinatorDependencies extends Omit<
+  SessionLifecycleDependencies,
+  "notify"
+> {
+  readonly notifyMany: (userId: string, sessionIds: readonly string[]) => void;
   readonly broker: Pick<
     RunnerCommandBroker,
     "cancelSessionCommands" | "runnerRemoved"
@@ -83,8 +87,11 @@ export function createRunnerRemovalCoordinator(
           dependencies.now(),
         );
       }
-      dependencies.notify(userId, session.id);
     }
+    dependencies.notifyMany(
+      userId,
+      affected.map((session) => session.id),
+    );
     await Promise.allSettled(
       affected.map((session) => dependencies.runtimes.settled(session.id)),
     );

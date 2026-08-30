@@ -113,8 +113,10 @@ function openedSessionPublisher(
     sessions: realtimeTestSessions({
       detailForUser: detail,
       listForUser: () => [detail()],
-      onChange: (nextListener) => {
-        listener = nextListener;
+      onChanges: (nextListener) => {
+        listener = (userId, sessionId) => {
+          nextListener(userId, [sessionId]);
+        };
       },
       ...sessionOverrides,
     }),
@@ -501,7 +503,10 @@ test("runner removal closes its socket, publishes the list, and responds before 
   hub.setRunner(runnerId, runner.socket, true);
 
   const cleanup = Promise.withResolvers<undefined>();
+  let responseSettled = false;
+  let cleanupStartedAfterResponse: boolean | undefined;
   runners.onRemoved(async () => {
+    cleanupStartedAfterResponse = responseSettled;
     await cleanup.promise;
   });
   const removal = runners.remove(
@@ -520,8 +525,11 @@ test("runner removal closes its socket, publishes the list, and responds before 
   ]);
   cleanup.resolve();
   const response = await removal;
+  responseSettled = true;
+  await Bun.sleep(10);
 
   expect(promptResponse).toBe(response);
+  expect(cleanupStartedAfterResponse).toBe(true);
   expect(response.status).toBe(204);
   expect(runner.record.closed).toEqual([1000, "Runner removed"]);
   expect(parseRealtimeMessages(browser.record.sent)).toEqual([

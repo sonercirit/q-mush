@@ -75,6 +75,9 @@ export interface SessionIntegration extends SessionDetailReader {
   pendingRunnerRestart(runnerId: string): DurableRunnerRestartGate;
   readonly realtimeCommands: SessionRealtimeCommands;
   onChange(listener: (userId: string, sessionId: string) => void): void;
+  onChanges(
+    listener: (userId: string, sessionIds: readonly string[]) => void,
+  ): void;
   reassign(request: Request, sessionId: string): Promise<Response>;
   drainRunner(runnerId: string, restartId: string): Promise<void>;
   escalateRunnerDrain(runnerId: string, restartId: string): boolean;

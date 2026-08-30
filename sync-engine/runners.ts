@@ -68,6 +68,30 @@ interface RunnerRemovalListeners {
   readonly removing: RunnerRemovingListener;
 }
 
+function detachRemovedListeners(
+  listeners: ReadonlySet<RunnerRemovalListeners>,
+  userId: string,
+  runnerId: string,
+): void {
+  for (const listener of listeners) {
+    detachRemovedListener(listener.removed, userId, runnerId);
+  }
+}
+
+function detachRemovedListener(
+  removed: RunnerRemovedListener,
+  userId: string,
+  runnerId: string,
+): void {
+  try {
+    void Promise.resolve(removed(userId, runnerId)).catch(() => {
+      // Removal is committed; asynchronous cleanup cannot change its outcome.
+    });
+  } catch {
+    // Removal is committed; cleanup failures cannot change its outcome.
+  }
+}
+
 interface RunnerDependencies extends Pick<
   OAuthDependencies,
   "database" | "now" | "randomId" | "randomToken"
@@ -442,23 +466,13 @@ export function createRunnerIntegration(
   }
 
   function notifyRemoved(userId: string, runnerId: string): void {
-    for (const { removed } of removalListeners) {
-      try {
-        void Promise.resolve(removed(userId, runnerId)).catch(() => {
-          // Removal is committed; asynchronous cleanup must not hold its response.
-        });
-      } catch {
-        // Removal is committed; cleanup failures cannot change its outcome.
-      }
-    }
+    setTimeout(detachRemovedListeners, 0, removalListeners, userId, runnerId);
   }
 
   function receiptState(
-    token: string,
-    metadata: RunnerMetadata,
-    receipt: string,
+    ...parameters: readonly [string, RunnerMetadata, string]
   ): RunnerActivationReceiptValidation | undefined {
-    return store.registration.receiptState(token, metadata, receipt);
+    return store.registration.receiptState(...parameters);
   }
 
   function settleActivationLifecycle(

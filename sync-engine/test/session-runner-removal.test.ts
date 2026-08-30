@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import {
   createRunnerCommandBroker,
   type RunnerCommandBroker,
@@ -120,7 +120,7 @@ function coordinator(
 ): RunnerRemovalCoordinator {
   return createRunnerRemovalCoordinator({
     broker,
-    notify: () => undefined,
+    notifyMany: () => undefined,
     now: () => 2,
     runtimes: { abort: () => undefined, settled },
     store: {
@@ -179,6 +179,42 @@ describe("removed session runners", () => {
         state: "completed",
       }),
     ).toBe(false);
+  });
+
+  test("batches notifications for every affected session before waiting for cleanup", async () => {
+    const sessions = Array.from({ length: 100 }, (_, index) => ({
+      ...testSession(),
+      id: "session-" + String(index),
+    }));
+    const settled = Promise.withResolvers<undefined>();
+    const notifyMany = vi.fn();
+    const removal = createRunnerRemovalCoordinator({
+      broker: createRunnerCommandBroker(),
+      notifyMany,
+      now: () => 2,
+      runtimes: { abort: vi.fn(), settled: () => settled.promise },
+      store: {
+        appendInterruptedRunnerTool: vi.fn(),
+        get: () => undefined,
+        list: () => sessions,
+      },
+    });
+
+    const cleanup = removal.removed("user-1", REMOVED_RUNNER_ID);
+
+    expect(notifyMany).toHaveBeenCalledOnce();
+    expect(notifyMany).toHaveBeenCalledWith(
+      "user-1",
+      sessions.map(({ id }) => id),
+    );
+    let cleanupComplete = false;
+    void cleanup.then(() => {
+      cleanupComplete = true;
+    });
+    await Promise.resolve();
+    expect(cleanupComplete).toBe(false);
+    settled.resolve();
+    await cleanup;
   });
 
   test("fences commands before waiting for the database removal callback", async () => {

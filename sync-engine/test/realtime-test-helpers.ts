@@ -322,6 +322,7 @@ export type RealtimeSessionOverrides = Partial<
     | "escalateRunnerDrain"
     | "listForUser"
     | "onChange"
+    | "onChanges"
     | "pendingQuestionForUser"
     | "pendingRunnerRestart"
     | "realtimeCommands"
@@ -360,6 +361,7 @@ export function realtimeTestSessions(
     message: () => Promise.resolve(new Response()),
     models: () => Promise.resolve(new Response()),
     onChange: () => undefined,
+    onChanges: () => undefined,
     openRouterProviders: () => Promise.resolve(new Response()),
     pendingQuestionForUser: () => null,
     prepareFinalShutdown: () => Promise.resolve(),

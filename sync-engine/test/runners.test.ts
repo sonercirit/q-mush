@@ -570,6 +570,7 @@ describe("runner connections", () => {
     connectFirstRunner(setup);
 
     await removeFirstRunnerAndExpect(setup);
+    await Bun.sleep(10);
 
     expect(removed).toEqual([`${TEST_USER_ID}:${FIRST_RUNNER_ID}`]);
     setup.database.$client.close();
