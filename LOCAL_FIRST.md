@@ -186,10 +186,25 @@
   same durable partition-stall path rather than growing without limit. An
   operator inspects/exports quarantine rows, repairs the engine or updates the
   runner, then rebuilds the replica from its checkpoint; there is intentionally
-  no skip frontier or automatic re-admission. Local outbox HTTP 400 protocol
-  rejections are durably marked rejected and set aside so push and pull can
-  continue; 507 capacity, transport, and other failures remain pending under
-  capped retry. Synchronization starts only from the WebSocket operational/ready
+  no skip frontier or automatic re-admission. Local outbox HTTP 400 batch
+  rejections are fail-closed: the runner retries that cycle's at-most-512
+  envelopes singly, acknowledges successful neighbors, and records every
+  individually rejected envelope's identity and reason in a durable
+  per-partition outbox stall without clearing its pending bit. Thus one skewed
+  or malformed operation cannot strand or discard up to 511 co-batched valid
+  operations. Every later cycle retries stalled envelopes singly; newly queued
+  neighbors remain pushable, pull still runs, and the other partition
+  synchronizes independently. Any partition pull failure, pull stall, outbox
+  stall, or transport failure makes the cycle fail for one logged message and
+  capped exponential backoff even when its peer succeeds; successful peer work
+  remains committed. HTTP 507, 403, and transport failures stay pending without
+  classification or set-aside and use the same backoff. In particular, 403 may
+  be transient and never causes a tight retry loop. Operators use the logged
+  partition and operation identities to inspect `operation_outbox_stalls` and
+  `operation_envelopes`, repair clock/version/identity or engine policy, and let
+  a successful retry atomically clear pending and stall state; there is no
+  skip/delete recovery path because preservation is safer than silent
+  divergence. Synchronization starts only from the WebSocket operational/ready
   callback, aborts on disconnect, and restarts after the next ready handshake.
   It pushes up to 512 pending rows and pulls 256-row pages until `hasMore`
   clears. Empty pages do not open write transactions. Successful cycles poll
@@ -200,4 +215,10 @@
   identity in the runner protocol; simultaneous browser and runner
   authentication deliberately uses runner identity/`self` alias semantics. No
   runner-local command producer exists yet; which command first emits local
-  operations remains open.
+  operations remains open. A producer also cannot currently construct an
+  admissible writer: intake requires `writerId === entity.accountId ===` the
+  authenticated user UUID, while the runner knows only origin and bearer token.
+  Until an identity plane supplies that UUID (or intake introduces a sound
+  runner writer mapping), a future runner-produced operation would receive 403
+  forever; retained outbox data and capped backoff prevent loss and a tight
+  livelock but do not make it synchronizable.
