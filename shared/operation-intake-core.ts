@@ -7,6 +7,30 @@ import {
   type OperationPartition,
 } from "./operation-core.ts";
 
+export const prepareSynchronizationFrontier = (
+  frontier: Readonly<Record<string, bigint>>,
+): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(frontier).map(([writerId, sequence]) => [
+      writerId,
+      sequence.toString(),
+    ]),
+  );
+
+export const initialOperationApplyState = <Projection>(
+  projection: Projection,
+): OperationApplyState<Projection> => ({
+  frontier: {},
+  pending: [],
+  projection,
+  applied: undefined,
+  replayHead: undefined,
+  replayCount: 0,
+  replayLastClock: undefined,
+  baseProjection: projection,
+  baseFrontier: {},
+});
+
 interface IntakeCandidate {
   readonly encoded: string;
   readonly operation: Operation;
@@ -32,10 +56,7 @@ export const applyOperationIntakeBatch = <Projection>(
     const snapshot = snapshotOperationEnvelope(operation);
     if (
       snapshot.partition !== partition ||
-      !(
-        resources.ownsOperation?.(snapshot) ??
-        snapshot.entity.accountId === ownerId
-      )
+      !(resources.ownsOperation?.(snapshot) ?? true)
     )
       throw operationProtocolError(
         "invalid",

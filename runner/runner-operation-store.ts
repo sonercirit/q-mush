@@ -6,35 +6,22 @@ import {
   encodeOperationCheckpoint,
   type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint.ts";
+import { type OperationPartition } from "../shared/operation-core.ts";
 import {
-  type OperationApplyState,
-  type OperationPartition,
-} from "../shared/operation-core.ts";
-import { applyOperationIntakeBatch } from "../shared/operation-intake-core.ts";
+  applyOperationIntakeBatch,
+  initialOperationApplyState,
+} from "../shared/operation-intake-core.ts";
 import {
   createRunnerOperationLog,
   type OperationReplicaSource,
 } from "./runner-operation-log.ts";
-
-const initialState =
-  (): OperationApplyState<OperationCheckpointProjection> => ({
-    frontier: {},
-    pending: [],
-    projection: [],
-    applied: undefined,
-    replayHead: undefined,
-    replayCount: 0,
-    replayLastClock: undefined,
-    baseProjection: [],
-    baseFrontier: {},
-  });
 
 export const createRunnerOperationStore = (database: Database) => {
   const log = createRunnerOperationLog(database);
   const state = (ownerId: string, partition: OperationPartition) => {
     const encoded = log.checkpoint(ownerId, partition);
     return encoded === undefined
-      ? initialState()
+      ? initialOperationApplyState<OperationCheckpointProjection>([])
       : decodeOperationCheckpoint(encoded);
   };
   return {
@@ -69,8 +56,9 @@ export const createRunnerOperationStore = (database: Database) => {
           state(ownerId, partition),
           valid,
           {
-            append: (encoded, operation) =>
-              log.append(ownerId, operation, encoded, source),
+            append: (encoded, operation) => {
+              log.append(ownerId, operation, encoded, source);
+            },
             ownsOperation: (operation) =>
               ownerId === "self" || operation.entity.accountId === ownerId,
             reducer: (projection, operation) => [
@@ -86,9 +74,13 @@ export const createRunnerOperationStore = (database: Database) => {
         );
       })();
     },
-    acknowledge: log.acknowledge,
-    inspect: log.inspect,
-    pending: log.pending,
+    acknowledge: (...arguments_: Parameters<typeof log.acknowledge>) => {
+      log.acknowledge(...arguments_);
+    },
+    inspect: (...arguments_: Parameters<typeof log.inspect>) =>
+      log.inspect(...arguments_),
+    pending: (...arguments_: Parameters<typeof log.pending>) =>
+      log.pending(...arguments_),
     state,
   };
 };

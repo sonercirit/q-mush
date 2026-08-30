@@ -36,11 +36,10 @@ export const createRunnerOperationLog = (database: Database) => {
       );
     },
     checkpoint(ownerId: string, partition: OperationPartition) {
-      return database
-        .query<{ encoded: string }, [string, string]>(
-          "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
-        )
-        .get(ownerId, partition)?.encoded;
+      const query = database.query<{ encoded: string }, [string, string]>(
+        "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
+      );
+      return query.get(ownerId, partition)?.encoded;
     },
     storeCheckpoint(
       ownerId: string,
@@ -59,11 +58,10 @@ export const createRunnerOperationLog = (database: Database) => {
       encoded: string,
       reason: string,
     ) {
-      database
-        .query(
-          "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, '', '', ?, 'rejected', 'remote', ?, 0)",
-        )
-        .run(ownerId, partition, crypto.randomUUID(), encoded, reason);
+      const query = database.query(
+        "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, '', '', ?, 'rejected', 'remote', ?, 0)",
+      );
+      query.run(ownerId, partition, crypto.randomUUID(), encoded, reason);
     },
     pending(ownerId: string, partition: OperationPartition) {
       return database

@@ -1,6 +1,8 @@
 import type { OperationPartition } from "../shared/operation-core.ts";
+import { prepareSynchronizationFrontier } from "../shared/operation-intake-core.ts";
 import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes.ts";
 import { isRecord } from "../shared/validation.ts";
+import type { RunnerOperationRead } from "./runner-operation-sync.ts";
 
 const requestJson = async (
   origin: string,
@@ -32,11 +34,7 @@ export const createRunnerOperationTransport = (
   origin: string,
   token: string,
 ) => ({
-  async pull(
-    partition: OperationPartition,
-    frontier: Readonly<Record<string, bigint>>,
-    signal: AbortSignal,
-  ) {
+  async readPage({ signal, partition, frontier }: RunnerOperationRead) {
     const value = await requestJson(
       origin,
       token,
@@ -44,12 +42,7 @@ export const createRunnerOperationTransport = (
       {
         ownerId: "self",
         partition,
-        frontier: Object.fromEntries(
-          Object.entries(frontier).map(([writerId, sequence]) => [
-            writerId,
-            sequence.toString(),
-          ]),
-        ),
+        frontier: prepareSynchronizationFrontier(frontier),
       },
       signal,
     );
@@ -60,12 +53,12 @@ export const createRunnerOperationTransport = (
       typeof value["hasMore"] !== "boolean"
     )
       throw new Error("Invalid operation synchronization response");
-    return {
-      envelopes: value["envelopes"] as readonly string[],
-      hasMore: value["hasMore"],
-    };
+    const envelopes: string[] = [];
+    for (const item of value["envelopes"])
+      if (typeof item === "string") envelopes.push(item);
+    return { envelopes, hasMore: value["hasMore"] };
   },
-  async push(
+  async writeBatch(
     partition: OperationPartition,
     envelopes: readonly string[],
     signal: AbortSignal,

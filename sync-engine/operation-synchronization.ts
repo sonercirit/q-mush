@@ -8,6 +8,7 @@ import {
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
+import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
@@ -199,12 +200,7 @@ export const createOperationSynchronization = (
         now,
       );
       return Response.json({
-        frontier: Object.fromEntries(
-          Object.entries(result.frontier).map(([writerId, sequence]) => [
-            writerId,
-            sequence.toString(),
-          ]),
-        ),
+        frontier: prepareSynchronizationFrontier(result.frontier),
       });
     } catch (error) {
       if (isOperationProtocolError(error))
@@ -227,3 +223,10 @@ export const createOperationSynchronization = (
     }
   };
 };
+
+export const createRunnerOperationSynchronization = (
+  database: AppDatabase,
+  googleAuth: Pick<GoogleAuth, "authenticatedUser">,
+  runnerAuth: NonNullable<Parameters<typeof createOperationSynchronization>[3]>,
+) =>
+  createOperationSynchronization(database, googleAuth, undefined, runnerAuth);

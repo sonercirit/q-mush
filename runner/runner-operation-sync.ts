@@ -22,15 +22,11 @@ interface OperationStore {
   ) => { readonly frontier: Readonly<Record<string, bigint>> };
 }
 interface OperationTransport {
-  readonly pull: (
-    partition: OperationPartition,
-    frontier: Readonly<Record<string, bigint>>,
-    signal: AbortSignal,
-  ) => Promise<{
+  readonly readPage: (request: RunnerOperationRead) => Promise<{
     readonly envelopes: readonly string[];
     readonly hasMore: boolean;
   }>;
-  readonly push: (
+  readonly writeBatch: (
     partition: OperationPartition,
     envelopes: readonly string[],
     signal: AbortSignal,
@@ -38,6 +34,12 @@ interface OperationTransport {
 }
 
 const partitions = ["non-session", "session"] as const;
+
+export interface RunnerOperationRead {
+  readonly frontier: Readonly<Record<string, bigint>>;
+  readonly partition: OperationPartition;
+  readonly signal: AbortSignal;
+}
 
 export const synchronizeRunnerOperations = async (
   store: OperationStore,
@@ -47,16 +49,16 @@ export const synchronizeRunnerOperations = async (
   for (const partition of partitions) {
     const pending = store.pending("self", partition);
     if (pending.length > 0) {
-      await transport.push(partition, pending, signal);
+      await transport.writeBatch(partition, pending, signal);
       store.acknowledge("self", partition, pending);
     }
     let hasMore: boolean;
     do {
-      const page = await transport.pull(
-        partition,
-        store.state("self", partition).frontier,
+      const page = await transport.readPage({
         signal,
-      );
+        partition,
+        frontier: store.state("self", partition).frontier,
+      });
       store.apply("self", partition, page.envelopes, "remote");
       hasMore = page.hasMore;
     } while (hasMore);

@@ -573,7 +573,7 @@ async function run(): Promise<void> {
 
   const replicaDirectory = join(runnerDirectory, "replica");
   const replica = createRunnerReplicaStore(replicaDirectory);
-  const operationSynchronization =
+  const sync =
     configuration === undefined
       ? new AbortController()
       : startRunnerOperationSynchronization(
@@ -633,7 +633,7 @@ async function run(): Promise<void> {
       );
     }
   } finally {
-    operationSynchronization.abort();
+    sync.abort();
     await app.stop();
     replica.close();
   }

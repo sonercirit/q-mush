@@ -40,10 +40,10 @@ import { exportAccountBlob, exportAccountPage } from "./account-export.ts";
 import { engineLocalResponse } from "./active-view.ts";
 import { readFavicon } from "./client-build.ts";
 import { createMethodNotAllowedResponse } from "./http.ts";
-import { createOperationSynchronization } from "./operation-synchronization.ts";
 import type { RenderedPages } from "./pages.ts";
 import type { ProviderIntegration } from "./provider-integration.ts";
 import type { RequestHandlerIntegrations } from "./server-integrations.ts";
+import { operationSynchronizationHandler } from "./server-operation-synchronization.ts";
 
 const DEFAULT_Q_MUSH_PORT = 12_345;
 
@@ -422,7 +422,6 @@ function routeProviderRequest(
       integration.reassignSessions(request, credentialId),
   });
 }
-
 export function createRequestHandler(
   clientJavaScript: string,
   stylesheet: string,
@@ -430,11 +429,10 @@ export function createRequestHandler(
   integrations: RequestHandlerIntegrations,
 ): (request: Request) => Promise<Response> {
   const { braveSearch, database, generic, googleAuth, openAi } = integrations;
-  const { openRouter, prompts, runnerExecutables, runners } = integrations;
-  const { sessions, toolSettings, workspaces } = integrations;
-  const sync = createOperationSynchronization(database, googleAuth, undefined, {
-    runnerAccount: runners.runnerAccount,
-  });
+  const { openRouter, prompts, runnerExecutables, runners, sessions } =
+    integrations;
+  const { toolSettings, workspaces } = integrations;
+  const sync = operationSynchronizationHandler(integrations);
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const faviconSource = readFavicon();

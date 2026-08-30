@@ -168,3 +168,14 @@
   replica APIs remain browser-grant protected. Unlike the engine active view,
   the runner checks that grant before method handling, so an unpaired non-GET
   `/api/local/*` request deliberately returns 401 rather than revealing 405.
+- Runner operation replicas keep immutable encoded envelopes plus verification,
+  source, rejection, and outbox metadata in the per-account SQLite. Valid batch
+  log/projection/checkpoint writes share one transaction; malformed encodings
+  are quarantined separately so later envelopes continue. Post-ready sync pushes
+  up to 512 pending rows and pulls 256-row pages by durable frontier until
+  `hasMore` clears, then repeats with capped non-fatal backoff and shutdown
+  abort. The HTTP operation route now accepts the native runner bearer token;
+  runner owner alias `self` resolves only after token authentication, avoiding
+  account identity in runner configuration, while browser session auth remains.
+  No runner-local command producer exists yet; which command first emits local
+  operations remains open.

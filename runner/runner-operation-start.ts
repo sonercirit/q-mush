@@ -21,8 +21,14 @@ export const startRunnerOperationSynchronization = (
   const controller = new AbortController();
   const delay =
     options.delay ??
-    ((milliseconds, signal) => setTimeout(milliseconds, undefined, { signal }));
-  const log = options.log ?? console.warn;
+    (async (milliseconds, signal) => {
+      await setTimeout(milliseconds, undefined, { signal });
+    });
+  const log =
+    options.log ??
+    ((message: string) => {
+      console.warn(message);
+    });
   void (async () => {
     const transport = createRunnerOperationTransport(origin, token);
     let retryMilliseconds = 1_000;
@@ -31,7 +37,6 @@ export const startRunnerOperationSynchronization = (
         await synchronizeRunnerOperations(store, transport, controller.signal);
         retryMilliseconds = 1_000;
       } catch (error) {
-        if (controller.signal.aborted) return;
         log(`Operation synchronization deferred: ${describeError(error)}`);
       }
       try {
