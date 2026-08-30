@@ -457,20 +457,6 @@ export function createRunnerIntegration(
     );
   }
 
-  const receiptState = (
-    token: string,
-    metadata: RunnerMetadata,
-    receipt: string,
-  ): RunnerActivationReceiptValidation | undefined => {
-    const argumentsForReceipt = { metadata, receipt, token };
-    const state = store.registration.receiptState(
-      argumentsForReceipt.token,
-      argumentsForReceipt.metadata,
-      argumentsForReceipt.receipt,
-    );
-    return state;
-  };
-
   function settleActivationLifecycle(
     ...parameters: RunnerLifecycleParameters
   ): boolean {
@@ -617,7 +603,7 @@ export function createRunnerIntegration(
     onRemoving,
     onlineForUser,
     preflightRegistration,
-    receiptState,
+    receiptState: store.registration.receiptState.bind(store.registration),
     remove,
     runnerAccount,
     runnerIsAvailable,

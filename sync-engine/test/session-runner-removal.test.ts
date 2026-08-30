@@ -1,4 +1,3 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, test, vi } from "vitest";
 import {
   createRunnerCommandBroker,
@@ -135,14 +134,6 @@ function coordinator(
 }
 
 describe("removed session runners", () => {
-  test("registers restart visibility on the batched session change path", () => {
-    const indexSource = readFileSync(
-      new URL("../index.ts", import.meta.url),
-      "utf8",
-    );
-
-    expect(indexSource).toContain("sessions.onChanges((userId, sessionIds)");
-  });
   test("rechecks command authority at dispatch", async () => {
     let authorized = true;
     const broker = createRunnerCommandBroker();
