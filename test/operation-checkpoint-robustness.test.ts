@@ -54,6 +54,54 @@ test("rejects a frontier inconsistent with replay history", () => {
   reject({ ...state(), frontier: { a: 2n } }, /derived state/);
 });
 
+test("accepts contiguous replay above a non-empty base with parents covered after resort", () => {
+  const base = {
+    ...testApplyState<readonly string[]>(["base"]),
+    frontier: { a: 5n },
+    baseFrontier: { a: 5n },
+  };
+  const child = testOperation("b", 1n, { a: 6n }, "child", 1);
+  const parent = testOperation("a", 6n, { a: 5n }, "parent", 10);
+  const replayed = applyOperationList([child, parent], base, appendOperationId);
+  expect(replayed.projection).toEqual(["base", "b-1", "a-6"]);
+  expect(
+    decodeOperationCheckpoint(encodeOperationCheckpoint(replayed)).frontier,
+  ).toEqual({ a: 6n, b: 1n });
+});
+
+const singleReplayState = (
+  replayed: ReturnType<typeof testOperation>,
+): OperationApplyState<readonly string[]> => {
+  const fingerprint = operationFingerprint(replayed);
+  return {
+    ...testApplyState<readonly string[]>([]),
+    frontier: { [replayed.writerId]: replayed.sequence },
+    projection: [replayed.operationId],
+    applied: restoreAppliedIdentityIndex({
+      [`id:${replayed.operationId}`]: fingerprint,
+      [`writer:${replayed.writerId}:${replayed.sequence.toString()}`]:
+        fingerprint,
+    }),
+    replayHead: { operation: replayed, previous: undefined },
+    replayCount: 1,
+    replayLastClock: replayed.clock,
+  };
+};
+
+test("rejects a replay writer-sequence gap above the base frontier", () => {
+  reject(
+    singleReplayState(testOperation("a", 2n, {}, "x", 2)),
+    /replay sequence/,
+  );
+});
+
+test("rejects a replay operation with an uncovered cross-writer parent", () => {
+  reject(
+    singleReplayState(testOperation("a", 1n, { b: 1n }, "x", 1)),
+    /replay parent/,
+  );
+});
+
 const replayDuplicateState = (
   duplicate: ReturnType<typeof testOperation>,
 ): OperationApplyState<readonly string[]> => {

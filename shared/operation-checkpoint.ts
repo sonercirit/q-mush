@@ -296,22 +296,36 @@ const validateCheckpointConsistency = (
   const expectedApplied: Record<string, string> = {};
   const replayIdentities = new Set<string>();
   for (const operation of replay) {
-    const previous = Object.hasOwn(expectedFrontier, operation.writerId)
-      ? (expectedFrontier[operation.writerId] ?? 0n)
-      : 0n;
-    if (operation.sequence > previous)
-      Object.defineProperty(expectedFrontier, operation.writerId, {
-        configurable: true,
-        enumerable: true,
-        value: operation.sequence,
-        writable: true,
-      });
     const replayFingerprint = operationFingerprint(operation);
     for (const identity of operationIdentityKeys(operation)) {
       if (replayIdentities.has(identity))
         throw new Error("Invalid operation checkpoint replay identity");
       replayIdentities.add(identity);
       expectedApplied[identity] = replayFingerprint;
+    }
+  }
+  for (let index = replay.length - 1; index >= 0; index -= 1) {
+    const operation = replay[index];
+    if (operation === undefined) continue;
+    const previous = Object.hasOwn(expectedFrontier, operation.writerId)
+      ? (expectedFrontier[operation.writerId] ?? 0n)
+      : 0n;
+    if (operation.sequence !== previous + 1n)
+      throw new Error("Invalid operation checkpoint replay sequence");
+    Object.defineProperty(expectedFrontier, operation.writerId, {
+      configurable: true,
+      enumerable: true,
+      value: operation.sequence,
+      writable: true,
+    });
+  }
+  for (const operation of replay) {
+    for (const [writerId, sequence] of Object.entries(operation.parents)) {
+      const covered = Object.hasOwn(expectedFrontier, writerId)
+        ? (expectedFrontier[writerId] ?? 0n)
+        : 0n;
+      if (sequence > covered)
+        throw new Error("Invalid operation checkpoint replay parent");
     }
   }
   validateOperationWriterClocks([...replay, ...state.pending]);
