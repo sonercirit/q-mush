@@ -8,6 +8,7 @@ import {
 } from "node:fs";
 import { arch, hostname, networkInterfaces, platform } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout } from "node:timers/promises";
 import { describeError } from "../shared/error.ts";
 import { RUNNER_REALTIME_PATH } from "../shared/routes.ts";
 import {
@@ -38,10 +39,7 @@ import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
 import { reportRunnerFatalError } from "./runner-fatal-error.ts";
 import { startRunnerOperationSynchronization } from "./runner-operation-start.ts";
 import { bindOperationalRunnerSocket } from "./runner-operational-socket.ts";
-import {
-  createRunnerReadySynchronization,
-  waitForRunnerReconnect,
-} from "./runner-ready-synchronization.ts";
+import { createRunnerReadySynchronization } from "./runner-ready-synchronization.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { recordReplicaRetry } from "./runner-replica-retry.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
@@ -311,7 +309,7 @@ async function connectRunner(
         throw error;
       }
       console.warn("Could not reach Q Mush; retrying setup…");
-      await waitForRunnerReconnect();
+      await setTimeout(5_000);
     }
   }
 }

@@ -11,19 +11,16 @@ import {
   testSessionOperation,
 } from "./operation-core-test-support.ts";
 
-const envelope = (sequence: bigint, value = `value-${String(sequence)}`) => {
-  const operation = testOperation(
-    "owner-1",
-    sequence,
-    {},
-    value,
-    Number(sequence),
+const ownedOperation = (operation: ReturnType<typeof testOperation>) => ({
+  ...operation,
+  entity: { ...operation.entity, accountId: "owner-1" },
+});
+const envelope = (sequence: bigint, value = `value-${String(sequence)}`) =>
+  encodeOperationEnvelope(
+    ownedOperation(
+      testOperation("owner-1", sequence, {}, value, Number(sequence)),
+    ),
   );
-  return encodeOperationEnvelope({
-    ...operation,
-    entity: { ...operation.entity, accountId: "owner-1" },
-  });
-};
 type Store = ReturnType<typeof createRunnerOperationStore>;
 const withStore = (run: (store: Store, database: Database) => void) => {
   const database = new Database(":memory:");
@@ -33,22 +30,41 @@ const withStore = (run: (store: Store, database: Database) => void) => {
     database.close();
   }
 };
+const applyRemote = (
+  store: Store,
+  partition: "non-session" | "session",
+  envelopes: readonly string[],
+) => {
+  store.apply("owner-1", partition, envelopes, "remote");
+};
 const remote = (store: Store, envelopes: readonly string[]) => {
-  store.apply("owner-1", "non-session", envelopes, "remote");
+  applyRemote(store, "non-session", envelopes);
 };
 const remoteSession = (store: Store, envelopes: readonly string[]) => {
-  store.apply("owner-1", "session", envelopes, "remote");
+  applyRemote(store, "session", envelopes);
 };
+const poisonEnvelope = (sequence: bigint) => {
+  const operation = decodeOperationEnvelope(envelope(sequence));
+  return encodeOperationEnvelope({
+    ...operation,
+    clock: { ...operation.clock, physicalMs: 1 },
+  });
+};
+
 const rows = (store: Store) => store.inspect("owner-1", "non-session");
 const verificationStates = (store: Store) =>
   rows(store).map(({ verificationState }) => verificationState);
 const expectStates = (store: Store, expected: readonly string[]) => {
   expect(verificationStates(store)).toEqual(expected);
 };
+const expectNonSessionFrontier = (
+  store: Store,
+  expected: Readonly<Record<string, bigint>>,
+) => {
+  expect(store.state("owner-1", "non-session").frontier).toEqual(expected);
+};
 const expectFrontierOne = (store: Store) => {
-  expect(store.state("owner-1", "non-session").frontier).toEqual({
-    "owner-1": 1n,
-  });
+  expectNonSessionFrontier(store, { "owner-1": 1n });
 };
 
 test("records accepted immutable envelopes and checkpoints", () => {
@@ -106,39 +122,22 @@ test("redelivery of one undecodable envelope remains one quarantine row", () => 
   withStore((store) => {
     for (let cycle = 0; cycle < 3; cycle += 1) remote(store, ["same-poison"]);
     expectStates(store, ["rejected"]);
-    expect(store.state("owner-1", "non-session").frontier).toEqual({});
+    expectNonSessionFrontier(store, {});
   });
 });
 
 test("does not advance or retain later operations across a rejected identity", () => {
   withStore((store) => {
-    const first = envelope(1n);
-    const operation = decodeOperationEnvelope(envelope(2n));
-    const poison = encodeOperationEnvelope({
-      ...operation,
-      clock: { ...operation.clock, physicalMs: 1 },
-    });
-    remote(store, [first, poison, envelope(3n)]);
+    const poison = poisonEnvelope(2n);
+    remote(store, [envelope(1n), poison, envelope(3n)]);
+    expect(rows(store).filter(({ encoded }) => encoded === poison)).toEqual([
+      expect.objectContaining({ verificationState: "rejected" }),
+    ]);
     const state = store.state("owner-1", "non-session");
     expect(state.projection).toEqual(["owner-1-1"]);
     expect(state.pending).toEqual([]);
     expect(state.frontier).toEqual({ "owner-1": 1n });
     expect(state.stalled).toBe(true);
-  });
-});
-
-test("intake-rejected envelopes are never recorded as accepted", () => {
-  withStore((store) => {
-    remote(store, [envelope(1n)]);
-    const operation = decodeOperationEnvelope(envelope(2n));
-    const poison = encodeOperationEnvelope({
-      ...operation,
-      clock: { ...operation.clock, physicalMs: 1 },
-    });
-    remote(store, [poison]);
-    expect(rows(store).filter(({ encoded }) => encoded === poison)).toEqual([
-      expect.objectContaining({ verificationState: "rejected" }),
-    ]);
   });
 });
 
@@ -153,18 +152,18 @@ test("quarantines decoded remote intake rejection and stalls", () => {
     remote(store, [wrongPartition, envelope(1n)]);
     expectStates(store, ["rejected"]);
     expect(rows(store)[0]?.rejectionReason).toContain("partition");
-    expect(store.state("owner-1", "non-session").frontier).toEqual({});
+    expectNonSessionFrontier(store, {});
   });
 });
 
 test("quarantines equivocation without advancing past it", () => {
-  withStore((store) => {
-    const first = envelope(1n);
-    remote(store, [first]);
+  const run = (store: Store) => {
+    remote(store, [envelope(1n)]);
     remote(store, [envelope(1n, "equivocation"), envelope(2n)]);
     expectStates(store, ["accepted", "rejected"]);
     expectFrontierOne(store);
-  });
+  };
+  withStore(run);
 });
 
 test("rolls back the whole batch after a genuine storage failure", () => {

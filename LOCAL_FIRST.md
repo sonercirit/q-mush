@@ -170,23 +170,34 @@
   `/api/local/*` request deliberately returns 401 rather than revealing 405.
 - Runner operation replicas keep immutable encoded envelopes plus acceptance,
   source, rejection, and outbox metadata in the per-account SQLite. `accepted`
-  means schema/intake admission, not cryptographic verification. Valid batch
-  log/projection/checkpoint writes share one transaction; malformed or decoded
-  remote intake rejections are quarantined with their reason and a separate
-  durable synchronization frontier advances past them, so later envelopes
-  continue. Genuine storage failures still roll back the whole batch, and each
-  partition synchronizes independently. Quarantine is fail-safe for replica
-  availability but records possible engine corruption; an operator should
-  inspect/export rejected rows, repair the engine source, then rebuild the local
-  replica to retry them—there is intentionally no automatic re-admission.
-  Synchronization starts only from the WebSocket operational/ready callback,
-  aborts on disconnect, and restarts after the next ready handshake. It pushes
-  up to 512 pending rows and pulls 256-row pages until `hasMore` clears. Empty
-  pages do not open write transactions. Successful cycles poll every 5 seconds
-  with ±20% jitter (slower than the former 1-second herd); failures use 1-second
-  exponential backoff capped at 30 seconds and success resets it. Shutdown
-  aborts requests. The HTTP operation route accepts the native runner bearer
-  token only with owner alias `self`, avoiding account identity in the runner
-  protocol; browser sessions require their exact account UUID and reject the
-  alias. No runner-local command producer exists yet; which command first emits
-  local operations remains open.
+  means schema/intake admission, not cryptographic verification. Valid prefix
+  log/projection/checkpoint writes share one transaction. Because the engine
+  already used the same intake core, any malformed envelope or decoded remote
+  intake rejection indicates corruption or version disagreement: the runner
+  records it idempotently in a separate quarantine table using its real
+  operation/writer/sequence identity, or a SHA-256 envelope identity when it
+  cannot decode one, and durably stalls that partition. The accepted prefix is
+  committed, the checkpoint/pull frontier never passes the rejected identity,
+  and later page entries are neither accepted nor retained pending. Polling
+  continues at capped failure backoff, logs the stall, and still synchronizes
+  the other partition and local outbox. Repeated delivery is a no-op, preventing
+  quarantine growth. Genuine storage failures still roll back the whole batch.
+  Runner checkpoints use the shared 4 MiB encoded bound; overflow follows the
+  same durable partition-stall path rather than growing without limit. An
+  operator inspects/exports quarantine rows, repairs the engine or updates the
+  runner, then rebuilds the replica from its checkpoint; there is intentionally
+  no skip frontier or automatic re-admission. Local outbox HTTP 400 protocol
+  rejections are durably marked rejected and set aside so push and pull can
+  continue; 507 capacity, transport, and other failures remain pending under
+  capped retry. Synchronization starts only from the WebSocket operational/ready
+  callback, aborts on disconnect, and restarts after the next ready handshake.
+  It pushes up to 512 pending rows and pulls 256-row pages until `hasMore`
+  clears. Empty pages do not open write transactions. Successful cycles poll
+  every 5 seconds with ±20% jitter (slower than the former 1-second herd);
+  failures use 1-second exponential backoff capped at 30 seconds and success
+  resets it. Shutdown aborts requests. The HTTP operation route accepts the
+  native runner bearer token only with owner alias `self`, avoiding account
+  identity in the runner protocol; simultaneous browser and runner
+  authentication deliberately uses runner identity/`self` alias semantics. No
+  runner-local command producer exists yet; which command first emits local
+  operations remains open.

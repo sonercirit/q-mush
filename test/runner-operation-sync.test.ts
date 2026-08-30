@@ -13,10 +13,12 @@ import { createOperationDatabaseHarness } from "./operation-store-test-support.t
 interface HarnessState {
   frontier: Readonly<Record<string, bigint>>;
   pending: readonly string[];
+  stalled: boolean;
 }
 const harness = (initial: Partial<HarnessState> = {}) => {
   const state: HarnessState = {
     frontier: initial.frontier ?? {},
+    stalled: initial.stalled ?? false,
     pending: initial.pending ?? [],
   };
   const events: string[] = [];
@@ -33,22 +35,21 @@ const harness = (initial: Partial<HarnessState> = {}) => {
         _partition: OperationPartition,
         envelopes: readonly string[],
       ) => {
+        const poisoned = envelopes.some((envelope) => envelope === "poison");
+        if (poisoned) state.stalled = true;
         events.push(`apply:${envelopes.join(",")}`);
+        if (poisoned) return;
         state.frontier = {
           writer: (state.frontier["writer"] ?? 0n) + BigInt(envelopes.length),
         };
       },
       pending: () => state.pending,
-      rejectOutbox: (
-        _ownerId: string,
-        _partition: OperationPartition,
-        _envelopes: readonly string[],
-        reason: string,
-      ) => {
-        events.push(`reject:${reason}`);
+      rejectOutbox: (...rejection: readonly unknown[]) => {
+        const reason = rejection.at(-1);
+        events.push(`reject:${String(reason)}`);
         state.pending = [];
       },
-      state: () => ({ frontier: state.frontier }),
+      state: () => ({ frontier: state.frontier, stalled: state.stalled }),
     },
   };
 };
@@ -63,9 +64,32 @@ const runSynchronization = (
     new AbortController().signal,
   );
 
+const pendingForNonSession = (
+  store: ReturnType<typeof createRunnerOperationStore>,
+) => store.pending("self", "non-session");
 const noEnvelopes: readonly string[] = [];
 const emptyPage = () =>
   Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
+const engineOwnedEnvelope = () => {
+  const operation = testOperation("owner-1", 1n, {}, "local", Date.now());
+  return encodeOperationEnvelope(
+    Object.assign(operation, {
+      entity: { ...operation.entity, accountId: "owner-1" },
+    }),
+  );
+};
+const resolvedWrite = () => Promise.resolve(undefined);
+const emptyTransport = (
+  writeBatch: Parameters<typeof synchronizeRunnerOperations>[1]["writeBatch"],
+) => ({ writeBatch, readPage: emptyPage });
+
+const expectOutboxRetained = (
+  replica: ReturnType<typeof harness>,
+  expected: readonly string[],
+) => {
+  expect(replica.state.pending).toEqual(expected);
+  expect(replica.events).toEqual([]);
+};
 
 test("resumes pull pages from each durably applied frontier", async () => {
   const replica = harness();
@@ -88,26 +112,39 @@ test("resumes pull pages from each durably applied frontier", async () => {
 
 test("skips empty pages without opening store writes", async () => {
   const replica = harness();
-  await runSynchronization(replica, {
-    writeBatch: () => Promise.resolve(undefined),
-    readPage: emptyPage,
-  });
+  await runSynchronization(replica, emptyTransport(resolvedWrite));
   expect(replica.events).toEqual([]);
 });
 
 test("continues the other partition after one partition fails", async () => {
-  const replica = harness();
   const partitions: OperationPartition[] = [];
-  await runSynchronization(replica, {
+  await runSynchronization(harness(), {
     readPage: ({ partition }) => {
       partitions.push(partition);
       return partition === "non-session"
         ? Promise.reject(new Error("poisoned partition"))
         : emptyPage();
     },
-    writeBatch: () => Promise.resolve(undefined),
+    writeBatch: resolvedWrite,
   });
-  expect(partitions).toEqual(["non-session", "session"]);
+  expect(partitions.join(",")).toBe("non-session,session");
+});
+
+test("a durably stalled partition leaves its frontier fixed while its peer completes", async () => {
+  const replica = harness();
+  const reads: OperationPartition[] = [];
+  await runSynchronization(replica, {
+    readPage: ({ partition }) => {
+      reads.push(partition);
+      return Promise.resolve({
+        envelopes: partition === "non-session" ? ["poison"] : noEnvelopes,
+        hasMore: partition === "non-session",
+      });
+    },
+    writeBatch: resolvedWrite,
+  });
+  expect(reads).toEqual(["non-session", "session"]);
+  expect(replica.state.frontier).toEqual({});
 });
 
 test("sets aside a permanently rejected outbox batch and continues pulling", async () => {
@@ -132,13 +169,12 @@ test("retains capacity-rejected outbox entries for retry", async () => {
     operationSynchronizationStatus: 507,
   });
   await expect(
-    runSynchronization(replica, {
-      writeBatch: () => Promise.reject(capacity),
-      readPage: emptyPage,
-    }),
+    runSynchronization(
+      replica,
+      emptyTransport(() => Promise.reject(capacity)),
+    ),
   ).rejects.toThrow("capacity");
-  expect(replica.state.pending).toEqual(["large"]);
-  expect(replica.events).toEqual([]);
+  expectOutboxRetained(replica, ["large"]);
 });
 
 test("re-pushes idempotently after engine commit and a dropped local acknowledgement", async () => {
@@ -153,17 +189,7 @@ test("re-pushes idempotently after engine commit and a dropped local acknowledge
   const runnerDatabase = new Database(":memory:");
   try {
     const store = createRunnerOperationStore(runnerDatabase);
-    const operation = testOperation(
-      "owner-1",
-      1n,
-      {},
-      "local",
-      Date.now(),
-    );
-    const encoded = encodeOperationEnvelope({
-      ...operation,
-      entity: { ...operation.entity, accountId: "owner-1" },
-    });
+    const encoded = engineOwnedEnvelope();
     store.apply("self", "non-session", [encoded], "local");
     let pushes = 0;
     const transport = {
@@ -184,26 +210,21 @@ test("re-pushes idempotently after engine commit and a dropped local acknowledge
       },
       readPage: () => emptyPage(),
     };
-    await synchronizeRunnerOperations(
-      store,
-      transport,
-      new AbortController().signal,
-    );
-    expect(store.pending("self", "non-session")).toEqual([encoded]);
-    await synchronizeRunnerOperations(
-      store,
-      transport,
-      new AbortController().signal,
-    );
-    expect(store.pending("self", "non-session")).toEqual([]);
+    const synchronize = () =>
+      synchronizeRunnerOperations(
+        store,
+        transport,
+        new AbortController().signal,
+      );
+    await synchronize();
+    expect(pendingForNonSession(store)).toEqual([encoded]);
+    await synchronize();
+    expect(pendingForNonSession(store)).toEqual([]);
     expect(pushes).toBe(2);
     expect(
-      createOperationStore({ database: resources.database }).readEncodedEnvelopes(
-        "owner-1",
-        "non-session",
-        {},
-        10,
-      ).envelopes,
+      createOperationStore({
+        database: resources.database,
+      }).readEncodedEnvelopes("owner-1", "non-session", {}, 10).envelopes,
     ).toEqual([encoded]);
   } finally {
     runnerDatabase.close();

@@ -158,6 +158,16 @@ test("operation synchronization isolates runner aliases from browser owner IDs",
   expect(statuses).toEqual([200, 403, 403, 200, 403]);
 });
 
+test("operation synchronization gives simultaneous runner auth precedence", async () => {
+  const synchronized = handler("browser-owner", undefined, "owner-1");
+  expect(
+    await Promise.all([
+      responseStatus(synchronized(request(body("self")))),
+      responseStatus(synchronized(request(body("browser-owner")))),
+    ]),
+  ).toEqual([200, 403]);
+});
+
 test("operation synchronization rejects malformed payloads", async () => {
   expect(
     (await handler("owner-1")(request({ ownerId: "owner-1" }))).status,

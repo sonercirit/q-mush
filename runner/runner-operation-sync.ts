@@ -1,5 +1,12 @@
-import { isPermanentOperationSynchronizationRejection } from "./runner-operation-transport.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
+import { isPermanentOperationSynchronizationRejection } from "./runner-operation-transport.ts";
+
+type OutboxRejection = readonly [
+  ownerId: string,
+  partition: OperationPartition,
+  envelopes: readonly string[],
+  reason: string,
+];
 
 interface OperationStore {
   readonly acknowledge: (
@@ -17,16 +24,14 @@ interface OperationStore {
     ownerId: string,
     partition: OperationPartition,
   ) => readonly string[];
-  readonly rejectOutbox: (
-    ownerId: string,
-    partition: OperationPartition,
-    envelopes: readonly string[],
-    reason: string,
-  ) => void;
+  readonly rejectOutbox: (...rejection: OutboxRejection) => void;
   readonly state: (
     ownerId: string,
     partition: OperationPartition,
-  ) => { readonly frontier: Readonly<Record<string, bigint>> };
+  ) => {
+    readonly frontier: Readonly<Record<string, bigint>>;
+    readonly stalled?: boolean;
+  };
 }
 interface OperationTransport {
   readonly readPage: (request: RunnerOperationRead) => Promise<{
@@ -73,8 +78,13 @@ const synchronizePartition = async (request: {
       partition,
       frontier: store.state(ownerAlias, partition).frontier,
     });
-    if (page.envelopes.length > 0)
+    if (page.envelopes.length > 0) {
       store.apply(ownerAlias, partition, page.envelopes, "remote");
+      if (store.state(ownerAlias, partition).stalled)
+        throw new Error(
+          `Operation synchronization partition stalled: ${partition}`,
+        );
+    }
     hasMore = page.hasMore;
   } while (hasMore);
 };

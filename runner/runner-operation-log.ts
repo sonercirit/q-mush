@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import type { Database } from "bun:sqlite";
+import { createHash } from "node:crypto";
 
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
 import type {
@@ -37,6 +37,24 @@ export const createRunnerOperationLog = (database: Database) => {
   database.run(
     "CREATE TABLE IF NOT EXISTS operation_quarantines (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, rejection_reason TEXT NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
   );
+  const loadCheckpoint = database.query<
+    { encoded: string },
+    [string, OperationPartition]
+  >(
+    "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
+  );
+  const findStall = database.query<
+    { found: number },
+    [string, OperationPartition]
+  >(
+    "SELECT 1 AS found FROM operation_quarantines WHERE owner_id = ? AND partition = ? LIMIT 1",
+  );
+  const pendingOutbox = database.query<
+    { encoded: string },
+    [string, OperationPartition]
+  >(
+    "SELECT encoded FROM operation_envelopes WHERE owner_id = ? AND partition = ? AND outbox_pending = 1 ORDER BY rowid LIMIT 512",
+  );
   const append = database.query(
     "INSERT INTO operation_envelopes (owner_id, partition, operation_id, writer_id, sequence, encoded, verification_state, source, rejection_reason, outbox_pending) VALUES (?, ?, ?, ?, ?, ?, 'accepted', ?, NULL, ?) ON CONFLICT DO NOTHING",
   );
@@ -62,11 +80,7 @@ export const createRunnerOperationLog = (database: Database) => {
       );
     },
     checkpoint(ownerId: string, partition: OperationPartition) {
-      return database
-        .query<{ encoded: string }, [string, string]>(
-          "SELECT encoded FROM operation_checkpoints WHERE owner_id = ? AND partition = ?",
-        )
-        .get(ownerId, partition)?.encoded;
+      return loadCheckpoint.get(ownerId, partition)?.encoded;
     },
     storeCheckpoint(
       ownerId: string,
@@ -98,19 +112,10 @@ export const createRunnerOperationLog = (database: Database) => {
       );
     },
     stalled(ownerId: string, partition: OperationPartition): boolean {
-      return (
-        database
-          .query<{ found: number }, [string, string]>(
-            "SELECT 1 AS found FROM operation_quarantines WHERE owner_id = ? AND partition = ? LIMIT 1",
-          )
-          .get(ownerId, partition) !== null
-      );
+      return findStall.get(ownerId, partition) !== null;
     },
     pending(ownerId: string, partition: OperationPartition) {
-      return database
-        .query<{ encoded: string }, [string, string]>(
-          "SELECT encoded FROM operation_envelopes WHERE owner_id = ? AND partition = ? AND outbox_pending = 1 ORDER BY rowid LIMIT 512",
-        )
+      return pendingOutbox
         .all(ownerId, partition)
         .map(({ encoded }) => encoded);
     },

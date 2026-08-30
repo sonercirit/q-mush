@@ -22,8 +22,8 @@ import {
   type OperationReplicaSource,
 } from "./runner-operation-log.ts";
 
-const encodedBytes = (value: string): number =>
-  new TextEncoder().encode(value).byteLength;
+const checkpointByteLength = (value: string): number =>
+  Buffer.byteLength(value, "utf8");
 
 export const createRunnerOperationStore = (database: Database) => {
   const log = createRunnerOperationLog(database);
@@ -66,13 +66,14 @@ export const createRunnerOperationStore = (database: Database) => {
           }
           if (stalled) continue;
           try {
-            successor = applyOperationIntakeBatch(
+            let acceptedOperation: typeof operation | undefined;
+            const candidate = applyOperationIntakeBatch(
               partition,
               successor,
               [{ encoded, operation }],
               {
-                append: (candidate, accepted) => {
-                  log.append(ownerId, accepted, candidate, source);
+                append: (_candidate, accepted) => {
+                  acceptedOperation = accepted;
                 },
                 ownsOperation: (accepted) =>
                   accepted.entity.accountId === accepted.writerId,
@@ -82,16 +83,28 @@ export const createRunnerOperationStore = (database: Database) => {
                 ],
               },
             );
-            const encodedCheckpoint = encodeOperationCheckpoint(successor);
-            if (encodedBytes(encodedCheckpoint) > MAX_OPERATION_CHECKPOINT_BYTES)
+            const encodedCheckpoint = encodeOperationCheckpoint(candidate);
+            if (
+              checkpointByteLength(encodedCheckpoint) >
+              MAX_OPERATION_CHECKPOINT_BYTES
+            )
               throw operationProtocolError(
                 "capacity",
                 "Operation checkpoint capacity reached",
               );
+            if (acceptedOperation !== undefined)
+              log.append(ownerId, acceptedOperation, encoded, source);
+            successor = candidate;
           } catch (error) {
             if (source !== "remote" || !isOperationProtocolError(error))
               throw error;
-            log.quarantine(ownerId, partition, encoded, error.message, operation);
+            log.quarantine(
+              ownerId,
+              partition,
+              encoded,
+              error.message,
+              operation,
+            );
             stalled = true;
           }
         }
@@ -109,8 +122,8 @@ export const createRunnerOperationStore = (database: Database) => {
       log.inspect(...arguments_),
     pending: (...arguments_: Parameters<typeof log.pending>) =>
       log.pending(...arguments_),
-    rejectOutbox: (...arguments_: Parameters<typeof log.rejectOutbox>) => {
-      log.rejectOutbox(...arguments_);
+    rejectOutbox: (...rejection: Parameters<typeof log.rejectOutbox>) => {
+      log.rejectOutbox(...rejection);
     },
     state(ownerId: string, partition: OperationPartition) {
       return {

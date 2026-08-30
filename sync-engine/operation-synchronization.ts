@@ -146,6 +146,8 @@ export const createOperationSynchronization = (
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined)
       return Response.json({ error: "Invalid request" }, { status: 400 });
+    // Runner credentials deliberately take precedence when both auth mechanisms
+    // are present, so runner owner alias semantics cannot become browser scope.
     const ownerId =
       runnerUser === undefined ? browserUser?.id : runnerUser.userId;
     const ownsScope =

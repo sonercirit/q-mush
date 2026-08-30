@@ -1,5 +1,3 @@
-import { setTimeout } from "node:timers/promises";
-
 import type { startRunnerOperationSynchronization } from "./runner-operation-start.ts";
 
 interface ReadySynchronizationOptions {
@@ -23,8 +21,4 @@ export const createRunnerReadySynchronization = (
       active = options.start(options.store, options.origin, options.token);
     },
   };
-};
-
-export const waitForRunnerReconnect = async (): Promise<void> => {
-  await setTimeout(5_000);
 };
