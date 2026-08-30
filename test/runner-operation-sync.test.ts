@@ -14,14 +14,16 @@ import { createOperationSynchronization } from "../sync-engine/operation-synchro
 import { testOperation } from "./operation-core-test-support.ts";
 import { createOperationDatabaseHarness } from "./operation-store-test-support.ts";
 
+type HarnessOutboxStall = NonNullable<
+  ReturnType<
+    ReturnType<typeof createRunnerOperationStore>["state"]
+  >["outboxStalls"]
+>[number];
 interface HarnessState {
   frontier: Readonly<Record<string, bigint>>;
   pending: readonly string[];
   stalled: boolean;
-  outboxStalls: readonly {
-    readonly operationId: string;
-    readonly reason: string;
-  }[];
+  outboxStalls: readonly HarnessOutboxStall[];
 }
 const harness = (initial: Partial<HarnessState> = {}) => {
   const state: HarnessState = {
@@ -67,7 +69,14 @@ const harness = (initial: Partial<HarnessState> = {}) => {
         reason: string,
       ) => {
         events.push(`stall:${envelope}:${reason}`);
-        state.outboxStalls = [{ operationId: envelope, reason }];
+        state.outboxStalls = [
+          {
+            operationId: envelope,
+            queuedBehind: 0,
+            reason,
+            writerId: "unknown-writer",
+          },
+        ];
       },
       state: () => ({
         frontier: state.frontier,
@@ -223,6 +232,25 @@ const expectError = (value: unknown): Error => {
 };
 const captureError = async (promise: Promise<unknown>): Promise<Error> =>
   expectError(await promise.catch((reason: unknown) => reason));
+const runnerTransport = () =>
+  createRunnerOperationTransport("http://engine.test", "token");
+const writeEncoded = () =>
+  runnerTransport().writeBatch(
+    "non-session",
+    ["encoded"],
+    new AbortController().signal,
+  );
+const rejectedStall = (
+  operationId: string,
+  writerId: string,
+): HarnessOutboxStall => ({
+  operationId,
+  queuedBehind: 0,
+  reason: "rejected",
+  writerId,
+});
+const captureSynchronizationError = (replica: ReturnType<typeof harness>) =>
+  captureError(runSynchronization(replica, emptyTransport(resolvedWrite)));
 const expectOutboxRetained = (
   replica: ReturnType<typeof harness>,
   expected: readonly string[],
@@ -239,19 +267,7 @@ test("captures only a bounded engine rejection reason", async () => {
       new Response(JSON.stringify({ error: detail }), { status: 400 }),
     );
   try {
-    const transport = createRunnerOperationTransport(
-      "http://engine.test",
-      "token",
-    );
-    const message = (
-      await captureError(
-        transport.writeBatch(
-          "non-session",
-          ["encoded"],
-          new AbortController().signal,
-        ),
-      )
-    ).message;
+    const message = (await captureError(writeEncoded())).message;
     expect(message).toContain("safe reason");
     expect(message.length).toBeLessThan(460);
     expect(message).not.toContain("x".repeat(500));
@@ -261,23 +277,48 @@ test("captures only a bounded engine rejection reason", async () => {
   }
 });
 
+test("stops reading an oversized streamed engine rejection", async () => {
+  const cancel = vi.fn();
+  const pull = vi.fn(
+    (controller: ReadableStreamDefaultController<Uint8Array>) => {
+      controller.enqueue(new Uint8Array(1_024).fill(120));
+    },
+  );
+  const body = new ReadableStream<Uint8Array>({ cancel, pull });
+  const fetchMock = vi
+    .spyOn(globalThis, "fetch")
+    .mockResolvedValue(new Response(body, { status: 400 }));
+  try {
+    await expect(writeEncoded()).rejects.toThrow(
+      "Operation synchronization failed (400)",
+    );
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(pull.mock.calls.length).toBeLessThan(10);
+  } finally {
+    fetchMock.mockRestore();
+  }
+});
+
 test("bounds reported stall identities while retaining total depth", async () => {
+  const longOperationId = `operation-${"x".repeat(1_000)}`;
   const replica = harness({
     pending: [],
-    outboxStalls: Array.from({ length: 512 }, (_, index) => ({
-      operationId: `operation-${String(index).padStart(3, "0")}`,
-      reason: "rejected",
-    })),
+    outboxStalls: Array.from({ length: 512 }, (_, index) =>
+      rejectedStall(
+        index === 0
+          ? longOperationId
+          : `operation-${String(index).padStart(3, "0")}`,
+        `writer-${String(index)}`,
+      ),
+    ),
   });
-  const message = (
-    await captureError(
-      runSynchronization(replica, emptyTransport(resolvedWrite)),
-    )
-  ).message;
-  expect(message).toContain("operation-000, operation-001");
+  const message = (await captureSynchronizationError(replica)).message;
+  expect(message).toContain(`${longOperationId.slice(0, 64)}…`);
+  expect(message).not.toContain(longOperationId.slice(0, 66));
+  expect(message).toContain("operation-001");
   expect(message).toContain("+507 more");
   expect(message).toContain("512 stalled");
-  expect(message.length).toBeLessThan(200);
+  expect(message.length).toBeLessThan(500);
   expect(message).not.toContain("operation-006");
 });
 
@@ -454,7 +495,12 @@ test("a batch 400 stalls only rejected singles, retains them, and continues pull
   ]);
   expect(replica.state.pending).toEqual(["poison", "also-good"]);
   expect(replica.state.outboxStalls).toEqual([
-    { operationId: "poison", reason: "protocol rejected" },
+    {
+      operationId: "poison",
+      queuedBehind: 0,
+      reason: "protocol rejected",
+      writerId: "unknown-writer",
+    },
   ]);
   expect(pulls).toEqual(["non-session", "session"]);
 });

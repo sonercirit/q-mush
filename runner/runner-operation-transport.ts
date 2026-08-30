@@ -15,7 +15,38 @@ export const isOperationSynchronizationBadRequest = (
   "operationSynchronizationStatus" in error &&
   error.operationSynchronizationStatus === 400;
 
+const MAX_SYNCHRONIZATION_ERROR_BODY_BYTES = 4_096;
 const MAX_SYNCHRONIZATION_ERROR_BODY_CHARACTERS = 400;
+const readSynchronizationErrorBody = async (
+  body: ReadableStream<Uint8Array> | null,
+): Promise<string> => {
+  if (body === null) return "";
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let byteLength = 0;
+  try {
+    while (byteLength < MAX_SYNCHRONIZATION_ERROR_BODY_BYTES) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const remaining = MAX_SYNCHRONIZATION_ERROR_BODY_BYTES - byteLength;
+      const chunk = value.subarray(0, remaining);
+      chunks.push(chunk);
+      byteLength += chunk.byteLength;
+      if (value.byteLength > remaining) break;
+    }
+    if (byteLength >= MAX_SYNCHRONIZATION_ERROR_BODY_BYTES)
+      await reader.cancel();
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(byteLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+};
 const synchronizationHttpError = (
   status: number,
   responseBody: string,
@@ -52,7 +83,10 @@ const requestJson = async (
     },
   );
   if (!response.ok)
-    throw synchronizationHttpError(response.status, await response.text());
+    throw synchronizationHttpError(
+      response.status,
+      await readSynchronizationErrorBody(response.body),
+    );
   return response.json();
 };
 

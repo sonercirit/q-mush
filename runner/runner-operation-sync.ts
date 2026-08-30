@@ -4,9 +4,9 @@ import { isOperationSynchronizationBadRequest } from "./runner-operation-transpo
 
 interface OutboxStall {
   readonly operationId: string;
-  readonly queuedBehind?: number;
+  readonly queuedBehind: number;
   readonly reason: string;
-  readonly writerId?: string;
+  readonly writerId: string;
 }
 interface OperationStore {
   readonly acknowledge: (
@@ -128,10 +128,7 @@ const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   const pending = store.pending(ownerAlias, partition);
   const existingStalls = store.state(ownerAlias, partition).outboxStalls ?? [];
   const stalledByWriter = new Map(
-    existingStalls.map((stall) => [
-      stall.writerId ?? "unknown-writer",
-      stall.operationId,
-    ]),
+    existingStalls.map((stall) => [stall.writerId, stall.operationId]),
   );
   const stalledHeads = pending.filter((encoded) => {
     const identity = outboxIdentity(encoded);
@@ -145,7 +142,7 @@ const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   }
   const stillBlockedWriters = new Set(
     (store.state(ownerAlias, partition).outboxStalls ?? []).map(
-      (stall) => stall.writerId ?? "unknown-writer",
+      (stall) => stall.writerId,
     ),
   );
   const pushable = pending.filter((encoded) => {
@@ -168,15 +165,20 @@ const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   }
 };
 const MAX_REPORTED_STALL_IDENTITIES = 5;
+const MAX_REPORTED_STALL_IDENTITY_CHARACTERS = 64;
+const describeStallIdentity = (identity: string): string =>
+  identity.length <= MAX_REPORTED_STALL_IDENTITY_CHARACTERS
+    ? identity
+    : `${identity.slice(0, MAX_REPORTED_STALL_IDENTITY_CHARACTERS)}…`;
 const describeOutboxStalls = (outboxStalls: readonly OutboxStall[]): string => {
   const shown = outboxStalls
     .slice(0, MAX_REPORTED_STALL_IDENTITIES)
-    .map(({ operationId }) => operationId)
+    .map(({ operationId }) => describeStallIdentity(operationId))
     .join(", ");
   const omitted = outboxStalls.length - MAX_REPORTED_STALL_IDENTITIES;
   const identities = omitted > 0 ? `${shown}, +${String(omitted)} more` : shown;
   const queuedBehind = outboxStalls.reduce(
-    (total, stall) => total + (stall.queuedBehind ?? 0),
+    (total, stall) => total + stall.queuedBehind,
     0,
   );
   return ` (${identities}; ${String(queuedBehind)} queued behind; ${String(outboxStalls.length)} stalled)`;
