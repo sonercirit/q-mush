@@ -41,9 +41,21 @@ test("operation envelopes reject encoded negative zero and preserve zero", () =>
   expect(decodeOperationEnvelope(encoded).payload).toEqual({ nested: 0 });
   const negativeZero = encoded.replace('["primitive",0]', '["primitive",-0]');
   expect(negativeZero).not.toBe(encoded);
-  expect(() => decodeOperationEnvelope(negativeZero)).toThrow(
-    /operation envelope/,
-  );
+  const decodeNegativeZero = (): unknown =>
+    decodeOperationEnvelope(negativeZero);
+  expect(decodeNegativeZero).toThrow(/operation envelope/);
+});
+
+test("operation envelopes reject non-canonical bigint negative zero", () => {
+  const encoded = encodeOperationEnvelope({ ...operation, payload: 0n });
+  const negativeZero = encoded.replace('["bigint","0"]', '["bigint","-0"]');
+  expect(negativeZero).not.toBe(encoded);
+  const decodeNegativeBigintZero = (): unknown =>
+    decodeOperationEnvelope(negativeZero);
+  expect(decodeNegativeBigintZero).toThrow(/operation envelope/);
+  expect(decodeOperationEnvelope(encoded).payload).toBe(0n);
+  const negative = encodeOperationEnvelope({ ...operation, payload: -7n });
+  expect(decodeOperationEnvelope(negative).payload).toBe(-7n);
 });
 
 test("rejects a replay count inconsistent with replay-chain length", () => {
@@ -410,7 +422,7 @@ describe("operation value domain", () => {
       expect(() => createOperation({ ...seed, payload })).toThrow();
 
     for (const payload of [0, [0], { nested: 0 }, [1], new Date(1), { a: 1 }])
-      expect(createOperation({ ...seed, payload }).payload).toBe(payload);
+      expect(createOperation({ ...seed, payload }).payload).toEqual(payload);
   });
 
   test("rejects undefined workspace IDs and round-trips accepted entities", () => {

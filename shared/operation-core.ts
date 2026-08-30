@@ -1,4 +1,5 @@
 import { setAppliedNode } from "./operation-applied-index";
+import { snapshotOperationValue } from "./operation-value";
 
 export interface OperationProtocolError extends Error {
   readonly operationError: "invalid" | "conflict" | "capacity";
@@ -82,107 +83,53 @@ export const classifyOperationPartition = (
 
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
-const validateOperationValue = (
-  value: unknown,
-  seen = new Set<object>(),
-): void => {
-  if (
-    value === undefined ||
-    typeof value === "string" ||
-    typeof value === "boolean" ||
-    typeof value === "bigint" ||
-    value === null
-  )
-    return;
-  if (typeof value === "number") {
-    if (!Number.isFinite(value))
-      throw new Error("Operation numbers must be finite");
-    if (Object.is(value, -0))
-      throw new Error("Operation numbers must not be negative zero");
-    return;
-  }
-  if (typeof value !== "object") throw new Error("Unsupported operation value");
-  if (seen.has(value)) throw new Error("Operation values must not be cyclic");
-  seen.add(value);
-  if (value instanceof Date) {
-    if (!Number.isFinite(value.getTime()))
-      throw new Error("Operation dates must be valid");
-    if (
-      Object.getPrototypeOf(value) !== Date.prototype ||
-      Reflect.ownKeys(value).length > 0
-    )
-      throw new Error("Operation dates must not have own properties");
-  } else if (Array.isArray(value)) {
-    const keys = Reflect.ownKeys(value);
-    if (
-      keys.length !== value.length + 1 ||
-      keys.some(
-        (key) =>
-          key !== "length" &&
-          (typeof key !== "string" ||
-            !/^(0|[1-9]\d*)$/.test(key) ||
-            Number(key) >= value.length),
-      )
-    )
-      throw new Error(
-        "Operation arrays must not be sparse or contain extra properties",
-      );
-    for (let index = 0; index < value.length; index += 1) {
-      if (!Object.hasOwn(value, index))
-        throw new Error("Operation arrays must not be sparse");
-      validateOperationValue(value[index], seen);
-    }
-  } else {
-    const prototype: unknown = Object.getPrototypeOf(value);
-    if (
-      (prototype !== Object.prototype && prototype !== null) ||
-      Object.getOwnPropertySymbols(value).length > 0 ||
-      Object.getOwnPropertyNames(value).length !== Object.keys(value).length
-    )
-      throw new Error(
-        "Operation objects must be plain, string-keyed, and enumerable",
-      );
-    for (const item of Object.values(value)) validateOperationValue(item, seen);
-  }
-  seen.delete(value);
-};
 export const operationSequenceOrder = (sequence: bigint): string => {
   const decimal = sequence.toString();
   return `${decimal.length.toString().padStart(5, "0")}:${decimal}`;
 };
 
-export const createOperation = <TPayload>(
+const validateAndSnapshotOperation = <TPayload>(
   input: OperationInput<TPayload>,
-): Operation<TPayload> => {
-  if (!Number.isInteger(input.schemaVersion) || input.schemaVersion < 1)
+): OperationInput<TPayload> => {
+  const snapshot = snapshotOperationValue(input);
+  if (!Number.isInteger(snapshot.schemaVersion) || snapshot.schemaVersion < 1)
     throw new Error("schemaVersion must be positive");
-  if (input.sequence < 1n) throw new Error("sequence must be positive");
-  for (const parent of Object.values(input.parents))
+  if (snapshot.sequence < 1n) throw new Error("sequence must be positive");
+  for (const parent of Object.values(snapshot.parents))
     if (typeof parent !== "bigint" || parent < 0n)
       throw new Error("Operation parents must be non-negative bigints");
   if (
-    Object.hasOwn(input.parents, input.writerId) &&
-    (input.parents[input.writerId] ?? 0n) >= input.sequence
+    Object.hasOwn(snapshot.parents, snapshot.writerId) &&
+    (snapshot.parents[snapshot.writerId] ?? 0n) >= snapshot.sequence
   )
     throw new Error("Operation own-writer parent must precede sequence");
   if (
-    !Number.isSafeInteger(input.clock.physicalMs) ||
-    input.clock.physicalMs < 0 ||
-    !Number.isSafeInteger(input.clock.logical) ||
-    input.clock.logical < 0
+    !Number.isSafeInteger(snapshot.clock.physicalMs) ||
+    snapshot.clock.physicalMs < 0 ||
+    !Number.isSafeInteger(snapshot.clock.logical) ||
+    snapshot.clock.logical < 0
   )
     throw new Error(
       "Operation clock components must be non-negative safe integers",
     );
-  if (input.clock.writerId !== input.writerId)
+  if (snapshot.clock.writerId !== snapshot.writerId)
     throw new Error("Operation clock writer must match envelope writer");
   if (
-    Object.hasOwn(input.entity, "workspaceId") &&
-    typeof input.entity.workspaceId !== "string"
+    Object.hasOwn(snapshot.entity, "workspaceId") &&
+    typeof snapshot.entity.workspaceId !== "string"
   )
     throw new Error("Operation workspaceId must be omitted or a string");
-  validateOperationValue(input);
-  return { ...input, partition: classifyOperationPartition(input.entity.type) };
+  return snapshot;
+};
+
+export const createOperation = <TPayload>(
+  input: OperationInput<TPayload>,
+): Operation<TPayload> => {
+  const snapshot = validateAndSnapshotOperation(input);
+  return {
+    ...snapshot,
+    partition: classifyOperationPartition(snapshot.entity.type),
+  };
 };
 
 /** @public clock comparator for deterministic replay. */
@@ -418,9 +365,10 @@ export const applyOperation = <TProjection>(
   candidate: Operation,
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
-  validateOperationValue(candidate);
-  if (candidate.clock.writerId !== candidate.writerId)
-    throw operationProtocolError("invalid", "Operation clock writer mismatch");
+  const snapshot = createOperation(candidate);
+  if (snapshot.partition !== candidate.partition)
+    throw operationProtocolError("invalid", "Operation partition mismatch");
+  candidate = snapshot;
   const history: Operation[] = [];
   for (
     let entry = state.replayHead;

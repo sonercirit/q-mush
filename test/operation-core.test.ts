@@ -306,7 +306,7 @@ describe("operation core", () => {
     });
     expect(
       createOperation({ ...validationSeed, parents: validParents }).parents,
-    ).toBe(validParents);
+    ).toEqual(validParents);
     expect(() =>
       createOperation({ ...validationSeed, schemaVersion: 0 }),
     ).toThrow(/schemaVersion/);
@@ -430,27 +430,21 @@ describe("operation core", () => {
     ).toThrow(/equivocation/);
   });
 
-  test("canonicalizes each never-ready candidate a bounded number of times", () => {
-    let payloadReads = 0;
-    const state = foldOperations(
-      MAX_OPERATION_BATCH_SIZE,
-      (index) => {
-        const payload = Object.defineProperty({}, "value", {
-          enumerable: true,
-          get: () => {
-            payloadReads += 1;
-            return "x";
-          },
-        });
-        return {
-          ...operation(`waiting-${String(index)}`, 1n, { ghost: 1n }, "x"),
+  test("rejects accessor candidates before pending admission", () => {
+    const payload = Object.defineProperty({}, "value", {
+      enumerable: true,
+      get: () => "x",
+    });
+    expect(() =>
+      applyOperation(
+        initialApplyState(),
+        {
+          ...operation("waiting", 1n, { ghost: 1n }, "x"),
           payload,
-        };
-      },
-      reducer,
-    );
-    expect(state.pending).toHaveLength(MAX_OPERATION_BATCH_SIZE);
-    expect(payloadReads).toBe(MAX_OPERATION_BATCH_SIZE * 2);
+        },
+        reducer,
+      ),
+    ).toThrow(/data properties/);
   });
 
   test("preserves the applied index structurally during sequential admission", () => {

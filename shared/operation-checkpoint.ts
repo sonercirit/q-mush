@@ -80,7 +80,7 @@ const decodeCheckpointValue = (value: unknown): unknown => {
   if (
     tag === "bigint" &&
     typeof body === "string" &&
-    /^-?(0|[1-9]\d*)$/.test(body)
+    /^(0|-?[1-9]\d*)$/.test(body)
   )
     return BigInt(body);
   if (tag === "date" && typeof body === "string") {
