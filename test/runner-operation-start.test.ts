@@ -11,6 +11,7 @@ const store = {
   acknowledge: () => undefined,
   apply: () => undefined,
   pending: () => [],
+  rejectOutbox: () => undefined,
   state: () => ({ frontier: {} }),
 };
 const installFetch = (

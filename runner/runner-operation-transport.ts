@@ -4,6 +4,25 @@ import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes.ts";
 import { isRecord } from "../shared/validation.ts";
 import type { RunnerOperationRead } from "./runner-operation-sync.ts";
 
+export interface OperationSynchronizationHttpError extends Error {
+  readonly operationSynchronizationStatus: number;
+}
+
+export const isPermanentOperationSynchronizationRejection = (
+  error: unknown,
+): error is OperationSynchronizationHttpError =>
+  error instanceof Error &&
+  "operationSynchronizationStatus" in error &&
+  error.operationSynchronizationStatus === 400;
+
+const synchronizationHttpError = (
+  status: number,
+): OperationSynchronizationHttpError =>
+  Object.assign(
+    new Error(`Operation synchronization failed (${String(status)})`),
+    { operationSynchronizationStatus: status },
+  );
+
 const requestJson = async (
   origin: string,
   token: string,
@@ -23,10 +42,7 @@ const requestJson = async (
       signal,
     },
   );
-  if (!response.ok)
-    throw new Error(
-      `Operation synchronization failed (${String(response.status)})`,
-    );
+  if (!response.ok) throw synchronizationHttpError(response.status);
   return response.json();
 };
 

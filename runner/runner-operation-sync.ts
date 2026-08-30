@@ -1,3 +1,4 @@
+import { isPermanentOperationSynchronizationRejection } from "./runner-operation-transport.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
 
 interface OperationStore {
@@ -16,6 +17,12 @@ interface OperationStore {
     ownerId: string,
     partition: OperationPartition,
   ) => readonly string[];
+  readonly rejectOutbox: (
+    ownerId: string,
+    partition: OperationPartition,
+    envelopes: readonly string[],
+    reason: string,
+  ) => void;
   readonly state: (
     ownerId: string,
     partition: OperationPartition,
@@ -51,8 +58,13 @@ const synchronizePartition = async (request: {
   const { partition, signal, store, transport } = request;
   const pending = store.pending(ownerAlias, partition);
   if (pending.length > 0) {
-    await transport.writeBatch(partition, pending, signal);
-    store.acknowledge(ownerAlias, partition, pending);
+    try {
+      await transport.writeBatch(partition, pending, signal);
+      store.acknowledge(ownerAlias, partition, pending);
+    } catch (error) {
+      if (!isPermanentOperationSynchronizationRejection(error)) throw error;
+      store.rejectOutbox(ownerAlias, partition, pending, error.message);
+    }
   }
   let hasMore: boolean;
   do {
