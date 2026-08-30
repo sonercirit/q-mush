@@ -432,7 +432,9 @@ export function createRequestHandler(
   const { braveSearch, database, generic, googleAuth, openAi } = integrations;
   const { openRouter, prompts, runnerExecutables, runners } = integrations;
   const { sessions, toolSettings, workspaces } = integrations;
-  const sync = createOperationSynchronization(database, googleAuth);
+  const sync = createOperationSynchronization(database, googleAuth, undefined, {
+    runnerAccount: runners.runnerAccount,
+  });
   const appPage = prepareBody(pages.app);
   const browserBundle = prepareBody(clientJavaScript);
   const faviconSource = readFavicon();

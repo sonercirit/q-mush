@@ -38,6 +38,7 @@ import {
 } from "./runner-container.ts";
 import { embeddedClientRelease } from "./runner-embedded-client-release.ts";
 import { reportRunnerFatalError } from "./runner-fatal-error.ts";
+import { startRunnerOperationSynchronization } from "./runner-operation-start.ts";
 import { completeRunnerRegistration } from "./runner-registration.ts";
 import { recordReplicaRetry } from "./runner-replica-retry.ts";
 import { createRunnerReplicaStore } from "./runner-replica-store.ts";
@@ -572,6 +573,14 @@ async function run(): Promise<void> {
 
   const replicaDirectory = join(runnerDirectory, "replica");
   const replica = createRunnerReplicaStore(replicaDirectory);
+  const operationSynchronization =
+    configuration === undefined
+      ? new AbortController()
+      : startRunnerOperationSynchronization(
+          replica.operations,
+          configuration.serverOrigin,
+          configuration.token,
+        );
   if (configuration !== undefined && configurationPath !== undefined) {
     void catchUpAccountExport(
       replicaDirectory,
@@ -624,6 +633,7 @@ async function run(): Promise<void> {
       );
     }
   } finally {
+    operationSynchronization.abort();
     await app.stop();
     replica.close();
   }

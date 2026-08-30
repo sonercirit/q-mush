@@ -112,13 +112,22 @@ export const createOperationSynchronization = (
   database: AppDatabase,
   googleAuth: Pick<GoogleAuth, "authenticatedUser">,
   limits?: OperationIntakeLimits,
+  runnerAuth?: {
+    readonly runnerAccount: (
+      request: Request,
+    ) => { readonly userId: string } | undefined;
+  },
 ) => {
   const intake = createOperationIntake(
     limits === undefined ? { database } : { database, limits },
   );
   const store = createOperationStore({ database });
   return async (request: Request): Promise<Response> => {
-    const user = googleAuth.authenticatedUser(request);
+    const browserUser = googleAuth.authenticatedUser(request);
+    const runnerUser = runnerAuth?.runnerAccount(request);
+    const user =
+      browserUser ??
+      (runnerUser === undefined ? null : { id: runnerUser.userId });
     if (user === null) return new Response("Unauthorized", { status: 401 });
     if (request.method !== "POST" && request.method !== "PUT")
       return new Response("Method Not Allowed", {
@@ -138,12 +147,14 @@ export const createOperationSynchronization = (
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined)
       return Response.json({ error: "Invalid request" }, { status: 400 });
-    if (parsed.ownerId !== user.id)
+    const runnerAlias = runnerUser !== undefined && parsed.ownerId === "self";
+    if (parsed.ownerId !== user.id && !runnerAlias)
       return new Response("Forbidden", { status: 403 });
+    const ownerId = user.id;
     try {
       if ("frontier" in parsed) {
         const page = store.readEncodedEnvelopes(
-          user.id,
+          ownerId,
           parsed.partition,
           parsed.frontier,
           MAX_ENVELOPE_PAGE_SIZE,
@@ -180,7 +191,7 @@ export const createOperationSynchronization = (
           { status: 400 },
         );
       const result = intake.apply(
-        user.id,
+        ownerId,
         parsed.partition,
         operations,
         (projection, operation) => [...projection, operation.operationId],
