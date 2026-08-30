@@ -51,7 +51,6 @@ export const createRunnerOperationStore = (database: Database) => {
       }
       database.transaction(() => {
         const successor = applyOperationIntakeBatch(
-          ownerId,
           partition,
           state(ownerId, partition),
           valid,

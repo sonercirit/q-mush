@@ -45,7 +45,6 @@ interface IntakeResources<Projection> {
 }
 
 export const applyOperationIntakeBatch = <Projection>(
-  ownerId: string,
   partition: OperationPartition,
   state: OperationApplyState<Projection>,
   candidates: readonly IntakeCandidate[],

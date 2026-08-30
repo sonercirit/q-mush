@@ -69,7 +69,6 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             ? initialOperationApplyState<OperationCheckpointProjection>([])
             : decodeOperationCheckpoint(encoded);
         state = applyOperationIntakeBatch(
-          ownerId,
           partition,
           state,
           operations.map((operation) => ({ encoded: "", operation })),

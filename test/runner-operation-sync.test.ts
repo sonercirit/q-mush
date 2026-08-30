@@ -37,6 +37,10 @@ const harness = (initial: Partial<HarnessState> = {}) => {
   };
 };
 
+const noEnvelopes: readonly string[] = [];
+const emptyPage = () =>
+  Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
+
 test("resumes pull pages from each durably applied frontier", async () => {
   const replica = harness();
   const frontiers: bigint[] = [];
@@ -48,7 +52,7 @@ test("resumes pull pages from each durably applied frontier", async () => {
         frontiers.push(frontier["writer"] ?? 0n);
         page += 1;
         return Promise.resolve({
-          envelopes: page === 1 ? ["one"] : page === 2 ? ["two"] : [],
+          envelopes: page === 1 ? ["one"] : page === 2 ? ["two"] : noEnvelopes,
           hasMore: page < 2,
         });
       },
@@ -56,18 +60,31 @@ test("resumes pull pages from each durably applied frontier", async () => {
     },
     new AbortController().signal,
   );
-  expect(frontiers.slice(0, 2)).toEqual([0n, 1n]);
-  expect(replica.events.slice(0, 2)).toEqual(["apply:one", "apply:two"]);
+  expect(frontiers).toEqual([0n, 1n, 2n]);
+  expect(replica.events).toEqual(["apply:one", "apply:two", "apply:"]);
 });
 
 test("acknowledges pushed outbox only after transport success", async () => {
+  const successful = harness({ pending: ["local"] });
+  await synchronizeRunnerOperations(
+    successful.store,
+    {
+      writeBatch: () => Promise.resolve(),
+      readPage: emptyPage,
+    },
+    new AbortController().signal,
+  );
+  expect(successful.events[0]).toBe("ack");
+  expect(successful.state.pending).toEqual([]);
+
   const replica = harness({ pending: ["local"] });
+  const offline = new Error("offline");
   await expect(
     synchronizeRunnerOperations(
       replica.store,
       {
-        readPage: () => Promise.resolve({ envelopes: [], hasMore: false }),
-        writeBatch: () => Promise.reject(new Error("offline")),
+        writeBatch: () => Promise.reject(offline),
+        readPage: emptyPage,
       },
       new AbortController().signal,
     ),
