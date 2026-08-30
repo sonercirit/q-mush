@@ -106,7 +106,11 @@ const validateOperationValue = (
     if (!Number.isFinite(value.getTime()))
       throw new Error("Operation dates must be valid");
   } else if (Array.isArray(value)) {
-    for (const item of value) validateOperationValue(item, seen);
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index))
+        throw new Error("Operation arrays must not be sparse");
+      validateOperationValue(value[index], seen);
+    }
   } else {
     const prototype: unknown = Object.getPrototypeOf(value);
     if (

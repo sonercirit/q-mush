@@ -132,6 +132,7 @@ describe("operation checkpoints", () => {
       ["bigint", "123"],
       ["array", ["primitive", "x"]],
       ["object", [["value", ["bigint", "123"]]]],
+      [undefined],
     ];
     for (const payload of payloads) {
       const item = { ...operation("a", 1n, {}, "x", 1), payload };

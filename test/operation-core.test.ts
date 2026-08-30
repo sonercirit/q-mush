@@ -10,6 +10,7 @@ import {
   frontierCovers,
   materializeApplied,
   MAX_OPERATION_BATCH_SIZE,
+  operationFingerprint,
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
@@ -337,6 +338,27 @@ describe("operation core", () => {
       expect(() => createOperation({ ...validationSeed, payload })).toThrow(
         message,
       );
+    const sparsePayload = Array(1);
+    expect(() =>
+      createOperation({ ...validationSeed, payload: sparsePayload }),
+    ).toThrow(/sparse/);
+    expect(operationFingerprint([])).not.toBe(
+      operationFingerprint([undefined]),
+    );
+    const sparseCandidate = {
+      ...validationSeed,
+      parents: {},
+      payload: sparsePayload,
+    };
+    const emptyCandidate = { ...sparseCandidate, payload: [] };
+    const emptyState = applyOperation(
+      initialApplyState(),
+      emptyCandidate,
+      reducer,
+    );
+    expect(() => applyOperation(emptyState, sparseCandidate, reducer)).toThrow(
+      /sparse/,
+    );
     const shared = { value: "shared" };
     expect(
       createOperation({ ...validationSeed, payload: { a: shared, b: shared } })

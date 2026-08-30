@@ -79,7 +79,8 @@
   pending-against-pending operation-ID and writer-sequence checks. HLC
   components are non-negative safe integers. Frontier/parent access is
   own-property-safe, including `__proto__`; canonical identity explicitly
-  preserves `undefined` object-property presence. The checkpoint codec currently
+  preserves `undefined` object-property and dense array-element presence, while
+  operation validation rejects sparse arrays. The checkpoint codec currently
   supports only `readonly string[]` projections; its exported types enforce that
   restriction until a caller-supplied projection codec is introduced. Operation
   values accept primitives, arrays, plain string-keyed objects, and valid Dates;
@@ -124,16 +125,16 @@
   acknowledged even when history is full. Intake decodes loaded checkpoints
   once, persists validated successors, and serves stored envelope strings
   without a decode/re-encode pass. Complete checkpoint derivation remains
-  O(history) on the single shared SQLite connection, so request work is
-  O(history), not O(batch), and serializes every other server write.
-  One-operation measurements were 7 ms at 100 operations, 27 ms at 500, 46 ms at
-  1,000, 70 ms at 1,500, and 89 ms at 2,000; measured 200-operation batches grew
-  87–188 ms, one operation at 1,990 took 96 ms, and the 2,000-operation
-  checkpoint was 2,661,057 bytes (1,330 B/op), bounding throughput before the
-  history cap. Every envelope binds both `entity.accountId` and `writerId` to
-  the authenticated account. Physical pairing is transcript-bound, five-minute,
-  one-use/rate-limited, constant-time checked; the browser grant and pairing
-  transcript are never logged.
+  O(history) on the single shared SQLite connection, and applying each batch
+  candidate walks that history, so request work is O(batch × history) and
+  serializes every other server write. One-operation measurements were 7 ms at
+  100 operations, 27 ms at 500, 46 ms at 1,000, 70 ms at 1,500, and 89 ms at
+  2,000; measured 200-operation batches grew 87–188 ms, one operation at 1,990
+  took 96 ms, and the 2,000-operation checkpoint was 2,661,057 bytes (1,330
+  B/op), bounding throughput before the history cap. Every envelope binds both
+  `entity.accountId` and `writerId` to the authenticated account. Physical
+  pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
+  checked; the browser grant and pairing transcript are never logged.
 
 ## Operational rules
 
