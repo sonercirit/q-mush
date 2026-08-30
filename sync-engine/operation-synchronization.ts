@@ -126,10 +126,8 @@ export const createOperationSynchronization = (
   return async (request: Request): Promise<Response> => {
     const browserUser = googleAuth.authenticatedUser(request);
     const runnerUser = runnerAuth?.runnerAccount(request);
-    const user =
-      browserUser ??
-      (runnerUser === undefined ? null : { id: runnerUser.userId });
-    if (user === null) return new Response("Unauthorized", { status: 401 });
+    if (browserUser === null && runnerUser === undefined)
+      return new Response("Unauthorized", { status: 401 });
     if (request.method !== "POST" && request.method !== "PUT")
       return new Response("Method Not Allowed", {
         status: 405,
@@ -148,10 +146,14 @@ export const createOperationSynchronization = (
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined)
       return Response.json({ error: "Invalid request" }, { status: 400 });
-    const runnerAlias = runnerUser !== undefined && parsed.ownerId === "self";
-    if (parsed.ownerId !== user.id && !runnerAlias)
+    const ownerId =
+      runnerUser === undefined ? browserUser?.id : runnerUser.userId;
+    const ownsScope =
+      runnerUser === undefined
+        ? parsed.ownerId === ownerId
+        : parsed.ownerId === "self";
+    if (ownerId === undefined || !ownsScope)
       return new Response("Forbidden", { status: 403 });
-    const ownerId = user.id;
     try {
       if ("frontier" in parsed) {
         const page = store.readEncodedEnvelopes(
@@ -176,8 +178,8 @@ export const createOperationSynchronization = (
       if (
         operations.some(
           (operation) =>
-            operation.entity.accountId !== user.id ||
-            operation.writerId !== user.id,
+            operation.entity.accountId !== ownerId ||
+            operation.writerId !== ownerId,
         )
       )
         return new Response("Forbidden", { status: 403 });
@@ -196,7 +198,7 @@ export const createOperationSynchronization = (
         parsed.partition,
         operations,
         (projection, operation) => [...projection, operation.operationId],
-        user.id,
+        ownerId,
         now,
       );
       return Response.json({

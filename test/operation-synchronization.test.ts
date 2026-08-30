@@ -141,17 +141,17 @@ test("operation synchronization rejects unauthenticated requests", async () => {
   expect((await handler()(request(body()))).status).toBe(401);
 });
 
-test("operation synchronization resolves runner self only after token auth", async () => {
-  const response = await handler(
-    undefined,
-    undefined,
-    "owner-1",
-  )(request(body("self")));
-  expect(response.status).toBe(200);
-});
-
-test("operation synchronization rejects cross-owner requests", async () => {
-  expect((await handler("owner-1")(request(body("owner-2")))).status).toBe(403);
+test("operation synchronization isolates runner aliases from browser owner IDs", async () => {
+  const statuses = await Promise.all([
+    handler(undefined, undefined, "owner-1")(request(body("self"))),
+    handler(undefined, undefined, "owner-1")(request(body("owner-1"))),
+    handler("owner-1")(request(body("self"))),
+    handler("owner-1")(request(body("owner-1"))),
+    handler("owner-1")(request(body("owner-2"))),
+  ]);
+  expect(statuses.map(({ status }) => status)).toEqual([
+    200, 403, 403, 200, 403,
+  ]);
 });
 
 test("operation synchronization rejects malformed payloads", async () => {
