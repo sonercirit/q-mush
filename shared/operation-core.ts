@@ -81,6 +81,9 @@ export const classifyOperationPartition = (
   throw new Error(`Unknown operation entity: ${entityType}`);
 };
 
+const isOperationPartition = (value: unknown): value is OperationPartition =>
+  value === "session" || value === "non-session";
+
 const compareText = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
 export const operationSequenceOrder = (sequence: bigint): string => {
@@ -111,7 +114,6 @@ const inputKeys = [
   "payload",
 ] as const;
 
-const validatedOperationSnapshots = new WeakSet<object>();
 function validateAndSnapshotOperation<TPayload>(
   input: OperationInput<TPayload>,
   includesPartition?: false,
@@ -159,12 +161,23 @@ function validateAndSnapshotOperation<TPayload>(
     );
   if (snapshot.clock.writerId !== snapshot.writerId)
     throw new Error("Operation clock writer must match envelope writer");
+  if (includesPartition) {
+    if (!("partition" in snapshot))
+      throw operationProtocolError("invalid", "Operation partition is invalid");
+    const declaredPartition: unknown = snapshot.partition;
+    if (!isOperationPartition(declaredPartition))
+      throw operationProtocolError("invalid", "Operation partition is invalid");
+    const classifiedPartition = classifyOperationPartition(
+      snapshot.entity.type,
+    );
+    if (declaredPartition !== classifiedPartition)
+      throw operationProtocolError("invalid", "Operation partition mismatch");
+  }
   if (
     Object.hasOwn(snapshot.entity, "workspaceId") &&
     typeof snapshot.entity.workspaceId !== "string"
   )
     throw new Error("Operation workspaceId must be omitted or a string");
-  validatedOperationSnapshots.add(snapshot);
   return snapshot;
 }
 
@@ -176,12 +189,10 @@ export const createOperation = <TPayload>(
   input: OperationInput<TPayload>,
 ): Operation<TPayload> => {
   const snapshot = validateAndSnapshotOperation(input);
-  const operation = {
+  return {
     ...snapshot,
     partition: classifyOperationPartition(snapshot.entity.type),
   };
-  validatedOperationSnapshots.add(operation);
-  return operation;
 };
 
 /** @public clock comparator for deterministic replay. */
@@ -417,11 +428,7 @@ export const applyOperation = <TProjection>(
   candidate: Operation,
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
-  const snapshot = validatedOperationSnapshots.has(candidate)
-    ? candidate
-    : snapshotOperationEnvelope(candidate);
-  if (snapshot.partition !== candidate.partition)
-    throw operationProtocolError("invalid", "Operation partition mismatch");
+  const snapshot = snapshotOperationEnvelope(candidate);
   candidate = snapshot;
   const history: Operation[] = [];
   for (
