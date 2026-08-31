@@ -54,6 +54,10 @@ export const createRunnerOperationStore = (
       partition: OperationPartition,
       envelopes: readonly string[],
       source: OperationReplicaSource,
+      stability?: {
+        readonly stableClock: HybridTimestamp | null;
+        readonly stableFrontier: CausalFrontier | null;
+      },
     ) {
       if (envelopes.length === 0) return;
       if (
@@ -111,7 +115,7 @@ export const createRunnerOperationStore = (
           }
           try {
             let acceptedOperation: typeof operation | undefined;
-            const candidate = applyOperationIntakeBatch(
+            let candidate = applyOperationIntakeBatch(
               partition,
               successor,
               [{ encoded, operation }],
@@ -127,6 +131,16 @@ export const createRunnerOperationStore = (
                 ],
               },
             );
+            if (
+              stability?.stableClock != null &&
+              stability.stableFrontier != null &&
+              frontierCovers(candidate.frontier, stability.stableFrontier)
+            )
+              candidate = stabilizeOperationApplyState(
+                candidate,
+                stability.stableClock,
+                (projection, item) => [...projection, item.operationId],
+              );
             const encodedCheckpoint = encodeOperationCheckpoint(candidate);
             if (
               checkpointByteLength(encodedCheckpoint) >

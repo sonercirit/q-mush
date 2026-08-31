@@ -4,41 +4,36 @@ import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
-import { stabilizeOperationApplyState } from "../shared/operation-stability";
 import {
   appendOperationId,
   applyOperationList,
   testApplyState,
   testOperation,
 } from "./operation-core-test-support";
+import { stableArrayState } from "./operation-stability-test-support";
 
 const decodeTagged = (encoded: string): [string, unknown][] => {
   const parsed: unknown = JSON.parse(encoded);
   if (!Array.isArray(parsed) || !Array.isArray(parsed[1]))
     throw new Error("Invalid fixture");
-  return parsed[1] as [string, unknown][];
+  return parsed[1].flatMap((entry): [string, unknown][] =>
+    Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string"
+      ? [[entry[0], entry[1]]]
+      : [],
+  );
 };
 const withoutStableClock = (encoded: string): string => {
   const parsed: unknown = JSON.parse(encoded);
   if (!Array.isArray(parsed) || !Array.isArray(parsed[1]))
     throw new Error("Invalid fixture");
-  parsed[1] = (parsed[1] as [string, unknown][]).filter(
-    ([key]) => key !== "stableClock",
+  parsed[1] = parsed[1].filter(
+    (entry) => Array.isArray(entry) && entry[0] !== "stableClock",
   );
   return JSON.stringify(parsed);
 };
 
 describe("stable checkpoint codec", () => {
-  const stableState = () =>
-    stabilizeOperationApplyState(
-      applyOperationList(
-        [testOperation("a", 1n, {}, "a", 10)],
-        testApplyState<readonly string[]>([]),
-        appendOperationId,
-      ),
-      { physicalMs: 10, logical: 0, writerId: "a" },
-      appendOperationId,
-    );
+  const stableState = stableArrayState;
 
   test("round trips the tenth stableClock field", () => {
     const encoded = encodeOperationCheckpoint(stableState());
@@ -68,10 +63,9 @@ describe("stable checkpoint codec", () => {
         }),
       ),
     ).toThrow(/clock/);
-    const encoded = JSON.parse(encodeOperationCheckpoint(state)) as [
-      string,
-      [string, unknown][],
-    ];
+    const encoded: unknown = JSON.parse(encodeOperationCheckpoint(state));
+    if (!Array.isArray(encoded) || !Array.isArray(encoded[1]))
+      throw new Error("Invalid fixture");
     encoded[1].push(["extra", ["primitive", null]]);
     expect(() => decodeOperationCheckpoint(JSON.stringify(encoded))).toThrow(
       /fields/,

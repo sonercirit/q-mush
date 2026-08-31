@@ -23,8 +23,8 @@ interface OperationStoreResources {
 }
 
 export interface StoredOperationStability {
-  readonly stableClock: unknown | null;
-  readonly stableFrontier: unknown | null;
+  readonly stableClock: unknown;
+  readonly stableFrontier: unknown;
 }
 
 export interface EncodedOperationEnvelopePage {
@@ -91,6 +91,16 @@ function buildOperationEnvelopeQuery(
 export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
+  const encodedStability = (state?: OperationApplyState<readonly string[]>) => {
+    if (state === undefined || state.stableClock === undefined)
+      return { stableClock: null, stableFrontier: null };
+    return {
+      stableClock: JSON.stringify(state.stableClock),
+      stableFrontier: JSON.stringify(
+        prepareSynchronizationFrontier(state.baseFrontier),
+      ),
+    };
+  };
   const classifyEnvelopeIdentity = (
     ownerId: string,
     operation: Operation,
@@ -191,7 +201,7 @@ export function createOperationStore(resources: OperationStoreResources) {
         .from(operationCheckpoints)
         .where(activeCheckpointScope(ownerId, partition))
         .get();
-      const parse = (value: string | null | undefined): unknown | null =>
+      const parse = (value: string | null | undefined): unknown =>
         value == null ? null : JSON.parse(value);
       return {
         stableClock: parse(row?.stableClock),
@@ -221,16 +231,7 @@ export function createOperationStore(resources: OperationStoreResources) {
               userId: ownerId,
               partition,
               encodedCheckpoint,
-              stableClock:
-                state?.stableClock === undefined
-                  ? null
-                  : JSON.stringify(state?.stableClock),
-              stableFrontier:
-                state?.stableClock === undefined
-                  ? null
-                  : JSON.stringify(
-                      prepareSynchronizationFrontier(state?.baseFrontier ?? {}),
-                    ),
+              ...encodedStability(state),
               ...createdAuditFields(actorId, now),
             })
             .run();
@@ -240,16 +241,7 @@ export function createOperationStore(resources: OperationStoreResources) {
           .update(operationCheckpoints)
           .set({
             encodedCheckpoint,
-            stableClock:
-              state?.stableClock === undefined
-                ? null
-                : JSON.stringify(state?.stableClock),
-            stableFrontier:
-              state?.stableClock === undefined
-                ? null
-                : JSON.stringify(
-                    prepareSynchronizationFrontier(state?.baseFrontier ?? {}),
-                  ),
+            ...encodedStability(state),
             ...updatedAuditFields(actorId, now),
           })
           .where(eq(operationCheckpoints.id, existing.id))

@@ -17,7 +17,9 @@ const replayOldestFirst = (head: ReplayEntry | undefined): Operation[] => {
   operations.reverse();
   return operations;
 };
-const replayHead = (operations: readonly Operation[]): ReplayEntry | undefined => {
+const replayHead = (
+  operations: readonly Operation[],
+): ReplayEntry | undefined => {
   let head: ReplayEntry | undefined;
   for (const operation of operations) head = { operation, previous: head };
   return head;
@@ -50,24 +52,17 @@ export const stabilizeOperationApplyState = <TProjection>(
     if (writerClock === undefined) return state;
     cap = earlierClock(cap, writerClock);
   }
-  for (const pending of state.pending) {
-    // Strictly below pending: equality is not safe, unlike the other caps.
-    if (compareClocks(pending.clock, cap) <= 0) {
-      const index = replay.findIndex(
-        (operation) => compareClocks(operation.clock, pending.clock) >= 0,
-      );
-      const foldCount = index < 0 ? replay.length : index;
-      return foldPrefix(state, replay, foldCount, cap, reducer);
-    }
-  }
   const foldCount = replay.findIndex(
-    (operation) => compareClocks(operation.clock, cap) > 0,
+    (operation) =>
+      compareClocks(operation.clock, cap) > 0 ||
+      state.pending.some(
+        (pending) => compareClocks(operation.clock, pending.clock) >= 0,
+      ),
   );
   return foldPrefix(
     state,
     replay,
     foldCount < 0 ? replay.length : foldCount,
-    cap,
     reducer,
   );
 };
@@ -76,12 +71,9 @@ const foldPrefix = <TProjection>(
   state: OperationApplyState<TProjection>,
   replay: readonly Operation[],
   requestedCount: number,
-  cap: HybridTimestamp,
   reducer: (projection: TProjection, operation: Operation) => TProjection,
 ): OperationApplyState<TProjection> => {
-  let count = requestedCount;
-  while (count > 0 && compareClocks(replay[count - 1]!.clock, cap) > 0)
-    count -= 1;
+  const count = requestedCount;
   if (count === 0) return state;
   const folded = replay.slice(0, count);
   const retained = replay.slice(count);

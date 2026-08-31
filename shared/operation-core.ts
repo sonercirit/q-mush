@@ -22,7 +22,6 @@ export const isOperationProtocolError = (
     value.operationError === "invalid" ||
     value.operationError === "conflict");
 
-export { classifyOperationPartition } from "./operation-partitions";
 export type OperationPartition = "non-session" | "session";
 export type CausalFrontier = Readonly<Record<string, bigint>>;
 

@@ -157,6 +157,39 @@
   pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
   checked; the browser grant and pairing transcript are never logged.
 
+## Operation stability compaction
+
+- Checkpoints now carry `stableClock`; decoding accepts the legacy exact
+  nine-field form as unstable and the exact ten-field form, while rejecting
+  clocks inconsistent with the folded base, replay, or pending set. The engine
+  folds only a clock-ordered replay prefix at/below every frontier writer's
+  latest operation clock, with fully folded writers conservatively represented
+  by the prior `stableClock`; strictly before every pending clock; and with
+  `physicalMs < now - 5 minutes`. Subtracting one from the integral drift cutoff
+  makes that last strict condition an inclusive HLC cap. Intake's strict
+  per-writer sequence/clock advance and authenticated drift bound ensure future
+  admissions are strictly above the result. Retained replay and pending clocks
+  are likewise strictly above it. A dormant fully folded writer can therefore
+  pin stability indefinitely; whether future device writer identity needs a
+  retirement protocol remains open.
+- The engine persists JSON `stable_clock` and decimal-string `stable_frontier`
+  columns beside the checkpoint and publishes them on pull pages without blob
+  decoding. A runner folds against the published clock only after its applied
+  frontier covers the published frontier; this prevents an early bootstrap page
+  from folding before a later writer's old-clock page arrives. Local writer and
+  pending caps still apply. Envelope identities are pre-screened against durable
+  rows before core admission on both sides, so folded duplicates acknowledge
+  without quarantine and fingerprint mismatches conflict. Engine drift checks
+  happen only after this screen, fixing retries of acknowledged operations older
+  than five minutes.
+- The 2,000-operation limit now bounds retained replay plus pending work, not
+  total envelope rows; the 4 MiB bound applies after attempted folding. This
+  unwedges representation growth while immutable envelope rows intentionally
+  continue growing with account history. Durable subscriber receipts remain
+  deferred: they become necessary when scope compaction actually deletes those
+  rows (and then require the documented two eligible durable replicas), not for
+  this checkpoint representation compaction.
+
 ## Operational rules
 
 - Export revision caches invalidate on both same-connection total changes and

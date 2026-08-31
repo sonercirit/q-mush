@@ -2,11 +2,11 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
-import type {
-  Operation,
-  OperationPartition,
+import {
+  operationFingerprint,
+  type Operation,
+  type OperationPartition,
 } from "../shared/operation-core.ts";
-import { operationFingerprint } from "../shared/operation-core.ts";
 
 export type OperationReplicaSource = "local" | "remote";
 

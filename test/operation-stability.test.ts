@@ -33,7 +33,11 @@ describe("operation stability", () => {
     expect(Object.keys(materializeApplied(folded.applied))).toHaveLength(2);
 
     const foldedSuccessor = applyOperation(folded, between, appendOperationId);
-    const unfoldedSuccessor = applyOperation(unfolded, between, appendOperationId);
+    const unfoldedSuccessor = applyOperation(
+      unfolded,
+      between,
+      appendOperationId,
+    );
     expect(foldedSuccessor.projection).toEqual(unfoldedSuccessor.projection);
     expect(foldedSuccessor.frontier).toEqual(unfoldedSuccessor.frontier);
   });

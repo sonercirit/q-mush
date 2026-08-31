@@ -301,7 +301,7 @@ const validateCheckpointConsistency = (
   const replay = replayOperations(state.replayHead);
   if (
     (state.stableClock === undefined) !==
-      (Object.keys(state.baseFrontier).length === 0)
+    (Object.keys(state.baseFrontier).length === 0)
   )
     throw new Error("Invalid operation checkpoint stable frontier");
   if (

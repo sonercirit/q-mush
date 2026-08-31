@@ -29,6 +29,10 @@ interface OperationStore {
     partition: OperationPartition,
     envelopes: readonly string[],
     source: "remote",
+    stability?: {
+      readonly stableClock: HybridTimestamp | null;
+      readonly stableFrontier: CausalFrontier | null;
+    },
   ) => void;
   readonly pending: (
     ownerId: string,
@@ -208,25 +212,21 @@ const synchronizePartition = async (
       frontier: store.state(ownerAlias, partition).frontier,
     });
     if (page.envelopes.length > 0) {
-      store.apply(ownerAlias, partition, page.envelopes, "remote");
-      store.compact?.(
-        ownerAlias,
-        partition,
-        page.stableClock ?? null,
-        page.stableFrontier ?? null,
-      );
+      store.apply(ownerAlias, partition, page.envelopes, "remote", {
+        stableClock: page.stableClock ?? null,
+        stableFrontier: page.stableFrontier ?? null,
+      });
       if (store.state(ownerAlias, partition).stalled)
         throw new Error(
           `Operation synchronization partition stalled: ${partition}`,
         );
     }
-    if (page.envelopes.length === 0)
-      store.compact?.(
-        ownerAlias,
-        partition,
-        page.stableClock ?? null,
-        page.stableFrontier ?? null,
-      );
+    store.compact?.(
+      ownerAlias,
+      partition,
+      page.stableClock ?? null,
+      page.stableFrontier ?? null,
+    );
     hasMore = page.hasMore;
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];
