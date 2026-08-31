@@ -168,3 +168,69 @@
   replica APIs remain browser-grant protected. Unlike the engine active view,
   the runner checks that grant before method handling, so an unpaired non-GET
   `/api/local/*` request deliberately returns 401 rather than revealing 405.
+- Runner operation replicas keep immutable encoded envelopes plus acceptance,
+  source, rejection, and outbox metadata in the per-account SQLite. `accepted`
+  means schema/intake admission, not cryptographic verification. Valid prefix
+  log/projection/checkpoint writes share one transaction. Because the engine
+  already used the same intake core, any malformed envelope or decoded remote
+  intake rejection indicates corruption or version disagreement: the runner
+  records it idempotently in a separate quarantine table using its real
+  operation/writer/sequence identity, or a SHA-256 envelope identity when it
+  cannot decode one, and durably stalls that partition. The accepted prefix is
+  committed, the checkpoint/pull frontier never passes the rejected identity,
+  and later page entries are neither accepted nor retained pending. Polling
+  continues at capped failure backoff, logs the stall, and still synchronizes
+  the other partition and local outbox. Repeated delivery is a no-op, preventing
+  quarantine growth. Genuine storage failures still roll back the whole batch.
+  Runner checkpoints use the shared 4 MiB encoded bound; overflow follows the
+  same durable partition-stall path rather than growing without limit. Local
+  producers additionally fail before durable queueing when an encoded envelope
+  exceeds the shared 16 KiB engine intake bound; the engine retains its route
+  check as defense in depth. An operator inspects/exports quarantine rows,
+  repairs the engine or updates the runner, then rebuilds the replica from its
+  checkpoint; there is intentionally no skip frontier or automatic re-admission.
+  Local outbox HTTP 400 batch rejections are fail-closed with per-writer
+  head-of-line stalling. The runner isolates a rejected batch singly in
+  writer-sequence order and stops that writer at its first rejected envelope:
+  successors remain ordinary durable pending rows, are neither pushed nor
+  acknowledged, and cannot fill the engine's causal pending buffer. Other
+  writers can continue independently; today writer identity is the account, so a
+  permanent head poison blocks that partition's complete local outbox. Each
+  later cycle retries only the stalled writer head before considering its
+  successors. A successful head retry atomically clears its stall/pending state,
+  then the queued suffix resumes in order; every acknowledged local operation
+  has therefore reached engine state that can eventually apply it. Pull and the
+  other partition remain unaffected. Stall state exposes the head operation,
+  writer, bounded rejection reason, and exact queued-behind depth; cycle errors
+  report at most five identities plus total stall and queued counts. HTTP
+  rejection text is whitespace-normalized and bounded to its first 400
+  characters before entering the transport error and durable stall reason. Any
+  partition pull failure, pull stall, outbox stall, or transport failure makes
+  the cycle fail for one bounded logged message and capped exponential backoff
+  even when its peer succeeds; successful peer work remains committed. HTTP 507,
+  403, and transport failures stay pending without classification or set-aside.
+  In particular, 403 may be transient and never causes a tight retry loop.
+  Operators repair the head envelope/clock, engine policy, or runner version,
+  then rebuild while queued local rows remain durable; there is no skip/delete
+  recovery path because preservation is safer than silent divergence. A
+  permanently stalled outbox deliberately pins the overall cycle in failure
+  backoff, so healthy-partition pull latency remains at the 30-second cap
+  indefinitely; per-partition backoff is deferred. Synchronization starts only
+  from the WebSocket operational/ready callback, aborts on disconnect, and
+  restarts after the next ready handshake. It pushes up to 512 pending rows and
+  pulls 256-row pages until `hasMore` clears. Empty pages do not open write
+  transactions. Successful cycles poll every 5 seconds with ±20% jitter (slower
+  than the former 1-second herd); failures use 1-second exponential backoff
+  capped at 30 seconds and success resets it. Shutdown aborts requests. The HTTP
+  operation route accepts the native runner bearer token only with owner alias
+  `self`, avoiding account identity in the runner protocol; simultaneous browser
+  and runner authentication deliberately uses runner identity/`self` alias
+  semantics. No runner-local command producer exists yet; which command first
+  emits local operations remains open. A producer also cannot currently
+  construct an admissible writer: intake requires
+  `writerId === entity.accountId ===` the authenticated user UUID, while the
+  runner knows only origin and bearer token. Until an identity plane supplies
+  that UUID (or intake introduces a sound runner writer mapping), a future
+  runner-produced operation would receive 403 forever; retained outbox data and
+  capped backoff prevent loss and a tight livelock but do not make it
+  synchronizable.

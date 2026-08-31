@@ -9,14 +9,15 @@ import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
-  applyOperation,
   operationProtocolError,
-  snapshotOperationEnvelope,
   type CausalFrontier,
   type Operation,
-  type OperationApplyState,
   type OperationPartition,
 } from "../shared/operation-core";
+import {
+  applyOperationIntakeBatch,
+  initialOperationApplyState,
+} from "../shared/operation-intake-core";
 import { createOperationStore } from "./operation-store";
 
 export interface OperationIntakeLimits {
@@ -32,18 +33,6 @@ interface OperationIntakeResult {
   readonly frontier: CausalFrontier;
   readonly encodedCheckpoint: string;
 }
-const initialState =
-  (): OperationApplyState<OperationCheckpointProjection> => ({
-    frontier: {},
-    pending: [],
-    projection: [],
-    applied: undefined,
-    replayHead: undefined,
-    replayCount: 0,
-    replayLastClock: undefined,
-    baseProjection: [],
-    baseFrontier: {},
-  });
 
 export const createOperationIntake = (resources: OperationIntakeResources) => {
   const store = createOperationStore({
@@ -77,29 +66,30 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
-            ? initialState()
+            ? initialOperationApplyState<OperationCheckpointProjection>([])
             : decodeOperationCheckpoint(encoded);
-        for (const operation of operations) {
-          const snapshot = snapshotOperationEnvelope(operation);
-          if (snapshot.partition !== partition)
-            throw operationProtocolError(
-              "invalid",
-              "Operation intake scope mismatch",
-            );
-          const appended = store.appendEnvelope(
-            ownerId,
-            snapshot,
-            actorId,
-            now,
-          );
-          if (appended) storedCount += 1;
-          if (storedCount > ownerPartitionOperationLimit)
-            throw operationProtocolError(
-              "capacity",
-              "Operation history capacity reached",
-            );
-          state = applyOperation(state, snapshot, reducer);
-        }
+        state = applyOperationIntakeBatch(
+          partition,
+          state,
+          operations.map((operation) => ({ encoded: "", operation })),
+          {
+            append: (_encoded, snapshot) => {
+              const appended = store.appendEnvelope(
+                ownerId,
+                snapshot,
+                actorId,
+                now,
+              );
+              if (appended) storedCount += 1;
+              if (storedCount > ownerPartitionOperationLimit)
+                throw operationProtocolError(
+                  "capacity",
+                  "Operation history capacity reached",
+                );
+            },
+            reducer,
+          },
+        );
         const encodedCheckpoint = encodeOperationCheckpoint(state);
         if (
           new TextEncoder().encode(encodedCheckpoint).byteLength >

@@ -26,6 +26,8 @@ const jsonRequest = (method: "POST" | "PUT", payload: unknown) =>
     body: JSON.stringify(payload),
   });
 const request = (body: unknown) => jsonRequest("POST", body);
+const responseStatus = async (response: Promise<Response>): Promise<number> =>
+  (await response).status;
 const readRequest = (
   frontier: unknown,
   extra: Readonly<Record<string, unknown>> = {},
@@ -64,7 +66,11 @@ const ownedOperation = (sequence = 1n) => {
     },
   };
 };
-const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
+const handler = (
+  authenticatedId?: string,
+  limits?: OperationIntakeLimits,
+  runnerId?: string,
+) => {
   const resources = harness.setup();
   return createOperationSynchronization(
     resources.database,
@@ -75,6 +81,9 @@ const handler = (authenticatedId?: string, limits?: OperationIntakeLimits) => {
           : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
     },
     limits,
+    runnerId === undefined
+      ? undefined
+      : { runnerAccount: () => ({ userId: runnerId }) },
   );
 };
 const statusAfterClosedDatabase = async (request: Request) => {
@@ -134,8 +143,29 @@ test("operation synchronization rejects unauthenticated requests", async () => {
   expect((await handler()(request(body()))).status).toBe(401);
 });
 
-test("operation synchronization rejects cross-owner requests", async () => {
-  expect((await handler("owner-1")(request(body("owner-2")))).status).toBe(403);
+test("operation synchronization isolates runner aliases from browser owner IDs", async () => {
+  const statuses = await Promise.all([
+    responseStatus(
+      handler(undefined, undefined, "owner-1")(request(body("self"))),
+    ),
+    responseStatus(
+      handler(undefined, undefined, "owner-1")(request(body("owner-1"))),
+    ),
+    responseStatus(handler("owner-1")(request(body("self")))),
+    responseStatus(handler("owner-1")(request(body("owner-1")))),
+    responseStatus(handler("owner-1")(request(body("owner-2")))),
+  ]);
+  expect(statuses).toEqual([200, 403, 403, 200, 403]);
+});
+
+test("operation synchronization gives simultaneous runner auth precedence", async () => {
+  const synchronized = handler("browser-owner", undefined, "owner-1");
+  expect(
+    await Promise.all([
+      responseStatus(synchronized(request(body("self")))),
+      responseStatus(synchronized(request(body("browser-owner")))),
+    ]),
+  ).toEqual([200, 403]);
 });
 
 test("operation synchronization rejects malformed payloads", async () => {

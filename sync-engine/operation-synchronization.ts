@@ -8,6 +8,7 @@ import {
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
+import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
@@ -112,14 +113,21 @@ export const createOperationSynchronization = (
   database: AppDatabase,
   googleAuth: Pick<GoogleAuth, "authenticatedUser">,
   limits?: OperationIntakeLimits,
+  runnerAuth?: {
+    readonly runnerAccount: (
+      request: Request,
+    ) => { readonly userId: string } | undefined;
+  },
 ) => {
   const intake = createOperationIntake(
     limits === undefined ? { database } : { database, limits },
   );
   const store = createOperationStore({ database });
   return async (request: Request): Promise<Response> => {
-    const user = googleAuth.authenticatedUser(request);
-    if (user === null) return new Response("Unauthorized", { status: 401 });
+    const browserUser = googleAuth.authenticatedUser(request);
+    const runnerUser = runnerAuth?.runnerAccount(request);
+    if (browserUser === null && runnerUser === undefined)
+      return new Response("Unauthorized", { status: 401 });
     if (request.method !== "POST" && request.method !== "PUT")
       return new Response("Method Not Allowed", {
         status: 405,
@@ -138,12 +146,20 @@ export const createOperationSynchronization = (
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined)
       return Response.json({ error: "Invalid request" }, { status: 400 });
-    if (parsed.ownerId !== user.id)
+    // Runner credentials deliberately take precedence when both auth mechanisms
+    // are present, so runner owner alias semantics cannot become browser scope.
+    const ownerId =
+      runnerUser === undefined ? browserUser?.id : runnerUser.userId;
+    const ownsScope =
+      runnerUser === undefined
+        ? parsed.ownerId === ownerId
+        : parsed.ownerId === "self";
+    if (ownerId === undefined || !ownsScope)
       return new Response("Forbidden", { status: 403 });
     try {
       if ("frontier" in parsed) {
         const page = store.readEncodedEnvelopes(
-          user.id,
+          ownerId,
           parsed.partition,
           parsed.frontier,
           MAX_ENVELOPE_PAGE_SIZE,
@@ -164,8 +180,8 @@ export const createOperationSynchronization = (
       if (
         operations.some(
           (operation) =>
-            operation.entity.accountId !== user.id ||
-            operation.writerId !== user.id,
+            operation.entity.accountId !== ownerId ||
+            operation.writerId !== ownerId,
         )
       )
         return new Response("Forbidden", { status: 403 });
@@ -180,20 +196,15 @@ export const createOperationSynchronization = (
           { status: 400 },
         );
       const result = intake.apply(
-        user.id,
+        ownerId,
         parsed.partition,
         operations,
         (projection, operation) => [...projection, operation.operationId],
-        user.id,
+        ownerId,
         now,
       );
       return Response.json({
-        frontier: Object.fromEntries(
-          Object.entries(result.frontier).map(([writerId, sequence]) => [
-            writerId,
-            sequence.toString(),
-          ]),
-        ),
+        frontier: prepareSynchronizationFrontier(result.frontier),
       });
     } catch (error) {
       if (isOperationProtocolError(error))
@@ -216,3 +227,10 @@ export const createOperationSynchronization = (
     }
   };
 };
+
+export const createRunnerOperationSynchronization = (
+  database: AppDatabase,
+  googleAuth: Pick<GoogleAuth, "authenticatedUser">,
+  runnerAuth: NonNullable<Parameters<typeof createOperationSynchronization>[3]>,
+) =>
+  createOperationSynchronization(database, googleAuth, undefined, runnerAuth);

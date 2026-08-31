@@ -4,6 +4,7 @@ import {
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
+import { initialOperationApplyState } from "../shared/operation-intake-core";
 
 export const testOperation = (
   writerId: string,
@@ -37,17 +38,8 @@ export const testSessionOperation = (
   };
 };
 
-export const testApplyState = <T>(projection: T): OperationApplyState<T> => ({
-  frontier: {},
-  pending: [],
-  projection,
-  applied: undefined,
-  replayHead: undefined,
-  replayCount: 0,
-  replayLastClock: undefined,
-  baseProjection: projection,
-  baseFrontier: {},
-});
+export const testApplyState = <T>(projection: T): OperationApplyState<T> =>
+  initialOperationApplyState(projection);
 
 export const appendOperationId = (
   projection: readonly string[],

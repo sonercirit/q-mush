@@ -6,6 +6,7 @@ import { validActiveViewLimit } from "../shared/active-view.ts";
 import { isRecord } from "../shared/auth-model.ts";
 import { isSha256Digest } from "../shared/digest.ts";
 import { sha256 } from "../shared/sha256.ts";
+import { createRunnerOperationStore } from "./runner-operation-store.ts";
 
 import type { AccountExportRecord } from "../shared/account-export.ts";
 import type { AccountExportRetryProgress } from "./runner-account-export-client.ts";
@@ -69,6 +70,7 @@ export function createRunnerReplicaStore(directory: string) {
   database.run(
     "CREATE TABLE IF NOT EXISTS replica_state (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
   );
+  const operations = createRunnerOperationStore(database);
   const state = database.query<{ value: string }, [string]>(
     "SELECT value FROM replica_state WHERE key = ?",
   );
@@ -122,6 +124,7 @@ export function createRunnerReplicaStore(directory: string) {
     };
   };
   return {
+    operations,
     begin: ({
       availableBytes,
       requiredBytes,
