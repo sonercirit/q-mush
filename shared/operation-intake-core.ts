@@ -6,6 +6,38 @@ import {
   type OperationApplyState,
   type OperationPartition,
 } from "./operation-core.ts";
+import { utf8ByteLength } from "./utf8.ts";
+
+const MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES = 16 * 1024;
+const validSynchronizationFrontierComponent = (value: string): boolean =>
+  value.length > 0 &&
+  value !== "__proto__" &&
+  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES;
+
+const validSynchronizationSequenceText = (value: unknown): value is string =>
+  typeof value === "string" &&
+  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES &&
+  /^(0|[1-9]\d*)$/.test(value);
+
+export const parseSynchronizationFrontier = (
+  value: unknown,
+  maximumWriters = 512,
+): Readonly<Record<string, bigint>> | undefined => {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return undefined;
+  const entries = Object.entries(value);
+  if (entries.length > maximumWriters) return undefined;
+  const result: Record<string, bigint> = {};
+  for (const [writerId, sequence] of entries) {
+    if (
+      !validSynchronizationFrontierComponent(writerId) ||
+      !validSynchronizationSequenceText(sequence)
+    )
+      return undefined;
+    result[writerId] = BigInt(sequence);
+  }
+  return result;
+};
 
 export const prepareSynchronizationFrontier = (
   frontier: Readonly<Record<string, bigint>>,

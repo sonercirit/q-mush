@@ -2,7 +2,7 @@ import type { OperationApplyState } from "../shared/operation-core";
 import { stabilizeOperationApplyState } from "../shared/operation-stability";
 import {
   appendOperationId,
-  applyOperationList,
+  applyOperationIds,
   testApplyState,
   testOperation,
 } from "./operation-core-test-support";
@@ -15,22 +15,30 @@ export const stabilityClock = (physicalMs: number, writerId: string) => ({
 
 export const stabilizeArrayState = (
   state: OperationApplyState<readonly string[]>,
+  clock: ReturnType<typeof stabilityClock>,
+) => stabilizeOperationApplyState(state, clock, appendOperationId);
+
+export const stabilizeForWriter = (
+  state: OperationApplyState<readonly string[]>,
   physicalMs: number,
   writerId: string,
-) =>
-  stabilizeOperationApplyState(
-    state,
-    stabilityClock(physicalMs, writerId),
-    appendOperationId,
-  );
+) => stabilizeArrayState(state, stabilityClock(physicalMs, writerId));
+
+export const singleWriterArrayState = (
+  writerId: string,
+  physicalMs: number,
+): OperationApplyState<readonly string[]> =>
+  applyOperationIds([testOperation(writerId, 1n, {}, writerId, physicalMs)]);
+
+export const invalidStableBaseStates = (): readonly OperationApplyState<
+  readonly string[]
+>[] => {
+  const empty = testApplyState<readonly string[]>([]);
+  return [
+    { ...empty, stableClock: stabilityClock(1, "a") },
+    { ...empty, baseFrontier: { a: 1n } },
+  ];
+};
 
 export const stableArrayState = (): OperationApplyState<readonly string[]> =>
-  stabilizeArrayState(
-    applyOperationList(
-      [testOperation("a", 1n, {}, "a", 10)],
-      testApplyState<readonly string[]>([]),
-      appendOperationId,
-    ),
-    10,
-    "a",
-  );
+  stabilizeForWriter(singleWriterArrayState("a", 10), 10, "a");

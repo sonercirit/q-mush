@@ -5,6 +5,7 @@ import type {
   OperationPartition,
 } from "../shared/operation-core.ts";
 import type { OperationStabilityBoundary } from "../shared/operation-stability.ts";
+import type { RunnerOperationCompactionRequest } from "./runner-operation-store.ts";
 import { isOperationSynchronizationBadRequest } from "./runner-operation-transport.ts";
 
 interface OutboxStall {
@@ -19,12 +20,7 @@ interface OperationStore {
     partition: OperationPartition,
     envelopes: readonly string[],
   ) => void;
-  readonly compact?: (
-    ownerId: string,
-    partition: OperationPartition,
-    stableClock: HybridTimestamp | null,
-    stableFrontier: CausalFrontier | null,
-  ) => void;
+  readonly compact?: (request: RunnerOperationCompactionRequest) => void;
   readonly apply: (
     ownerId: string,
     partition: OperationPartition,
@@ -219,12 +215,12 @@ const synchronizePartition = async (
           `Operation synchronization partition stalled: ${partition}`,
         );
     }
-    store.compact?.(
-      ownerAlias,
+    store.compact?.({
+      ownerId: ownerAlias,
       partition,
-      page.stableClock ?? null,
-      page.stableFrontier ?? null,
-    );
+      stableClock: page.stableClock ?? null,
+      stableFrontier: page.stableFrontier ?? null,
+    });
     hasMore = page.hasMore;
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];

@@ -8,6 +8,7 @@ import {
   type HybridTimestamp,
   type Operation,
   type OperationApplyState,
+  type OperationReducer,
   type ReplayEntry,
 } from "./operation-core.ts";
 
@@ -44,7 +45,7 @@ const earlierClock = (
 export const stabilizeOperationApplyState = <TProjection>(
   state: OperationApplyState<TProjection>,
   boundaryClock: HybridTimestamp,
-  reducer: (projection: TProjection, operation: Operation) => TProjection,
+  reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
   const replay = replayOldestFirst(state.replayHead);
   if (replay.length === 0) return state;
@@ -77,7 +78,7 @@ const foldPrefix = <TProjection>(
   state: OperationApplyState<TProjection>,
   replay: readonly Operation[],
   requestedCount: number,
-  reducer: (projection: TProjection, operation: Operation) => TProjection,
+  reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
   const count = requestedCount;
   if (count === 0) return state;

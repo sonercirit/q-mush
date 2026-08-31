@@ -11,32 +11,31 @@ import {
   testOperation,
   testSessionOperation,
 } from "./operation-core-test-support.ts";
+import { applyAndCompactRunnerOperation } from "./runner-operation-stability-test-support.ts";
+import {
+  applyRunnerEnvelope,
+  compactRunnerOperationStore,
+  expectRunnerOperationState,
+  runnerEnvelope,
+  runnerOwnerId,
+  withRunnerOperationStore,
+  type RunnerOperationTestStore,
+} from "./runner-operation-store-test-support.ts";
 
-const ownedOperation = (operation: ReturnType<typeof testOperation>) => ({
-  ...operation,
-  entity: { ...operation.entity, accountId: "owner-1" },
-});
-const envelope = (sequence: bigint, value = `value-${String(sequence)}`) =>
-  encodeOperationEnvelope(
-    ownedOperation(
-      testOperation("owner-1", sequence, {}, value, Number(sequence)),
-    ),
-  );
-type Store = ReturnType<typeof createRunnerOperationStore>;
-const withStore = (run: (store: Store, database: Database) => void) => {
-  const database = new Database(":memory:");
-  try {
-    run(createRunnerOperationStore(database), database);
-  } finally {
-    database.close();
-  }
+const withStore = (
+  run: (store: RunnerOperationTestStore, database: Database) => void,
+) => {
+  withRunnerOperationStore(createRunnerOperationStore, run);
 };
+const envelope = runnerEnvelope;
+type Store = RunnerOperationTestStore;
+
 const applyRemote = (
   store: Store,
   partition: "non-session" | "session",
   envelopes: readonly string[],
 ) => {
-  store.apply("owner-1", partition, envelopes, "remote");
+  store.apply(runnerOwnerId, partition, envelopes, "remote");
 };
 const remote = (store: Store, envelopes: readonly string[]) => {
   applyRemote(store, "non-session", envelopes);
@@ -52,7 +51,7 @@ const poisonEnvelope = (sequence: bigint) => {
   });
 };
 
-const rows = (store: Store) => store.inspect("owner-1", "non-session");
+const rows = (store: Store) => store.inspect(runnerOwnerId, "non-session");
 const verificationStates = (store: Store) =>
   rows(store).map(({ verificationState }) => verificationState);
 const expectStates = (store: Store, expected: readonly string[]) => {
@@ -62,7 +61,7 @@ const expectNonSessionFrontier = (
   store: Store,
   expected: Readonly<Record<string, bigint>>,
 ) => {
-  expect(store.state("owner-1", "non-session").frontier).toEqual(expected);
+  expect(store.state(runnerOwnerId, "non-session").frontier).toEqual(expected);
 };
 const expectFrontierOne = (store: Store) => {
   expectNonSessionFrontier(store, { "owner-1": 1n });
@@ -70,46 +69,28 @@ const expectFrontierOne = (store: Store) => {
 
 test("compacts only after the published stable frontier is covered", () => {
   withStore((store) => {
-    remote(store, [envelope(1n)]);
-    store.compact(
-      "owner-1",
-      "non-session",
-      { physicalMs: 1, logical: 0, writerId: "owner-1" },
-      { "owner-1": 2n },
-    );
-    expect(store.state("owner-1", "non-session").replayCount).toBe(1);
-    store.compact(
-      "owner-1",
-      "non-session",
-      { physicalMs: 1, logical: 0, writerId: "owner-1" },
-      { "owner-1": 1n },
-    );
-    const state = store.state("owner-1", "non-session");
+    applyRunnerEnvelope(store);
+    compactRunnerOperationStore(store, 2n);
+    expectRunnerOperationState(store, { replayCount: 1 });
+    compactRunnerOperationStore(store, 1n);
+    const state = store.state(runnerOwnerId, "non-session");
     expect(state.replayCount).toBe(0);
     expect(state.stableClock?.physicalMs).toBe(1);
   });
 });
 
-test("redelivered folded identity does not quarantine", () => {
+test("redelivered folded identity remains accepted", () => {
   withStore((store) => {
-    const encoded = envelope(1n);
+    const encoded = applyAndCompactRunnerOperation(store);
     remote(store, [encoded]);
-    store.compact(
-      "owner-1",
-      "non-session",
-      { physicalMs: 1, logical: 0, writerId: "owner-1" },
-      { "owner-1": 1n },
-    );
-    remote(store, [encoded]);
-    expect(store.state("owner-1", "non-session").stalled).toBe(false);
+    expectRunnerOperationState(store, { stalled: false });
     expect(rows(store)).toHaveLength(1);
   });
 });
 
-test("records accepted immutable envelopes and checkpoints", () => {
+test("records accepted envelopes and checkpoints", () => {
   withStore((store) => {
-    const encoded = envelope(1n);
-    remote(store, [encoded]);
+    const encoded = applyRunnerEnvelope(store);
     const recorded = rows(store);
     expect(recorded[0]).toMatchObject({
       encoded,
@@ -126,13 +107,13 @@ test("treats duplicate envelopes as idempotent", () => {
     const duplicate = envelope(1n);
     remote(store, Array(3).fill(duplicate));
     expectStates(store, ["accepted"]);
-    expect(store.state("owner-1", "non-session").projection.join(",")).toBe(
+    expect(store.state(runnerOwnerId, "non-session").projection).toEqual([
       "owner-1-1",
-    );
+    ]);
   });
 });
 
-test("durably quarantines distinct poisons, stalls only their partition, and applies the valid prefix", () => {
+test("durably quarantines distinct poisons and applies the valid prefix", () => {
   withStore((store) => {
     remote(store, [envelope(1n), "poison-one", "poison-two", envelope(2n)]);
     expectStates(store, ["accepted", "rejected", "rejected"]);

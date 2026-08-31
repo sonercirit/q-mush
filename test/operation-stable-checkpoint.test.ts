@@ -5,32 +5,33 @@ import {
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
 import {
-  appendOperationId,
-  applyOperationList,
+  expectCheckpointRejection,
+  mapTaggedCheckpointEntries,
+  taggedCheckpointEntries,
+} from "./operation-checkpoint-test-support";
+import {
+  applyOperationIds,
   testApplyState,
   testOperation,
 } from "./operation-core-test-support";
-import { stableArrayState } from "./operation-stability-test-support";
+import {
+  invalidStableBaseStates,
+  stabilityClock,
+  stableArrayState,
+} from "./operation-stability-test-support";
 
-const decodeTagged = (encoded: string): [string, unknown][] => {
-  const parsed: unknown = JSON.parse(encoded);
-  if (!Array.isArray(parsed) || !Array.isArray(parsed[1]))
-    throw new Error("Invalid fixture");
-  return parsed[1].flatMap((entry): [string, unknown][] =>
+const decodeTagged = (encoded: string): [string, unknown][] =>
+  taggedCheckpointEntries(encoded).flatMap((entry): [string, unknown][] =>
     Array.isArray(entry) && entry.length === 2 && typeof entry[0] === "string"
       ? [[entry[0], entry[1]]]
       : [],
   );
-};
-const withoutStableClock = (encoded: string): string => {
-  const parsed: unknown = JSON.parse(encoded);
-  if (!Array.isArray(parsed) || !Array.isArray(parsed[1]))
-    throw new Error("Invalid fixture");
-  parsed[1] = parsed[1].filter(
-    (entry) => Array.isArray(entry) && entry[0] !== "stableClock",
+const withoutStableClock = (encoded: string): string =>
+  mapTaggedCheckpointEntries(encoded, (entries) =>
+    entries.filter(
+      (entry) => Array.isArray(entry) && entry[0] !== "stableClock",
+    ),
   );
-  return JSON.stringify(parsed);
-};
 
 describe("stable checkpoint codec", () => {
   const stableState = stableArrayState;
@@ -59,69 +60,48 @@ describe("stable checkpoint codec", () => {
       decodeOperationCheckpoint(
         encodeOperationCheckpoint({
           ...state,
-          stableClock: { physicalMs: -1, logical: 0, writerId: "a" },
+          stableClock: stabilityClock(-1, "a"),
         }),
       ),
     ).toThrow(/clock/);
-    const encoded: unknown = JSON.parse(encodeOperationCheckpoint(state));
-    if (!Array.isArray(encoded) || !Array.isArray(encoded[1]))
-      throw new Error("Invalid fixture");
-    encoded[1].push(["extra", ["primitive", null]]);
-    expect(() => decodeOperationCheckpoint(JSON.stringify(encoded))).toThrow(
-      /fields/,
+    const encoded = mapTaggedCheckpointEntries(
+      encodeOperationCheckpoint(state),
+      (entries) => [...entries, ["extra", ["primitive", null]]],
     );
+    expect(() => decodeOperationCheckpoint(encoded)).toThrow(/fields/);
   });
 
   test("requires stableClock exactly with a nonempty base frontier", () => {
-    const empty = testApplyState<readonly string[]>([]);
-    expect(() =>
-      decodeOperationCheckpoint(
-        encodeOperationCheckpoint({
-          ...empty,
-          stableClock: { physicalMs: 1, logical: 0, writerId: "a" },
-        }),
-      ),
-    ).toThrow(/stable frontier/);
-    expect(() =>
-      decodeOperationCheckpoint(
-        encodeOperationCheckpoint({ ...empty, baseFrontier: { a: 1n } }),
-      ),
-    ).toThrow(/stable frontier/);
+    for (const invalid of invalidStableBaseStates())
+      expectCheckpointRejection(invalid, /stable frontier/);
   });
 
   test("requires the stable writer in base and later replay and pending clocks", () => {
     const state = stableState();
     const stableClock = state.stableClock;
     if (stableClock === undefined) throw new Error("Missing stable fixture");
-    expect(() =>
-      decodeOperationCheckpoint(
-        encodeOperationCheckpoint({
-          ...state,
-          stableClock: { ...stableClock, writerId: "missing" },
-        }),
-      ),
-    ).toThrow(/stable writer/);
-    const replay = applyOperationList(
-      [testOperation("a", 1n, {}, "a", 10)],
-      testApplyState<readonly string[]>([]),
-      appendOperationId,
+    expectCheckpointRejection(
+      {
+        ...state,
+        stableClock: { ...stableClock, writerId: "missing" },
+      },
+      /stable writer/,
     );
-    expect(() =>
-      decodeOperationCheckpoint(
-        encodeOperationCheckpoint({
-          ...replay,
-          baseFrontier: { a: 0n },
-          stableClock: replay.replayLastClock,
-        }),
-      ),
-    ).toThrow(/stable clock order/);
-    expect(() =>
-      decodeOperationCheckpoint(
-        encodeOperationCheckpoint({
-          ...state,
-          pending: [testOperation("0", 2n, { "0": 1n }, "pending", 10)],
-        }),
-      ),
-    ).toThrow(/stable clock order/);
+    const replay = applyOperationIds([testOperation("a", 1n, {}, "a", 10)]);
+    expectCheckpointRejection(
+      {
+        ...replay,
+        baseFrontier: { a: 0n },
+        stableClock: replay.replayLastClock,
+      },
+      /stable clock order/,
+    );
+    expectCheckpointRejection(
+      {
+        ...state,
+        pending: [testOperation("0", 2n, { "0": 1n }, "pending", 10)],
+      },
+      /stable clock order/,
+    );
   });
 });

@@ -1,9 +1,13 @@
+import { decodeHybridTimestamp } from "../shared/operation-clock-codec.ts";
 import {
   type CausalFrontier,
   type HybridTimestamp,
   type OperationPartition,
 } from "../shared/operation-core.ts";
-import { prepareSynchronizationFrontier } from "../shared/operation-intake-core.ts";
+import {
+  parseSynchronizationFrontier,
+  prepareSynchronizationFrontier,
+} from "../shared/operation-intake-core.ts";
 import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes.ts";
 import { isRecord } from "../shared/validation.ts";
 import type { RunnerOperationRead } from "./runner-operation-sync.ts";
@@ -79,36 +83,17 @@ const parseStability = (value: unknown): RunnerOperationStability => {
   const frontier = value["stableFrontier"];
   if (clock == null && frontier == null)
     return { stableClock: null, stableFrontier: null };
-  if (
-    !isRecord(clock) ||
-    Object.keys(clock).length !== 3 ||
-    !Number.isSafeInteger(clock["physicalMs"]) ||
-    Number(clock["physicalMs"]) < 0 ||
-    !Number.isSafeInteger(clock["logical"]) ||
-    Number(clock["logical"]) < 0 ||
-    typeof clock["writerId"] !== "string" ||
-    !isRecord(frontier) ||
-    Object.keys(frontier).length > 512
-  )
+  if (!isRecord(frontier) || Object.keys(frontier).length > 512)
     throw new Error("Invalid operation synchronization stability");
-  const decoded: Record<string, bigint> = {};
-  for (const [writerId, sequence] of Object.entries(frontier)) {
-    if (
-      writerId.length === 0 ||
-      new TextEncoder().encode(writerId).byteLength > 16 * 1024 ||
-      typeof sequence !== "string" ||
-      new TextEncoder().encode(sequence).byteLength > 16 * 1024 ||
-      !/^(0|[1-9]\\d*)$/.test(sequence)
-    )
-      throw new Error("Invalid operation synchronization stability");
-    decoded[writerId] = BigInt(sequence);
-  }
+  const stableClock = decodeHybridTimestamp(
+    clock,
+    () => new Error("Invalid operation synchronization stability"),
+  );
+  const decoded = parseSynchronizationFrontier(frontier);
+  if (decoded === undefined)
+    throw new Error("Invalid operation synchronization stability");
   return {
-    stableClock: {
-      physicalMs: Number(clock["physicalMs"]),
-      logical: Number(clock["logical"]),
-      writerId: clock["writerId"],
-    },
+    stableClock,
     stableFrontier: decoded,
   };
 };

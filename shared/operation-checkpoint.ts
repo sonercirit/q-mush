@@ -1,3 +1,4 @@
+import { decodeHybridTimestamp } from "./operation-clock-codec";
 import {
   compareClocks,
   createOperation,
@@ -149,23 +150,8 @@ const nonNegativeBigintCheckpointRecord = (
     value,
     (item): item is bigint => typeof item === "bigint" && item >= 0n,
   );
-const decodeClock = (value: unknown): HybridTimestamp => {
-  const clock = checkpointObject(value);
-  exactCheckpointKeys(clock, ["physicalMs", "logical", "writerId"]);
-  if (
-    !Number.isSafeInteger(clock["physicalMs"]) ||
-    Number(clock["physicalMs"]) < 0 ||
-    !Number.isSafeInteger(clock["logical"]) ||
-    Number(clock["logical"]) < 0 ||
-    typeof clock["writerId"] !== "string"
-  )
-    throw new Error("Invalid checkpoint clock");
-  return {
-    physicalMs: Number(clock["physicalMs"]),
-    logical: Number(clock["logical"]),
-    writerId: clock["writerId"],
-  };
-};
+const decodeClock = (value: unknown): HybridTimestamp =>
+  decodeHybridTimestamp(value, () => new Error("Invalid checkpoint clock"));
 const decodeOperation = (
   value: unknown,
   deferOwnWriterParentValidation = false,

@@ -234,6 +234,12 @@ const captureError = async (promise: Promise<unknown>): Promise<Error> =>
   expectError(await promise.catch((reason: unknown) => reason));
 const runnerTransport = () =>
   createRunnerOperationTransport("http://engine.test", "token");
+const readRunnerPage = () =>
+  runnerTransport().readPage({
+    frontier: {},
+    partition: "non-session",
+    signal: new AbortController().signal,
+  });
 const writeEncoded = () =>
   runnerTransport().writeBatch(
     "non-session",
@@ -265,13 +271,10 @@ test("transport defaults absent stability and rejects malformed stability", asyn
     fetchMock.mockResolvedValueOnce(
       Response.json({ envelopes: [], hasMore: false }),
     );
-    await expect(
-      runnerTransport().readPage({
-        frontier: {},
-        partition: "non-session",
-        signal: new AbortController().signal,
-      }),
-    ).resolves.toMatchObject({ stableClock: null, stableFrontier: null });
+    await expect(readRunnerPage()).resolves.toMatchObject({
+      stableClock: null,
+      stableFrontier: null,
+    });
     fetchMock.mockResolvedValueOnce(
       Response.json({
         envelopes: [],
@@ -280,13 +283,7 @@ test("transport defaults absent stability and rejects malformed stability", asyn
         stableFrontier: { a: "1" },
       }),
     );
-    await expect(
-      runnerTransport().readPage({
-        frontier: {},
-        partition: "non-session",
-        signal: new AbortController().signal,
-      }),
-    ).rejects.toThrow(/stability/);
+    await expect(readRunnerPage()).rejects.toThrow(/stability/);
   } finally {
     fetchMock.mockRestore();
   }

@@ -1,31 +1,31 @@
 import { describe, expect, test } from "vitest";
 
-import { applyOperation, materializeApplied } from "../shared/operation-core";
-import { stabilizeOperationApplyState } from "../shared/operation-stability";
+import {
+  applyOperation,
+  materializeApplied,
+  type Operation,
+} from "../shared/operation-core";
 import {
   appendOperationId,
-  applyOperationList,
-  testApplyState,
+  applyOperationIds,
   testOperation,
 } from "./operation-core-test-support";
+import {
+  singleWriterArrayState,
+  stabilizeForWriter,
+} from "./operation-stability-test-support";
 
 const operation = testOperation;
+const operationIdState = (items: readonly Operation[]) =>
+  applyOperationIds(items);
 
 describe("operation stability", () => {
   test("folds a safe prefix and preserves convergence for a later clock insertion", () => {
     const first = operation("a", 1n, {}, "one", 10);
     const later = operation("b", 1n, {}, "later", 30);
     const between = operation("c", 1n, {}, "between", 25);
-    const unfolded = applyOperationList(
-      [first, later],
-      testApplyState<readonly string[]>([]),
-      appendOperationId,
-    );
-    const folded = stabilizeOperationApplyState(
-      unfolded,
-      { physicalMs: 10, logical: 0, writerId: "a" },
-      appendOperationId,
-    );
+    const unfolded = operationIdState([first, later]);
+    const folded = stabilizeForWriter(unfolded, 10, "a");
     expect(folded.baseProjection).toEqual(["a-1"]);
     expect(folded.baseFrontier).toEqual({ a: 1n });
     expect(folded.stableClock).toEqual(first.clock);
@@ -43,74 +43,37 @@ describe("operation stability", () => {
   });
 
   test("refuses clocks above the frontier writer minimum", () => {
-    const state = applyOperationList(
-      [operation("a", 1n, {}, "a", 10), operation("b", 1n, {}, "b", 20)],
-      testApplyState<readonly string[]>([]),
-      appendOperationId,
-    );
-    const folded = stabilizeOperationApplyState(
-      state,
-      { physicalMs: 99, logical: 0, writerId: "z" },
-      appendOperationId,
-    );
+    const state = operationIdState([
+      operation("a", 1n, {}, "a", 10),
+      operation("b", 1n, {}, "b", 20),
+    ]);
+    const folded = stabilizeForWriter(state, 99, "z");
     expect(folded.replayCount).toBe(1);
     expect(folded.stableClock?.physicalMs).toBe(10);
   });
 
   test("a fully folded dormant writer pins subsequent stabilization", () => {
-    const first = applyOperation(
-      testApplyState<readonly string[]>([]),
-      operation("a", 1n, {}, "a", 10),
-      appendOperationId,
-    );
-    const folded = stabilizeOperationApplyState(
-      first,
-      { physicalMs: 10, logical: 0, writerId: "a" },
-      appendOperationId,
-    );
+    const first = singleWriterArrayState("a", 10);
+    const folded = stabilizeForWriter(first, 10, "a");
     const next = applyOperation(
       folded,
       operation("b", 1n, {}, "b", 20),
       appendOperationId,
     );
-    expect(
-      stabilizeOperationApplyState(
-        next,
-        { physicalMs: 99, logical: 0, writerId: "z" },
-        appendOperationId,
-      ),
-    ).toBe(next);
+    expect(stabilizeForWriter(next, 99, "z")).toBe(next);
   });
 
   test("pending clocks are strict fold caps", () => {
-    const applied = applyOperation(
-      testApplyState<readonly string[]>([]),
-      operation("a", 1n, {}, "a", 10),
-      appendOperationId,
-    );
+    const applied = singleWriterArrayState("a", 10);
     const pending = {
       ...applied,
       pending: [operation("a", 3n, { a: 2n }, "pending", 10)],
     };
-    expect(
-      stabilizeOperationApplyState(
-        pending,
-        { physicalMs: 99, logical: 0, writerId: "z" },
-        appendOperationId,
-      ),
-    ).toBe(pending);
+    expect(stabilizeForWriter(pending, 99, "z")).toBe(pending);
   });
 
   test("rejects new identities at or below stableClock but admits above", () => {
-    const state = stabilizeOperationApplyState(
-      applyOperation(
-        testApplyState<readonly string[]>([]),
-        operation("a", 1n, {}, "a", 10),
-        appendOperationId,
-      ),
-      { physicalMs: 10, logical: 0, writerId: "a" },
-      appendOperationId,
-    );
+    const state = stabilizeForWriter(singleWriterArrayState("a", 10), 10, "a");
     expect(() =>
       applyOperation(
         state,

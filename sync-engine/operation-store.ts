@@ -101,6 +101,16 @@ export function createOperationStore(resources: OperationStoreResources) {
       ),
     };
   };
+  const checkpointRow = (ownerId: string, partition: OperationPartition) =>
+    database
+      .select({
+        encoded: operationCheckpoints.encodedCheckpoint,
+        stableClock: operationCheckpoints.stableClock,
+        stableFrontier: operationCheckpoints.stableFrontier,
+      })
+      .from(operationCheckpoints)
+      .where(activeCheckpointScope(ownerId, partition))
+      .get();
   const classifyEnvelopeIdentity = (
     ownerId: string,
     operation: Operation,
@@ -180,24 +190,13 @@ export function createOperationStore(resources: OperationStoreResources) {
       );
     },
     loadCheckpoint(ownerId: string, partition: OperationPartition) {
-      return database
-        .select({ encoded: operationCheckpoints.encodedCheckpoint })
-        .from(operationCheckpoints)
-        .where(activeCheckpointScope(ownerId, partition))
-        .get()?.encoded;
+      return checkpointRow(ownerId, partition)?.encoded;
     },
     loadStability(
       ownerId: string,
       partition: OperationPartition,
     ): StoredOperationStability {
-      const row = database
-        .select({
-          stableClock: operationCheckpoints.stableClock,
-          stableFrontier: operationCheckpoints.stableFrontier,
-        })
-        .from(operationCheckpoints)
-        .where(activeCheckpointScope(ownerId, partition))
-        .get();
+      const row = checkpointRow(ownerId, partition);
       const parse = (value: string | null | undefined): unknown =>
         value == null ? null : JSON.parse(value);
       return {

@@ -208,6 +208,10 @@ export interface AppliedIdentityNode {
   readonly left: AppliedIdentityNode | undefined;
   readonly right: AppliedIdentityNode | undefined;
 }
+export type OperationReducer<TProjection> = (
+  projection: TProjection,
+  operation: Operation,
+) => TProjection;
 export interface OperationApplyState<TProjection> {
   readonly frontier: CausalFrontier;
   readonly pending: readonly Operation[];
@@ -408,7 +412,7 @@ export const buildAppliedIdentityIndex = (
 export const applyOperation = <TProjection>(
   state: OperationApplyState<TProjection>,
   candidate: Operation,
-  reducer: (projection: TProjection, operation: Operation) => TProjection,
+  reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
   const snapshot = snapshotOperationEnvelope(candidate);
   candidate = snapshot;

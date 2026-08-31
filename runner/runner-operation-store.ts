@@ -33,6 +33,13 @@ import {
 const checkpointByteLength = (value: string): number =>
   Buffer.byteLength(value, "utf8");
 
+export interface RunnerOperationCompactionRequest {
+  readonly ownerId: string;
+  readonly partition: OperationPartition;
+  readonly stableClock: HybridTimestamp | null;
+  readonly stableFrontier: CausalFrontier | null;
+}
+
 export interface RunnerOperationStoreLimits {
   readonly checkpointBytes?: number;
 }
@@ -177,12 +184,8 @@ export const createRunnerOperationStore = (
           );
       })();
     },
-    compact(
-      ownerId: string,
-      partition: OperationPartition,
-      stableClock: HybridTimestamp | null,
-      stableFrontier: CausalFrontier | null,
-    ) {
+    compact(request: RunnerOperationCompactionRequest) {
+      const { ownerId, partition, stableClock, stableFrontier } = request;
       if (stableClock === null || stableFrontier === null) return;
       database.transaction(() => {
         const state = checkpointState(ownerId, partition);

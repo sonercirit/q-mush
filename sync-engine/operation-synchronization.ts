@@ -7,7 +7,10 @@ import {
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
-import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
+import {
+  parseSynchronizationFrontier,
+  prepareSynchronizationFrontier,
+} from "../shared/operation-intake-core";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
@@ -17,10 +20,6 @@ import {
 import { createOperationStore } from "./operation-store";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
-const MAX_FRONTIER_WRITERS = 512;
-const MAX_FRONTIER_COMPONENT_BYTES = 16 * 1024;
-const utf8Length = (value: string): number =>
-  new TextEncoder().encode(value).byteLength;
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
@@ -31,28 +30,7 @@ interface SynchronizationReadRequest {
   readonly partition: OperationPartition;
   readonly frontier: Readonly<Record<string, bigint>>;
 }
-const parseFrontier = (
-  value: unknown,
-): Readonly<Record<string, bigint>> | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return undefined;
-  const entries = Object.entries(value);
-  if (entries.length > MAX_FRONTIER_WRITERS) return undefined;
-  const result: Record<string, bigint> = {};
-  for (const [writerId, sequence] of entries) {
-    if (
-      writerId.length === 0 ||
-      writerId === "__proto__" ||
-      utf8Length(writerId) > MAX_FRONTIER_COMPONENT_BYTES ||
-      typeof sequence !== "string" ||
-      utf8Length(sequence) > MAX_FRONTIER_COMPONENT_BYTES ||
-      !/^(0|[1-9]\d*)$/.test(sequence)
-    )
-      return undefined;
-    result[writerId] = BigInt(sequence);
-  }
-  return result;
-};
+const parseFrontier = parseSynchronizationFrontier;
 const parseScope = (
   record: Readonly<Record<string, unknown>>,
 ):
