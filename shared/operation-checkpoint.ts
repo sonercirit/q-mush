@@ -237,12 +237,11 @@ export interface OperationProjectionCodec<TProjection> {
   readonly decode: (value: unknown) => TProjection;
 }
 
-const replayOperations = replayOperationsNewestFirst;
 export const encodeOperationCheckpoint = <TProjection>(
   state: OperationApplyState<TProjection>,
   codec: OperationProjectionCodec<TProjection>,
 ): string => {
-  const replay = replayOperations(state.replayHead);
+  const replay = replayOperationsNewestFirst(state.replayHead);
   return JSON.stringify(
     encodeCheckpointValue({
       ...state,
@@ -265,7 +264,7 @@ const clocksEqual = (
 const validateCheckpointConsistency = <TProjection>(
   state: OperationApplyState<TProjection>,
 ): void => {
-  const replay = replayOperations(state.replayHead);
+  const replay = replayOperationsNewestFirst(state.replayHead);
   if (
     (state.stableClock === undefined) !==
     (Object.keys(state.baseFrontier).length === 0)

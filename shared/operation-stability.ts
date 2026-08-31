@@ -18,7 +18,6 @@ export interface OperationStabilityBoundary {
   readonly stableFrontier: CausalFrontier | null;
 }
 
-const replayOldestFirst = replayOperationsOldestFirst;
 const replayHead = (
   operations: readonly Operation[],
 ): ReplayEntry | undefined => {
@@ -42,7 +41,7 @@ export const stabilizeOperationApplyState = <TProjection>(
   boundaryClock: HybridTimestamp,
   reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
-  const replay = replayOldestFirst(state.replayHead);
+  const replay = replayOperationsOldestFirst(state.replayHead);
   if (replay.length === 0) return state;
   const latestByWriter = new Map<string, HybridTimestamp>();
   for (const operation of replay)

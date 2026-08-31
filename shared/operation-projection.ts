@@ -262,12 +262,11 @@ export const reduceOperationEntityProjection = (
       : reduceUser(projection, operation);
 
 const projectionKeys = ["workspaces", "prompts", "users"] as const;
-const safeId = hasSafeRecordKey;
 const validClock = (value: unknown): value is HybridTimestamp =>
   exactObjectKeys(value, ["physicalMs", "logical", "writerId"]) &&
   isNonNegativeSafeInteger(value["physicalMs"]) &&
   isNonNegativeSafeInteger(value["logical"]) &&
-  safeId(value["writerId"]);
+  hasSafeRecordKey(value["writerId"]);
 const validWrite = (
   value: unknown,
   validValue: (item: unknown) => boolean,
@@ -280,8 +279,8 @@ const validWrite = (
     "clock",
   ]) &&
   validValue(value["value"]) &&
-  safeId(value["operationId"]) &&
-  safeId(value["writerId"]) &&
+  hasSafeRecordKey(value["operationId"]) &&
+  hasSafeRecordKey(value["writerId"]) &&
   typeof value["sequence"] === "bigint" &&
   value["sequence"] > 0n &&
   validClock(value["clock"]) &&
@@ -302,7 +301,7 @@ const encodeOperationEntityProjection = (
   decodeOperationEntityProjection(projection);
 const validNamedWrites = (item: Record<string, unknown>): boolean => {
   return (
-    safeId(item["id"]) &&
+    hasSafeRecordKey(item["id"]) &&
     optionalWrite(item["created"], (entry) => entry === true) &&
     optionalWrite(item["name"], (entry) => typeof entry === "string") &&
     optionalWrite(item["deleted"], (entry) => entry === true)
@@ -338,13 +337,13 @@ const validUser = (item: unknown): item is UserProjection =>
     "defaultWorkspaceId",
     "effectiveDefaultWorkspaceId",
   ]) &&
-  safeId(item["id"]) &&
+  hasSafeRecordKey(item["id"]) &&
   optionalWrite(
     item["defaultWorkspaceId"],
     (entry) => entry === null || typeof entry === "string",
   ) &&
   (item["effectiveDefaultWorkspaceId"] === null ||
-    safeId(item["effectiveDefaultWorkspaceId"]));
+    hasSafeRecordKey(item["effectiveDefaultWorkspaceId"]));
 
 const decodeOperationEntityProjection = (
   value: unknown,

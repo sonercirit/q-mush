@@ -28,26 +28,22 @@
   and encoding 52.4 ms on the development runner. Checkpoint decoding rejects
   repeated replay or pending operation-ID or writer-sequence identities,
   including byte-identical duplicates, and rejects negative sequence, parent,
-  and frontier values while preserving signed bigint operation payloads. Sizes
-  use bytes per operation and binary MiB (1 MiB = 1,048,576 bytes). Stability
-  compaction now folds replay prefixes proven safe by frontier, drift, and
+  and frontier values while preserving signed bigint operation payloads.
+  Stability compaction folds replay prefixes proven safe by frontier, drift, and
   pending-clock bounds. The route fails closed at 16 KiB per encoded envelope,
   2,000 retained replay-plus-pending operations per owner/partition, or a 4 MiB
-  post-fold checkpoint (HTTP 507 for either working-set capacity). Limits apply
-  after the route buffers/parses JSON; stage 2 has no route request-byte cap.
-  Reads rely on 256 envelopes × 16 KiB: strings are at most 4 MiB, but escaping
-  can make JSON about 8 MiB. A separate cap would require measuring while paging
-  or serializing twice. With 4 KiB payloads an uncompacted checkpoint reaches 4
-  MiB around 300 operations; stability folding resolves the wedge once entries
-  age and become covered. Envelope-row deletion remains deferred until durable
+  checkpoint (HTTP 507). Limits apply after buffering/parsing JSON; stage 2 has
+  no request-byte cap. Reads allow 256 envelopes × 16 KiB; escaping can double
+  JSON size. A separate cap needs paging measurement or double serialization.
+  With 4 KiB payloads an uncompacted checkpoint reaches 4 MiB near 300
+  operations; folding resolves it once entries age and become covered. Envelope deletion remains deferred until
   subscriber receipts can bound replicated scope. Writer identity is currently
   forced to the authenticated account ID; whether device keys should introduce
   per-device writer IDs remains open for that later slice. Identity fingerprints
   remain plain enumerable checkpoint data: live state stores the serializable
-  balanced identity tree, and checkpoint encoding (or `materializeApplied`)
-  creates the flat record on demand. Sequential steady-state admission is
-  expected O(log n) per operation and O(n log n) overall, rather than repeatedly
-  materializing O(n) records. Unready operations maintain a per-state persistent
+  balanced identity tree; checkpoint encoding (or `materializeApplied`) creates
+  the flat record on demand. Steady-state admission is expected O(log n) per
+  operation and O(n log n) overall. Unready operations maintain a per-state
   identity treap for incremental O(log n) checks and bounded admission;
   operation intake and synchronization batches share `MAX_OPERATION_BATCH_SIZE`
   (512), after which admission fails rather than silently wedging, while a ready
@@ -74,10 +70,10 @@
   then apply re-walks only that plain copy, so the caller is still read once and
   fingerprints, reduction, persistence, and checkpoint encoding use validated
   plain data. Entity `workspaceId` must be omitted or a string; explicit
-  `undefined` is rejected. Tagged bigint checkpoint encodings are injective:
-  Tagged bigint encoding rejects noncanonical forms. Checkpoint callers supply
-  the projection codec; production paths use one typed codec validating exact
-  structures, canonical ordering, metadata, conflicts, safe IDs, and defaults.
+  `undefined` is rejected. Tagged bigint encoding rejects noncanonical forms.
+  Checkpoint callers supply the projection codec; production paths use one typed
+  codec validating exact structures, canonical ordering, metadata, conflicts,
+  safe IDs, and defaults.
   The operation envelope, clock, and entity require the codec's exact key sets
   at admission. Values must be reference-free trees: shared object references
   and cycles are rejected. Operation values accept primitives, arrays, plain
@@ -142,16 +138,20 @@
 
 ## Typed entity projection
 
-- Shared intake has a closed kind/entity/payload registry. It admits workspace
-  create/name/delete, prompt create/name/body/delete, and user default-workspace
-  writes only; unknown kinds, unsupported entities, malformed payloads, and all
-  session operations fail closed. Entities use immutable create identity, LWW
-  fields, remove-wins deletion, canonical prompt conflicts, causal revision
-  discard, and deterministic effective-default repair.
-- No old production string checkpoint can exist: no local producer exists,
-  engine checkpoints require non-empty POST intake, the runner outbox is empty,
-  and runner checkpoints require non-empty pull pages. No data or database
-  Stale/foreign blobs fail closed and require rebuild.
+- Shared intake has a closed kind/entity/payload registry admitting only
+  workspace create/name/delete, prompt create/name/body/delete, and user
+  default-workspace writes. Unknown kinds/entities, malformed payloads, and all
+  session operations fail closed. User-register entities must identify their
+  account. Synchronization parses sequence values only after a string type
+  check. Projection uses immutable create identity, LWW fields, remove-wins
+  deletion, canonical prompt conflicts, causal discard, and default repair.
+- No old production string checkpoint can exist: there is no local producer,
+  engine checkpoints need non-empty POST intake, the runner outbox is empty, and
+  runner checkpoints need non-empty pull pages. No data or database migration is
+  required; stale/foreign blobs fail closed and need operator rebuild.
+- Losing prompt bodies grow O(concurrent writers) across folds, bounded only by
+  the fail-closed 4 MiB checkpoint cap. Current one-writer-per-account admission
+  prevents such concurrency; conflict retirement or a tighter bound remains open.
 
 ## Operation stability compaction
 
