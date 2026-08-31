@@ -1,8 +1,6 @@
 import { describe, expect, test } from "vitest";
-import {
-  createOperation,
-  snapshotOperationEnvelope,
-} from "../shared/operation-core";
+import { createOperation } from "../shared/operation-core";
+import { applyOperationIntakeBatch } from "../shared/operation-intake-core";
 import {
   initialOperationEntityProjection,
   operationEntityProjectionCodec,
@@ -64,9 +62,14 @@ describe("operation entity registry", () => {
       operation("workspace.name.set", { value: 1 }),
       operation("session.create", {}, { entityType: "agent_sessions" }),
     ])
-      expect(() => snapshotOperationEnvelope(item)).toThrow(
-        /kind|payload|entity/i,
-      );
+      expect(() =>
+        applyOperationIntakeBatch(
+          "non-session",
+          testApplyState(initialOperationEntityProjection),
+          [{ encoded: "", operation: item }],
+          { append: () => undefined, reducer: reduceOperationEntityProjection },
+        ),
+      ).toThrow(/kind|payload|entity/i);
   });
 });
 

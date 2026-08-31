@@ -9,6 +9,7 @@ import {
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
+import { operationEntityProjectionCodec } from "../shared/operation-projection.ts";
 import { createOperationStore } from "../sync-engine/operation-store.ts";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization.ts";
 import { testOperation } from "./operation-core-test-support.ts";
@@ -493,6 +494,7 @@ permanentHeadTest(
         "owner-1",
         "non-session",
       ) ?? "",
+      operationEntityProjectionCodec,
     );
     expect(checkpoint.frontier).toEqual({ "owner-1": 9n });
     expect(checkpoint.pending).toEqual([]);

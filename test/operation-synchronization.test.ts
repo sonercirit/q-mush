@@ -15,7 +15,7 @@ import { isRecord } from "../shared/validation";
 import { type OperationIntakeLimits } from "../sync-engine/operation-intake";
 import { createOperationStore } from "../sync-engine/operation-store";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
-import { testOperation } from "./operation-core-test-support";
+import { entityTestOperation } from "./operation-entity-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
@@ -50,7 +50,7 @@ const body = (
 const OWNED_OPERATION_CLOCK_BASE_MS = Date.now();
 const ownedOperation = (sequence = 1n) => {
   const sequenceNumber = Number(sequence);
-  const operation = testOperation(
+  const operation = entityTestOperation(
     "owner-1",
     sequence,
     {},
@@ -329,7 +329,7 @@ test("operation synchronization maps identity equivocation to conflict", async (
   const first = encodeOperationEnvelope(operation);
   const changed = encodeOperationEnvelope({
     ...operation,
-    payload: { value: "changed" },
+    payload: { name: "changed" },
   });
   expect(await synchronizationStatus([first, changed])).toBe(409);
 });

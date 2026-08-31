@@ -22,10 +22,8 @@ import {
   type OperationIntakeLimits,
 } from "../sync-engine/operation-intake";
 import { createOperationStore } from "../sync-engine/operation-store";
-import {
-  testOperation,
-  testSessionOperation,
-} from "./operation-core-test-support";
+import { testSessionOperation } from "./operation-core-test-support";
+import { entityTestOperation } from "./operation-entity-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
@@ -40,7 +38,7 @@ const setup = (limits?: OperationIntakeLimits) => {
 };
 const setupWithOperation = () => ({
   ...setup(),
-  operation: testOperation("writer-a", 1n, {}, "one"),
+  operation: entityTestOperation("writer-a", 1n, {}, "one"),
 });
 const checkpointProjection = (encodedCheckpoint: string) =>
   decodeOperationCheckpoint(encodedCheckpoint, operationEntityProjectionCodec)
@@ -65,7 +63,7 @@ const expectNoStoredOperations = (
 };
 const operationsOfLength = (length: number) =>
   Array.from({ length }, (_, index) =>
-    testOperation(`writer-${String(index)}`, 1n, {}, "one"),
+    entityTestOperation(`writer-${String(index)}`, 1n, {}, "one"),
   );
 const applyOperationCount = (
   intake: ReturnType<typeof createOperationIntake>,
@@ -98,7 +96,7 @@ test("operation intake persists one snapshot consistently and replays it as a du
   const resources = harness.setup();
   const database = resources.database;
   const intake = createOperationIntake(resources);
-  const operation = testOperation("writer-a", 1n, {}, "one");
+  const operation = entityTestOperation("writer-a", 1n, {}, "one");
   const originalPayload = { name: "one" };
   const payload = new Proxy(originalPayload, {
     get: () => "get-trap-value",
@@ -130,7 +128,7 @@ test("operation intake persists one snapshot consistently and replays it as a du
 
 test("operation intake persists frozen defensive operation snapshots", () => {
   const { database, intake } = setup();
-  const operation = testOperation("frozen-writer", 1n, {}, "immutable");
+  const operation = entityTestOperation("frozen-writer", 1n, {}, "immutable");
   const originalFingerprint = operationFingerprint(operation);
   const first = apply(intake, [operation], 2);
   const row = storedEnvelopeRows(database).at(0);
@@ -177,7 +175,7 @@ test("operation intake checkpoints applied state for round-trip", () => {
 
 test("operation intake retains out-of-order operations pending and drains them", () => {
   const { intake } = setup();
-  const second = testOperation("writer-a", 2n, { "writer-a": 1n }, "two");
+  const second = entityTestOperation("writer-a", 2n, { "writer-a": 1n }, "two");
   const pending = apply(intake, [second], 2);
   expect(
     decodeOperationCheckpoint(
@@ -185,7 +183,7 @@ test("operation intake retains out-of-order operations pending and drains them",
       operationEntityProjectionCodec,
     ).pending,
   ).toEqual([second]);
-  const first = testOperation("writer-a", 1n, {}, "one");
+  const first = entityTestOperation("writer-a", 1n, {}, "one");
   const drained = apply(intake, [first], 3);
   expect(drained.frontier).toEqual({ "writer-a": 2n });
   expect(
@@ -205,7 +203,7 @@ test("operation intake rejects equivocation and rolls back its batch", () => {
 test("operation intake rejects a mismatched operation partition", () => {
   const { database, intake } = setup();
   const operation = {
-    ...testOperation("writer-a", 1n, {}, "one"),
+    ...entityTestOperation("writer-a", 1n, {}, "one"),
     partition: "session" as const,
   };
   expect(() => apply(intake, [operation], 2)).toThrow("scope mismatch");
@@ -230,7 +228,7 @@ test("operation intake retained capacity ignores folded envelope history", () =>
   expect(MAX_OWNER_PARTITION_OPERATIONS).toBe(2_000);
   const { database, intake } = setup();
   const seededEnvelope = encodeOperationEnvelope(
-    testOperation("bulk-writer", 1n, {}, "seeded"),
+    entityTestOperation("bulk-writer", 1n, {}, "seeded"),
   );
   database.$client.run(
     `WITH RECURSIVE rows(sequence) AS (
@@ -256,13 +254,17 @@ test("operation intake retained capacity ignores folded envelope history", () =>
     createOperationStore({ database })
       .readEncodedEnvelopes("owner-1", "non-session", {}, 1)
       .envelopes.map(decodeOperationEnvelope),
-  ).toEqual([testOperation("bulk-writer", 1n, {}, "seeded")]);
+  ).toEqual([entityTestOperation("bulk-writer", 1n, {}, "seeded")]);
   expect(
-    apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,
+    apply(intake, [entityTestOperation("final-writer", 1n, {}, "final")], 2)
+      .frontier,
   ).toEqual({ "final-writer": 1n });
   expect(
-    apply(intake, [testOperation("overflow-writer", 1n, {}, "overflow")], 3)
-      .frontier,
+    apply(
+      intake,
+      [entityTestOperation("overflow-writer", 1n, {}, "overflow")],
+      3,
+    ).frontier,
   ).toEqual({ "final-writer": 1n, "overflow-writer": 1n });
   expectStoredEnvelopeCount(database, MAX_OWNER_PARTITION_OPERATIONS + 1);
 });
@@ -271,19 +273,19 @@ test("operation intake rejects owner-partition history above its capacity", () =
   const { intake } = setup({ ownerPartitionOperations: 2 });
   apply(intake, operationsOfLength(2), 2);
   expect(() =>
-    apply(intake, [testOperation("overflow", 1n, {}, "one")], 3),
+    apply(intake, [entityTestOperation("overflow", 1n, {}, "one")], 3),
   ).toThrow("history capacity reached");
 });
 
 test("operation intake duplicate older than drift remains acknowledged", () => {
   const { intake } = setup();
-  const old = testOperation("writer-a", 1n, {}, "old", 1);
+  const old = entityTestOperation("writer-a", 1n, {}, "old", 1);
   apply(intake, [old], 1);
   expect(() => apply(intake, [old], 600_002)).not.toThrow();
   expect(() =>
     apply(
       intake,
-      [testOperation("writer-b", 1n, {}, "new identity", 1)],
+      [entityTestOperation("writer-b", 1n, {}, "new identity", 1)],
       600_002,
     ),
   ).toThrow(/drift bound/);
@@ -300,7 +302,7 @@ test("operation intake leaves session capacity unavailable", () => {
     ),
   ).toThrow(/kind|entity/);
   expect(
-    apply(intake, [testOperation("writer-a", 1n, {}, "one")], 3).frontier,
+    apply(intake, [entityTestOperation("writer-a", 1n, {}, "one")], 3).frontier,
   ).toEqual({ "writer-a": 1n });
 });
 
@@ -313,7 +315,7 @@ test("operation intake history capacity counts stored envelopes, not replays", (
 
 test("operation intake rejects checkpoints above their byte capacity", () => {
   const { database, intake } = setup();
-  const operation = testOperation(
+  const operation = entityTestOperation(
     "capacity-writer",
     1n,
     {},

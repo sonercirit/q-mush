@@ -1,5 +1,4 @@
 import { setAppliedNode } from "./operation-applied-index";
-import { validateEntityOperation } from "./operation-entities";
 import { classifyOperationPartition } from "./operation-partitions";
 import {
   freezeOperationValue,
@@ -152,13 +151,8 @@ function validateAndSnapshotOperation<TPayload>(
 }
 
 /** Validates an operation envelope and returns its frozen durable snapshot. */
-export const snapshotOperationEnvelope = (operation: Operation): Operation => {
-  const snapshot = validateAndSnapshotOperation(operation, true);
-  const entityError = validateEntityOperation(snapshot);
-  if (entityError !== undefined)
-    throw operationProtocolError("invalid", entityError);
-  return freezeOperationValue(snapshot);
-};
+export const snapshotOperationEnvelope = (operation: Operation): Operation =>
+  freezeOperationValue(validateAndSnapshotOperation(operation, true));
 
 export const createOperation = <TPayload>(
   input: OperationInput<TPayload>,

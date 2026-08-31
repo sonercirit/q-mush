@@ -6,6 +6,7 @@ import {
   type OperationApplyState,
   type OperationPartition,
 } from "./operation-core.ts";
+import { validateEntityOperation } from "./operation-entities.ts";
 import { utf8ByteLength } from "./utf8.ts";
 
 const MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES = 16 * 1024;
@@ -86,6 +87,9 @@ export const applyOperationIntakeBatch = <Projection>(
   let successor = state;
   for (const { encoded, operation } of candidates) {
     const snapshot = snapshotOperationEnvelope(operation);
+    const entityError = validateEntityOperation(snapshot);
+    if (entityError !== undefined)
+      throw operationProtocolError("invalid", entityError);
     if (
       snapshot.partition !== partition ||
       !(resources.ownsOperation?.(snapshot) ?? true)
