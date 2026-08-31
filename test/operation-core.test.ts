@@ -550,6 +550,7 @@ describe("operation core", () => {
       replayLastClock: seeded.replayLastClock,
       baseProjection: seeded.baseProjection,
       baseFrontier: seeded.baseFrontier,
+      stableClock: seeded.stableClock,
     };
     const append = (projection: readonly string[], item: Operation) => [
       ...projection,

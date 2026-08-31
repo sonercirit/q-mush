@@ -453,6 +453,8 @@ test("operation synchronization returns deterministic bounded missing pages", as
   expect(result).toEqual({
     envelopes: operations.slice().reverse().map(encodeOperationEnvelope),
     hasMore: false,
+    stableClock: null,
+    stableFrontier: null,
   });
 });
 

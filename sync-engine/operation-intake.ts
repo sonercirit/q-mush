@@ -9,6 +9,7 @@ import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
+  MAX_REMOTE_CLOCK_DRIFT_MS,
   operationProtocolError,
   type CausalFrontier,
   type Operation,
@@ -18,6 +19,10 @@ import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
 } from "../shared/operation-intake-core";
+import {
+  engineStabilityBoundaryClock,
+  stabilizeOperationApplyState,
+} from "../shared/operation-stability";
 import { createOperationStore } from "./operation-store";
 
 export interface OperationIntakeLimits {
@@ -28,6 +33,7 @@ interface OperationIntakeResources {
   readonly database: AppDatabase;
   readonly generateId?: IdGenerator;
   readonly limits?: OperationIntakeLimits;
+  readonly enforceClockDrift?: boolean;
 }
 interface OperationIntakeResult {
   readonly frontier: CausalFrontier;
@@ -62,34 +68,44 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           "Operation intake batch is too large",
         );
       return resources.database.transaction(() => {
-        let storedCount = store.countEnvelopes(ownerId, partition);
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
             ? initialOperationApplyState<OperationCheckpointProjection>([])
             : decodeOperationCheckpoint(encoded);
-        state = applyOperationIntakeBatch(
-          partition,
-          state,
-          operations.map((operation) => ({ encoded: "", operation })),
-          {
-            append: (_encoded, snapshot) => {
-              const appended = store.appendEnvelope(
-                ownerId,
-                snapshot,
-                actorId,
-                now,
-              );
-              if (appended) storedCount += 1;
-              if (storedCount > ownerPartitionOperationLimit)
-                throw operationProtocolError(
-                  "capacity",
-                  "Operation history capacity reached",
-                );
-            },
-            reducer,
+        const candidates = operations.flatMap((operation) => {
+          if (
+            store.classifyEnvelopeIdentity(ownerId, operation) === "duplicate"
+          )
+            return [];
+          if (
+            resources.enforceClockDrift !== false &&
+            Math.abs(operation.clock.physicalMs - now) >
+              MAX_REMOTE_CLOCK_DRIFT_MS
+          )
+            throw operationProtocolError(
+              "invalid",
+              "Operation clock exceeds remote drift bound",
+            );
+          return [{ encoded: "", operation }];
+        });
+        state = applyOperationIntakeBatch(partition, state, candidates, {
+          append: (_encoded, snapshot) => {
+            store.appendEnvelope(ownerId, snapshot, actorId, now);
           },
-        );
+          reducer,
+        });
+        const boundary = engineStabilityBoundaryClock(now);
+        if (boundary !== undefined)
+          state = stabilizeOperationApplyState(state, boundary, reducer);
+        if (
+          state.replayCount + state.pending.length >
+          ownerPartitionOperationLimit
+        )
+          throw operationProtocolError(
+            "capacity",
+            "Operation history capacity reached",
+          );
         const encodedCheckpoint = encodeOperationCheckpoint(state);
         if (
           new TextEncoder().encode(encodedCheckpoint).byteLength >
@@ -105,6 +121,7 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           encodedCheckpoint,
           actorId,
           now,
+          state,
         );
         return { frontier: state.frontier, encodedCheckpoint };
       });

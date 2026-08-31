@@ -4,7 +4,6 @@ import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_ENVELOPE_BYTES,
-  MAX_REMOTE_CLOCK_DRIFT_MS,
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
@@ -164,9 +163,12 @@ export const createOperationSynchronization = (
           parsed.frontier,
           MAX_ENVELOPE_PAGE_SIZE,
         );
+        const stability = store.loadStability(ownerId, parsed.partition);
         return Response.json({
           envelopes: page.envelopes,
           hasMore: page.hasMore,
+          stableClock: stability.stableClock,
+          stableFrontier: stability.stableFrontier,
         });
       }
       const operations = parsed.envelopes.map((envelope) => {
@@ -185,16 +187,6 @@ export const createOperationSynchronization = (
         )
       )
         return new Response("Forbidden", { status: 403 });
-      if (
-        operations.some(
-          ({ clock }) =>
-            Math.abs(clock.physicalMs - now) > MAX_REMOTE_CLOCK_DRIFT_MS,
-        )
-      )
-        return Response.json(
-          { error: "Invalid operation batch" },
-          { status: 400 },
-        );
       const result = intake.apply(
         ownerId,
         parsed.partition,
