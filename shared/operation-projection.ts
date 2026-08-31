@@ -291,6 +291,43 @@ const encodeOperationEntityProjection = (
   projection: OperationEntityProjection,
 ): EncodedOperationEntityProjection =>
   decodeOperationEntityProjection(projection);
+const validNamedWrites = (item: Record<string, unknown>): boolean =>
+  safeId(item["id"]) &&
+  optionalWrite(item["created"], (entry) => entry === true) &&
+  optionalWrite(item["name"], (entry) => typeof entry === "string") &&
+  optionalWrite(item["deleted"], (entry) => entry === true);
+const validWorkspace = (item: unknown): item is WorkspaceProjection =>
+  exactObject(item, ["id", "created", "name", "deleted"]) &&
+  validNamedWrites(item);
+const validPrompt = (item: unknown): item is PromptProjection =>
+  exactObject(item, [
+    "id",
+    "created",
+    "name",
+    "body",
+    "bodyConflicts",
+    "deleted",
+  ]) &&
+  validNamedWrites(item) &&
+  optionalWrite(item["body"], (entry) => typeof entry === "string") &&
+  Array.isArray(item["bodyConflicts"]) &&
+  item["bodyConflicts"].every((entry) =>
+    validWrite(entry, (body) => typeof body === "string"),
+  );
+const validUser = (item: unknown): item is UserProjection =>
+  exactObject(item, [
+    "id",
+    "defaultWorkspaceId",
+    "effectiveDefaultWorkspaceId",
+  ]) &&
+  safeId(item["id"]) &&
+  optionalWrite(
+    item["defaultWorkspaceId"],
+    (entry) => entry === null || typeof entry === "string",
+  ) &&
+  (item["effectiveDefaultWorkspaceId"] === null ||
+    safeId(item["effectiveDefaultWorkspaceId"]));
+
 const decodeOperationEntityProjection = (
   value: unknown,
 ): OperationEntityProjection => {
@@ -304,43 +341,6 @@ const decodeOperationEntityProjection = (
   const workspaces = value["workspaces"];
   const prompts = value["prompts"];
   const users = value["users"];
-  const validWorkspace = (item: unknown): item is WorkspaceProjection =>
-    exactObject(item, ["id", "created", "name", "deleted"]) &&
-    safeId(item["id"]) &&
-    optionalWrite(item["created"], (entry) => entry === true) &&
-    optionalWrite(item["name"], (entry) => typeof entry === "string") &&
-    optionalWrite(item["deleted"], (entry) => entry === true);
-  const validPrompt = (item: unknown): item is PromptProjection =>
-    exactObject(item, [
-      "id",
-      "created",
-      "name",
-      "body",
-      "bodyConflicts",
-      "deleted",
-    ]) &&
-    safeId(item["id"]) &&
-    optionalWrite(item["created"], (entry) => entry === true) &&
-    optionalWrite(item["name"], (entry) => typeof entry === "string") &&
-    optionalWrite(item["body"], (entry) => typeof entry === "string") &&
-    Array.isArray(item["bodyConflicts"]) &&
-    item["bodyConflicts"].every((entry) =>
-      validWrite(entry, (body) => typeof body === "string"),
-    ) &&
-    optionalWrite(item["deleted"], (entry) => entry === true);
-  const validUser = (item: unknown): item is UserProjection =>
-    exactObject(item, [
-      "id",
-      "defaultWorkspaceId",
-      "effectiveDefaultWorkspaceId",
-    ]) &&
-    safeId(item["id"]) &&
-    optionalWrite(
-      item["defaultWorkspaceId"],
-      (entry) => entry === null || typeof entry === "string",
-    ) &&
-    (item["effectiveDefaultWorkspaceId"] === null ||
-      safeId(item["effectiveDefaultWorkspaceId"]));
   if (
     !workspaces.every(validWorkspace) ||
     !prompts.every(validPrompt) ||

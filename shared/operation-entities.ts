@@ -28,15 +28,17 @@ interface EntityOperationDefinition {
   readonly validPayload: (value: unknown) => boolean;
 }
 
+const stringValueDefinition = (entityType: "workspaces" | "prompts") => ({
+  entityType,
+  validPayload: (value: unknown) => payloadWith(value, "value", validString),
+});
+
 const definitions = {
   "workspace.create": {
     entityType: "workspaces",
     validPayload: (value) => payloadWith(value, "name", validString),
   },
-  "workspace.name.set": {
-    entityType: "workspaces",
-    validPayload: (value) => payloadWith(value, "value", validString),
-  },
+  "workspace.name.set": stringValueDefinition("workspaces"),
   "workspace.delete": {
     entityType: "workspaces",
     validPayload: (value) => exactObject(value, []),
@@ -48,14 +50,8 @@ const definitions = {
       validString(value["name"]) &&
       validString(value["body"]),
   },
-  "prompt.name.set": {
-    entityType: "prompts",
-    validPayload: (value) => payloadWith(value, "value", validString),
-  },
-  "prompt.body.set": {
-    entityType: "prompts",
-    validPayload: (value) => payloadWith(value, "value", validString),
-  },
+  "prompt.name.set": stringValueDefinition("prompts"),
+  "prompt.body.set": stringValueDefinition("prompts"),
   "prompt.delete": {
     entityType: "prompts",
     validPayload: (value) => exactObject(value, []),
