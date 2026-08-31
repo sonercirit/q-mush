@@ -13,19 +13,16 @@ interface ProjectionWrite<T> {
   readonly sequence: bigint;
   readonly clock: HybridTimestamp;
 }
-interface WorkspaceProjection {
+interface NamedEntityProjection {
   readonly id: string;
   readonly created: ProjectionWrite<true> | undefined;
   readonly name: ProjectionWrite<string> | undefined;
   readonly deleted: ProjectionWrite<true> | undefined;
 }
-interface PromptProjection {
-  readonly id: string;
-  readonly created: ProjectionWrite<true> | undefined;
-  readonly name: ProjectionWrite<string> | undefined;
+type WorkspaceProjection = NamedEntityProjection;
+interface PromptProjection extends NamedEntityProjection {
   readonly body: ProjectionWrite<string> | undefined;
   readonly bodyConflicts: readonly ProjectionWrite<string>[];
-  readonly deleted: ProjectionWrite<true> | undefined;
 }
 interface UserProjection {
   readonly id: string;
@@ -74,24 +71,23 @@ const payloadString = (
   const value = payloadField(operation, key);
   return typeof value === "string" ? value : "";
 };
+const emptyNamedEntity = (id: string): NamedEntityProjection => ({
+  id,
+  created: undefined,
+  name: undefined,
+  deleted: undefined,
+});
 const workspaceRecord = (
   projection: OperationEntityProjection,
   id: string,
 ): WorkspaceProjection =>
-  projection.workspaces.find((item) => item.id === id) ?? {
-    id,
-    created: undefined,
-    name: undefined,
-    deleted: undefined,
-  };
+  projection.workspaces.find((item) => item.id === id) ?? emptyNamedEntity(id);
 const promptRecord = (
   projection: OperationEntityProjection,
   id: string,
 ): PromptProjection =>
   projection.prompts.find((item) => item.id === id) ?? {
-    id,
-    created: undefined,
-    name: undefined,
+    ...emptyNamedEntity(id),
     body: undefined,
     bodyConflicts: [],
     deleted: undefined,
@@ -174,6 +170,13 @@ const reducePrompt = (
     };
     return { ...projection, prompts: replaceById(projection.prompts, next) };
   }
+  if (operation.kind === "prompt.delete") {
+    const deleted = { ...current, deleted: write<true>(operation, true) };
+    return {
+      ...projection,
+      prompts: replaceById(projection.prompts, deleted),
+    };
+  }
   if (current.created === undefined || current.deleted !== undefined)
     return projection;
   if (operation.kind === "prompt.name.set")
@@ -182,14 +185,6 @@ const reducePrompt = (
       prompts: replaceById(projection.prompts, {
         ...current,
         name: write(operation, payloadString(operation, "value")),
-      }),
-    };
-  if (operation.kind === "prompt.delete")
-    return {
-      ...projection,
-      prompts: replaceById(projection.prompts, {
-        ...current,
-        deleted: write<true>(operation, true),
       }),
     };
   const nextBody = write(operation, payloadString(operation, "value"));
@@ -294,7 +289,8 @@ const canonicalItems = (items: readonly { readonly id: string }[]) =>
 type EncodedOperationEntityProjection = OperationEntityProjection;
 const encodeOperationEntityProjection = (
   projection: OperationEntityProjection,
-): EncodedOperationEntityProjection => projection;
+): EncodedOperationEntityProjection =>
+  decodeOperationEntityProjection(projection);
 const decodeOperationEntityProjection = (
   value: unknown,
 ): OperationEntityProjection => {
@@ -361,11 +357,19 @@ const decodeOperationEntityProjection = (
   )
     throw new Error("Invalid entity projection effective default");
   for (const prompt of prompts) {
+    const conflictOrder = prompt.bodyConflicts.every((item, index) => {
+      const previous = prompt.bodyConflicts[index - 1];
+      return (
+        previous === undefined ||
+        compareClocks(previous.clock, item.clock) < 0 ||
+        (compareClocks(previous.clock, item.clock) === 0 &&
+          previous.operationId < item.operationId)
+      );
+    });
     if (
-      !canonicalItems(
-        prompt.bodyConflicts.map((item) => ({
-          id: `${item.clock.physicalMs.toString()}:${item.clock.logical.toString()}:${item.clock.writerId}:${item.operationId}`,
-        })),
+      !conflictOrder ||
+      prompt.bodyConflicts.some(
+        ({ operationId }) => operationId === prompt.body?.operationId,
       ) ||
       new Set(prompt.bodyConflicts.map(({ operationId }) => operationId))
         .size !== prompt.bodyConflicts.length

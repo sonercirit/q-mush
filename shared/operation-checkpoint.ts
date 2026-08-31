@@ -258,20 +258,16 @@ const replayOperations = (head: ReplayEntry | undefined): Operation[] => {
     replay.push(entry.operation);
   return replay;
 };
+const validStringProjection = (value: unknown): value is readonly string[] =>
+  Array.isArray(value) && value.every((item) => typeof item === "string");
 const legacyStringProjectionCodec: OperationProjectionCodec<unknown> = {
   encode: (projection) => {
-    if (
-      !Array.isArray(projection) ||
-      !projection.every((item) => typeof item === "string")
-    )
+    if (!validStringProjection(projection))
       throw new Error("Invalid legacy string projection");
     return projection;
   },
   decode: (value) => {
-    if (
-      !Array.isArray(value) ||
-      !value.every((item) => typeof item === "string")
-    )
+    if (!validStringProjection(value))
       throw new Error("Invalid legacy string projection");
     return value;
   },

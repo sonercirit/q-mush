@@ -22,45 +22,38 @@
   clocks more than five minutes in the past, so a client offline longer than
   that cannot submit its queue. Encoding flattens replay history and both
   encoding and decoding are depth-independent, without dropping history.
-  Checkpoints therefore grow linearly with replay history and the `applied`
-  identity index. With 2,000 sequential operations and a minimal
-  `{ value: "x" }` payload, a `readonly string[]` projection containing each
-  operation ID, `entity.type: "workspaces"`, `kind: "workspace.name.set"`, and
-  identifiers `writerId: "a"`, `accountId: "a"`, `entity.id: "w"`, and operation
-  IDs `a-<sequence>`, plain JSON with decimal bigint strings measures 2,099,540
-  bytes (1,049.77 bytes/operation, 2.002 MiB total); the production tagged
-  checkpoint encoding measures 2,783,735 bytes (1,391.87 bytes/operation, 2.655
-  MiB total). Checkpoint decoding rejects repeated replay or pending
-  operation-ID or writer-sequence identities, including byte-identical
-  duplicates, and rejects negative sequence, parent, and frontier values while
-  preserving signed bigint operation payloads. Sizes use bytes per operation and
-  binary MiB (1 MiB = 1,048,576 bytes). Stability compaction now folds replay
-  prefixes proven safe by frontier, drift, and pending-clock bounds. The route
-  fails closed at 16 KiB per encoded envelope, 2,000 retained
-  replay-plus-pending operations per owner/partition, or a 4 MiB post-fold
-  checkpoint (HTTP 507 for either working-set capacity). Limits apply after the
-  route buffers/parses JSON; stage 2 has no route request-byte cap. Reads rely
-  on 256 envelopes × 16 KiB: strings are at most 4 MiB, but escaping can make
-  JSON about 8 MiB. A separate cap would require measuring while paging or
-  serializing twice. With 4 KiB payloads an uncompacted checkpoint reaches 4 MiB
-  around 300 operations; stability folding resolves the wedge once entries age
-  and become covered. Measurements ranged from 258 KB/9.8 ms at 200 operations
-  to 4.14 MB/134.4 ms at 3,200; 20,000 produced 25.1 MB and decoded in 564 ms.
-  Envelope-row deletion remains deferred until durable subscriber receipts can
-  bound replicated scope. Writer identity is currently forced to the
-  authenticated account ID; whether device keys should introduce per-device
-  writer IDs remains open for that later slice. Identity fingerprints remain
-  plain enumerable checkpoint data: live state stores the serializable balanced
-  identity tree, and checkpoint encoding (or `materializeApplied`) creates the
-  flat record on demand. Sequential steady-state admission is expected O(log n)
-  per operation and O(n log n) overall, rather than repeatedly materializing
-  O(n) records. Unready operations maintain a per-state persistent identity
-  treap for incremental O(log n) checks and bounded admission; operation intake
-  and synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after
-  which admission fails rather than silently wedging, while a ready dependency
-  may enter a full buffer to drain it; operation-ID and writer-sequence
-  equivocation is rejected. Durable checkpoints consist of `frontier`,
-  `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
+  Checkpoints grow linearly with replay and applied identity history. A measured
+  2,000-operation single-workspace stream using the production typed reducer and
+  codec produced 2,659,611 bytes (1,329.81 B/op, 2.536 MiB); apply took 566.5 ms
+  and encoding 52.4 ms on the development runner. Checkpoint decoding rejects
+  repeated replay or pending operation-ID or writer-sequence identities,
+  including byte-identical duplicates, and rejects negative sequence, parent,
+  and frontier values while preserving signed bigint operation payloads. Sizes
+  use bytes per operation and binary MiB (1 MiB = 1,048,576 bytes). Stability
+  compaction now folds replay prefixes proven safe by frontier, drift, and
+  pending-clock bounds. The route fails closed at 16 KiB per encoded envelope,
+  2,000 retained replay-plus-pending operations per owner/partition, or a 4 MiB
+  post-fold checkpoint (HTTP 507 for either working-set capacity). Limits apply
+  after the route buffers/parses JSON; stage 2 has no route request-byte cap.
+  Reads rely on 256 envelopes × 16 KiB: strings are at most 4 MiB, but escaping
+  can make JSON about 8 MiB. A separate cap would require measuring while paging
+  or serializing twice. With 4 KiB payloads an uncompacted checkpoint reaches 4
+  MiB around 300 operations; stability folding resolves the wedge once entries
+  age and become covered. Envelope-row deletion remains deferred until durable
+  subscriber receipts can bound replicated scope. Writer identity is currently
+  forced to the authenticated account ID; whether device keys should introduce
+  per-device writer IDs remains open for that later slice. Identity fingerprints
+  remain plain enumerable checkpoint data: live state stores the serializable
+  balanced identity tree, and checkpoint encoding (or `materializeApplied`)
+  creates the flat record on demand. Sequential steady-state admission is
+  expected O(log n) per operation and O(n log n) overall, rather than repeatedly
+  materializing O(n) records. Unready operations maintain a per-state persistent
+  identity treap for incremental O(log n) checks and bounded admission;
+  operation intake and synchronization batches share `MAX_OPERATION_BATCH_SIZE`
+  (512), after which admission fails rather than silently wedging, while a ready
+  dependency may enter a full buffer to drain it; operation-ID and
+  writer-sequence equivocation is rejected. Durable checkpoints consist of
+  `frontier`, `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
   `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
   fields is optional. Decoding fails closed unless replay count/head clock,
   global canonical clock order, per-writer sequence contiguity from the base
@@ -82,53 +75,52 @@
   fingerprints, reduction, persistence, and checkpoint encoding use validated
   plain data. Entity `workspaceId` must be omitted or a string; explicit
   `undefined` is rejected. Tagged bigint checkpoint encodings are injective:
-  decimal `0` is accepted, while non-canonical `-0` is rejected. The checkpoint
-  codec currently supports only `readonly string[]` projections; its exported
-  types enforce that restriction until a caller-supplied projection codec is
-  introduced. The operation envelope, clock, and entity require the codec's
-  exact key sets at admission. Values must be reference-free trees: shared
-  object references and cycles are rejected. Operation values accept primitives,
-  arrays, plain string-keyed objects, and valid Dates; other object prototypes
-  and symbol keys are rejected. Every validated or decoded operation snapshot is
-  transitively frozen before retention, including payload, parents, clock, and
-  entity. Each reducer invocation receives a separate transitively frozen deep
-  copy rebuilt from that pristine retained snapshot; retained snapshots are
-  never exposed to reducers. Reducers must remain pure with respect to their
-  operation input's object properties, while internal-slot mutation such as
-  `Date.setTime()` can affect only the invocation's defensive copy and cannot
-  corrupt fingerprints, replay history, or later encoding. The auth bearer-token
-  `sessions`, encrypted `provider_credentials`, and setup-token-bearing
-  `runners` tables are deliberately absent from operation replication because
-  ordinary frames contain no secrets. The remaining closed allow-list was
-  audited against schema columns: none stores credentials, authentication
-  tokens, password material, or encryption keys. Blob lookup early hit. Solid
-  selects its host from page metadata; both runner and authenticated
-  migration-engine handlers serve bounded, read-only active views labeled with
-  origin and completeness. Sensitive export tables use explicit public-column
-  allow-lists; blobs download separately/resumably. Engine blob GETs are
-  stateless and read-only: they derive digests from owner-scoped attachment
-  columns, requiring no export priming, duplicated blob table, or process cache.
-  Engine active views rewrite inline attachments to the digest references Solid
-  consumes; runner views use replicated references and its blob store. Runner
-  catch-up is background/non-fatal; its loopback app uses an ephemeral
-  collision-free port unless configured. Stage-2 operation durability now stores
-  owner-scoped, encoded envelopes with operation-ID and writer-sequence
-  equivocation checks scoped per partition, matching each partition’s
-  independent writer sequence space, serves bounded ranges after a causal
-  frontier, and atomically replaces one encoded checkpoint per owner and
-  partition. Engine intake transactionally admits a bounded batch, drives the
-  shared `applyOperation` reducer path from a strictly decoded checkpoint, and
-  persists the complete projection, frontier, pending, identity, and replay
-  state; duplicates no-op and equivocation aborts and rolls back the complete
-  batch. An order-preserving, arbitrary-size decimal sequence key backs the
-  owner/partition/writer range index; the store returns bounded missing-envelope
-  pages in deterministic writer/sequence order without SQLite integer casts. The
-  frontier OR predicate uses that ordered index to avoid a temporary sort, but
-  SQLite scans the complete matching owner/partition index prefix: read work is
-  O(history), not a bounded per-writer index range. Client-caused intake scope
-  and batch-bound failures are protocol-invalid errors (HTTP 400), while
-  history/checkpoint capacity is HTTP 507. The authenticated, owner-scoped
-  endpoint accepts strict write `POST` bodies
+  Tagged bigint encoding rejects noncanonical forms. Checkpoint callers supply
+  the projection codec; production paths use one typed codec validating exact
+  structures, canonical ordering, metadata, conflicts, safe IDs, and defaults.
+  The operation envelope, clock, and entity require the codec's exact key sets
+  at admission. Values must be reference-free trees: shared object references
+  and cycles are rejected. Operation values accept primitives, arrays, plain
+  string-keyed objects, and valid Dates; other object prototypes and symbol keys
+  are rejected. Every validated or decoded operation snapshot is transitively
+  frozen before retention, including payload, parents, clock, and entity. Each
+  reducer invocation receives a separate transitively frozen deep copy rebuilt
+  from that pristine retained snapshot; retained snapshots are never exposed to
+  reducers. Reducers must remain pure with respect to their operation input's
+  object properties, while internal-slot mutation such as `Date.setTime()` can
+  affect only the invocation's defensive copy and cannot corrupt fingerprints,
+  replay history, or later encoding. The auth bearer-token `sessions`, encrypted
+  `provider_credentials`, and setup-token-bearing `runners` tables are
+  deliberately absent from operation replication because ordinary frames contain
+  no secrets. The remaining closed allow-list was audited against schema
+  columns: none stores credentials, authentication tokens, password material, or
+  encryption keys. Blob lookup early hit. Solid selects its host from page
+  metadata; both runner and authenticated migration-engine handlers serve
+  bounded, read-only active views labeled with origin and completeness.
+  Sensitive export tables use explicit public-column allow-lists; blobs download
+  separately/resumably. Engine blob GETs are stateless and read-only: they
+  derive digests from owner-scoped attachment columns, requiring no export
+  priming, duplicated blob table, or process cache. Engine active views rewrite
+  inline attachments to the digest references Solid consumes; runner views use
+  replicated references and its blob store. Runner catch-up is
+  background/non-fatal; its loopback app uses an ephemeral collision-free port
+  unless configured. Stage-2 operation durability now stores owner-scoped,
+  encoded envelopes with operation-ID and writer-sequence equivocation checks
+  scoped per partition, matching each partition’s independent writer sequence
+  space, serves bounded ranges after a causal frontier, and atomically replaces
+  one encoded checkpoint per owner and partition. Engine intake transactionally
+  admits a bounded batch, drives the shared `applyOperation` reducer path from a
+  strictly decoded checkpoint, and persists the complete projection, frontier,
+  pending, identity, and replay state; duplicates no-op and equivocation aborts
+  and rolls back the complete batch. An order-preserving, arbitrary-size decimal
+  sequence key backs the owner/partition/writer range index; the store returns
+  bounded missing-envelope pages in deterministic writer/sequence order without
+  SQLite integer casts. The frontier OR predicate uses that ordered index to
+  avoid a temporary sort, but SQLite scans the complete matching owner/partition
+  index prefix: read work is O(history), not a bounded per-writer index range.
+  Client-caused intake scope and batch-bound failures are protocol-invalid
+  errors (HTTP 400), while history/checkpoint capacity is HTTP 507. The
+  authenticated, owner-scoped endpoint accepts strict write `POST` bodies
   `{ ownerId, partition, envelopes }` (at most 512) and read `PUT` bodies
   `{ ownerId, partition, frontier }`; reads return at most 256 encoded envelopes
   plus `hasMore` for resume and anti-entropy. Read frontiers fail closed above
@@ -147,6 +139,19 @@
   `entity.accountId` and `writerId` to the authenticated account. Physical
   pairing is transcript-bound, five-minute, one-use/rate-limited, constant-time
   checked; the browser grant and pairing transcript are never logged.
+
+## Typed entity projection
+
+- Shared intake has a closed kind/entity/payload registry. It admits workspace
+  create/name/delete, prompt create/name/body/delete, and user default-workspace
+  writes only; unknown kinds, unsupported entities, malformed payloads, and all
+  session operations fail closed. Entities use immutable create identity, LWW
+  fields, remove-wins deletion, canonical prompt conflicts, causal revision
+  discard, and deterministic effective-default repair.
+- No old production string checkpoint can exist: no local producer exists,
+  engine checkpoints require non-empty POST intake, the runner outbox is empty,
+  and runner checkpoints require non-empty pull pages. No data or database
+  Stale/foreign blobs fail closed and require rebuild.
 
 ## Operation stability compaction
 
