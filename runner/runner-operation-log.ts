@@ -6,6 +6,7 @@ import type {
   Operation,
   OperationPartition,
 } from "../shared/operation-core.ts";
+import { operationFingerprint } from "../shared/operation-core.ts";
 
 export type OperationReplicaSource = "local" | "remote";
 
@@ -51,6 +52,12 @@ export const createRunnerOperationLog = (database: Database) => {
   database.run(
     "CREATE TABLE IF NOT EXISTS operation_outbox_stalls (owner_id TEXT NOT NULL, partition TEXT NOT NULL, operation_id TEXT NOT NULL, writer_id TEXT NOT NULL, sequence TEXT NOT NULL, encoded TEXT NOT NULL, rejection_reason TEXT NOT NULL, PRIMARY KEY (owner_id, partition, operation_id), UNIQUE (owner_id, partition, writer_id, sequence))",
   );
+  const findIdentity = database.query<
+    { encoded: string },
+    [string, OperationPartition, string, string, string]
+  >(
+    "SELECT encoded FROM operation_envelopes WHERE owner_id = ? AND partition = ? AND (operation_id = ? OR (writer_id = ? AND sequence = ?))",
+  );
   const loadCheckpoint = database.query<
     { encoded: string },
     [string, OperationPartition]
@@ -90,6 +97,21 @@ export const createRunnerOperationLog = (database: Database) => {
     "INSERT INTO operation_quarantines (owner_id, partition, operation_id, writer_id, sequence, encoded, rejection_reason) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING",
   );
   return {
+    classifyIdentity(
+      ownerId: string,
+      operation: Operation,
+    ): "absent" | "duplicate" | "conflict" {
+      const rows = findIdentity.all(...operationIdentity(ownerId, operation));
+      if (rows.length === 0) return "absent";
+      const fingerprint = operationFingerprint(operation);
+      return rows.every(
+        ({ encoded }) =>
+          operationFingerprint(decodeOperationEnvelope(encoded)) ===
+          fingerprint,
+      )
+        ? "duplicate"
+        : "conflict";
+    },
     append(
       ownerId: string,
       operation: Operation,

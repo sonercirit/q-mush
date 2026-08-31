@@ -90,6 +90,22 @@ test("compacts only after the published stable frontier is covered", () => {
   });
 });
 
+test("redelivered folded identity does not quarantine", () => {
+  withStore((store) => {
+    const encoded = envelope(1n);
+    remote(store, [encoded]);
+    store.compact(
+      "owner-1",
+      "non-session",
+      { physicalMs: 1, logical: 0, writerId: "owner-1" },
+      { "owner-1": 1n },
+    );
+    remote(store, [encoded]);
+    expect(store.state("owner-1", "non-session").stalled).toBe(false);
+    expect(rows(store)).toHaveLength(1);
+  });
+});
+
 test("records accepted immutable envelopes and checkpoints", () => {
   withStore((store) => {
     const encoded = envelope(1n);

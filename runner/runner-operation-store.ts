@@ -90,6 +90,25 @@ export const createRunnerOperationStore = (
             continue;
           }
           if (stalled) continue;
+          const identity = log.classifyIdentity(ownerId, operation);
+          if (identity === "duplicate") continue;
+          if (identity === "conflict") {
+            if (source === "local")
+              throw operationProtocolError(
+                "conflict",
+                "Operation identity equivocation",
+              );
+            log.quarantine(
+              ownerId,
+              partition,
+              encoded,
+              "Operation identity equivocation",
+              operation,
+            );
+            changed = true;
+            stalled = true;
+            continue;
+          }
           try {
             let acceptedOperation: typeof operation | undefined;
             const candidate = applyOperationIntakeBatch(
