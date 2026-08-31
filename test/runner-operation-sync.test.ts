@@ -263,6 +263,17 @@ const expectOutboxRetained = (
   expect(replica.events).toEqual([]);
 };
 
+const malformedStabilityResponse = (
+  stableClock: unknown,
+  stableFrontier: unknown,
+): Response =>
+  Response.json({
+    envelopes: [],
+    hasMore: false,
+    stableClock,
+    stableFrontier,
+  });
+
 test("transport defaults absent stability and rejects malformed stability", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch");
   try {
@@ -273,15 +284,15 @@ test("transport defaults absent stability and rejects malformed stability", asyn
       stableClock: null,
       stableFrontier: null,
     });
-    fetchMock.mockResolvedValueOnce(
-      Response.json({
-        envelopes: [],
-        hasMore: false,
-        stableClock: { physicalMs: -1, logical: 0, writerId: "a" },
-        stableFrontier: { a: "1" },
-      }),
-    );
-    await expect(readRunnerPage()).rejects.toThrow(/stability/);
+    for (const [clock, frontier] of [
+      [{ physicalMs: -1, logical: 0, writerId: "a" }, { a: "1" }],
+      [{ physicalMs: 1, logical: 0, writerId: "a" }, { a: { toString: "x" } }],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(
+        malformedStabilityResponse(clock, frontier),
+      );
+      await expect(readRunnerPage()).rejects.toThrow(/stability/);
+    }
   } finally {
     fetchMock.mockRestore();
   }

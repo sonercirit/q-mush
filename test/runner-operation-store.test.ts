@@ -142,6 +142,52 @@ test("treats duplicate envelopes as idempotent", () => {
   });
 });
 
+test("runner rejects a mismatched user register identity", () => {
+  withStore((store) => {
+    const base = decodeOperationEnvelope(envelope(1n));
+    const mismatched = encodeOperationEnvelope({
+      ...base,
+      entity: {
+        type: "users",
+        id: "another-user-row",
+        accountId: runnerOwnerId,
+      },
+      kind: "user.default-workspace.set",
+      payload: { defaultWorkspaceId: null },
+    });
+    remote(store, [mismatched]);
+    expect(rows(store)).toHaveLength(1);
+    expect(rows(store)[0]?.rejectionReason).toMatch(/match account/);
+    expectRunnerOperationState(store, { stalled: true });
+    expectNonSessionFrontier(store, {});
+  });
+});
+
+test("unknown session kind quarantines once and stalls across redelivery", () => {
+  withStore((store) => {
+    const sessionOperation = testSessionOperation(
+      runnerOwnerId,
+      1n,
+      "session-value",
+    );
+    const encoded = encodeOperationEnvelope({
+      ...sessionOperation,
+      entity: { ...sessionOperation.entity, accountId: runnerOwnerId },
+    });
+    for (let delivery = 0; delivery < 3; delivery += 1)
+      remoteSession(store, [encoded]);
+    const quarantined = store.inspect(runnerOwnerId, "session");
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0]).toMatchObject({ verificationState: "rejected" });
+    expect(quarantined[0]?.rejectionReason).toMatch(/unsupported|entity/);
+    expect(quarantined[0]?.rejectionReason?.length).toBeLessThanOrEqual(400);
+    expect(store.state(runnerOwnerId, "session")).toMatchObject({
+      frontier: {},
+      stalled: true,
+    });
+  });
+});
+
 test("durably quarantines distinct poisons and applies the valid prefix", () => {
   withStore((store) => {
     remote(store, [envelope(1n), "poison-one", "poison-two", envelope(2n)]);
@@ -150,18 +196,6 @@ test("durably quarantines distinct poisons and applies the valid prefix", () => 
       frontier: { "owner-1": 1n },
       stalled: true,
     });
-    const sessionOperation = testSessionOperation(
-      "owner-1",
-      1n,
-      "session-value",
-    );
-    remoteSession(store, [
-      encodeOperationEnvelope({
-        ...sessionOperation,
-        entity: { ...sessionOperation.entity, accountId: "owner-1" },
-      }),
-    ]);
-    expect(store.state("owner-1", "session").frontier).toEqual({});
   });
 });
 

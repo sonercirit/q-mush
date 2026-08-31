@@ -60,6 +60,21 @@ const project = (items: readonly ReturnType<typeof operation>[]) =>
     reduceOperationEntityProjection,
   ).projection;
 
+const entityOperation = (
+  kind: string,
+  payload: unknown,
+  entityType: string,
+  entityId: string,
+  writer = "writer-a",
+  physicalMs = 1,
+) =>
+  operation(kind, payload, {
+    writer,
+    physicalMs,
+    entityType,
+    entityId,
+  });
+
 const promptBodyOperation = (writer: string, value: string) =>
   operation(
     "prompt.body.set",
@@ -150,6 +165,94 @@ describe("typed operation projection", () => {
     expect(first.workspaces[0]?.id).toBe("workspace-1");
     expect(first.workspaces[0]?.deleted).toBeDefined();
     expect(first.workspaces[0]?.name?.value).toBe("Right");
+  });
+
+  test("remove-wins blocks workspace updates and recreation in every replay order", () => {
+    const create = entityOperation(
+      "workspace.create",
+      { name: "first" },
+      "workspaces",
+      "workspace-rw",
+      "creator",
+      1,
+    );
+    const remove = entityOperation(
+      "workspace.delete",
+      {},
+      "workspaces",
+      "workspace-rw",
+      "deleter",
+      2,
+    );
+    const laterName = entityOperation(
+      "workspace.name.set",
+      { value: "resurrected" },
+      "workspaces",
+      "workspace-rw",
+      "updater",
+      3,
+    );
+    const recreate = entityOperation(
+      "workspace.create",
+      { name: "again" },
+      "workspaces",
+      "workspace-rw",
+      "recreator",
+      4,
+    );
+    for (const items of [
+      [create, remove, laterName, recreate],
+      [recreate, laterName, remove, create],
+    ]) {
+      const workspace = project(items).workspaces[0];
+      expect(workspace?.deleted).toBeDefined();
+      expect(workspace?.name?.value).toBe("first");
+      expect(workspace?.created?.operationId).toBe(create.operationId);
+    }
+  });
+
+  test("remove-wins blocks prompt name and body writes after deletion", () => {
+    const create = entityOperation(
+      "prompt.create",
+      { name: "first", body: "body" },
+      "prompts",
+      "prompt-rw",
+      "creator",
+      1,
+    );
+    const remove = entityOperation(
+      "prompt.delete",
+      {},
+      "prompts",
+      "prompt-rw",
+      "deleter",
+      2,
+    );
+    const name = entityOperation(
+      "prompt.name.set",
+      { value: "resurrected" },
+      "prompts",
+      "prompt-rw",
+      "name-writer",
+      3,
+    );
+    const body = entityOperation(
+      "prompt.body.set",
+      { value: "resurrected" },
+      "prompts",
+      "prompt-rw",
+      "body-writer",
+      4,
+    );
+    for (const items of [
+      [create, remove, name, body],
+      [body, name, remove, create],
+    ]) {
+      const prompt = project(items).prompts[0];
+      expect(prompt?.deleted).toBeDefined();
+      expect(prompt?.name?.value).toBe("first");
+      expect(prompt?.body?.value).toBe("body");
+    }
   });
 
   test("retains concurrent losing prompt bodies and discards causally covered revisions", () => {

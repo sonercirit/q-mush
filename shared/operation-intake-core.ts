@@ -14,10 +14,13 @@ const MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES = 16 * 1024;
 const validSynchronizationFrontierComponent = (value: string): boolean =>
   isBoundedSafeRecordKey(value, MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES);
 
-const validSynchronizationSequenceText = (value: unknown): value is string =>
-  /^(0|[1-9]\d*)$/.test(String(value)) &&
-  typeof value === "string" &&
-  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES;
+const validSynchronizationSequenceText = (value: unknown): value is string => {
+  if (typeof value !== "string") return false;
+  return (
+    utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES &&
+    /^(0|[1-9]\d*)$/.test(value)
+  );
+};
 
 export const parseSynchronizationFrontier = (
   value: unknown,

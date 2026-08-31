@@ -53,7 +53,11 @@ const definitions = {
 } satisfies Record<string, EntityOperationDefinition>;
 
 export const validateEntityOperation = (operation: {
-  readonly entity: { readonly type: string };
+  readonly entity: {
+    readonly type: string;
+    readonly id: string;
+    readonly accountId: string;
+  };
   readonly kind: string;
   readonly payload: unknown;
 }): string | undefined => {
@@ -62,6 +66,11 @@ export const validateEntityOperation = (operation: {
   const definition = definitions[operation.kind];
   if (operation.entity.type !== definition.entityType)
     return "Operation kind does not match entity";
+  if (
+    operation.kind === "user.default-workspace.set" &&
+    operation.entity.id !== operation.entity.accountId
+  )
+    return "User operation entity must match account";
   if (!definition.validPayload(operation.payload))
     return "Operation payload is invalid";
   return undefined;
