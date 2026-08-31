@@ -3,7 +3,10 @@ import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
-import { createOperation } from "../shared/operation-core";
+import {
+  createOperation,
+  isOperationProtocolError,
+} from "../shared/operation-core";
 import { applyOperationIntakeBatch } from "../shared/operation-intake-core";
 import {
   initialOperationEntityProjection,
@@ -59,21 +62,34 @@ const project = (items: readonly ReturnType<typeof operation>[]) =>
 
 describe("operation entity registry", () => {
   test("fails closed for unknown kinds, mismatched entities, and malformed payloads", () => {
-    for (const item of [
-      operation("unknown", {}),
+    const candidates = [
       operation("prompt.name.set", { value: "x" }),
       operation("workspace.name.set", { value: "x", extra: true }),
       operation("workspace.name.set", { value: 1 }),
       operation("session.create", {}, { entityType: "agent_sessions" }),
-    ])
-      expect(() =>
+    ];
+    expect(() =>
+      applyOperationIntakeBatch(
+        "non-session",
+        testApplyState(initialOperationEntityProjection),
+        [{ encoded: "", operation: operation("unknown", {}) }],
+        { append: () => undefined, reducer: reduceOperationEntityProjection },
+      ),
+    ).toThrow("unsupported");
+    for (const item of candidates) {
+      let caught: unknown;
+      try {
         applyOperationIntakeBatch(
           "non-session",
           testApplyState(initialOperationEntityProjection),
           [{ encoded: "", operation: item }],
           { append: () => undefined, reducer: reduceOperationEntityProjection },
-        ),
-      ).toThrow(/kind|payload|entity/i);
+        );
+      } catch (error) {
+        caught = error;
+      }
+      expect(isOperationProtocolError(caught)).toBe(true);
+    }
   });
 });
 
