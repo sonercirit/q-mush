@@ -92,7 +92,7 @@ export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
   const encodedStability = (state?: OperationApplyState<readonly string[]>) => {
-    if (state === undefined || state.stableClock === undefined)
+    if (state?.stableClock === undefined)
       return { stableClock: null, stableFrontier: null };
     return {
       stableClock: JSON.stringify(state.stableClock),
@@ -179,10 +179,7 @@ export function createOperationStore(resources: OperationStoreResources) {
           .get()?.value ?? 0
       );
     },
-    loadCheckpoint(
-      ownerId: string,
-      partition: OperationPartition,
-    ): string | undefined {
+    loadCheckpoint(ownerId: string, partition: OperationPartition) {
       return database
         .select({ encoded: operationCheckpoints.encodedCheckpoint })
         .from(operationCheckpoints)

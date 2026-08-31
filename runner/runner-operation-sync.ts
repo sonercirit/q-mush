@@ -4,6 +4,7 @@ import type {
   HybridTimestamp,
   OperationPartition,
 } from "../shared/operation-core.ts";
+import type { OperationStabilityBoundary } from "../shared/operation-stability.ts";
 import { isOperationSynchronizationBadRequest } from "./runner-operation-transport.ts";
 
 interface OutboxStall {
@@ -29,10 +30,7 @@ interface OperationStore {
     partition: OperationPartition,
     envelopes: readonly string[],
     source: "remote",
-    stability?: {
-      readonly stableClock: HybridTimestamp | null;
-      readonly stableFrontier: CausalFrontier | null;
-    },
+    stability?: OperationStabilityBoundary,
   ) => void;
   readonly pending: (
     ownerId: string,

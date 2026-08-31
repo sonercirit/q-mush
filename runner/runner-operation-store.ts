@@ -21,7 +21,10 @@ import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
 } from "../shared/operation-intake-core.ts";
-import { stabilizeOperationApplyState } from "../shared/operation-stability.ts";
+import {
+  stabilizeOperationApplyState,
+  type OperationStabilityBoundary,
+} from "../shared/operation-stability.ts";
 import {
   createRunnerOperationLog,
   type OperationReplicaSource,
@@ -54,10 +57,7 @@ export const createRunnerOperationStore = (
       partition: OperationPartition,
       envelopes: readonly string[],
       source: OperationReplicaSource,
-      stability?: {
-        readonly stableClock: HybridTimestamp | null;
-        readonly stableFrontier: CausalFrontier | null;
-      },
+      stability?: OperationStabilityBoundary,
     ) {
       if (envelopes.length === 0) return;
       if (

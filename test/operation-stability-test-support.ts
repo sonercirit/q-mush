@@ -13,13 +13,24 @@ export const stabilityClock = (physicalMs: number, writerId: string) => ({
   writerId,
 });
 
-export const stableArrayState = (): OperationApplyState<readonly string[]> =>
+export const stabilizeArrayState = (
+  state: OperationApplyState<readonly string[]>,
+  physicalMs: number,
+  writerId: string,
+) =>
   stabilizeOperationApplyState(
+    state,
+    stabilityClock(physicalMs, writerId),
+    appendOperationId,
+  );
+
+export const stableArrayState = (): OperationApplyState<readonly string[]> =>
+  stabilizeArrayState(
     applyOperationList(
       [testOperation("a", 1n, {}, "a", 10)],
       testApplyState<readonly string[]>([]),
       appendOperationId,
     ),
-    stabilityClock(10, "a"),
-    appendOperationId,
+    10,
+    "a",
   );
