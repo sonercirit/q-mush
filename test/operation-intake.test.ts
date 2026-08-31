@@ -82,31 +82,16 @@ const applyPartition = (
 afterEach(harness.close);
 const apply = (intake: Intake, operations: IntakeOperations, now: number) =>
   applyPartition(intake, "non-session", operations, now);
-const expectPartitionSequenceSpaces = (
-  firstPartition: "non-session" | "session",
-) => {
+test("operation intake fails closed for session operations", () => {
   const { intake } = setup();
-  const session = testSessionOperation("writer-a", 1n, "session");
-  const nonSession = testOperation("writer-a", 1n, {}, "workspace");
-  const byPartition = { "non-session": nonSession, session };
-  const secondPartition =
-    firstPartition === "session" ? "non-session" : "session";
-  expect(
-    applyPartition(intake, firstPartition, [byPartition[firstPartition]], 2)
-      .frontier,
-  ).toEqual({ "writer-a": 1n });
-  expect(
-    applyPartition(intake, secondPartition, [byPartition[secondPartition]], 3)
-      .frontier,
-  ).toEqual({ "writer-a": 1n });
-};
-
-test("operation intake advances non-session then session sequence spaces independently", () => {
-  expectPartitionSequenceSpaces("non-session");
-});
-
-test("operation intake advances session then non-session sequence spaces independently", () => {
-  expectPartitionSequenceSpaces("session");
+  expect(() =>
+    applyPartition(
+      intake,
+      "session",
+      [testSessionOperation("writer-a", 1n, "session")],
+      2,
+    ),
+  ).toThrow(/kind|entity/);
 });
 
 test("operation intake persists one snapshot consistently and replays it as a duplicate", () => {
@@ -114,7 +99,7 @@ test("operation intake persists one snapshot consistently and replays it as a du
   const database = resources.database;
   const intake = createOperationIntake(resources);
   const operation = testOperation("writer-a", 1n, {}, "one");
-  const originalPayload = { value: "one" };
+  const originalPayload = { name: "one" };
   const payload = new Proxy(originalPayload, {
     get: () => "get-trap-value",
     getOwnPropertyDescriptor(target, property) {
@@ -132,7 +117,7 @@ test("operation intake persists one snapshot consistently and replays it as a du
     first.encodedCheckpoint,
     operationEntityProjectionCodec,
   );
-  expect(stored.payload).toEqual({ value: "snapshot-value" });
+  expect(stored.payload).toEqual({ name: "snapshot-value" });
   expect(row?.fingerprint).toBe(operationFingerprint(stored));
   expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
     row?.fingerprint,
@@ -210,7 +195,7 @@ test("operation intake retains out-of-order operations pending and drains them",
 
 test("operation intake rejects equivocation and rolls back its batch", () => {
   const { database, intake, operation } = setupWithOperation();
-  const conflicting = { ...operation, payload: { value: "other" } };
+  const conflicting = { ...operation, payload: { name: "other" } };
   expect(() => apply(intake, [operation, conflicting], 3)).toThrow(
     "equivocation",
   );
@@ -304,14 +289,16 @@ test("operation intake duplicate older than drift remains acknowledged", () => {
   ).toThrow(/drift bound/);
 });
 
-test("operation intake history capacity is independent per partition", () => {
+test("operation intake leaves session capacity unavailable", () => {
   const { intake } = setup();
-  applyPartition(
-    intake,
-    "session",
-    [testSessionOperation("writer-a", 1n, "session")],
-    2,
-  );
+  expect(() =>
+    applyPartition(
+      intake,
+      "session",
+      [testSessionOperation("writer-a", 1n, "session")],
+      2,
+    ),
+  ).toThrow(/kind|entity/);
   expect(
     apply(intake, [testOperation("writer-a", 1n, {}, "one")], 3).frontier,
   ).toEqual({ "writer-a": 1n });

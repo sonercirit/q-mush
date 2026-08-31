@@ -30,7 +30,7 @@ const withStore = (
 const withLimitedRunnerStore = (run: (store: Store) => void): void => {
   withRunnerOperationStore(
     (database) =>
-      createRunnerOperationStore(database, { checkpointBytes: 2_500 }),
+      createRunnerOperationStore(database, { checkpointBytes: 3_200 }),
     run,
   );
 };
@@ -134,9 +134,10 @@ test("treats duplicate envelopes as idempotent", () => {
     const duplicate = envelope(1n);
     remote(store, Array(3).fill(duplicate));
     expectStates(store, ["accepted"]);
-    expect(store.state(runnerOwnerId, "non-session").projection).toEqual([
-      "owner-1-1",
-    ]);
+    expect(
+      store.state(runnerOwnerId, "non-session").projection.workspaces[0]?.name
+        ?.value,
+    ).toBe("value-1");
   });
 });
 
@@ -159,9 +160,7 @@ test("durably quarantines distinct poisons and applies the valid prefix", () => 
         entity: { ...sessionOperation.entity, accountId: "owner-1" },
       }),
     ]);
-    expect(store.state("owner-1", "session").frontier).toEqual({
-      "owner-1": 1n,
-    });
+    expect(store.state("owner-1", "session").frontier).toEqual({});
   });
 });
 
@@ -199,7 +198,7 @@ test("does not advance or retain later operations across a rejected identity", (
       expect.objectContaining({ verificationState: "rejected" }),
     ]);
     const state = store.state("owner-1", "non-session");
-    expect(state.projection).toEqual(["owner-1-1"]);
+    expect(state.projection.workspaces[0]?.name?.value).toBe("value-1");
     expect(state.pending).toEqual([]);
     expect(state.frontier).toEqual({ "owner-1": 1n });
     expect(state.stalled).toBe(true);
