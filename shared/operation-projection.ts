@@ -298,19 +298,19 @@ const validNamedWrites = (item: Record<string, unknown>): boolean =>
   optionalWrite(item["created"], (entry) => entry === true) &&
   optionalWrite(item["name"], (entry) => typeof entry === "string") &&
   optionalWrite(item["deleted"], (entry) => entry === true);
-const validProjectionEntity = <T>(
+const validProjectionEntity = (
   item: unknown,
   keys: readonly string[],
   valid: (record: Record<string, unknown>) => boolean,
-): item is T => exactObjectKeys(item, keys) && valid(item);
+): boolean => exactObjectKeys(item, keys) && valid(item);
 const validWorkspace = (item: unknown): item is WorkspaceProjection =>
-  validProjectionEntity<WorkspaceProjection>(
+  validProjectionEntity(
     item,
     ["id", "created", "name", "deleted"],
     validNamedWrites,
   );
 const validPrompt = (item: unknown): item is PromptProjection =>
-  validProjectionEntity<PromptProjection>(
+  validProjectionEntity(
     item,
     ["id", "created", "name", "body", "bodyConflicts", "deleted"],
     (record) =>
