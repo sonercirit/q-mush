@@ -267,9 +267,10 @@ const legacyStringProjectionCodec: OperationProjectionCodec<unknown> = {
     return projection;
   },
   decode: (value) => {
-    if (!validStringProjection(value))
+    const decoded = value;
+    if (!validStringProjection(decoded))
       throw new Error("Invalid legacy string projection");
-    return value;
+    return [...decoded];
   },
 };
 

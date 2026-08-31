@@ -126,6 +126,41 @@ const repairUsers = (
     ),
   })),
 });
+const updateWorkspaces = (
+  projection: OperationEntityProjection,
+  item: WorkspaceProjection,
+): OperationEntityProjection =>
+  repairUsers({
+    ...projection,
+    workspaces: replaceById(projection.workspaces, item),
+  });
+const updatePrompts = (
+  projection: OperationEntityProjection,
+  item: PromptProjection,
+): OperationEntityProjection => ({
+  ...projection,
+  prompts: replaceById(projection.prompts, item),
+});
+const createNamedEntity = (
+  current: NamedEntityProjection,
+  operation: Operation,
+): NamedEntityProjection => ({
+  ...current,
+  created: current.created ?? write(operation, true),
+  name: current.name ?? write(operation, payloadString(operation, "name")),
+});
+const namedPayloadWrite = <T extends NamedEntityProjection>(
+  current: T,
+  operation: Operation,
+): T & NamedEntityProjection => ({
+  ...current,
+  name: write(operation, payloadString(operation, "value")),
+});
+const deleteNamedEntity = <T extends NamedEntityProjection>(
+  operation: Operation,
+  current: T,
+): T & NamedEntityProjection =>
+  Object.assign({}, current, { deleted: write<true>(operation, true) });
 const reduceWorkspace = (
   projection: OperationEntityProjection,
   operation: Operation,
@@ -135,25 +170,13 @@ const reduceWorkspace = (
     operation.kind === "workspace.create"
       ? current.deleted !== undefined
         ? current
-        : {
-            ...current,
-            created: current.created ?? write(operation, true),
-            name:
-              current.name ??
-              write(operation, payloadString(operation, "name")),
-          }
+        : createNamedEntity(current, operation)
       : operation.kind === "workspace.name.set"
         ? current.created === undefined || current.deleted !== undefined
           ? current
-          : {
-              ...current,
-              name: write(operation, payloadString(operation, "value")),
-            }
-        : { ...current, deleted: write<true>(operation, true) };
-  return repairUsers({
-    ...projection,
-    workspaces: replaceById(projection.workspaces, next),
-  });
+          : namedPayloadWrite(current, operation)
+        : deleteNamedEntity(operation, current);
+  return updateWorkspaces(projection, next);
 };
 const reducePrompt = (
   projection: OperationEntityProjection,
@@ -162,31 +185,21 @@ const reducePrompt = (
   const current = promptRecord(projection, operation.entity.id);
   if (operation.kind === "prompt.create") {
     if (current.deleted !== undefined) return projection;
+    const named = createNamedEntity(current, operation);
     const next = {
       ...current,
-      created: current.created ?? write(operation, true),
-      name: current.name ?? write(operation, payloadString(operation, "name")),
+      ...named,
       body: current.body ?? write(operation, payloadString(operation, "body")),
     };
-    return { ...projection, prompts: replaceById(projection.prompts, next) };
+    return updatePrompts(projection, next);
   }
   if (operation.kind === "prompt.delete") {
-    const deleted = { ...current, deleted: write<true>(operation, true) };
-    return {
-      ...projection,
-      prompts: replaceById(projection.prompts, deleted),
-    };
+    return updatePrompts(projection, deleteNamedEntity(operation, current));
   }
   if (current.created === undefined || current.deleted !== undefined)
     return projection;
   if (operation.kind === "prompt.name.set")
-    return {
-      ...projection,
-      prompts: replaceById(projection.prompts, {
-        ...current,
-        name: write(operation, payloadString(operation, "value")),
-      }),
-    };
+    return updatePrompts(projection, namedPayloadWrite(current, operation));
   const nextBody = write(operation, payloadString(operation, "value"));
   const candidates = [
     ...current.bodyConflicts,
@@ -200,14 +213,11 @@ const reducePrompt = (
       compareClocks(left.clock, right.clock) ||
       (left.operationId < right.operationId ? -1 : 1),
   );
-  return {
-    ...projection,
-    prompts: replaceById(projection.prompts, {
-      ...current,
-      body: nextBody,
-      bodyConflicts: conflicts,
-    }),
-  };
+  return updatePrompts(projection, {
+    ...current,
+    body: nextBody,
+    bodyConflicts: conflicts,
+  });
 };
 const reduceUser = (
   projection: OperationEntityProjection,
@@ -296,23 +306,28 @@ const validNamedWrites = (item: Record<string, unknown>): boolean =>
   optionalWrite(item["created"], (entry) => entry === true) &&
   optionalWrite(item["name"], (entry) => typeof entry === "string") &&
   optionalWrite(item["deleted"], (entry) => entry === true);
+const validProjectionEntity = <T>(
+  item: unknown,
+  keys: readonly string[],
+  valid: (record: Record<string, unknown>) => boolean,
+): item is T => exactObject(item, keys) && valid(item);
 const validWorkspace = (item: unknown): item is WorkspaceProjection =>
-  exactObject(item, ["id", "created", "name", "deleted"]) &&
-  validNamedWrites(item);
+  validProjectionEntity<WorkspaceProjection>(
+    item,
+    ["id", "created", "name", "deleted"],
+    validNamedWrites,
+  );
 const validPrompt = (item: unknown): item is PromptProjection =>
-  exactObject(item, [
-    "id",
-    "created",
-    "name",
-    "body",
-    "bodyConflicts",
-    "deleted",
-  ]) &&
-  validNamedWrites(item) &&
-  optionalWrite(item["body"], (entry) => typeof entry === "string") &&
-  Array.isArray(item["bodyConflicts"]) &&
-  item["bodyConflicts"].every((entry) =>
-    validWrite(entry, (body) => typeof body === "string"),
+  validProjectionEntity<PromptProjection>(
+    item,
+    ["id", "created", "name", "body", "bodyConflicts", "deleted"],
+    (record) =>
+      validNamedWrites(record) &&
+      optionalWrite(record["body"], (entry) => typeof entry === "string") &&
+      Array.isArray(record["bodyConflicts"]) &&
+      record["bodyConflicts"].every((entry) =>
+        validWrite(entry, (body) => typeof body === "string"),
+      ),
   );
 const validUser = (item: unknown): item is UserProjection =>
   exactObject(item, [
