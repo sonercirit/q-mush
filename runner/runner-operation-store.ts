@@ -7,10 +7,13 @@ import {
   type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint.ts";
 import {
+  frontierCovers,
   isOperationProtocolError,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OPERATION_ENVELOPE_BYTES,
   operationProtocolError,
+  type CausalFrontier,
+  type HybridTimestamp,
   type OperationApplyState,
   type OperationPartition,
 } from "../shared/operation-core.ts";
@@ -18,6 +21,7 @@ import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
 } from "../shared/operation-intake-core.ts";
+import { stabilizeOperationApplyState } from "../shared/operation-stability.ts";
 import {
   createRunnerOperationLog,
   type OperationReplicaSource,
@@ -26,7 +30,14 @@ import {
 const checkpointByteLength = (value: string): number =>
   Buffer.byteLength(value, "utf8");
 
-export const createRunnerOperationStore = (database: Database) => {
+export interface RunnerOperationStoreLimits {
+  readonly checkpointBytes?: number;
+}
+
+export const createRunnerOperationStore = (
+  database: Database,
+  limits?: RunnerOperationStoreLimits,
+) => {
   const log = createRunnerOperationLog(database);
   const checkpointState = (
     ownerId: string,
@@ -100,7 +111,7 @@ export const createRunnerOperationStore = (database: Database) => {
             const encodedCheckpoint = encodeOperationCheckpoint(candidate);
             if (
               checkpointByteLength(encodedCheckpoint) >
-              MAX_OPERATION_CHECKPOINT_BYTES
+              (limits?.checkpointBytes ?? MAX_OPERATION_CHECKPOINT_BYTES)
             )
               throw operationProtocolError(
                 "capacity",
@@ -130,6 +141,29 @@ export const createRunnerOperationStore = (database: Database) => {
             ownerId,
             partition,
             encodeOperationCheckpoint(successor),
+          );
+      })();
+    },
+    compact(
+      ownerId: string,
+      partition: OperationPartition,
+      stableClock: HybridTimestamp | null,
+      stableFrontier: CausalFrontier | null,
+    ) {
+      if (stableClock === null || stableFrontier === null) return;
+      database.transaction(() => {
+        const state = checkpointState(ownerId, partition);
+        if (!frontierCovers(state.frontier, stableFrontier)) return;
+        const compacted = stabilizeOperationApplyState(
+          state,
+          stableClock,
+          (projection, operation) => [...projection, operation.operationId],
+        );
+        if (compacted !== state)
+          log.storeCheckpoint(
+            ownerId,
+            partition,
+            encodeOperationCheckpoint(compacted),
           );
       })();
     },

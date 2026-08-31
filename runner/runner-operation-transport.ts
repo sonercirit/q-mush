@@ -1,8 +1,17 @@
-import type { OperationPartition } from "../shared/operation-core.ts";
+import {
+  type CausalFrontier,
+  type HybridTimestamp,
+  type OperationPartition,
+} from "../shared/operation-core.ts";
 import { prepareSynchronizationFrontier } from "../shared/operation-intake-core.ts";
 import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes.ts";
 import { isRecord } from "../shared/validation.ts";
 import type { RunnerOperationRead } from "./runner-operation-sync.ts";
+
+export interface RunnerOperationStability {
+  readonly stableClock: HybridTimestamp | null;
+  readonly stableFrontier: CausalFrontier | null;
+}
 
 export interface OperationSynchronizationHttpError extends Error {
   readonly operationSynchronizationStatus: number;
@@ -63,6 +72,47 @@ const synchronizationHttpError = (
   );
 };
 
+const parseStability = (value: unknown): RunnerOperationStability => {
+  if (!isRecord(value))
+    throw new Error("Invalid operation synchronization response");
+  const clock = value["stableClock"];
+  const frontier = value["stableFrontier"];
+  if (clock == null && frontier == null)
+    return { stableClock: null, stableFrontier: null };
+  if (
+    !isRecord(clock) ||
+    Object.keys(clock).length !== 3 ||
+    !Number.isSafeInteger(clock["physicalMs"]) ||
+    Number(clock["physicalMs"]) < 0 ||
+    !Number.isSafeInteger(clock["logical"]) ||
+    Number(clock["logical"]) < 0 ||
+    typeof clock["writerId"] !== "string" ||
+    !isRecord(frontier) ||
+    Object.keys(frontier).length > 512
+  )
+    throw new Error("Invalid operation synchronization stability");
+  const decoded: Record<string, bigint> = {};
+  for (const [writerId, sequence] of Object.entries(frontier)) {
+    if (
+      writerId.length === 0 ||
+      new TextEncoder().encode(writerId).byteLength > 16 * 1024 ||
+      typeof sequence !== "string" ||
+      new TextEncoder().encode(sequence).byteLength > 16 * 1024 ||
+      !/^(0|[1-9]\\d*)$/.test(sequence)
+    )
+      throw new Error("Invalid operation synchronization stability");
+    decoded[writerId] = BigInt(sequence);
+  }
+  return {
+    stableClock: {
+      physicalMs: Number(clock["physicalMs"]),
+      logical: Number(clock["logical"]),
+      writerId: clock["writerId"],
+    },
+    stableFrontier: decoded,
+  };
+};
+
 const requestJson = async (
   origin: string,
   token: string,
@@ -113,7 +163,11 @@ export const createRunnerOperationTransport = (
       typeof value["hasMore"] !== "boolean"
     )
       throw new Error("Invalid operation synchronization response");
-    return { envelopes: value["envelopes"], hasMore: value["hasMore"] };
+    return {
+      envelopes: value["envelopes"],
+      hasMore: value["hasMore"],
+      ...parseStability(value),
+    };
   },
   async writeBatch(
     partition: OperationPartition,

@@ -1,5 +1,9 @@
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
-import type { OperationPartition } from "../shared/operation-core.ts";
+import type {
+  CausalFrontier,
+  HybridTimestamp,
+  OperationPartition,
+} from "../shared/operation-core.ts";
 import { isOperationSynchronizationBadRequest } from "./runner-operation-transport.ts";
 
 interface OutboxStall {
@@ -13,6 +17,12 @@ interface OperationStore {
     ownerId: string,
     partition: OperationPartition,
     envelopes: readonly string[],
+  ) => void;
+  readonly compact?: (
+    ownerId: string,
+    partition: OperationPartition,
+    stableClock: HybridTimestamp | null,
+    stableFrontier: CausalFrontier | null,
   ) => void;
   readonly apply: (
     ownerId: string,
@@ -43,6 +53,8 @@ interface OperationTransport {
   readonly readPage: (request: RunnerOperationRead) => Promise<{
     readonly envelopes: readonly string[];
     readonly hasMore: boolean;
+    readonly stableClock?: HybridTimestamp | null;
+    readonly stableFrontier?: CausalFrontier | null;
   }>;
   readonly writeBatch: (
     partition: OperationPartition,
@@ -197,11 +209,24 @@ const synchronizePartition = async (
     });
     if (page.envelopes.length > 0) {
       store.apply(ownerAlias, partition, page.envelopes, "remote");
+      store.compact?.(
+        ownerAlias,
+        partition,
+        page.stableClock ?? null,
+        page.stableFrontier ?? null,
+      );
       if (store.state(ownerAlias, partition).stalled)
         throw new Error(
           `Operation synchronization partition stalled: ${partition}`,
         );
     }
+    if (page.envelopes.length === 0)
+      store.compact?.(
+        ownerAlias,
+        partition,
+        page.stableClock ?? null,
+        page.stableFrontier ?? null,
+      );
     hasMore = page.hasMore;
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];

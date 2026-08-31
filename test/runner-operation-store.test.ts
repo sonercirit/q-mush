@@ -68,6 +68,28 @@ const expectFrontierOne = (store: Store) => {
   expectNonSessionFrontier(store, { "owner-1": 1n });
 };
 
+test("compacts only after the published stable frontier is covered", () => {
+  withStore((store) => {
+    remote(store, [envelope(1n)]);
+    store.compact(
+      "owner-1",
+      "non-session",
+      { physicalMs: 1, logical: 0, writerId: "owner-1" },
+      { "owner-1": 2n },
+    );
+    expect(store.state("owner-1", "non-session").replayCount).toBe(1);
+    store.compact(
+      "owner-1",
+      "non-session",
+      { physicalMs: 1, logical: 0, writerId: "owner-1" },
+      { "owner-1": 1n },
+    );
+    const state = store.state("owner-1", "non-session");
+    expect(state.replayCount).toBe(0);
+    expect(state.stableClock?.physicalMs).toBe(1);
+  });
+});
+
 test("records accepted immutable envelopes and checkpoints", () => {
   withStore((store) => {
     const encoded = envelope(1n);

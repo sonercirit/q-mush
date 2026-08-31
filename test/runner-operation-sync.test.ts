@@ -259,6 +259,39 @@ const expectOutboxRetained = (
   expect(replica.events).toEqual([]);
 };
 
+test("transport defaults absent stability and rejects malformed stability", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch");
+  try {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ envelopes: [], hasMore: false }),
+    );
+    await expect(
+      runnerTransport().readPage({
+        frontier: {},
+        partition: "non-session",
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ stableClock: null, stableFrontier: null });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        envelopes: [],
+        hasMore: false,
+        stableClock: { physicalMs: -1, logical: 0, writerId: "a" },
+        stableFrontier: { a: "1" },
+      }),
+    );
+    await expect(
+      runnerTransport().readPage({
+        frontier: {},
+        partition: "non-session",
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toThrow(/stability/);
+  } finally {
+    fetchMock.mockRestore();
+  }
+});
+
 test("captures only a bounded engine rejection reason", async () => {
   const detail = `safe reason ${"x".repeat(1_000)}`;
   const fetchMock = vi
