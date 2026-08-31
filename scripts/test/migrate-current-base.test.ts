@@ -46,10 +46,10 @@ const CURRENT_BASE_MIGRATIONS = [
   "0027_worthless_sentinels.sql",
 ] as const;
 const CURRENT_BASE_TIMESTAMP = 1_785_753_783_416;
+const OPERATION_STABILITY_MIGRATION_TIMESTAMP = 1_788_189_367_619;
 const PARENT_REPORT_MIGRATION_TIMESTAMP = 1_787_268_023_468;
 const TOOL_SETTINGS_MIGRATION_TIMESTAMP = 1_786_905_773_660;
 const CREDENTIAL_REAUTHENTICATION_MIGRATION_TIMESTAMP = 1_787_417_810_687;
-const ADAPTIVE_THINKING_MIGRATION_TIMESTAMP = 1_786_746_755_573;
 const OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP = 1_787_798_425_604;
 const OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP = 1_787_790_945_286;
 const OPERATION_STORAGE_MIGRATION_TIMESTAMP = 1_787_781_913_680;
@@ -146,6 +146,7 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     .all()
     .map(({ createdAt }) => createdAt);
   expect(migrationTimestamps).toEqual([
+    OPERATION_STABILITY_MIGRATION_TIMESTAMP,
     OPERATION_RANGE_INDEX_MIGRATION_TIMESTAMP,
     OPERATION_PARTITION_IDENTITY_MIGRATION_TIMESTAMP,
     OPERATION_STORAGE_MIGRATION_TIMESTAMP,
@@ -155,7 +156,6 @@ test("upgrades migration 0027 through the latest migrations", async () => {
     1_787_359_766_762,
     PARENT_REPORT_MIGRATION_TIMESTAMP,
     TOOL_SETTINGS_MIGRATION_TIMESTAMP,
-    ADAPTIVE_THINKING_MIGRATION_TIMESTAMP,
   ]);
   const envelopeColumns = pragmaNames(
     upgradedDatabase.$client,
@@ -168,6 +168,13 @@ test("upgrades migration 0027 through the latest migrations", async () => {
   );
   expect(envelopeIndexes).toContain(
     "operation_envelopes_owner_partition_writer_index",
+  );
+  const checkpointColumns = pragmaNames(
+    upgradedDatabase.$client,
+    "SELECT name FROM pragma_table_info('operation_checkpoints')",
+  );
+  expect(checkpointColumns).toEqual(
+    expect.arrayContaining(["stable_clock", "stable_frontier"]),
   );
   upgradedDatabase.$client.close();
 });

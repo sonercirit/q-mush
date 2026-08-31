@@ -1,5 +1,11 @@
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
-import type { OperationPartition } from "../shared/operation-core.ts";
+import type {
+  CausalFrontier,
+  HybridTimestamp,
+  OperationPartition,
+} from "../shared/operation-core.ts";
+import type { OperationStabilityBoundary } from "../shared/operation-stability.ts";
+import type { RunnerOperationCompactionRequest } from "./runner-operation-store.ts";
 import { isOperationSynchronizationBadRequest } from "./runner-operation-transport.ts";
 
 interface OutboxStall {
@@ -14,11 +20,13 @@ interface OperationStore {
     partition: OperationPartition,
     envelopes: readonly string[],
   ) => void;
+  readonly compact?: (request: RunnerOperationCompactionRequest) => void;
   readonly apply: (
     ownerId: string,
     partition: OperationPartition,
     envelopes: readonly string[],
     source: "remote",
+    stability?: OperationStabilityBoundary,
   ) => void;
   readonly pending: (
     ownerId: string,
@@ -43,6 +51,8 @@ interface OperationTransport {
   readonly readPage: (request: RunnerOperationRead) => Promise<{
     readonly envelopes: readonly string[];
     readonly hasMore: boolean;
+    readonly stableClock?: HybridTimestamp | null;
+    readonly stableFrontier?: CausalFrontier | null;
   }>;
   readonly writeBatch: (
     partition: OperationPartition,
@@ -196,12 +206,21 @@ const synchronizePartition = async (
       frontier: store.state(ownerAlias, partition).frontier,
     });
     if (page.envelopes.length > 0) {
-      store.apply(ownerAlias, partition, page.envelopes, "remote");
+      store.apply(ownerAlias, partition, page.envelopes, "remote", {
+        stableClock: page.stableClock ?? null,
+        stableFrontier: page.stableFrontier ?? null,
+      });
       if (store.state(ownerAlias, partition).stalled)
         throw new Error(
           `Operation synchronization partition stalled: ${partition}`,
         );
     }
+    store.compact?.({
+      ownerId: ownerAlias,
+      partition,
+      stableClock: page.stableClock ?? null,
+      stableFrontier: page.stableFrontier ?? null,
+    });
     hasMore = page.hasMore;
   } while (hasMore);
   const outboxStalls = store.state(ownerAlias, partition).outboxStalls ?? [];

@@ -46,6 +46,12 @@ export const appendOperationId = (
   item: Operation,
 ): readonly string[] => [...projection, item.operationId];
 
+export const applyOperationIds = (
+  items: readonly Operation[],
+  state = testApplyState<readonly string[]>([]),
+): OperationApplyState<readonly string[]> =>
+  applyOperationList(items, state, appendOperationId);
+
 export const applyOperationList = <T>(
   items: readonly Operation[],
   state: OperationApplyState<T>,

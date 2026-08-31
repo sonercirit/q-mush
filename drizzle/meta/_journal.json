@@ -302,6 +302,13 @@
       "when": 1787798425604,
       "tag": "0042_clammy_shadow_king",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "6",
+      "when": 1788189367619,
+      "tag": "0043_cooing_talisman",
+      "breakpoints": true
     }
   ]
 }

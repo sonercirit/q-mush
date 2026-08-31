@@ -53,8 +53,10 @@ const addSecondOwner = () => {
 };
 type Store = ReturnType<typeof createOperationStore>;
 type Partition = "non-session" | "session";
+const checkpointState = (projection: readonly string[]) =>
+  testApplyState<readonly string[]>(projection);
 const checkpoint = (projection: readonly string[]) =>
-  encodeOperationCheckpoint(testApplyState<readonly string[]>(projection));
+  encodeOperationCheckpoint(checkpointState(projection));
 const append = (
   store: Store,
   ownerId: string,
@@ -97,6 +99,7 @@ const saveCheckpoint = (
     checkpoint(projection),
     SYSTEM_ID,
     now,
+    checkpointState(projection),
   );
 };
 const expectEnvelopeCount = (

@@ -263,7 +263,7 @@ test("operation intake rejects a mismatched operation partition", () => {
     ...testOperation("writer-a", 1n, {}, "one"),
     partition: "session" as const,
   };
-  expect(() => apply(intake, [operation], 2)).toThrow("partition mismatch");
+  expect(() => apply(intake, [operation], 2)).toThrow("scope mismatch");
   expectNoStoredOperations(database);
 });
 
@@ -281,7 +281,7 @@ test("operation intake rejects a batch above its maximum size", () => {
   ).toThrow("batch is too large");
 });
 
-test("operation intake default path enforces the 2000-operation owner-partition limit", () => {
+test("operation intake retained capacity ignores folded envelope history", () => {
   expect(MAX_OWNER_PARTITION_OPERATIONS).toBe(2_000);
   const { database, intake } = setup();
   const seededEnvelope = encodeOperationEnvelope(
@@ -315,9 +315,11 @@ test("operation intake default path enforces the 2000-operation owner-partition 
   expect(
     apply(intake, [testOperation("final-writer", 1n, {}, "final")], 2).frontier,
   ).toEqual({ "final-writer": 1n });
-  expect(() =>
-    apply(intake, [testOperation("overflow-writer", 1n, {}, "overflow")], 3),
-  ).toThrow("history capacity reached");
+  expect(
+    apply(intake, [testOperation("overflow-writer", 1n, {}, "overflow")], 3)
+      .frontier,
+  ).toEqual({ "final-writer": 1n, "overflow-writer": 1n });
+  expectStoredEnvelopeCount(database, MAX_OWNER_PARTITION_OPERATIONS + 1);
 });
 
 test("operation intake rejects owner-partition history above its capacity", () => {
@@ -326,6 +328,20 @@ test("operation intake rejects owner-partition history above its capacity", () =
   expect(() =>
     apply(intake, [testOperation("overflow", 1n, {}, "one")], 3),
   ).toThrow("history capacity reached");
+});
+
+test("operation intake duplicate older than drift remains acknowledged", () => {
+  const { intake } = setup();
+  const old = testOperation("writer-a", 1n, {}, "old", 1);
+  apply(intake, [old], 1);
+  expect(() => apply(intake, [old], 600_002)).not.toThrow();
+  expect(() =>
+    apply(
+      intake,
+      [testOperation("writer-b", 1n, {}, "new identity", 1)],
+      600_002,
+    ),
+  ).toThrow(/drift bound/);
 });
 
 test("operation intake history capacity is independent per partition", () => {

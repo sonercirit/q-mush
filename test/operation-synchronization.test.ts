@@ -124,6 +124,13 @@ const operationResponse = (
   handler("owner-1")(
     request(body("owner-1", [encodeOperationEnvelope(operation)], partition)),
   );
+const expectScopeMismatch = async (response: Response): Promise<void> => {
+  const responseBody: unknown = await response.json();
+  expect({ status: response.status, body: responseBody }).toEqual({
+    status: 400,
+    body: { error: "Operation intake scope mismatch" },
+  });
+};
 const operationStatus = async (operation: ReturnType<typeof ownedOperation>) =>
   (await operationResponse(operation)).status;
 const repeatedOperationStatus = (length: number) =>
@@ -300,11 +307,21 @@ test("operation synchronization maps malformed envelopes to bad request", async 
 test("operation synchronization maps partition scope mismatch to bad request", async () => {
   const operation = ownedOperation(1n);
   const response = await operationResponse(operation, "session");
-  const mismatchBody: unknown = await response.json();
-  expect({ status: response.status, body: mismatchBody }).toEqual({
-    status: 400,
-    body: { error: "Operation intake scope mismatch" },
-  });
+  await expectScopeMismatch(response);
+});
+
+test("stored duplicate replay to the wrong partition remains invalid", async () => {
+  const synchronized = handler("owner-1");
+  const operation = ownedOperation();
+  const encoded = encodeOperationEnvelope(operation);
+  expect(
+    (await synchronized(request(body("owner-1", [encoded], "non-session"))))
+      .status,
+  ).toBe(200);
+  const replay = await synchronized(
+    request(body("owner-1", [encoded], "session")),
+  );
+  await expectScopeMismatch(replay);
 });
 
 test("operation synchronization maps identity equivocation to conflict", async () => {
@@ -453,6 +470,8 @@ test("operation synchronization returns deterministic bounded missing pages", as
   expect(result).toEqual({
     envelopes: operations.slice().reverse().map(encodeOperationEnvelope),
     hasMore: false,
+    stableClock: null,
+    stableFrontier: null,
   });
 });
 

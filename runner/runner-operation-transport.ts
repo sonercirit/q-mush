@@ -1,8 +1,21 @@
-import type { OperationPartition } from "../shared/operation-core.ts";
-import { prepareSynchronizationFrontier } from "../shared/operation-intake-core.ts";
+import { decodeHybridTimestamp } from "../shared/operation-clock-codec.ts";
+import {
+  type CausalFrontier,
+  type HybridTimestamp,
+  type OperationPartition,
+} from "../shared/operation-core.ts";
+import {
+  parseSynchronizationFrontier,
+  prepareSynchronizationFrontier,
+} from "../shared/operation-intake-core.ts";
 import { OPERATION_SYNCHRONIZATION_PATH } from "../shared/routes.ts";
 import { isRecord } from "../shared/validation.ts";
 import type { RunnerOperationRead } from "./runner-operation-sync.ts";
+
+export interface RunnerOperationStability {
+  readonly stableClock: HybridTimestamp | null;
+  readonly stableFrontier: CausalFrontier | null;
+}
 
 export interface OperationSynchronizationHttpError extends Error {
   readonly operationSynchronizationStatus: number;
@@ -63,6 +76,28 @@ const synchronizationHttpError = (
   );
 };
 
+const parseStability = (value: unknown): RunnerOperationStability => {
+  if (!isRecord(value))
+    throw new Error("Invalid operation synchronization response");
+  const clock = value["stableClock"];
+  const frontier = value["stableFrontier"];
+  if (clock == null && frontier == null)
+    return { stableClock: null, stableFrontier: null };
+  if (!isRecord(frontier) || Object.keys(frontier).length > 512)
+    throw new Error("Invalid operation synchronization stability");
+  const stableClock = decodeHybridTimestamp(
+    clock,
+    () => new Error("Invalid operation synchronization stability"),
+  );
+  const decoded = parseSynchronizationFrontier(frontier);
+  if (decoded === undefined)
+    throw new Error("Invalid operation synchronization stability");
+  return {
+    stableClock,
+    stableFrontier: decoded,
+  };
+};
+
 const requestJson = async (
   origin: string,
   token: string,
@@ -113,7 +148,11 @@ export const createRunnerOperationTransport = (
       typeof value["hasMore"] !== "boolean"
     )
       throw new Error("Invalid operation synchronization response");
-    return { envelopes: value["envelopes"], hasMore: value["hasMore"] };
+    return {
+      envelopes: value["envelopes"],
+      hasMore: value["hasMore"],
+      ...parseStability(value),
+    };
   },
   async writeBatch(
     partition: OperationPartition,

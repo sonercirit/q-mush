@@ -20,7 +20,6 @@ import {
 } from "../shared/database/schema";
 import {
   applyOperation,
-  classifyOperationPartition,
   compareClocks,
   createOperation,
   frontierCovers,
@@ -28,6 +27,7 @@ import {
   operationFingerprint,
   type Operation,
 } from "../shared/operation-core";
+import { classifyOperationPartition } from "../shared/operation-partitions";
 import { testApplyState, testOperation } from "./operation-core-test-support";
 
 const replicatedTables = [

@@ -1,3 +1,4 @@
+import { decodeHybridTimestamp } from "./operation-clock-codec";
 import {
   compareClocks,
   createOperation,
@@ -149,23 +150,8 @@ const nonNegativeBigintCheckpointRecord = (
     value,
     (item): item is bigint => typeof item === "bigint" && item >= 0n,
   );
-const decodeClock = (value: unknown): HybridTimestamp => {
-  const clock = checkpointObject(value);
-  exactCheckpointKeys(clock, ["physicalMs", "logical", "writerId"]);
-  if (
-    !Number.isSafeInteger(clock["physicalMs"]) ||
-    Number(clock["physicalMs"]) < 0 ||
-    !Number.isSafeInteger(clock["logical"]) ||
-    Number(clock["logical"]) < 0 ||
-    typeof clock["writerId"] !== "string"
-  )
-    throw new Error("Invalid checkpoint clock");
-  return {
-    physicalMs: Number(clock["physicalMs"]),
-    logical: Number(clock["logical"]),
-    writerId: clock["writerId"],
-  };
-};
+const decodeClock = (value: unknown): HybridTimestamp =>
+  decodeHybridTimestamp(value, () => new Error("Invalid checkpoint clock"));
 const decodeOperation = (
   value: unknown,
   deferOwnWriterParentValidation = false,
@@ -299,6 +285,24 @@ const validateCheckpointConsistency = (
   state: OperationApplyState<OperationCheckpointProjection>,
 ): void => {
   const replay = replayOperations(state.replayHead);
+  if (
+    (state.stableClock === undefined) !==
+    (Object.keys(state.baseFrontier).length === 0)
+  )
+    throw new Error("Invalid operation checkpoint stable frontier");
+  if (
+    state.stableClock !== undefined &&
+    !Object.hasOwn(state.baseFrontier, state.stableClock.writerId)
+  )
+    throw new Error("Invalid operation checkpoint stable writer");
+  const stableClock = state.stableClock;
+  if (
+    stableClock !== undefined &&
+    [...replay, ...state.pending].some(
+      (operation) => compareClocks(operation.clock, stableClock) <= 0,
+    )
+  )
+    throw new Error("Invalid operation checkpoint stable clock order");
   for (let index = 1; index < replay.length; index += 1) {
     const newer = replay[index - 1];
     const older = replay[index];
@@ -395,7 +399,7 @@ export const decodeOperationCheckpoint = (
 ): OperationApplyState<OperationCheckpointProjection> => {
   const decoded = decodeEncoded(encoded, "operation checkpoint");
   const state = checkpointObject(decoded);
-  exactCheckpointKeys(state, [
+  const checkpointKeys = [
     "frontier",
     "pending",
     "projection",
@@ -405,7 +409,13 @@ export const decodeOperationCheckpoint = (
     "replayLastClock",
     "baseProjection",
     "baseFrontier",
-  ]);
+  ] as const;
+  const actualKeys = Object.keys(state);
+  const legacy = actualKeys.length === checkpointKeys.length;
+  exactCheckpointKeys(
+    state,
+    legacy ? checkpointKeys : [...checkpointKeys, "stableClock"],
+  );
   if (
     !Array.isArray(state["pending"]) ||
     !Number.isSafeInteger(state["replayCount"]) ||
@@ -437,6 +447,10 @@ export const decodeOperationCheckpoint = (
         : decodeClock(state["replayLastClock"]),
     baseProjection: state["baseProjection"],
     baseFrontier: nonNegativeBigintCheckpointRecord(state["baseFrontier"]),
+    stableClock:
+      legacy || state["stableClock"] === undefined
+        ? undefined
+        : decodeClock(state["stableClock"]),
   };
   validateCheckpointConsistency(result);
   return result;

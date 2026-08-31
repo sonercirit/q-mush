@@ -85,6 +85,7 @@ test("accepts contiguous replay above a non-empty base with parents covered afte
     ...testApplyState<readonly string[]>(["base"]),
     frontier: { a: 5n },
     baseFrontier: { a: 5n },
+    stableClock: { physicalMs: 0, logical: 0, writerId: "a" },
   };
   const child = testOperation("b", 1n, { a: 6n }, "child", 1);
   const parent = testOperation("a", 6n, { a: 5n }, "parent", 10);

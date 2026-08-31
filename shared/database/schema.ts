@@ -517,6 +517,8 @@ export const operationCheckpoints = sqliteTable(
     ...userOwnedAuditColumns(),
     partition: operationPartitionColumn(),
     encodedCheckpoint: text("encoded_checkpoint").notNull(),
+    stableClock: text("stable_clock"),
+    stableFrontier: text("stable_frontier"),
   },
   (table) => [
     uniqueIndex("operation_checkpoints_active_owner_partition_unique")

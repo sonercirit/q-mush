@@ -1,4 +1,5 @@
 import { setAppliedNode } from "./operation-applied-index";
+import { classifyOperationPartition } from "./operation-partitions";
 import {
   freezeOperationValue,
   snapshotOperationValue,
@@ -48,41 +49,6 @@ export interface Operation<TPayload = unknown> {
   readonly payload: TPayload;
 }
 type OperationInput<TPayload> = Omit<Operation<TPayload>, "partition">;
-const operationEntityPartitions = {
-  session: [
-    "agent_sessions",
-    "agent_session_operations",
-    "agent_session_turns",
-    "agent_pending_inputs",
-    "agent_question_requests",
-    "agent_messages",
-  ],
-  "non-session": [
-    "users",
-    "workspaces",
-    "prompts",
-    "provider_quota_settings",
-    "provider_quota_reset_receipts",
-    "provider_credential_workspaces",
-    "attachment_fallbacks",
-    "runner_workspaces",
-    "tool_settings",
-  ],
-} as const;
-const sessionEntities: ReadonlySet<string> = new Set(
-  operationEntityPartitions.session,
-);
-const nonSessionEntities: ReadonlySet<string> = new Set(
-  operationEntityPartitions["non-session"],
-);
-/** @public entity partition classifier for operation creation. */
-export const classifyOperationPartition = (
-  entityType: string,
-): OperationPartition => {
-  if (sessionEntities.has(entityType)) return "session";
-  if (nonSessionEntities.has(entityType)) return "non-session";
-  throw new Error(`Unknown operation entity: ${entityType}`);
-};
 
 const isOperationPartition = (value: unknown): value is OperationPartition =>
   value === "session" || value === "non-session";
@@ -242,6 +208,10 @@ export interface AppliedIdentityNode {
   readonly left: AppliedIdentityNode | undefined;
   readonly right: AppliedIdentityNode | undefined;
 }
+export type OperationReducer<TProjection> = (
+  projection: TProjection,
+  operation: Operation,
+) => TProjection;
 export interface OperationApplyState<TProjection> {
   readonly frontier: CausalFrontier;
   readonly pending: readonly Operation[];
@@ -252,6 +222,7 @@ export interface OperationApplyState<TProjection> {
   readonly replayLastClock: HybridTimestamp | undefined;
   readonly baseProjection: TProjection;
   readonly baseFrontier: CausalFrontier;
+  readonly stableClock: HybridTimestamp | undefined;
 }
 /** Live intake bounds until subscriber stability permits safe compaction. */
 export const MAX_OPERATION_ENVELOPE_BYTES = 16 * 1024;
@@ -336,7 +307,7 @@ const orderedReady = (
     .sort((left, right) => compareClocks(left.clock, right.clock));
 const reducerOperationCopy = (operation: Operation): Operation =>
   freezeOperationValue(snapshotOperationValue(operation));
-const reduceOperations = <TProjection>(
+export const reduceOperationSequence = <TProjection>(
   initial: TProjection,
   operations: readonly Operation[],
   reducer: (projection: TProjection, operation: Operation) => TProjection,
@@ -385,7 +356,7 @@ const nullPrototypeBigintRecord = (): Record<string, bigint> => {
   return record;
 };
 
-const advanceOperations = (
+export const advanceOperationFrontier = (
   initial: CausalFrontier,
   operations: readonly Operation[],
 ): CausalFrontier => {
@@ -430,11 +401,18 @@ const appliedFromRecord = (
   return root;
 };
 export const restoreAppliedIdentityIndex = appliedFromRecord;
+export const buildAppliedIdentityIndex = (
+  operations: readonly Operation[],
+): AppliedIdentityNode | undefined => {
+  let root: AppliedIdentityNode | undefined;
+  for (const operation of operations) root = addIdentityKeys(root, operation);
+  return root;
+};
 
 export const applyOperation = <TProjection>(
   state: OperationApplyState<TProjection>,
   candidate: Operation,
-  reducer: (projection: TProjection, operation: Operation) => TProjection,
+  reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
   const snapshot = snapshotOperationEnvelope(candidate);
   candidate = snapshot;
@@ -445,7 +423,6 @@ export const applyOperation = <TProjection>(
     entry = entry.previous
   )
     history.push(entry.operation);
-  validateWriterClocks([...history, ...state.pending, candidate]);
   const fingerprint = canonical(candidate);
   const pendingIndex = pendingIdentityIndex(state);
   for (const key of operationIdentityKeys(candidate)) {
@@ -464,6 +441,15 @@ export const applyOperation = <TProjection>(
     state.pending.some((item) => item.operationId === candidate.operationId)
   )
     return state;
+  if (
+    state.stableClock !== undefined &&
+    compareClocks(candidate.clock, state.stableClock) <= 0
+  )
+    throw operationProtocolError(
+      "invalid",
+      "Operation clock is at or below the stable boundary",
+    );
+  validateWriterClocks([...history, ...state.pending, candidate]);
   if (
     state.pending.length >= MAX_OPERATION_BATCH_SIZE &&
     !isReady(candidate, state.frontier)
@@ -509,15 +495,15 @@ export const applyOperation = <TProjection>(
       const replay = [...replayHistory, ...ready].sort((left, right) =>
         compareClocks(left.clock, right.clock),
       );
-      projection = reduceOperations(baseProjection, replay, reducer);
-      frontier = advanceOperations(baseFrontier, replay);
+      projection = reduceOperationSequence(baseProjection, replay, reducer);
+      frontier = advanceOperationFrontier(baseFrontier, replay);
       const appended = appendReplay(undefined, 0, replay);
       replayHead = appended.head;
       replayCount = appended.count;
       replayLastClock = replay.at(-1)?.clock;
     } else {
-      projection = reduceOperations(projection, ready, reducer);
-      frontier = advanceOperations(frontier, ready);
+      projection = reduceOperationSequence(projection, ready, reducer);
+      frontier = advanceOperationFrontier(frontier, ready);
       const appended = appendReplay(replayHead, replayCount, ready);
       replayHead = appended.head;
       replayCount = appended.count;
@@ -541,6 +527,7 @@ export const applyOperation = <TProjection>(
     replayLastClock,
     baseProjection,
     baseFrontier,
+    stableClock: state.stableClock,
   };
   pendingIdentityIndexes.set(nextState, nextPendingIndex);
   return nextState;

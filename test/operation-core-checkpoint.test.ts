@@ -71,15 +71,16 @@ describe("operation checkpoints", () => {
       ...arrayState(),
       frontier: { a: 2n },
       baseFrontier: { a: 2n },
+      stableClock: { physicalMs: 2, logical: 0, writerId: "a" },
     });
     const state = applyOperation(
       checkpoint,
-      operation("a", 1n, {}, "stale"),
+      operation("a", 3n, { a: 2n }, "above", 3),
       append,
     );
-    expect(state.projection).toEqual([]);
-    expect(state.frontier).toEqual({ a: 2n });
-    expect(state.pending).toHaveLength(1);
+    expect(state.projection).toEqual(["a-3"]);
+    expect(state.frontier).toEqual({ a: 3n });
+    expect(state.pending).toHaveLength(0);
     expect(() => roundTrip(state)).not.toThrow();
   });
 

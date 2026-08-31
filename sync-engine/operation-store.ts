@@ -12,12 +12,19 @@ import {
   operationProtocolError,
   operationSequenceOrder,
   type Operation,
+  type OperationApplyState,
   type OperationPartition,
 } from "../shared/operation-core";
+import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
 
 interface OperationStoreResources {
   readonly database: AppDatabase;
   readonly generateId?: IdGenerator;
+}
+
+export interface StoredOperationStability {
+  readonly stableClock: unknown;
+  readonly stableFrontier: unknown;
 }
 
 export interface EncodedOperationEnvelopePage {
@@ -84,42 +91,69 @@ function buildOperationEnvelopeQuery(
 export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
+  const encodedStability = (state: OperationApplyState<readonly string[]>) => {
+    if (state.stableClock === undefined)
+      return { stableClock: null, stableFrontier: null };
+    return {
+      stableClock: JSON.stringify(state.stableClock),
+      stableFrontier: JSON.stringify(
+        prepareSynchronizationFrontier(state.baseFrontier),
+      ),
+    };
+  };
+  const checkpointRow = (ownerId: string, partition: OperationPartition) =>
+    database
+      .select({
+        encoded: operationCheckpoints.encodedCheckpoint,
+        stableClock: operationCheckpoints.stableClock,
+        stableFrontier: operationCheckpoints.stableFrontier,
+      })
+      .from(operationCheckpoints)
+      .where(activeCheckpointScope(ownerId, partition))
+      .get();
+  const classifyEnvelopeIdentity = (
+    ownerId: string,
+    operation: Operation,
+  ): "absent" | "duplicate" => {
+    const fingerprint = operationFingerprint(operation);
+    const existing = database
+      .select({ fingerprint: operationEnvelopes.fingerprint })
+      .from(operationEnvelopes)
+      .where(
+        and(
+          eq(operationEnvelopes.userId, ownerId),
+          eq(operationEnvelopes.partition, operation.partition),
+          eq(operationEnvelopes.isDeleted, false),
+          or(
+            eq(operationEnvelopes.operationId, operation.operationId),
+            and(
+              eq(operationEnvelopes.writerId, operation.writerId),
+              eq(operationEnvelopes.sequence, operation.sequence.toString()),
+            ),
+          ),
+        ),
+      )
+      .all();
+    if (existing.some((item) => item.fingerprint !== fingerprint))
+      throw operationProtocolError(
+        "conflict",
+        "Operation identity equivocation",
+      );
+    if (existing.length > 0) return "duplicate";
+    return "absent";
+  };
   return {
+    classifyEnvelopeIdentity,
     appendEnvelope(
       ownerId: string,
       operation: Operation,
       actorId: string,
       now: number,
     ): boolean {
+      if (classifyEnvelopeIdentity(ownerId, operation) === "duplicate")
+        return false;
       const fingerprint = operationFingerprint(operation);
-      return database.transaction((transaction) => {
-        const existing = transaction
-          .select({ fingerprint: operationEnvelopes.fingerprint })
-          .from(operationEnvelopes)
-          .where(
-            and(
-              eq(operationEnvelopes.userId, ownerId),
-              eq(operationEnvelopes.partition, operation.partition),
-              eq(operationEnvelopes.isDeleted, false),
-              or(
-                eq(operationEnvelopes.operationId, operation.operationId),
-                and(
-                  eq(operationEnvelopes.writerId, operation.writerId),
-                  eq(
-                    operationEnvelopes.sequence,
-                    operation.sequence.toString(),
-                  ),
-                ),
-              ),
-            ),
-          )
-          .all();
-        if (existing.some((item) => item.fingerprint !== fingerprint))
-          throw operationProtocolError(
-            "conflict",
-            "Operation identity equivocation",
-          );
-        if (existing.length > 0) return false;
+      database.transaction((transaction) => {
         transaction
           .insert(operationEnvelopes)
           .values({
@@ -135,8 +169,8 @@ export function createOperationStore(resources: OperationStoreResources) {
             ...createdAuditFields(actorId, now),
           })
           .run();
-        return true;
       });
+      return true;
     },
     readEncodedEnvelopes(
       ...parameters: EnvelopeQueryParameters
@@ -155,15 +189,20 @@ export function createOperationStore(resources: OperationStoreResources) {
           .get()?.value ?? 0
       );
     },
-    loadCheckpoint(
+    loadCheckpoint(ownerId: string, partition: OperationPartition) {
+      return checkpointRow(ownerId, partition)?.encoded;
+    },
+    loadStability(
       ownerId: string,
       partition: OperationPartition,
-    ): string | undefined {
-      return database
-        .select({ encoded: operationCheckpoints.encodedCheckpoint })
-        .from(operationCheckpoints)
-        .where(activeCheckpointScope(ownerId, partition))
-        .get()?.encoded;
+    ): StoredOperationStability {
+      const row = checkpointRow(ownerId, partition);
+      const parse = (value: string | null | undefined): unknown =>
+        value == null ? null : JSON.parse(value);
+      return {
+        stableClock: parse(row?.stableClock),
+        stableFrontier: parse(row?.stableFrontier),
+      };
     },
     storeCheckpoint(
       ownerId: string,
@@ -171,6 +210,7 @@ export function createOperationStore(resources: OperationStoreResources) {
       encodedCheckpoint: string,
       actorId: string,
       now: number,
+      state: OperationApplyState<readonly string[]>,
     ): void {
       database.transaction((transaction) => {
         const existing = transaction.query.operationCheckpoints
@@ -187,6 +227,7 @@ export function createOperationStore(resources: OperationStoreResources) {
               userId: ownerId,
               partition,
               encodedCheckpoint,
+              ...encodedStability(state),
               ...createdAuditFields(actorId, now),
             })
             .run();
@@ -196,6 +237,7 @@ export function createOperationStore(resources: OperationStoreResources) {
           .update(operationCheckpoints)
           .set({
             encodedCheckpoint,
+            ...encodedStability(state),
             ...updatedAuditFields(actorId, now),
           })
           .where(eq(operationCheckpoints.id, existing.id))

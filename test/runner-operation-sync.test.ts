@@ -234,6 +234,12 @@ const captureError = async (promise: Promise<unknown>): Promise<Error> =>
   expectError(await promise.catch((reason: unknown) => reason));
 const runnerTransport = () =>
   createRunnerOperationTransport("http://engine.test", "token");
+const readRunnerPage = () =>
+  runnerTransport().readPage({
+    frontier: {},
+    partition: "non-session",
+    signal: new AbortController().signal,
+  });
 const writeEncoded = () =>
   runnerTransport().writeBatch(
     "non-session",
@@ -258,6 +264,30 @@ const expectOutboxRetained = (
   expect(replica.state.pending).toEqual(expected);
   expect(replica.events).toEqual([]);
 };
+
+test("transport defaults absent stability and rejects malformed stability", async () => {
+  const fetchMock = vi.spyOn(globalThis, "fetch");
+  try {
+    fetchMock.mockResolvedValueOnce(
+      Response.json({ envelopes: [], hasMore: false }),
+    );
+    await expect(readRunnerPage()).resolves.toMatchObject({
+      stableClock: null,
+      stableFrontier: null,
+    });
+    fetchMock.mockResolvedValueOnce(
+      Response.json({
+        envelopes: [],
+        hasMore: false,
+        stableClock: { physicalMs: -1, logical: 0, writerId: "a" },
+        stableFrontier: { a: "1" },
+      }),
+    );
+    await expect(readRunnerPage()).rejects.toThrow(/stability/);
+  } finally {
+    fetchMock.mockRestore();
+  }
+});
 
 test("captures only a bounded engine rejection reason", async () => {
   const detail = `safe reason ${"x".repeat(1_000)}`;

@@ -4,11 +4,13 @@ import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_ENVELOPE_BYTES,
-  MAX_REMOTE_CLOCK_DRIFT_MS,
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
-import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
+import {
+  parseSynchronizationFrontier,
+  prepareSynchronizationFrontier,
+} from "../shared/operation-intake-core";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
@@ -18,10 +20,6 @@ import {
 import { createOperationStore } from "./operation-store";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
-const MAX_FRONTIER_WRITERS = 512;
-const MAX_FRONTIER_COMPONENT_BYTES = 16 * 1024;
-const utf8Length = (value: string): number =>
-  new TextEncoder().encode(value).byteLength;
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
@@ -32,28 +30,7 @@ interface SynchronizationReadRequest {
   readonly partition: OperationPartition;
   readonly frontier: Readonly<Record<string, bigint>>;
 }
-const parseFrontier = (
-  value: unknown,
-): Readonly<Record<string, bigint>> | undefined => {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return undefined;
-  const entries = Object.entries(value);
-  if (entries.length > MAX_FRONTIER_WRITERS) return undefined;
-  const result: Record<string, bigint> = {};
-  for (const [writerId, sequence] of entries) {
-    if (
-      writerId.length === 0 ||
-      writerId === "__proto__" ||
-      utf8Length(writerId) > MAX_FRONTIER_COMPONENT_BYTES ||
-      typeof sequence !== "string" ||
-      utf8Length(sequence) > MAX_FRONTIER_COMPONENT_BYTES ||
-      !/^(0|[1-9]\d*)$/.test(sequence)
-    )
-      return undefined;
-    result[writerId] = BigInt(sequence);
-  }
-  return result;
-};
+const parseFrontier = parseSynchronizationFrontier;
 const parseScope = (
   record: Readonly<Record<string, unknown>>,
 ):
@@ -164,9 +141,12 @@ export const createOperationSynchronization = (
           parsed.frontier,
           MAX_ENVELOPE_PAGE_SIZE,
         );
+        const stability = store.loadStability(ownerId, parsed.partition);
         return Response.json({
           envelopes: page.envelopes,
           hasMore: page.hasMore,
+          stableClock: stability.stableClock,
+          stableFrontier: stability.stableFrontier,
         });
       }
       const operations = parsed.envelopes.map((envelope) => {
@@ -185,16 +165,6 @@ export const createOperationSynchronization = (
         )
       )
         return new Response("Forbidden", { status: 403 });
-      if (
-        operations.some(
-          ({ clock }) =>
-            Math.abs(clock.physicalMs - now) > MAX_REMOTE_CLOCK_DRIFT_MS,
-        )
-      )
-        return Response.json(
-          { error: "Invalid operation batch" },
-          { status: 400 },
-        );
       const result = intake.apply(
         ownerId,
         parsed.partition,
