@@ -209,6 +209,32 @@ describe("typed operation projection", () => {
       expect(workspace?.name?.value).toBe("first");
       expect(workspace?.created?.operationId).toBe(create.operationId);
     }
+
+    const deleteBeforeCreate = entityOperation(
+      "workspace.delete",
+      {},
+      "workspaces",
+      "workspace-delete-first",
+      "deleter",
+      1,
+    );
+    const createAfterDelete = entityOperation(
+      "workspace.create",
+      { name: "must-not-resurrect" },
+      "workspaces",
+      "workspace-delete-first",
+      "creator",
+      2,
+    );
+    for (const items of [
+      [deleteBeforeCreate, createAfterDelete],
+      [createAfterDelete, deleteBeforeCreate],
+    ]) {
+      const workspace = project(items).workspaces[0];
+      expect(workspace?.deleted).toBeDefined();
+      expect(workspace?.created).toBeUndefined();
+      expect(workspace?.name).toBeUndefined();
+    }
   });
 
   test("remove-wins blocks prompt name and body writes after deletion", () => {
