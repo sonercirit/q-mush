@@ -91,7 +91,9 @@ function buildOperationEnvelopeQuery(
 export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
-  const encodedStability = (state: OperationApplyState<readonly string[]>) => {
+  const encodedStability = <TProjection>(
+    state: OperationApplyState<TProjection>,
+  ) => {
     if (state.stableClock === undefined)
       return { stableClock: null, stableFrontier: null };
     return {
@@ -204,13 +206,13 @@ export function createOperationStore(resources: OperationStoreResources) {
         stableFrontier: parse(row?.stableFrontier),
       };
     },
-    storeCheckpoint(
+    storeCheckpoint<TProjection>(
       ownerId: string,
       partition: OperationPartition,
       encodedCheckpoint: string,
       actorId: string,
       now: number,
-      state: OperationApplyState<readonly string[]>,
+      state: OperationApplyState<TProjection>,
     ): void {
       database.transaction((transaction) => {
         const existing = transaction.query.operationCheckpoints

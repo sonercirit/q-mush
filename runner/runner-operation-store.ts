@@ -4,7 +4,6 @@ import {
   decodeOperationCheckpoint,
   decodeOperationEnvelope,
   encodeOperationCheckpoint,
-  type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint.ts";
 import {
   frontierCovers,
@@ -21,6 +20,12 @@ import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
 } from "../shared/operation-intake-core.ts";
+import {
+  initialOperationEntityProjection,
+  operationEntityProjectionCodec,
+  reduceOperationEntityProjection,
+  type OperationEntityProjection,
+} from "../shared/operation-projection.ts";
 import {
   stabilizeOperationApplyState,
   type OperationStabilityBoundary,
@@ -52,11 +57,11 @@ export const createRunnerOperationStore = (
   const checkpointState = (
     ownerId: string,
     partition: OperationPartition,
-  ): OperationApplyState<OperationCheckpointProjection> => {
+  ): OperationApplyState<OperationEntityProjection> => {
     const encoded = log.checkpoint(ownerId, partition);
     return encoded === undefined
-      ? initialOperationApplyState<OperationCheckpointProjection>([])
-      : decodeOperationCheckpoint(encoded);
+      ? initialOperationApplyState(initialOperationEntityProjection)
+      : decodeOperationCheckpoint(encoded, operationEntityProjectionCodec);
   };
   return {
     apply(
@@ -132,10 +137,7 @@ export const createRunnerOperationStore = (
                 },
                 ownsOperation: (accepted) =>
                   accepted.entity.accountId === accepted.writerId,
-                reducer: (projection, accepted) => [
-                  ...projection,
-                  accepted.operationId,
-                ],
+                reducer: reduceOperationEntityProjection,
               },
             );
             if (
@@ -146,9 +148,12 @@ export const createRunnerOperationStore = (
               candidate = stabilizeOperationApplyState(
                 candidate,
                 stability.stableClock,
-                (projection, item) => [...projection, item.operationId],
+                reduceOperationEntityProjection,
               );
-            const encodedCheckpoint = encodeOperationCheckpoint(candidate);
+            const encodedCheckpoint = encodeOperationCheckpoint(
+              candidate,
+              operationEntityProjectionCodec,
+            );
             if (
               checkpointByteLength(encodedCheckpoint) >
               (limits?.checkpointBytes ?? MAX_OPERATION_CHECKPOINT_BYTES)
@@ -180,7 +185,10 @@ export const createRunnerOperationStore = (
           log.storeCheckpoint(
             ownerId,
             partition,
-            encodeOperationCheckpoint(successor),
+            encodeOperationCheckpoint(
+              successor,
+              operationEntityProjectionCodec,
+            ),
           );
       })();
     },
@@ -192,14 +200,14 @@ export const createRunnerOperationStore = (
       const compacted = stabilizeOperationApplyState(
         state,
         stableClock,
-        (projection, operation) => [...projection, operation.operationId],
+        reduceOperationEntityProjection,
       );
       if (compacted === state) return;
       database.transaction(() => {
         log.storeCheckpoint(
           ownerId,
           partition,
-          encodeOperationCheckpoint(compacted),
+          encodeOperationCheckpoint(compacted, operationEntityProjectionCodec),
         );
       })();
     },

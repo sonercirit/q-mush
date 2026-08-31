@@ -21,8 +21,8 @@ export const testOperation = (
     clock: { physicalMs, logical: 0, writerId },
     parents,
     entity: { type: "workspaces", id: "workspace-1", accountId: "account-1" },
-    kind: "workspace.name.set",
-    payload: { value },
+    kind: "workspace.create",
+    payload: { name: value },
   });
 
 export const testSessionOperation = (

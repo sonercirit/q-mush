@@ -247,7 +247,10 @@ export const encodeOperationEnvelope = (operation: Operation): string =>
 export const decodeOperationEnvelope = (encoded: string): Operation =>
   decodeOperation(decodeEncoded(encoded, "operation envelope"));
 
-export type OperationCheckpointProjection = readonly string[];
+export interface OperationProjectionCodec<TProjection> {
+  readonly encode: (projection: TProjection) => unknown;
+  readonly decode: (value: unknown) => TProjection;
+}
 
 const replayOperations = (head: ReplayEntry | undefined): Operation[] => {
   const replay: Operation[] = [];
@@ -255,18 +258,47 @@ const replayOperations = (head: ReplayEntry | undefined): Operation[] => {
     replay.push(entry.operation);
   return replay;
 };
-export const encodeOperationCheckpoint = (
-  state: OperationApplyState<OperationCheckpointProjection>,
-): string => {
+const legacyStringProjectionCodec: OperationProjectionCodec<unknown> = {
+  encode: (projection) => {
+    if (
+      !Array.isArray(projection) ||
+      !projection.every((item) => typeof item === "string")
+    )
+      throw new Error("Invalid legacy string projection");
+    return projection;
+  },
+  decode: (value) => {
+    if (
+      !Array.isArray(value) ||
+      !value.every((item) => typeof item === "string")
+    )
+      throw new Error("Invalid legacy string projection");
+    return value;
+  },
+};
+
+export function encodeOperationCheckpoint(
+  state: OperationApplyState<readonly string[]>,
+): string;
+export function encodeOperationCheckpoint<TProjection>(
+  state: OperationApplyState<TProjection>,
+  codec: OperationProjectionCodec<TProjection>,
+): string;
+export function encodeOperationCheckpoint(
+  state: OperationApplyState<unknown>,
+  codec: OperationProjectionCodec<unknown> = legacyStringProjectionCodec,
+): string {
   const replay = replayOperations(state.replayHead);
   return JSON.stringify(
     encodeCheckpointValue({
       ...state,
+      projection: codec.encode(state.projection),
+      baseProjection: codec.encode(state.baseProjection),
       applied: materializeApplied(state.applied),
       replayHead: replay,
     }),
   );
-};
+}
 const clocksEqual = (
   left: HybridTimestamp | undefined,
   right: HybridTimestamp | undefined,
@@ -281,8 +313,8 @@ const nullPrototypeBigintRecord = (): Record<string, bigint> => {
   Object.setPrototypeOf(record, null);
   return record;
 };
-const validateCheckpointConsistency = (
-  state: OperationApplyState<OperationCheckpointProjection>,
+const validateCheckpointConsistency = <TProjection>(
+  state: OperationApplyState<TProjection>,
 ): void => {
   const replay = replayOperations(state.replayHead);
   if (
@@ -394,9 +426,17 @@ const validateCheckpointConsistency = (
       throw new Error("Invalid operation checkpoint pending identity");
   }
 };
-export const decodeOperationCheckpoint = (
+export function decodeOperationCheckpoint(
   encoded: string,
-): OperationApplyState<OperationCheckpointProjection> => {
+): OperationApplyState<readonly string[]>;
+export function decodeOperationCheckpoint<TProjection>(
+  encoded: string,
+  codec: OperationProjectionCodec<TProjection>,
+): OperationApplyState<TProjection>;
+export function decodeOperationCheckpoint(
+  encoded: string,
+  codec: OperationProjectionCodec<unknown> = legacyStringProjectionCodec,
+): OperationApplyState<unknown> {
   const decoded = decodeEncoded(encoded, "operation checkpoint");
   const state = checkpointObject(decoded);
   const checkpointKeys = [
@@ -422,20 +462,28 @@ export const decodeOperationCheckpoint = (
     Number(state["replayCount"]) < 0
   )
     throw new Error("Invalid operation checkpoint");
-  const validProjection = (
-    value: unknown,
-  ): value is OperationCheckpointProjection =>
-    Array.isArray(value) && value.every((item) => typeof item === "string");
-  if (!validProjection(state["projection"]))
-    throw new Error("Invalid operation checkpoint projection");
-  if (!validProjection(state["baseProjection"]))
-    throw new Error("Invalid operation checkpoint base projection");
-  const result: OperationApplyState<OperationCheckpointProjection> = {
+  let projection: unknown;
+  let baseProjection: unknown;
+  try {
+    projection = codec.decode(state["projection"]);
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint projection", {
+      cause: error,
+    });
+  }
+  try {
+    baseProjection = codec.decode(state["baseProjection"]);
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint base projection", {
+      cause: error,
+    });
+  }
+  const result: OperationApplyState<unknown> = {
     frontier: nonNegativeBigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map((operation) =>
       decodeOperation(operation, true),
     ),
-    projection: state["projection"],
+    projection,
     applied: restoreAppliedIdentityIndex(
       stringCheckpointRecord(state["applied"]),
     ),
@@ -445,7 +493,7 @@ export const decodeOperationCheckpoint = (
       state["replayLastClock"] === undefined
         ? undefined
         : decodeClock(state["replayLastClock"]),
-    baseProjection: state["baseProjection"],
+    baseProjection,
     baseFrontier: nonNegativeBigintCheckpointRecord(state["baseFrontier"]),
     stableClock:
       legacy || state["stableClock"] === undefined
@@ -454,4 +502,4 @@ export const decodeOperationCheckpoint = (
   };
   validateCheckpointConsistency(result);
   return result;
-};
+}
