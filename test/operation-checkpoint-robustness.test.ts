@@ -12,6 +12,7 @@ import {
   restoreAppliedIdentityIndex,
   type OperationApplyState,
 } from "../shared/operation-core";
+import { stringArrayProjectionCodec } from "./operation-checkpoint-test-support";
 import {
   appendOperationId,
   applyOperationList,
@@ -27,7 +28,10 @@ const state = () =>
     appendOperationId,
   );
 const decoded = (checkpoint: OperationApplyState<readonly string[]>) =>
-  decodeOperationCheckpoint(encodeOperationCheckpoint(checkpoint));
+  decodeOperationCheckpoint(
+    encodeOperationCheckpoint(checkpoint, stringArrayProjectionCodec),
+    stringArrayProjectionCodec,
+  );
 const reject = (
   checkpoint: OperationApplyState<readonly string[]>,
   pattern: RegExp,
@@ -196,6 +200,7 @@ test("checkpoint decoding ignores inherited own-writer parent entries", () => {
   const checkpoint = testApplyState<readonly string[]>([]);
   const encoded = encodeOperationCheckpoint(
     Object.assign(checkpoint, { pending: [pending] }),
+    stringArrayProjectionCodec,
   );
   const inheritedParentDescriptor: PropertyDescriptor = {
     configurable: true,
@@ -205,9 +210,10 @@ test("checkpoint decoding ignores inherited own-writer parent entries", () => {
   };
   Reflect.defineProperty(Object.prototype, writerId, inheritedParentDescriptor);
   try {
-    expect(decodeOperationCheckpoint(encoded).pending[0]?.writerId).toBe(
-      writerId,
-    );
+    expect(
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec).pending[0]
+        ?.writerId,
+    ).toBe(writerId);
   } finally {
     Reflect.deleteProperty(Object.prototype, writerId);
   }
@@ -326,15 +332,20 @@ test("round trips replay depth beyond the former call-stack limit", () => {
     applied[`writer:${distinct.writerId}:1`] = fingerprint;
     frontier[distinct.writerId] = 1n;
   }
-  const encoded = encodeOperationCheckpoint({
-    ...testApplyState<readonly string[]>([]),
-    frontier,
-    applied: restoreAppliedIdentityIndex(applied),
-    replayHead,
-    replayCount: depth,
-    replayLastClock: replayHead?.operation.clock,
-  });
-  expect(decodeOperationCheckpoint(encoded).replayCount).toBe(depth);
+  const encoded = encodeOperationCheckpoint(
+    {
+      ...testApplyState<readonly string[]>([]),
+      frontier,
+      applied: restoreAppliedIdentityIndex(applied),
+      replayHead,
+      replayCount: depth,
+      replayLastClock: replayHead?.operation.clock,
+    },
+    stringArrayProjectionCodec,
+  );
+  expect(
+    decodeOperationCheckpoint(encoded, stringArrayProjectionCodec).replayCount,
+  ).toBe(depth);
 });
 
 test("checkpoint decoding rejects negative sequence, parents, and frontiers", () => {
@@ -374,22 +385,29 @@ test("checkpoint decoding rejects replay outside canonical clock order", () => {
 test("negative payload bigints round trip", () => {
   const pending = { ...operation, parents: { missing: 1n }, payload: -9n };
   const decoded = decodeOperationCheckpoint(
-    encodeOperationCheckpoint({
-      ...testApplyState<readonly string[]>([]),
-      pending: [pending],
-    }),
+    encodeOperationCheckpoint(
+      {
+        ...testApplyState<readonly string[]>([]),
+        pending: [pending],
+      },
+      stringArrayProjectionCodec,
+    ),
+    stringArrayProjectionCodec,
   );
   expect(decoded.pending[0]?.payload).toBe(-9n);
 });
 
 test("checkpoint decoding rejects negative physical clocks", () => {
-  const encoded = encodeOperationCheckpoint({
-    ...testApplyState<readonly string[]>([]),
-    replayLastClock: { physicalMs: -1, logical: 0, writerId: "a" },
-  });
-  expect(() => decodeOperationCheckpoint(encoded)).toThrow(
-    "Invalid checkpoint clock",
+  const encoded = encodeOperationCheckpoint(
+    {
+      ...testApplyState<readonly string[]>([]),
+      replayLastClock: { physicalMs: -1, logical: 0, writerId: "a" },
+    },
+    stringArrayProjectionCodec,
   );
+  expect(() =>
+    decodeOperationCheckpoint(encoded, stringArrayProjectionCodec),
+  ).toThrow("Invalid checkpoint clock");
 });
 
 describe("operation value domain", () => {

@@ -64,18 +64,33 @@ const replaceById = <T extends { readonly id: string }>(
   item: T,
 ): readonly T[] =>
   [...items.filter(({ id }) => id !== item.id), item].sort(byId);
-const payloadField = (operation: Operation, key: string): unknown => {
+const payloadRecord = (
+  operation: Operation,
+): Readonly<Record<string, unknown>> => {
   const payload = operation.payload;
-  return payload !== null && typeof payload === "object"
-    ? Reflect.get(payload, key)
-    : undefined;
+  if (!exactObjectKeys(payload, Object.keys(payload ?? {})))
+    throw new Error("Admitted operation payload must be an object");
+  return payload;
 };
+const payloadValue = (operation: Operation, key: string): unknown =>
+  Reflect.get(payloadRecord(operation), key);
 const payloadString = (
   operation: Operation,
   key: "name" | "body" | "value",
 ): string => {
-  const value = payloadField(operation, key);
-  return typeof value === "string" ? value : "";
+  const value = payloadValue(operation, key);
+  if (typeof value !== "string")
+    throw new Error("Admitted operation payload string is missing");
+  return value;
+};
+const payloadNullableString = (
+  operation: Operation,
+  key: "defaultWorkspaceId",
+): string | null => {
+  const value = payloadValue(operation, key);
+  if (value !== null && typeof value !== "string")
+    throw new Error("Admitted operation nullable string is missing");
+  return value;
 };
 const emptyNamedEntity = (id: string): NamedEntityProjection => ({
   id,
@@ -96,7 +111,6 @@ const promptRecord = (
     ...emptyNamedEntity(id),
     body: undefined,
     bodyConflicts: [],
-    deleted: undefined,
   };
 const effectiveDefault = (
   workspaces: readonly WorkspaceProjection[],
@@ -226,8 +240,7 @@ const reduceUser = (
   operation: Operation,
 ): OperationEntityProjection => {
   const current = projection.users.find(({ id }) => id === operation.entity.id);
-  const requested = payloadField(operation, "defaultWorkspaceId");
-  const value = typeof requested === "string" ? requested : null;
+  const value = payloadNullableString(operation, "defaultWorkspaceId");
   return repairUsers({
     ...projection,
     users: replaceById(projection.users, {
