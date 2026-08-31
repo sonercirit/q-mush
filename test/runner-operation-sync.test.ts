@@ -9,13 +9,13 @@ import {
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
-import { operationEntityProjectionCodec as c } from "../shared/operation-projection.ts";
+import { operationEntityProjectionCodec } from "../shared/operation-projection.ts";
 import { createOperationStore } from "../sync-engine/operation-store.ts";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization.ts";
 import { testOperation } from "./operation-core-test-support.ts";
 import { createOperationDatabaseHarness } from "./operation-store-test-support.ts";
 
-type HarnessOutboxStall = NonNullable<
+type OutboxStall = NonNullable<
   ReturnType<
     ReturnType<typeof createRunnerOperationStore>["state"]
   >["outboxStalls"]
@@ -24,7 +24,7 @@ interface HarnessState {
   frontier: Readonly<Record<string, bigint>>;
   pending: readonly string[];
   stalled: boolean;
-  outboxStalls: readonly HarnessOutboxStall[];
+  outboxStalls: readonly OutboxStall[];
 }
 const harness = (initial: Partial<HarnessState> = {}) => {
   const state: HarnessState = {
@@ -247,10 +247,7 @@ const writeEncoded = () =>
     ["encoded"],
     new AbortController().signal,
   );
-const rejectedStall = (
-  operationId: string,
-  writerId: string,
-): HarnessOutboxStall => ({
+const rejectedStall = (operationId: string, writerId: string): OutboxStall => ({
   operationId,
   queuedBehind: 0,
   reason: "rejected",
@@ -494,7 +491,7 @@ permanentHeadTest(
         "owner-1",
         "non-session",
       ) ?? "",
-      c,
+      operationEntityProjectionCodec,
     );
     expect(checkpoint.frontier).toEqual({ "owner-1": 9n });
     expect(checkpoint.pending).toEqual([]);

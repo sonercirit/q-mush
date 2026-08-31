@@ -1,4 +1,8 @@
 import { describe, expect, test } from "vitest";
+import {
+  decodeOperationCheckpoint,
+  encodeOperationCheckpoint,
+} from "../shared/operation-checkpoint";
 import { createOperation } from "../shared/operation-core";
 import { applyOperationIntakeBatch } from "../shared/operation-intake-core";
 import {
@@ -220,5 +224,26 @@ describe("operation entity projection codec", () => {
         ],
       }),
     ).toThrow();
+    const checkpoint = applyOperationList(
+      [operation("workspace.create", { name: "One" })],
+      testApplyState(initialOperationEntityProjection),
+      reduceOperationEntityProjection,
+    );
+    const serialized = encodeOperationCheckpoint(
+      checkpoint,
+      operationEntityProjectionCodec,
+    );
+    expect(
+      decodeOperationCheckpoint(serialized, operationEntityProjectionCodec)
+        .projection,
+    ).toEqual(projection);
+    expect(() =>
+      decodeOperationCheckpoint(serialized, {
+        encode: (value) => value,
+        decode: () => {
+          throw new Error("codec mutation");
+        },
+      }),
+    ).toThrow(/projection/);
   });
 });
