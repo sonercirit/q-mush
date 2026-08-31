@@ -29,6 +29,7 @@ export const initialOperationApplyState = <Projection>(
   replayLastClock: undefined,
   baseProjection: projection,
   baseFrontier: {},
+  stableClock: undefined,
 });
 
 interface IntakeCandidate {
