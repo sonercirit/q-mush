@@ -33,7 +33,6 @@ interface OperationIntakeResources {
   readonly database: AppDatabase;
   readonly generateId?: IdGenerator;
   readonly limits?: OperationIntakeLimits;
-  readonly enforceClockDrift?: boolean;
 }
 interface OperationIntakeResult {
   readonly frontier: CausalFrontier;
@@ -74,14 +73,18 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             ? initialOperationApplyState<OperationCheckpointProjection>([])
             : decodeOperationCheckpoint(encoded);
         const candidates = operations.flatMap((operation) => {
+          if (operation.partition !== partition)
+            throw operationProtocolError(
+              "invalid",
+              "Operation intake scope mismatch",
+            );
           if (
             store.classifyEnvelopeIdentity(ownerId, operation) === "duplicate"
           )
             return [];
           if (
-            resources.enforceClockDrift !== false &&
             Math.abs(operation.clock.physicalMs - now) >
-              MAX_REMOTE_CLOCK_DRIFT_MS
+            MAX_REMOTE_CLOCK_DRIFT_MS
           )
             throw operationProtocolError(
               "invalid",

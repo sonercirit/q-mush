@@ -187,20 +187,20 @@ export const createRunnerOperationStore = (
     compact(request: RunnerOperationCompactionRequest) {
       const { ownerId, partition, stableClock, stableFrontier } = request;
       if (stableClock === null || stableFrontier === null) return;
+      const state = checkpointState(ownerId, partition);
+      if (!frontierCovers(state.frontier, stableFrontier)) return;
+      const compacted = stabilizeOperationApplyState(
+        state,
+        stableClock,
+        (projection, operation) => [...projection, operation.operationId],
+      );
+      if (compacted === state) return;
       database.transaction(() => {
-        const state = checkpointState(ownerId, partition);
-        if (!frontierCovers(state.frontier, stableFrontier)) return;
-        const compacted = stabilizeOperationApplyState(
-          state,
-          stableClock,
-          (projection, operation) => [...projection, operation.operationId],
+        log.storeCheckpoint(
+          ownerId,
+          partition,
+          encodeOperationCheckpoint(compacted),
         );
-        if (compacted !== state)
-          log.storeCheckpoint(
-            ownerId,
-            partition,
-            encodeOperationCheckpoint(compacted),
-          );
       })();
     },
     acknowledge: (...arguments_: Parameters<typeof log.acknowledge>) => {

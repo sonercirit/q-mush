@@ -263,7 +263,7 @@ test("operation intake rejects a mismatched operation partition", () => {
     ...testOperation("writer-a", 1n, {}, "one"),
     partition: "session" as const,
   };
-  expect(() => apply(intake, [operation], 2)).toThrow("partition mismatch");
+  expect(() => apply(intake, [operation], 2)).toThrow("scope mismatch");
   expectNoStoredOperations(database);
 });
 

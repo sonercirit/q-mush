@@ -210,7 +210,7 @@ export function createOperationStore(resources: OperationStoreResources) {
       encodedCheckpoint: string,
       actorId: string,
       now: number,
-      state?: OperationApplyState<readonly string[]>,
+      state: OperationApplyState<readonly string[]>,
     ): void {
       database.transaction((transaction) => {
         const existing = transaction.query.operationCheckpoints

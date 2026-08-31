@@ -34,51 +34,42 @@
   operation-ID or writer-sequence identities, including byte-identical
   duplicates, and rejects negative sequence, parent, and frontier values while
   preserving signed bigint operation payloads. Sizes use bytes per operation and
-  binary MiB (1 MiB = 1,048,576 bytes). No safe compaction exists yet because a
-  local replica cannot know whether a peer may later send a valid earlier-clock
-  operation. The reachable authenticated route therefore fails closed at 16 KiB
-  per encoded envelope, 2,000 stored operations per owner/partition, or a 4 MiB
-  encoded checkpoint (HTTP 507 for either history capacity). These validation
-  limits apply after the synchronization route has fully buffered and parsed its
-  JSON body; stage 2 does not impose a route-level request-byte bound. Reads
-  likewise have no route-level response-byte bound: the fixed 256-envelope page
-  and 16 KiB encoded-envelope limit permit up to 4 MiB of envelope string
-  contents. JSON string escaping can nearly double that size in the worst case,
-  so the server may materialize an approximately 8 MiB response body for one
-  full page, including framing. A separate byte cap would require either
-  measuring encoded rows while paging or serializing twice; the existing
-  deterministic count and per-envelope caps are retained for this temporary
-  protocol instead. With 4 KiB payloads the 4 MiB is reached after about 300
-  operations, before the nominal 2,000-envelope cap, and this wedge is
-  unrecoverable until the stability protocol permits compaction. These are
-  temporary safety limits, not compaction. Reviewer in-memory single-operation
-  measurements grew from 258 KB/9.8 ms at 200 operations through 1.03 MB/39.1 ms
-  at 800 and 4.14 MB/134.4 ms at 3,200; 20,000 operations produced a 25.1 MB
-  checkpoint whose decode alone took 564 ms. Bounded compaction remains deferred
-  to stage 2 anti-entropy and durable subscriber receipts, which can establish a
-  stable boundary. Writer identity is currently forced to the authenticated
-  account ID; whether device keys should introduce per-device writer IDs remains
-  open for that later slice. Identity fingerprints remain plain enumerable
-  checkpoint data: live state stores the serializable balanced identity tree,
-  and checkpoint encoding (or `materializeApplied`) creates the flat record on
-  demand. Sequential steady-state admission is expected O(log n) per operation
-  and O(n log n) overall, rather than repeatedly materializing O(n) records.
-  Unready operations maintain a per-state persistent identity treap for
-  incremental O(log n) checks and bounded admission; operation intake and
-  synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after which
-  admission fails rather than silently wedging, while a ready dependency may
-  enter a full buffer to drain it; operation-ID and writer-sequence equivocation
-  is rejected. Durable checkpoints consist of `frontier`, `pending`,
-  `projection`, `applied`, `replayHead`, `replayCount`, `replayLastClock`,
-  `baseProjection`, and `baseFrontier`; none of the replay fields is optional.
-  Decoding fails closed unless replay count/head clock, global canonical clock
-  order, per-writer sequence contiguity from the base frontier, replay-parent
-  coverage by the final derived frontier, own-writer parents strictly below
-  their operation sequence in replay and pending state, derived frontier,
-  applied identities, and pending identities are mutually consistent, including
-  pending-against-pending operation-ID and writer-sequence checks. HLC
-  components are non-negative safe integers. Frontier/parent access is
-  own-property-safe, including `__proto__`; canonical identity explicitly
+  binary MiB (1 MiB = 1,048,576 bytes). Stability compaction now folds replay
+  prefixes proven safe by frontier, drift, and pending-clock bounds. The route
+  fails closed at 16 KiB per encoded envelope, 2,000 retained
+  replay-plus-pending operations per owner/partition, or a 4 MiB post-fold
+  checkpoint (HTTP 507 for either working-set capacity). Limits apply after the
+  route buffers/parses JSON; stage 2 has no route request-byte cap. Reads rely
+  on 256 envelopes × 16 KiB: strings are at most 4 MiB, but escaping can make
+  JSON about 8 MiB. A separate cap would require measuring while paging or
+  serializing twice. With 4 KiB payloads an uncompacted checkpoint reaches 4 MiB
+  around 300 operations; stability folding resolves the wedge once entries age
+  and become covered. Measurements ranged from 258 KB/9.8 ms at 200 operations
+  to 4.14 MB/134.4 ms at 3,200; 20,000 produced 25.1 MB and decoded in 564 ms.
+  Envelope-row deletion remains deferred until durable subscriber receipts can
+  bound replicated scope. Writer identity is currently forced to the
+  authenticated account ID; whether device keys should introduce per-device
+  writer IDs remains open for that later slice. Identity fingerprints remain
+  plain enumerable checkpoint data: live state stores the serializable balanced
+  identity tree, and checkpoint encoding (or `materializeApplied`) creates the
+  flat record on demand. Sequential steady-state admission is expected O(log n)
+  per operation and O(n log n) overall, rather than repeatedly materializing
+  O(n) records. Unready operations maintain a per-state persistent identity
+  treap for incremental O(log n) checks and bounded admission; operation intake
+  and synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after
+  which admission fails rather than silently wedging, while a ready dependency
+  may enter a full buffer to drain it; operation-ID and writer-sequence
+  equivocation is rejected. Durable checkpoints consist of `frontier`,
+  `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
+  `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
+  fields is optional. Decoding fails closed unless replay count/head clock,
+  global canonical clock order, per-writer sequence contiguity from the base
+  frontier, replay-parent coverage by the final derived frontier, own-writer
+  parents strictly below their operation sequence in replay and pending state,
+  derived frontier, applied identities, and pending identities are mutually
+  consistent, including pending-against-pending operation-ID and writer-sequence
+  checks. HLC components are non-negative safe integers. Frontier/parent access
+  is own-property-safe, including `__proto__`; canonical identity explicitly
   preserves `undefined` object-property and dense array-element presence, while
   operation validation rejects sparse arrays, negative zero, extra array/Date
   own properties, non-enumerable or symbol object properties, and every accessor
@@ -171,17 +162,22 @@
   admissions are strictly above the result. Retained replay and pending clocks
   are likewise strictly above it. A dormant fully folded writer can therefore
   pin stability indefinitely; whether future device writer identity needs a
-  retirement protocol remains open.
+  retirement protocol remains open. Engine wall time is not monotonic-clamped:
+  after a backward step, a newly drift-valid operation may still be at/below the
+  prior stable clock and permanently stall its writer head; monotonic engine
+  admission time remains an open requirement.
 - The engine persists JSON `stable_clock` and decimal-string `stable_frontier`
   columns beside the checkpoint and publishes them on pull pages without blob
   decoding. A runner folds against the published clock only after its applied
   frontier covers the published frontier; this prevents an early bootstrap page
   from folding before a later writer's old-clock page arrives. Local writer and
-  pending caps still apply. Envelope identities are pre-screened against durable
-  rows before core admission on both sides, so folded duplicates acknowledge
-  without quarantine and fingerprint mismatches conflict. Engine drift checks
-  happen only after this screen, fixing retries of acknowledged operations older
-  than five minutes.
+  pending caps still apply. Null, uncovered, or no-op runner boundaries are
+  rejected before opening a write transaction, preserving empty-page idle reads.
+  Envelope identities are pre-screened against durable rows before core
+  admission on both sides, so folded duplicates acknowledge without quarantine
+  and fingerprint mismatches conflict. Engine drift checks happen only after
+  this screen, fixing retries of acknowledged operations older than five
+  minutes.
 - The 2,000-operation limit now bounds retained replay plus pending work, not
   total envelope rows; the 4 MiB bound applies after attempted folding. This
   unwedges representation growth while immutable envelope rows intentionally

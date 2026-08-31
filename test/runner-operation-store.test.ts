@@ -27,9 +27,16 @@ const withStore = (
 ) => {
   withRunnerOperationStore(createRunnerOperationStore, run);
 };
+const withLimitedRunnerStore = (run: (store: Store) => void): void => {
+  withRunnerOperationStore(
+    (database) =>
+      createRunnerOperationStore(database, { checkpointBytes: 2_500 }),
+    run,
+  );
+};
+
 const envelope = runnerEnvelope;
 type Store = RunnerOperationTestStore;
-
 const applyRemote = (
   store: Store,
   partition: "non-session" | "session",
@@ -76,6 +83,26 @@ test("compacts only after the published stable frontier is covered", () => {
     const state = store.state(runnerOwnerId, "non-session");
     expect(state.replayCount).toBe(0);
     expect(state.stableClock?.physicalMs).toBe(1);
+  });
+});
+
+test("published covered boundary rescues checkpoint capacity", () => {
+  const envelopes = [runnerEnvelope(1n), runnerEnvelope(2n)];
+  withLimitedRunnerStore((store) => {
+    store.apply(runnerOwnerId, "non-session", envelopes, "remote");
+    expectRunnerOperationState(store, { stalled: true });
+  });
+  withLimitedRunnerStore((store) => {
+    store.apply(runnerOwnerId, "non-session", envelopes, "remote", {
+      stableClock: { physicalMs: 2, logical: 0, writerId: runnerOwnerId },
+      stableFrontier: { [runnerOwnerId]: 2n },
+    });
+    const state = store.state(runnerOwnerId, "non-session");
+    expect(state).toMatchObject({
+      replayCount: 0,
+      stableClock: { physicalMs: 2 },
+      stalled: false,
+    });
   });
 });
 
