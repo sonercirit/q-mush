@@ -85,14 +85,13 @@ describe("operation stability", () => {
   test("pending clocks are strict fold caps", () => {
     const applied = applyOperation(
       testApplyState<readonly string[]>([]),
-      operation("a", 1n, {}, "a", 20),
+      operation("a", 1n, {}, "a", 10),
       appendOperationId,
     );
-    const pending = applyOperation(
-      applied,
-      operation("b", 2n, { b: 1n }, "pending", 10),
-      appendOperationId,
-    );
+    const pending = {
+      ...applied,
+      pending: [operation("a", 3n, { a: 2n }, "pending", 10)],
+    };
     expect(
       stabilizeOperationApplyState(
         pending,
