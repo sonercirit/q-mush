@@ -230,14 +230,11 @@ describe("typed operation projection", () => {
       project([deleteBeforeCreate, createAfterDelete]),
       project([createAfterDelete, deleteBeforeCreate]),
     ];
-    expect(deleteFirstProjections).toHaveLength(2);
-    for (const { workspaces } of deleteFirstProjections) {
-      expect(workspaces[0]).toMatchObject({
-        created: undefined,
-        deleted: expect.anything(),
-        name: undefined,
-      });
-    }
+    const deletedFirst = deleteFirstProjections[0]?.workspaces[0];
+    expect(deletedFirst?.created).toBeUndefined();
+    expect(deletedFirst?.deleted).toBeDefined();
+    expect(deletedFirst?.name).toBeUndefined();
+    expect(deleteFirstProjections[1]).toEqual(deleteFirstProjections[0]);
   });
 
   test("remove-wins blocks prompt name and body writes after deletion", () => {
