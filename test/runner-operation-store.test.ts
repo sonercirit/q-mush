@@ -11,6 +11,7 @@ import {
   testOperation,
   testSessionOperation,
 } from "./operation-core-test-support.ts";
+import { expectWorkspaceName } from "./operation-intake-test-support.ts";
 import { applyAndCompactRunnerOperation } from "./runner-operation-stability-test-support.ts";
 import {
   applyRunnerEnvelope,
@@ -198,7 +199,7 @@ test("does not advance or retain later operations across a rejected identity", (
       expect.objectContaining({ verificationState: "rejected" }),
     ]);
     const state = store.state("owner-1", "non-session");
-    expect(state.projection.workspaces[0]?.name?.value).toBe("value-1");
+    expectWorkspaceName(state.projection, "value-1");
     expect(state.pending).toEqual([]);
     expect(state.frontier).toEqual({ "owner-1": 1n });
     expect(state.stalled).toBe(true);

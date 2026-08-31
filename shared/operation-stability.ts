@@ -4,6 +4,7 @@ import {
   compareClocks,
   MAX_REMOTE_CLOCK_DRIFT_MS,
   reduceOperationSequence,
+  replayOperationsOldestFirst,
   type CausalFrontier,
   type HybridTimestamp,
   type Operation,
@@ -17,13 +18,7 @@ export interface OperationStabilityBoundary {
   readonly stableFrontier: CausalFrontier | null;
 }
 
-const replayOldestFirst = (head: ReplayEntry | undefined): Operation[] => {
-  const operations: Operation[] = [];
-  for (let entry = head; entry !== undefined; entry = entry.previous)
-    operations.push(entry.operation);
-  operations.reverse();
-  return operations;
-};
+const replayOldestFirst = replayOperationsOldestFirst;
 const replayHead = (
   operations: readonly Operation[],
 ): ReplayEntry | undefined => {

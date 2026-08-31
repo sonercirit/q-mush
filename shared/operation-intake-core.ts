@@ -8,17 +8,16 @@ import {
 } from "./operation-core.ts";
 import { validateEntityOperation } from "./operation-entities.ts";
 import { utf8ByteLength } from "./utf8.ts";
+import { isBoundedSafeRecordKey } from "./validation.ts";
 
 const MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES = 16 * 1024;
 const validSynchronizationFrontierComponent = (value: string): boolean =>
-  value.length > 0 &&
-  value !== "__proto__" &&
-  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES;
+  isBoundedSafeRecordKey(value, MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES);
 
 const validSynchronizationSequenceText = (value: unknown): value is string =>
+  /^(0|[1-9]\d*)$/.test(String(value)) &&
   typeof value === "string" &&
-  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES &&
-  /^(0|[1-9]\d*)$/.test(value);
+  utf8ByteLength(value) <= MAX_SYNCHRONIZATION_FRONTIER_COMPONENT_BYTES;
 
 export const parseSynchronizationFrontier = (
   value: unknown,

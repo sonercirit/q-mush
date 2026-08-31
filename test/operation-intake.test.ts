@@ -22,8 +22,13 @@ import {
   type OperationIntakeLimits,
 } from "../sync-engine/operation-intake";
 import { createOperationStore } from "../sync-engine/operation-store";
-import { testSessionOperation } from "./operation-core-test-support";
 import { entityTestOperation } from "./operation-entity-test-support";
+import {
+  expectCheckpointOperationFingerprint,
+  expectIdempotentCheckpoint,
+  expectSessionIntakeRejection,
+  expectWorkspaceProjectionName,
+} from "./operation-intake-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
@@ -40,9 +45,6 @@ const setupWithOperation = () => ({
   ...setup(),
   operation: entityTestOperation("writer-a", 1n, {}, "one"),
 });
-const checkpointProjection = (encodedCheckpoint: string) =>
-  decodeOperationCheckpoint(encodedCheckpoint, operationEntityProjectionCodec)
-    .projection;
 const storedRows = (
   database: ReturnType<typeof setup>["database"],
   table: typeof operationEnvelopes | typeof operationCheckpoints,
@@ -81,15 +83,7 @@ afterEach(harness.close);
 const apply = (intake: Intake, operations: IntakeOperations, now: number) =>
   applyPartition(intake, "non-session", operations, now);
 test("operation intake fails closed for session operations", () => {
-  const { intake } = setup();
-  expect(() =>
-    applyPartition(
-      intake,
-      "session",
-      [testSessionOperation("writer-a", 1n, "session")],
-      2,
-    ),
-  ).toThrow(/kind|entity/);
+  expectSessionIntakeRejection(setup().intake);
 });
 
 test("operation intake persists one snapshot consistently and replays it as a duplicate", () => {
@@ -111,23 +105,19 @@ test("operation intake persists one snapshot consistently and replays it as a du
   const first = apply(intake, [candidate], 2);
   const [row] = storedEnvelopeRows(database);
   const stored = decodeOperationEnvelope(row?.encodedEnvelope ?? "");
-  const checkpoint = decodeOperationCheckpoint(
-    first.encodedCheckpoint,
-    operationEntityProjectionCodec,
-  );
   expect(stored.payload).toEqual({ name: "snapshot-value" });
   expect(row?.fingerprint).toBe(operationFingerprint(stored));
-  expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
+  expectCheckpointOperationFingerprint(
+    first.encodedCheckpoint,
     row?.fingerprint,
   );
-  expect(apply(intake, [stored], 3).encodedCheckpoint).toBe(
-    first.encodedCheckpoint,
-  );
+  expectIdempotentCheckpoint(intake, stored, first.encodedCheckpoint);
   expectStoredEnvelopeCount(database, 1);
 });
 
 test("operation intake persists frozen defensive operation snapshots", () => {
-  const { database, intake } = setup();
+  const resources = setup();
+  const { database, intake } = resources;
   const operation = entityTestOperation("frozen-writer", 1n, {}, "immutable");
   const originalFingerprint = operationFingerprint(operation);
   const first = apply(intake, [operation], 2);
@@ -140,17 +130,12 @@ test("operation intake persists frozen defensive operation snapshots", () => {
   ).toBe(true);
   expect(row?.fingerprint).toBe(originalFingerprint);
   expect(operationFingerprint(stored)).toBe(originalFingerprint);
-  const checkpoint = decodeOperationCheckpoint(
+  expectCheckpointOperationFingerprint(
     first.encodedCheckpoint,
-    operationEntityProjectionCodec,
-  );
-  expect(operationFingerprint(checkpoint.replayHead?.operation)).toBe(
     originalFingerprint,
   );
-  expect(checkpoint.projection.workspaces[0]?.name?.value).toBe("immutable");
-  expect(apply(intake, [stored], 3).encodedCheckpoint).toBe(
-    first.encodedCheckpoint,
-  );
+  expectWorkspaceProjectionName(first.encodedCheckpoint, "immutable");
+  expectIdempotentCheckpoint(intake, stored, first.encodedCheckpoint);
   expect(storedEnvelopeRows(database)).toHaveLength(1);
 });
 
@@ -167,10 +152,7 @@ test("operation intake checkpoints applied state for round-trip", () => {
   const result = apply(intake, [operation], 2);
   const [stored] = database.select().from(operationCheckpoints).all();
   expect(stored?.encodedCheckpoint).toBe(result.encodedCheckpoint);
-  expect(
-    checkpointProjection(stored?.encodedCheckpoint ?? "").workspaces[0]?.name
-      ?.value,
-  ).toBe("one");
+  expectWorkspaceProjectionName(stored?.encodedCheckpoint ?? "", "one");
 });
 
 test("operation intake retains out-of-order operations pending and drains them", () => {
@@ -186,9 +168,7 @@ test("operation intake retains out-of-order operations pending and drains them",
   const first = entityTestOperation("writer-a", 1n, {}, "one");
   const drained = apply(intake, [first], 3);
   expect(drained.frontier).toEqual({ "writer-a": 2n });
-  expect(
-    checkpointProjection(drained.encodedCheckpoint).workspaces[0]?.name?.value,
-  ).toBe("one");
+  expectWorkspaceProjectionName(drained.encodedCheckpoint, "one");
 });
 
 test("operation intake rejects equivocation and rolls back its batch", () => {
@@ -293,14 +273,7 @@ test("operation intake duplicate older than drift remains acknowledged", () => {
 
 test("operation intake leaves session capacity unavailable", () => {
   const { intake } = setup();
-  expect(() =>
-    applyPartition(
-      intake,
-      "session",
-      [testSessionOperation("writer-a", 1n, "session")],
-      2,
-    ),
-  ).toThrow(/kind|entity/);
+  expectSessionIntakeRejection(intake);
   expect(
     apply(intake, [entityTestOperation("writer-a", 1n, {}, "one")], 3).frontier,
   ).toEqual({ "writer-a": 1n });
@@ -314,7 +287,7 @@ test("operation intake history capacity counts stored envelopes, not replays", (
 });
 
 test("operation intake rejects checkpoints above their byte capacity", () => {
-  const { database, intake } = setup();
+  const { database, intake } = setup({});
   const operation = entityTestOperation(
     "capacity-writer",
     1n,

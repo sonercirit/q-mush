@@ -60,6 +60,23 @@ const project = (items: readonly ReturnType<typeof operation>[]) =>
     reduceOperationEntityProjection,
   ).projection;
 
+const promptBodyOperation = (writer: string, value: string) =>
+  operation(
+    "prompt.body.set",
+    { value },
+    {
+      writer,
+      parents: { c: 1n },
+      physicalMs: 2,
+      entityType: "prompts",
+      entityId: "prompt-1",
+    },
+  );
+
+const expectCodecRejection = (value: unknown): void => {
+  expect(() => operationEntityProjectionCodec.decode(value)).toThrow();
+};
+
 describe("operation entity registry", () => {
   test("fails closed for unknown kinds, mismatched entities, and malformed payloads", () => {
     const candidates = [
@@ -141,28 +158,8 @@ describe("typed operation projection", () => {
       { name: "Prompt", body: "base" },
       { writer: "c", entityType: "prompts", entityId: "prompt-1" },
     );
-    const left = operation(
-      "prompt.body.set",
-      { value: "left" },
-      {
-        writer: "a",
-        parents: { c: 1n },
-        physicalMs: 2,
-        entityType: "prompts",
-        entityId: "prompt-1",
-      },
-    );
-    const right = operation(
-      "prompt.body.set",
-      { value: "right" },
-      {
-        writer: "z",
-        parents: { c: 1n },
-        physicalMs: 2,
-        entityType: "prompts",
-        entityId: "prompt-1",
-      },
-    );
+    const left = promptBodyOperation("a", "left");
+    const right = promptBodyOperation("z", "right");
     const merged = project([right, create, left]);
     expect(merged.prompts[0]?.body?.value).toBe("right");
     expect(merged.prompts[0]?.bodyConflicts.map((item) => item.value)).toEqual([
@@ -220,15 +217,11 @@ describe("operation entity projection codec", () => {
         operationEntityProjectionCodec.encode(projection),
       ),
     ).toEqual(projection);
-    expect(() =>
-      operationEntityProjectionCodec.decode({ ...projection, extra: true }),
-    ).toThrow();
-    expect(() =>
-      operationEntityProjectionCodec.decode({
-        ...projection,
-        workspaces: [...projection.workspaces, projection.workspaces[0]],
-      }),
-    ).toThrow();
+    expectCodecRejection({ ...projection, extra: true });
+    expectCodecRejection({
+      ...projection,
+      workspaces: [...projection.workspaces, projection.workspaces[0]],
+    });
     expect(() =>
       operationEntityProjectionCodec.decode({
         ...projection,

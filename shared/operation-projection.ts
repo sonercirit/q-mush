@@ -2,10 +2,15 @@ import type { OperationProjectionCodec } from "./operation-checkpoint";
 import {
   compareClocks,
   operationFingerprint,
+  sortByClock,
   type HybridTimestamp,
   type Operation,
 } from "./operation-core";
-import { exactObjectKeys } from "./validation";
+import {
+  exactObjectKeys,
+  hasSafeRecordKey,
+  isNonNegativeSafeInteger,
+} from "./validation";
 
 interface ProjectionWrite<T> {
   readonly value: T;
@@ -209,11 +214,7 @@ const reducePrompt = (
       : []),
   ].filter((item) => !coveredBy(item, operation));
   const unique = new Map(candidates.map((item) => [item.operationId, item]));
-  const conflicts = [...unique.values()].sort(
-    (left, right) =>
-      compareClocks(left.clock, right.clock) ||
-      (left.operationId < right.operationId ? -1 : 1),
-  );
+  const conflicts = sortByClock([...unique.values()]);
   return updatePrompts(projection, {
     ...current,
     body: nextBody,
@@ -248,18 +249,11 @@ export const reduceOperationEntityProjection = (
       : reduceUser(projection, operation);
 
 const projectionKeys = ["workspaces", "prompts", "users"] as const;
-const safeId = (value: unknown): value is string =>
-  typeof value === "string" &&
-  value.length > 0 &&
-  value !== "__proto__" &&
-  value !== "prototype" &&
-  value !== "constructor";
+const safeId = hasSafeRecordKey;
 const validClock = (value: unknown): value is HybridTimestamp =>
   exactObjectKeys(value, ["physicalMs", "logical", "writerId"]) &&
-  Number.isSafeInteger(value["physicalMs"]) &&
-  Number(value["physicalMs"]) >= 0 &&
-  Number.isSafeInteger(value["logical"]) &&
-  Number(value["logical"]) >= 0 &&
+  isNonNegativeSafeInteger(value["physicalMs"]) &&
+  isNonNegativeSafeInteger(value["logical"]) &&
   safeId(value["writerId"]);
 const validWrite = (
   value: unknown,
@@ -293,22 +287,26 @@ const encodeOperationEntityProjection = (
   projection: OperationEntityProjection,
 ): EncodedOperationEntityProjection =>
   decodeOperationEntityProjection(projection);
-const validNamedWrites = (item: Record<string, unknown>): boolean =>
-  safeId(item["id"]) &&
-  optionalWrite(item["created"], (entry) => entry === true) &&
-  optionalWrite(item["name"], (entry) => typeof entry === "string") &&
-  optionalWrite(item["deleted"], (entry) => entry === true);
+const validNamedWrites = (item: Record<string, unknown>): boolean => {
+  return (
+    safeId(item["id"]) &&
+    optionalWrite(item["created"], (entry) => entry === true) &&
+    optionalWrite(item["name"], (entry) => typeof entry === "string") &&
+    optionalWrite(item["deleted"], (entry) => entry === true)
+  );
+};
 const validProjectionEntity = (
   item: unknown,
   keys: readonly string[],
   valid: (record: Record<string, unknown>) => boolean,
 ): boolean => exactObjectKeys(item, keys) && valid(item);
-const validWorkspace = (item: unknown): item is WorkspaceProjection =>
-  validProjectionEntity(
+const validWorkspace = (item: unknown): item is WorkspaceProjection => {
+  return validProjectionEntity(
     item,
     ["id", "created", "name", "deleted"],
     validNamedWrites,
   );
+};
 const validPrompt = (item: unknown): item is PromptProjection =>
   validProjectionEntity(
     item,
