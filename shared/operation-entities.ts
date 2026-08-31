@@ -1,17 +1,6 @@
 import { isDispatchKey } from "./dispatch";
 
-const exactObject = (
-  value: unknown,
-  keys: readonly string[],
-): value is Record<string, unknown> => {
-  if (value === null || typeof value !== "object" || Array.isArray(value))
-    return false;
-  const actual = Object.keys(value);
-  return (
-    actual.length === keys.length &&
-    keys.every((key) => Object.hasOwn(value, key))
-  );
-};
+import { exactObjectKeys } from "./validation";
 
 const validString = (value: unknown): value is string =>
   typeof value === "string";
@@ -21,7 +10,7 @@ const payloadWith = (
   value: unknown,
   key: string,
   valid: (item: unknown) => boolean,
-): boolean => exactObject(value, [key]) && valid(value[key]);
+): boolean => exactObjectKeys(value, [key]) && valid(value[key]);
 
 interface EntityOperationDefinition {
   readonly entityType: "workspaces" | "prompts" | "users";
@@ -41,12 +30,12 @@ const definitions = {
   "workspace.name.set": stringValueDefinition("workspaces"),
   "workspace.delete": {
     entityType: "workspaces",
-    validPayload: (value) => exactObject(value, []),
+    validPayload: (value) => exactObjectKeys(value, []),
   },
   "prompt.create": {
     entityType: "prompts",
     validPayload: (value) =>
-      exactObject(value, ["name", "body"]) &&
+      exactObjectKeys(value, ["name", "body"]) &&
       validString(value["name"]) &&
       validString(value["body"]),
   },
@@ -54,7 +43,7 @@ const definitions = {
   "prompt.body.set": stringValueDefinition("prompts"),
   "prompt.delete": {
     entityType: "prompts",
-    validPayload: (value) => exactObject(value, []),
+    validPayload: (value) => exactObjectKeys(value, []),
   },
   "user.default-workspace.set": {
     entityType: "users",

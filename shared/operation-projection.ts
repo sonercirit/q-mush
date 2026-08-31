@@ -5,6 +5,7 @@ import {
   type HybridTimestamp,
   type Operation,
 } from "./operation-core";
+import { exactObjectKeys } from "./validation";
 
 interface ProjectionWrite<T> {
   readonly value: T;
@@ -247,15 +248,6 @@ export const reduceOperationEntityProjection = (
       : reduceUser(projection, operation);
 
 const projectionKeys = ["workspaces", "prompts", "users"] as const;
-const exactObject = (
-  value: unknown,
-  keys: readonly string[],
-): value is Record<string, unknown> =>
-  value !== null &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  Object.keys(value).length === keys.length &&
-  keys.every((key) => Object.hasOwn(value, key));
 const safeId = (value: unknown): value is string =>
   typeof value === "string" &&
   value.length > 0 &&
@@ -263,7 +255,7 @@ const safeId = (value: unknown): value is string =>
   value !== "prototype" &&
   value !== "constructor";
 const validClock = (value: unknown): value is HybridTimestamp =>
-  exactObject(value, ["physicalMs", "logical", "writerId"]) &&
+  exactObjectKeys(value, ["physicalMs", "logical", "writerId"]) &&
   Number.isSafeInteger(value["physicalMs"]) &&
   Number(value["physicalMs"]) >= 0 &&
   Number.isSafeInteger(value["logical"]) &&
@@ -273,7 +265,7 @@ const validWrite = (
   value: unknown,
   validValue: (item: unknown) => boolean,
 ): value is ProjectionWrite<never> =>
-  exactObject(value, [
+  exactObjectKeys(value, [
     "value",
     "operationId",
     "writerId",
@@ -310,7 +302,7 @@ const validProjectionEntity = <T>(
   item: unknown,
   keys: readonly string[],
   valid: (record: Record<string, unknown>) => boolean,
-): item is T => exactObject(item, keys) && valid(item);
+): item is T => exactObjectKeys(item, keys) && valid(item);
 const validWorkspace = (item: unknown): item is WorkspaceProjection =>
   validProjectionEntity<WorkspaceProjection>(
     item,
@@ -330,7 +322,7 @@ const validPrompt = (item: unknown): item is PromptProjection =>
       ),
   );
 const validUser = (item: unknown): item is UserProjection =>
-  exactObject(item, [
+  exactObjectKeys(item, [
     "id",
     "defaultWorkspaceId",
     "effectiveDefaultWorkspaceId",
@@ -347,7 +339,7 @@ const decodeOperationEntityProjection = (
   value: unknown,
 ): OperationEntityProjection => {
   if (
-    !exactObject(value, projectionKeys) ||
+    !exactObjectKeys(value, projectionKeys) ||
     !Array.isArray(value["workspaces"]) ||
     !Array.isArray(value["prompts"]) ||
     !Array.isArray(value["users"])
