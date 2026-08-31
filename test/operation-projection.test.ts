@@ -226,14 +226,17 @@ describe("typed operation projection", () => {
       "creator",
       2,
     );
-    for (const items of [
-      [deleteBeforeCreate, createAfterDelete],
-      [createAfterDelete, deleteBeforeCreate],
-    ]) {
-      const workspace = project(items).workspaces[0];
-      expect(workspace?.deleted).toBeDefined();
-      expect(workspace?.created).toBeUndefined();
-      expect(workspace?.name).toBeUndefined();
+    const deleteFirstProjections = [
+      project([deleteBeforeCreate, createAfterDelete]),
+      project([createAfterDelete, deleteBeforeCreate]),
+    ];
+    expect(deleteFirstProjections).toHaveLength(2);
+    for (const { workspaces } of deleteFirstProjections) {
+      expect(workspaces[0]).toMatchObject({
+        created: undefined,
+        deleted: expect.anything(),
+        name: undefined,
+      });
     }
   });
 
