@@ -91,8 +91,8 @@ function buildOperationEnvelopeQuery(
 export function createOperationStore(resources: OperationStoreResources) {
   const database = resources.database;
   const generateId = resources.generateId ?? createUuidV7;
-  const encodedStability = (state?: OperationApplyState<readonly string[]>) => {
-    if (state?.stableClock === undefined)
+  const encodedStability = (state: OperationApplyState<readonly string[]>) => {
+    if (state.stableClock === undefined)
       return { stableClock: null, stableFrontier: null };
     return {
       stableClock: JSON.stringify(state.stableClock),

@@ -173,11 +173,11 @@
   from folding before a later writer's old-clock page arrives. Local writer and
   pending caps still apply. Null, uncovered, or no-op runner boundaries are
   rejected before opening a write transaction, preserving empty-page idle reads.
-  Envelope identities are pre-screened against durable rows before core
-  admission on both sides, so folded duplicates acknowledge without quarantine
-  and fingerprint mismatches conflict. Engine drift checks happen only after
-  this screen, fixing retries of acknowledged operations older than five
-  minutes.
+  Request-partition scope is validated first; envelope identities are then
+  pre-screened against durable rows before core admission on both sides, so
+  folded duplicates acknowledge without quarantine and fingerprint mismatches
+  conflict. Engine drift checks happen only after this screen, fixing retries of
+  acknowledged operations older than five minutes.
 - The 2,000-operation limit now bounds retained replay plus pending work, not
   total envelope rows; the 4 MiB bound applies after attempted folding. This
   unwedges representation growth while immutable envelope rows intentionally
