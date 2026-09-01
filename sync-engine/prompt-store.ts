@@ -9,11 +9,10 @@ import {
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
+import { commandOperationProducer } from "./command-operation-producer.ts";
+import type { OperationIntakeLimits } from "./operation-intake.ts";
 import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
-import {
-  createOperationProducer,
-  operationEntityIntent,
-} from "./operation-producer.ts";
+import { operationEntityIntent } from "./operation-producer.ts";
 import {
   PROMPT_STATE_SELECTION,
   promptStateCondition,
@@ -162,8 +161,9 @@ export function createPromptStore(
   database: AppDatabase,
   generateId: IdGenerator = createUuidV7,
   maximumCount = PROMPT_MAXIMUM_COUNT,
+  operationLimits?: OperationIntakeLimits,
 ): PromptStore {
-  const producer = createOperationProducer({ database });
+  const producer = commandOperationProducer(database, operationLimits);
   const throwIfChanged = (
     userId: string,
     promptId: string,

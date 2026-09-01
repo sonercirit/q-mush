@@ -19,10 +19,12 @@ import {
   type WorkspaceSummary,
 } from "../shared/workspace-model.ts";
 
+import { commandOperationProducer } from "./command-operation-producer.ts";
 import { activeCredentialWorkspaceCondition } from "./credential-workspace-query.ts";
+import type { OperationIntakeLimits } from "./operation-intake.ts";
 import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
 import {
-  createOperationProducer,
+  operationEntityEnsureIntent,
   operationEntityIntent,
 } from "./operation-producer.ts";
 import { insertWorkspaceWithOperation } from "./workspace-command-create.ts";
@@ -119,8 +121,9 @@ export interface WorkspaceStore {
 export function createWorkspaceStore(
   database: AppDatabase,
   generateId: IdGenerator = createUuidV7,
+  operationLimits?: OperationIntakeLimits,
 ): WorkspaceStore {
-  const producer = createOperationProducer({ database });
+  const producer = commandOperationProducer(database, operationLimits);
   const store: WorkspaceStore = {
     create(
       userId: string,
@@ -128,11 +131,16 @@ export function createWorkspaceStore(
       now: number,
     ): WorkspaceSummary | undefined {
       return normalizedWorkspaceName(name, (normalizedName) => {
-        return insertWorkspaceWithOperation(database, generateId, {
-          name: normalizedName,
-          now,
-          userId,
-        });
+        return insertWorkspaceWithOperation(
+          database,
+          generateId,
+          {
+            name: normalizedName,
+            now,
+            userId,
+          },
+          operationLimits,
+        );
       });
     },
 
@@ -142,12 +150,17 @@ export function createWorkspaceStore(
         return existing;
       }
 
-      return insertWorkspaceWithOperation(database, generateId, {
-        isDefault: true,
-        name: DEFAULT_WORKSPACE_NAME,
-        now,
-        userId,
-      });
+      return insertWorkspaceWithOperation(
+        database,
+        generateId,
+        {
+          isDefault: true,
+          name: DEFAULT_WORKSPACE_NAME,
+          now,
+          userId,
+        },
+        operationLimits,
+      );
     },
 
     defaultForUser(userId: string): WorkspaceSummary | undefined {
@@ -328,13 +341,9 @@ export function createWorkspaceStore(
                   "workspace.delete",
                   {},
                 ),
-                operationEntityIntent(
-                  "workspaces",
-                  replacement.id,
-                  "workspace.create",
-                  { name: replacement.name },
-                  { name: replacement.name },
-                ),
+                operationEntityEnsureIntent("workspaces", replacement.id, {
+                  name: replacement.name,
+                }),
                 operationEntityIntent(
                   "users",
                   userId,
@@ -381,13 +390,9 @@ export function createWorkspaceStore(
         producer.produce(
           userId,
           [
-            operationEntityIntent(
-              "workspaces",
-              workspaceId,
-              "workspace.create",
-              { name: targetName },
-              { name: targetName },
-            ),
+            operationEntityEnsureIntent("workspaces", workspaceId, {
+              name: targetName,
+            }),
             operationEntityIntent(
               "users",
               userId,

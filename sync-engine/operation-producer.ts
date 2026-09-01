@@ -38,6 +38,7 @@ interface EntityIntent {
     readonly id: string;
     readonly type: "prompts" | "users" | "workspaces";
   };
+  readonly ensureOnly?: boolean;
   readonly kind: string;
   readonly payload: unknown;
   readonly legacy?: { readonly body?: string; readonly name: string };
@@ -46,19 +47,41 @@ interface AccountIntent {
   readonly type: "account.ensure";
   readonly defaultWorkspace: LegacyWorkspace | null;
 }
+const entityIntent = (
+  entity: EntityIntent["entity"],
+  kind: string,
+  payload: unknown,
+  options: Pick<EntityIntent, "ensureOnly" | "legacy"> = {},
+): EntityIntent => ({
+  type: "entity",
+  entity,
+  kind,
+  payload,
+  ...options,
+});
 export const operationEntityIntent = (
   type: EntityIntent["entity"]["type"],
   id: string,
   kind: string,
   payload: unknown,
   legacy?: EntityIntent["legacy"],
-): EntityIntent => ({
-  type: "entity",
-  entity: { type, id },
-  kind,
-  payload,
-  ...(legacy === undefined ? {} : { legacy }),
-});
+): EntityIntent =>
+  entityIntent({ type, id }, kind, payload, {
+    ...(legacy === undefined ? {} : { legacy }),
+  });
+export const operationEntityEnsureIntent = (
+  type: "prompts" | "workspaces",
+  id: string,
+  legacy: NonNullable<EntityIntent["legacy"]>,
+): EntityIntent =>
+  entityIntent(
+    { type, id },
+    type === "workspaces" ? "workspace.create" : "prompt.create",
+    type === "workspaces"
+      ? { name: legacy.name }
+      : { name: legacy.name, body: legacy.body },
+    { legacy, ensureOnly: true },
+  );
 export const operationAccountIntent = (
   defaultWorkspace: LegacyWorkspace | null,
 ): AccountIntent => ({ type: "account.ensure", defaultWorkspace });
@@ -239,7 +262,7 @@ export const createOperationProducer = (
           continue;
         }
         ensureEntity(intent);
-        append(intent);
+        if (intent.ensureOnly !== true) append(intent);
       }
       if (operations.length > 0)
         intake.apply(ownerId, "non-session", operations, ownerId, now);

@@ -1,11 +1,10 @@
 import type { AppDatabase } from "../shared/database.ts";
 import type { IdGenerator } from "../shared/ids.ts";
 import type { WorkspaceSummary } from "../shared/workspace-model.ts";
+import { commandOperationProducer } from "./command-operation-producer.ts";
+import type { OperationIntakeLimits } from "./operation-intake.ts";
 import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
-import {
-  createOperationProducer,
-  operationEntityIntent,
-} from "./operation-producer.ts";
+import { operationEntityIntent } from "./operation-producer.ts";
 import { insertWorkspace } from "./workspace-write.ts";
 
 export const insertWorkspaceWithOperation = (
@@ -17,11 +16,12 @@ export const insertWorkspaceWithOperation = (
     readonly now: number;
     readonly userId: string;
   },
+  operationLimits?: OperationIntakeLimits,
 ): WorkspaceSummary => {
   const id = generateId(values.now);
   return database.transaction((transaction) => {
     const created = insertWorkspace(transaction, { ...values, id });
-    const producer = createOperationProducer({ database });
+    const producer = commandOperationProducer(database, operationLimits);
     producer.produce(
       values.userId,
       values.isDefault === true
