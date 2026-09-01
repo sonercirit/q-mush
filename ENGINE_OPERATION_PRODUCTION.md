@@ -30,14 +30,30 @@ MB—roughly twice its honest full form—and decoded RAM has no separate cap.
 
 The producer mints beyond stored account-writer sequences, dominates checkpoint
 clocks, and chains command parents/clocks. A backward wall-clock command can
-still stall behind the recorded admission-clock issue. The engine is now the
-authoritative account-writer author; browser POSTs with that writer can race and
-equivocate, so per-device writer identity remains open. Workspace-create latency
-measured 87.33–96.05 ms after an unfolded 500-operation/500-workspace burst and
-39.88–47.75 ms after stability folding across three development-runner runs.
-Folding removes replay history but not projection/checkpoint size: command cost
-remains O(projection + checkpoint bytes) and therefore grows with total account
-entity count.
+still stall behind the recorded admission-clock issue. The engine is the sole
+author of account-writer envelopes. Browsers cannot read or author envelopes;
+they submit commands through REST. The synchronization route accepts only a
+native runner bearer and `self` owner alias. Its authenticated runner row UUIDv7
+is the device writer ID, so a runner may push only envelopes for its account and
+its own writer sequence; no runner producer exists yet. The bearer token remains
+the device authenticator until purpose-separated device keys land.
+Workspace-create latency measured 87.33–96.05 ms after an unfolded
+500-operation/500-workspace burst and 39.88–47.75 ms after stability folding
+across three development-runner runs. Folding removes replay history but not
+projection/checkpoint size: command cost remains O(projection + checkpoint
+bytes) and therefore grows with total account entity count. Runner-authored
+operations are now admissible, but no runner-local producer may ship before
+fold-liveness lands. A runner that authors an operation and then goes
+permanently dormant remains in the frontier; after its head is fully folded,
+stabilization substitutes the shared stable clock for that absent writer head.
+That pins the fold boundary at the dormant writer's last clock while an active
+writer keeps adding replay, eventually wedging the account at the 2,000
+replay-plus-pending limit. The fold-liveness mechanism and runner-local
+producer/projection-to-legacy application are deliberately deferred. Rejected or
+stalled runner pushes retain their outbox data and use capped backoff,
+preventing both loss and a tight livelock. Replica pull currently trusts the
+authenticated engine response; scope and writer assertions on that pull path
+arrive with the trust plane.
 
 A full-scale real-store probe created 100 distinct maximum 32 KiB prompts with
 commands ten minutes apart. The ASCII bank completed with zero capacity

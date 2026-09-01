@@ -136,6 +136,11 @@ interface RunnerOptionQuery {
   readonly search?: string;
 }
 
+export interface RunnerAccountIdentity {
+  readonly runnerId: string;
+  readonly userId: string;
+}
+
 export interface RunnerIntegration
   extends
     RunnerActivationLifecycleOperations,
@@ -169,7 +174,7 @@ export interface RunnerIntegration
   ): RunnerActivationReceiptValidation | undefined;
   remove(request: Request, runnerId: string): Promise<Response>;
   runnerIsAvailable: SessionRunnerAvailability;
-  runnerAccount(request: Request): { readonly userId: string } | undefined;
+  runnerAccount(request: Request): RunnerAccountIdentity | undefined;
   runnerToken(request: Request): string | undefined;
   seen(runner: RunnerConnection): void;
   setDefault(request: Request, runnerId: string): Response;
@@ -480,13 +485,13 @@ export function createRunnerIntegration(
       : { connection, userId: connection.userId };
   }
 
-  function runnerAccount(
-    request: Request,
-  ): { readonly userId: string } | undefined {
+  function runnerAccount(request: Request): RunnerAccountIdentity | undefined {
     const token = readBearerToken(request);
     const connection =
       token === undefined ? undefined : store.authenticate(token);
-    return connection === undefined ? undefined : { userId: connection.userId };
+    return connection === undefined
+      ? undefined
+      : { runnerId: connection.id, userId: connection.userId };
   }
 
   function runnerToken(request: Request): string | undefined {

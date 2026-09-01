@@ -164,6 +164,12 @@ function connectFirstRunner(setup: Setup): void {
   connect(setup, FIRST_TOKEN, "machine-fingerprint-one");
 }
 
+function runnerBearerRequest(token: string): Request {
+  return new Request("http://localhost/api/operations/synchronize", {
+    headers: { authorization: `Bearer ${token}` },
+  });
+}
+
 async function removeFirstRunner(
   setup: Pick<Setup, "integration">,
 ): Promise<Response> {
@@ -364,6 +370,14 @@ describe("runner setup", () => {
 });
 
 describe("runner connections", () => {
+  test("runner bearer identity includes its device writer row ID", () => {
+    const setup = createSetup();
+    connectFirstRunner(setup);
+    expect(
+      setup.integration.runnerAccount(runnerBearerRequest(FIRST_TOKEN)),
+    ).toEqual({ runnerId: FIRST_RUNNER_ID, userId: TEST_USER_ID });
+    closeRunnerIntegrationTestSetup(setup);
+  });
   function prepareRegistration(setup: Setup, token: string, machineId: string) {
     return setup.integration.preflightRegistration(
       token,

@@ -258,15 +258,7 @@
   transactions. Successful cycles poll every 5 seconds with ±20% jitter (slower
   than the former 1-second herd); failures use 1-second exponential backoff
   capped at 30 seconds and success resets it. Shutdown aborts requests. The HTTP
-  operation route accepts the native runner bearer token only with owner alias
-  `self`, avoiding account identity in the runner protocol; simultaneous browser
-  and runner authentication deliberately uses runner identity/`self` alias
-  semantics. No runner-local command producer exists yet; which command first
-  emits local operations remains open. A producer also cannot currently
-  construct an admissible writer: intake requires
-  `writerId === entity.accountId ===` the authenticated user UUID, while the
-  runner knows only origin and bearer token. Until an identity plane supplies
-  that UUID (or intake introduces a sound runner writer mapping), a future
-  runner-produced operation would receive 403 forever; retained outbox data and
-  capped backoff prevent loss and a tight livelock but do not make it
-  synchronizable.
+  operation route accepts only the native runner bearer token and owner alias
+  `self`; browser authentication never applies. The authenticated runner row ID
+  is its device writer; runner producer/fold-liveness deferrals are recorded in
+  `ENGINE_OPERATION_PRODUCTION.md`.

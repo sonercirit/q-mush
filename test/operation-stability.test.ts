@@ -52,15 +52,23 @@ describe("operation stability", () => {
     expect(folded.stableClock?.physicalMs).toBe(10);
   });
 
-  test("a fully folded dormant writer pins subsequent stabilization", () => {
-    const first = singleWriterArrayState("a", 10);
-    const folded = stabilizeForWriter(first, 10, "a");
-    const next = applyOperation(
+  test("dormant device writer pins fold-liveness while account writer advances", () => {
+    const device = singleWriterArrayState("device", 10);
+    const folded = stabilizeForWriter(device, 10, "device");
+    const accountOne = applyOperation(
       folded,
-      operation("b", 1n, {}, "b", 20),
+      operation("account", 1n, {}, "one", 20),
       appendOperationId,
     );
-    expect(stabilizeForWriter(next, 99, "z")).toBe(next);
+    const accountTwo = applyOperation(
+      accountOne,
+      operation("account", 2n, { account: 1n }, "two", 30),
+      appendOperationId,
+    );
+    const pinned = stabilizeForWriter(accountTwo, 99, "boundary");
+    expect(pinned).toBe(accountTwo);
+    expect(pinned.stableClock?.physicalMs).toBe(10);
+    expect(pinned.replayCount).toBe(2);
   });
 
   test("pending clocks are strict fold caps", () => {

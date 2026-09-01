@@ -136,6 +136,7 @@ export const createRunnerOperationStore = (
                   acceptedOperation = accepted;
                 },
                 ownsOperation: (accepted) =>
+                  source === "remote" ||
                   accepted.entity.accountId === accepted.writerId,
                 reducer: reduceOperationEntityProjection,
               },

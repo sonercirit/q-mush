@@ -16,16 +16,12 @@ const encoded = (sequence: bigint, bytes: number) =>
 test("synchronization POST rejects a batch above the byte cap", async () => {
   const { harness, database } = operationDatabase();
   const handler = createOperationSynchronization(database, {
-    authenticatedUser: () => ({
-      id: ownerId,
-      email: "a@example.test",
-      name: "A",
-    }),
+    runnerAccount: () => ({ runnerId: ownerId, userId: ownerId }),
   });
   const envelope = encoded(1n, 240_000);
   const request = new Request("http://localhost/operations", {
     body: JSON.stringify({
-      ownerId,
+      ownerId: "self",
       partition: "non-session",
       envelopes: Array.from({ length: 18 }, () => envelope),
     }),
@@ -41,13 +37,9 @@ test("synchronization rejects an oversized raw body before JSON parsing", async 
   const { harness, database } = operationDatabase();
   let authenticationCalls = 0;
   const handler = createOperationSynchronization(database, {
-    authenticatedUser: () => {
+    runnerAccount: () => {
       authenticationCalls += 1;
-      return {
-        id: ownerId,
-        email: "a@example.test",
-        name: "A",
-      };
+      return { runnerId: ownerId, userId: ownerId };
     },
   });
   const raw = `{"unterminated":"${"x".repeat(MAX_OPERATION_SYNC_BATCH_BYTES + 1024 * 1024)}`;
