@@ -22,40 +22,53 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Tests (shard 1/4)
-            command: bun run test:unit --shard=1/4
-          - name: Tests (shard 2/4)
-            command: bun run test:unit --shard=2/4
-          - name: Tests (shard 3/4)
-            command: bun run test:unit --shard=3/4
-          - name: Tests (shard 4/4)
-            command: bun run test:unit --shard=4/4
-          - name: Real-browser regressions
-            command: bun run test:browser
-            browser: true
-
-    steps:
+          - {
+              name: Tests (shard 1/6),
+              command: "bun run test:unit --shard=1/6",
+            }
+          - {
+              name: Tests (shard 2/6),
+              command: "bun run test:unit --shard=2/6",
+            }
+          - {
+              name: Tests (shard 3/6),
+              command: "bun run test:unit --shard=3/6",
+            }
+          - {
+              name: Tests (shard 4/6),
+              command: "bun run test:unit --shard=4/6",
+            }
+          - {
+              name: Tests (shard 5/6),
+              command: "bun run test:unit --shard=5/6",
+            }
+          - {
+              name: Tests (shard 6/6),
+              command: "bun run test:unit --shard=6/6",
+            }
+          - {
+              name: Real-browser regressions,
+              command: "bun run test:browser",
+              browser: true,
+            }
+    steps: &installed-steps
       - name: Check out repository
         uses: actions/checkout@v7
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-
       - name: Restore Bun package cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/.bun/install/cache
           key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
-
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      - name: Run tests
+      - name: Run unit shard
         if: ${{ !matrix.browser }}
         run: ${{ matrix.command }}
-
       - name: Restore Playwright Chromium
         if: ${{ matrix.browser }}
         id: playwright-cache
@@ -63,16 +76,15 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-1.62.1
-
+          restore-keys: ${{ runner.os }}-playwright-
       - name: Install browser test dependencies
         if:
           ${{ matrix.browser && steps.playwright-cache.outputs.cache-hit !=
           'true' }}
         run: bunx playwright install --with-deps chromium
-
       - name: Run real-browser regressions
         if: ${{ matrix.browser }}
-        run: bun run test:browser
+        run: ${{ matrix.command }}
 
   static-checks:
     name: ${{ matrix.name }}
@@ -82,69 +94,65 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Repository policy
-            script: repository-check
-          - name: Formatting
-            script: format:check
-          - name: Typecheck
-            script: typecheck
-          - name: Lint
-            script: lint
-          - name: Unused code
-            script: knip
-          - name: Copy-paste detection
-            script: cpd
-
+          - { name: Lint (shard 1/2), kind: lint, shard: 0 }
+          - { name: Lint (shard 2/2), kind: lint, shard: 1 }
+          - { name: Formatting, kind: format }
+          - { name: Typecheck, kind: typecheck }
+          - { name: Repository analysis, kind: analysis }
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.0
-
       - name: Restore Bun package cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/.bun/install/cache
           key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
-
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
       - name: Install dependencies
         run: bun install --frozen-lockfile
-
-      - name: Run ${{ matrix.name }}
-        run: bun run ${{ matrix.script }}
+      - name: Run lint shard
+        if: ${{ matrix.kind == 'lint' }}
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: |
+          mapfile -d '' files < <(git ls-files -z '*.cjs' '*.cts' '*.js' '*.mjs' '*.mts' '*.ts' '*.tsx')
+          shard=()
+          for ((index=SHARD; index<${#files[@]}; index+=2)); do shard+=("${files[index]}"); done
+          bunx eslint --max-warnings 0 "${shard[@]}"
+      - name: Run formatting
+        if: ${{ matrix.kind == 'format' }}
+        run: bun run format:check
+      - name: Run typecheck
+        if: ${{ matrix.kind == 'typecheck' }}
+        run: bun run typecheck
+      - name: Run repository analysis in parallel
+        if: ${{ matrix.kind == 'analysis' }}
+        run: bun run --parallel --no-exit-on-error repository-check knip cpd
 
   build:
     name: Build and tracked whitespace
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
-
       - name: Set up Bun
         uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-
+        with: { bun-version: 1.4.0 }
       - name: Restore Bun package cache
         uses: actions/cache@v5
         with:
           path: ~/.cache/.bun/install/cache
           key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
-
-      - name: Build production assets
-        if: ${{ !cancelled() }}
+          restore-keys: ${{ runner.os }}-bun-1.4.0-
+      - run: bun install --frozen-lockfile
+      - if: ${{ !cancelled() }}
         run: bun run build
-
-      - name: Check tracked whitespace
-        if: ${{ !cancelled() }}
+      - if: ${{ !cancelled() }}
         run: git diff --check "$(git hash-object -t tree /dev/null)" HEAD
 
   aggregate:
@@ -152,25 +160,16 @@ jobs:
     needs: [tests, static-checks, build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
-
     steps:
       - name: Require every check leg to succeed
         run: |
-          if [[ "${{ needs.tests.result }}" != "success" || \
-                "${{ needs.static-checks.result }}" != "success" || \
-                "${{ needs.build.result }}" != "success" ]]; then
-            exit 1
-          fi
-
+          if [[ "${{ needs.tests.result }}" != success || "${{ needs.static-checks.result }}" != success || "${{ needs.build.result }}" != success ]]; then exit 1; fi
       - name: Enforce overall wall-clock budget
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          started_at=$(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
-            --jq .run_started_at)
-          started_epoch=$(date --date="$started_at" +%s)
-          elapsed=$(( $(date +%s) - started_epoch ))
+          started_at=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" --jq .run_started_at)
+          elapsed=$(( $(date +%s) - $(date --date="$started_at" +%s) ))
           echo "Overall workflow wall-clock duration: ${elapsed}s (budget: 60s)"
           if (( elapsed > 60 )); then
             echo "::error::Overall workflow took ${elapsed}s, exceeding the 60s wall-clock budget."

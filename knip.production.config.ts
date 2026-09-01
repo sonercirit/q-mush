@@ -6,6 +6,7 @@ export default {
     "runner/runner-agent.ts!",
     "solid/favicon.svg!",
     "solid/styles.css!",
+    "scripts/check.ts!",
     "scripts/cpd.ts!",
     "scripts/dev.ts!",
     "scripts/migrate-database.ts!",
