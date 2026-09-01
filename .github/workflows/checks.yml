@@ -84,7 +84,7 @@ jobs:
         run: bunx playwright install --with-deps chromium
       - name: Run real-browser regressions
         if: ${{ matrix.browser }}
-        run: ${{ matrix.command }}
+        run: bun run test:browser
 
   static-checks:
     name: ${{ matrix.name }}
