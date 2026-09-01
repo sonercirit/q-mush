@@ -286,14 +286,33 @@ test("operation intake keeps replay bounded after a dormant writer is fully fold
 test("operation intake admits the exact old drift edge after folding", () => {
   const { intake } = setup();
   const now = 600_000;
-  apply(intake, [entityTestOperation("first", 1n, {}, "first", 1)], 1);
-  expect(() =>
-    apply(
+  apply(
+    intake,
+    [entityTestOperation("folded-writer", 1n, {}, "folded", now - 300_000 - 1)],
+    now - 300_000 - 1,
+  );
+  const folded = apply(intake, [], now);
+  const foldedCheckpoint = decodeOperationCheckpoint(
+    folded.encodedCheckpoint,
+    operationEntityProjectionCodec,
+  );
+  expect(foldedCheckpoint.stableClock).toBeDefined();
+  expect(foldedCheckpoint.stableClock?.physicalMs).toBe(now - 300_000 - 1);
+
+  let admitted: ReturnType<typeof apply> | undefined;
+  expect(() => {
+    admitted = apply(
       intake,
-      [entityTestOperation("edge", 1n, {}, "edge", now - 300_000)],
+      [entityTestOperation("edge-writer", 1n, {}, "edge", now - 300_000)],
       now,
-    ),
-  ).not.toThrow();
+    );
+  }).not.toThrow();
+  expect(
+    decodeOperationCheckpoint(
+      admitted?.encodedCheckpoint ?? "",
+      operationEntityProjectionCodec,
+    ).stableClock,
+  ).toEqual(foldedCheckpoint.stableClock);
 });
 
 test("operation intake rejects owner-partition history above its capacity", () => {
