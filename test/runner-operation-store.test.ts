@@ -299,6 +299,23 @@ test("migrates legacy verified rows to accepted idempotently", () => {
     database.close();
   }
 });
+test("rejects device-writer envelopes from the local producer path", () => {
+  withStore((store) => {
+    const accountOperation = decodeOperationEnvelope(envelope(1n));
+    const deviceId = "runner-device-1";
+    const deviceEnvelope = encodeOperationEnvelope({
+      ...accountOperation,
+      operationId: "device-local-1",
+      writerId: deviceId,
+      clock: { ...accountOperation.clock, writerId: deviceId },
+    });
+    expect(() => {
+      store.apply(runnerOwnerId, "non-session", [deviceEnvelope], "local");
+    }).toThrow(/scope mismatch/);
+    expect(store.inspect(runnerOwnerId, "non-session")).toEqual([]);
+  });
+});
+
 test("rejects an oversized local envelope before durable queueing", () => {
   withStore((store) => {
     const oversized = envelope(1n, "x".repeat(MAX_OPERATION_ENVELOPE_BYTES));

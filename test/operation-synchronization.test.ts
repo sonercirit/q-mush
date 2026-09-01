@@ -67,11 +67,7 @@ const ownedOperation = (sequence = 1n) => {
     },
   };
 };
-const handler = (
-  authenticatedId?: string,
-  limits?: OperationIntakeLimits,
-  runnerUserId = authenticatedId,
-) => {
+const handler = (runnerUserId?: string, limits?: OperationIntakeLimits) => {
   const resources = harness.setup();
   return createOperationSynchronization(
     resources.database,
@@ -150,29 +146,14 @@ test("operation synchronization rejects unauthenticated requests", async () => {
   expect((await handler()(request(body()))).status).toBe(401);
 });
 
-test("operation synchronization isolates runner aliases from browser owner IDs", async () => {
+test("operation synchronization accepts only self for runner scope", async () => {
+  const synchronized = handler("owner-1");
   const statuses = await Promise.all([
-    responseStatus(
-      handler(undefined, undefined, "owner-1")(request(body("self"))),
-    ),
-    responseStatus(
-      handler(undefined, undefined, "owner-1")(request(body("owner-1"))),
-    ),
-    responseStatus(handler("owner-1")(request(body("self")))),
-    responseStatus(handler("owner-1")(request(body("owner-1")))),
-    responseStatus(handler("owner-1")(request(body("owner-2")))),
+    responseStatus(synchronized(request(body("self")))),
+    responseStatus(synchronized(request(body("owner-1")))),
+    responseStatus(synchronized(request(body("owner-2")))),
   ]);
-  expect(statuses).toEqual([200, 403, 200, 403, 403]);
-});
-
-test("operation synchronization gives simultaneous runner auth precedence", async () => {
-  const synchronized = handler("browser-owner", undefined, "owner-1");
-  expect(
-    await Promise.all([
-      responseStatus(synchronized(request(body("self")))),
-      responseStatus(synchronized(request(body("browser-owner")))),
-    ]),
-  ).toEqual([200, 403]);
+  expect(statuses).toEqual([200, 403, 403]);
 });
 
 test("operation synchronization rejects malformed payloads", async () => {

@@ -49,7 +49,11 @@ stabilization substitutes the shared stable clock for that absent writer head.
 That pins the fold boundary at the dormant writer's last clock while an active
 writer keeps adding replay, eventually wedging the account at the 2,000
 replay-plus-pending limit. The fold-liveness mechanism and runner-local
-producer/projection-to-legacy application are deliberately deferred.
+producer/projection-to-legacy application are deliberately deferred. Rejected or
+stalled runner pushes retain their outbox data and use capped backoff,
+preventing both loss and a tight livelock. Replica pull currently trusts the
+authenticated engine response; scope and writer assertions on that pull path
+arrive with the trust plane.
 
 A full-scale real-store probe created 100 distinct maximum 32 KiB prompts with
 commands ten minutes apart. The ASCII bank completed with zero capacity

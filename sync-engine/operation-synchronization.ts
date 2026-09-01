@@ -228,8 +228,3 @@ export const createOperationSynchronization = (
     }
   };
 };
-
-export const createRunnerOperationSynchronization = (
-  database: AppDatabase,
-  runnerAuth: Parameters<typeof createOperationSynchronization>[1],
-) => createOperationSynchronization(database, runnerAuth);
