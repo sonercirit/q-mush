@@ -34,7 +34,7 @@ const readRequest = (
   extra: Readonly<Record<string, unknown>> = {},
 ) =>
   jsonRequest("PUT", {
-    ownerId: "owner-1",
+    ownerId: "self",
     partition: "non-session",
     frontier,
     ...extra,
@@ -70,21 +70,18 @@ const ownedOperation = (sequence = 1n) => {
 const handler = (
   authenticatedId?: string,
   limits?: OperationIntakeLimits,
-  runnerId?: string,
+  runnerUserId = authenticatedId,
 ) => {
   const resources = harness.setup();
   return createOperationSynchronization(
     resources.database,
     {
-      authenticatedUser: () =>
-        authenticatedId === undefined
-          ? null
-          : { id: authenticatedId, email: "owner@example.com", name: "Owner" },
+      runnerAccount: () =>
+        runnerUserId === undefined
+          ? undefined
+          : { runnerId: "owner-1", userId: runnerUserId },
     },
     limits,
-    runnerId === undefined
-      ? undefined
-      : { runnerAccount: () => ({ userId: runnerId }) },
   );
 };
 const statusAfterClosedDatabase = async (request: Request) => {
@@ -99,7 +96,7 @@ const statusAfterClosedDatabase = async (request: Request) => {
   }
 };
 const synchronizationStatus = async (envelopes: readonly string[]) =>
-  (await handler("owner-1")(request(body("owner-1", envelopes)))).status;
+  (await handler("owner-1")(request(body("self", envelopes)))).status;
 const expectSynchronizationStatus = async (
   envelope: string,
   expected: number,
@@ -125,7 +122,7 @@ const operationResponse = (
   partition: "non-session" | "session" = "non-session",
 ) =>
   handler("owner-1")(
-    request(body("owner-1", [encodeOperationEnvelope(operation)], partition)),
+    request(body("self", [encodeOperationEnvelope(operation)], partition)),
   );
 const expectScopeMismatch = async (response: Response): Promise<void> => {
   const responseBody: unknown = await response.json();
@@ -165,7 +162,7 @@ test("operation synchronization isolates runner aliases from browser owner IDs",
     responseStatus(handler("owner-1")(request(body("owner-1")))),
     responseStatus(handler("owner-1")(request(body("owner-2")))),
   ]);
-  expect(statuses).toEqual([200, 403, 403, 200, 403]);
+  expect(statuses).toEqual([200, 403, 200, 403, 403]);
 });
 
 test("operation synchronization gives simultaneous runner auth precedence", async () => {
@@ -204,7 +201,7 @@ test("operation synchronization pins protocol request limits", () => {
 
 test("operation synchronization bounds operation batches", async () => {
   expect(
-    (await handler("owner-1")(request(body("owner-1", Array(513).fill("x")))))
+    (await handler("owner-1")(request(body("self", Array(513).fill("x")))))
       .status,
   ).toBe(400);
 });
@@ -282,7 +279,7 @@ test("operation synchronization measures envelope limits in UTF-8 bytes", async 
 
 test("operation synchronization reports malformed oversized envelopes clearly", async () => {
   const response = await handler("owner-1")(
-    request(body("owner-1", ["x".repeat(MAX_OPERATION_ENVELOPE_BYTES + 1)])),
+    request(body("self", ["x".repeat(MAX_OPERATION_ENVELOPE_BYTES + 1)])),
   );
   expect(await response.json()).toEqual({ error: "Invalid request" });
 });
@@ -335,11 +332,11 @@ test("stored duplicate replay to the wrong partition remains invalid", async () 
   const operation = ownedOperation();
   const encoded = encodeOperationEnvelope(operation);
   expect(
-    (await synchronized(request(body("owner-1", [encoded], "non-session"))))
+    (await synchronized(request(body("self", [encoded], "non-session"))))
       .status,
   ).toBe(200);
   const replay = await synchronized(
-    request(body("owner-1", [encoded], "session")),
+    request(body("self", [encoded], "session")),
   );
   await expectScopeMismatch(replay);
 });
@@ -355,7 +352,7 @@ test("operation synchronization maps identity equivocation to conflict", async (
 });
 
 test("operation synchronization maps storage faults to server errors", async () => {
-  expect(await statusAfterClosedDatabase(request(body()))).toBe(500);
+  expect(await statusAfterClosedDatabase(request(body("self")))).toBe(500);
 });
 
 test("operation synchronization response stays bounded as history grows", async () => {
@@ -364,7 +361,7 @@ test("operation synchronization response stays bounded as history grows", async 
   for (let sequence = 1; sequence <= 40; sequence += 1) {
     const operation = ownedOperation(BigInt(sequence));
     const response = await synchronized(
-      request(body("owner-1", [encodeOperationEnvelope(operation)])),
+      request(body("self", [encodeOperationEnvelope(operation)])),
     );
     responseLength = (await response.text()).length;
   }
@@ -483,7 +480,7 @@ test("operation synchronization returns deterministic bounded missing pages", as
   expect(
     (
       await synchronized(
-        request(body("owner-1", operations.map(encodeOperationEnvelope))),
+        request(body("self", operations.map(encodeOperationEnvelope))),
       )
     ).status,
   ).toBe(200);
@@ -502,7 +499,7 @@ test("operation synchronization returns deterministic bounded missing pages", as
 test("operation synchronization limits missing-envelope pages to 256", async () => {
   const synchronized = handler("owner-1");
   const envelopes = ownedEnvelopes(257);
-  expect((await synchronized(request(body("owner-1", envelopes)))).status).toBe(
+  expect((await synchronized(request(body("self", envelopes)))).status).toBe(
     200,
   );
   const response = await synchronized(readRequest({}));
@@ -534,13 +531,13 @@ test("operation synchronization fails closed at capacity without counting duplic
   });
   const envelopes = ownedEnvelopes(3);
   const initial = await synchronized(
-    request(body("owner-1", envelopes.slice(0, 2))),
+    request(body("self", envelopes.slice(0, 2))),
   );
   const replay = await synchronized(
-    request(body("owner-1", [envelopes[0] ?? ""])),
+    request(body("self", [envelopes[0] ?? ""])),
   );
   const overflow = await synchronized(
-    request(body("owner-1", [envelopes[2] ?? ""])),
+    request(body("self", [envelopes[2] ?? ""])),
   );
   expect({
     initial: initial.status,
@@ -551,7 +548,7 @@ test("operation synchronization fails closed at capacity without counting duplic
 
 test("operation synchronization fails closed above checkpoint byte capacity", async () => {
   const response = await handler("owner-1", { checkpointBytes: 1 })(
-    request(body("owner-1", [encodeOperationEnvelope(ownedOperation())])),
+    request(body("self", [encodeOperationEnvelope(ownedOperation())])),
   );
   expect(response.status).toBe(507);
 });
@@ -563,7 +560,7 @@ test("remote drift accepts operations near the five-minute boundary", async () =
   const nearBoundaryMarginMs = 5_000;
   const response = await synchronized(
     request(
-      body("owner-1", [
+      body("self", [
         encodeOperationEnvelope({
           ...operation,
           clock: {

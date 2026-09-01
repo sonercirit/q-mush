@@ -6,6 +6,5 @@ export const operationSynchronizationHandler = (
 ) =>
   createRunnerOperationSynchronization(
     integrations.database,
-    integrations.googleAuth,
     integrations.runners,
   );

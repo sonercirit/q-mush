@@ -13,13 +13,13 @@ import {
   prepareSynchronizationFrontier,
 } from "../shared/operation-intake-core";
 import { utf8ByteLength } from "../shared/utf8";
-import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
   createOperationIntake,
   type OperationIntakeLimits,
 } from "./operation-intake";
 import { createOperationStore } from "./operation-store";
+import type { RunnerAccountIdentity } from "./runners";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
 const MAX_OPERATION_SYNC_REQUEST_BYTES =
@@ -127,13 +127,12 @@ const parseRequest = (
 
 export const createOperationSynchronization = (
   database: AppDatabase,
-  googleAuth: Pick<GoogleAuth, "authenticatedUser">,
-  limits?: OperationIntakeLimits,
-  runnerAuth?: {
+  runnerAuth: {
     readonly runnerAccount: (
       request: Request,
-    ) => { readonly userId: string } | undefined;
+    ) => RunnerAccountIdentity | undefined;
   },
+  limits?: OperationIntakeLimits,
 ) => {
   const intake = createOperationIntake(
     limits === undefined ? { database } : { database, limits },
@@ -143,9 +142,8 @@ export const createOperationSynchronization = (
     const bounded = await readBoundedRequest(request);
     if (bounded instanceof Response) return bounded;
     request = bounded;
-    const browserUser = googleAuth.authenticatedUser(request);
-    const runnerUser = runnerAuth?.runnerAccount(request);
-    if (browserUser === null && runnerUser === undefined)
+    const runnerUser = runnerAuth.runnerAccount(request);
+    if (runnerUser === undefined)
       return new Response("Unauthorized", { status: 401 });
     if (request.method !== "POST" && request.method !== "PUT")
       return new Response("Method Not Allowed", {
@@ -164,15 +162,8 @@ export const createOperationSynchronization = (
     );
     if (parsed instanceof Response) return parsed;
     if (parsed === undefined) return invalidRequest();
-    // Runner credentials deliberately take precedence when both auth mechanisms
-    // are present, so runner owner alias semantics cannot become browser scope.
-    const ownerId =
-      runnerUser === undefined ? browserUser?.id : runnerUser.userId;
-    const ownsScope =
-      runnerUser === undefined
-        ? parsed.ownerId === ownerId
-        : parsed.ownerId === "self";
-    if (ownerId === undefined || !ownsScope)
+    const ownerId = runnerUser.userId;
+    if (parsed.ownerId !== "self")
       return new Response("Forbidden", { status: 403 });
     try {
       if ("frontier" in parsed) {
@@ -202,7 +193,7 @@ export const createOperationSynchronization = (
         operations.some(
           (operation) =>
             operation.entity.accountId !== ownerId ||
-            operation.writerId !== ownerId,
+            operation.writerId !== runnerUser.runnerId,
         )
       )
         return new Response("Forbidden", { status: 403 });
@@ -240,7 +231,5 @@ export const createOperationSynchronization = (
 
 export const createRunnerOperationSynchronization = (
   database: AppDatabase,
-  googleAuth: Pick<GoogleAuth, "authenticatedUser">,
-  runnerAuth: NonNullable<Parameters<typeof createOperationSynchronization>[3]>,
-) =>
-  createOperationSynchronization(database, googleAuth, undefined, runnerAuth);
+  runnerAuth: Parameters<typeof createOperationSynchronization>[1],
+) => createOperationSynchronization(database, runnerAuth);

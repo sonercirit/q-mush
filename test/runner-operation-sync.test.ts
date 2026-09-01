@@ -104,12 +104,9 @@ const engineHarness = () => {
   return {
     engine,
     resources,
-    handler: createOperationSynchronization(
-      resources.database,
-      { authenticatedUser: () => null },
-      undefined,
-      { runnerAccount: () => ({ userId: "owner-1" }) },
-    ),
+    handler: createOperationSynchronization(resources.database, {
+      runnerAccount: () => ({ runnerId: "owner-1", userId: "owner-1" }),
+    }),
   };
 };
 const postToEngine = async (
