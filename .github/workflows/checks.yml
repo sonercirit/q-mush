@@ -23,28 +23,28 @@ jobs:
       matrix:
         include:
           - {
-              name: Tests (shard 1/6),
-              command: "bun run test:unit --shard=1/6",
+              name: Tests (shard 1/8),
+              command: "bun run test:unit --shard=1/8",
             }
           - {
-              name: Tests (shard 2/6),
-              command: "bun run test:unit --shard=2/6",
+              name: Tests (shard 2/8),
+              command: "bun run test:unit --shard=2/8",
             }
           - {
-              name: Tests (shard 3/6),
-              command: "bun run test:unit --shard=3/6",
+              name: Tests (shard 3/8),
+              command: "bun run test:unit --shard=3/8",
             }
           - {
-              name: Tests (shard 4/6),
-              command: "bun run test:unit --shard=4/6",
+              name: Tests (shard 4/8),
+              command: "bun run test:unit --shard=4/8",
             }
           - {
-              name: Tests (shard 5/6),
-              command: "bun run test:unit --shard=5/6",
+              name: Tests (shard 5/8),
+              command: "bun run test:unit --shard=5/8",
             }
           - {
-              name: Tests (shard 6/6),
-              command: "bun run test:unit --shard=6/6",
+              name: Tests (shard 6/8),
+              command: "bun run test:unit --shard=6/8",
             }
           - {
               name: Real-browser regressions,
