@@ -42,19 +42,37 @@ Workspace-create latency measured 87.33–96.05 ms after an unfolded
 across three development-runner runs. Folding removes replay history but not
 projection/checkpoint size: command cost remains O(projection + checkpoint
 bytes) and therefore grows with total account entity count. Runner-authored
-workspace operations are admissible and reflected during intake. The route
-rejects runner-authored prompts and every other non-session entity kind as
-protocol-invalid before persistence; prompt reflection remains deferred. For
-each accepted workspace batch, lazy account-writer backfill first captures any
-legacy-only touched workspace and the account default register, shared intake
-applies and stabilizes device-writer operations, then legacy workspace rows are
-upserted from the post-apply canonical projection. Envelope, checkpoint,
-backfill, and projection-to-legacy writes share one outer SQLite transaction.
-The runner-local producer remains deliberately deferred and the local
-`ownsOperation` gate stays closed. Rejected or stalled runner pushes retain
-their outbox data and use capped backoff, preventing both loss and a tight
-livelock. Replica pull currently trusts the authenticated engine response; scope
-and writer assertions on that pull path arrive with the trust plane.
+workspace operations and the `users` default-workspace register are admissible
+and reflected during intake; every other runner-authored entity kind fails
+closed before persistence. Fold liveness no longer depends on retained
+per-writer heads: shared compaction retains strict pending-clock caps and
+rejects backward/no-op boundaries. Engine intake's symmetric drift bound makes
+every post-boundary admission newer; its producer mints above stable, replay,
+and pending clocks. Per-writer heads remain independent, so a dormant fully
+folded device writer cannot pin an active account writer's replay.
+
+Backfill is conditional: it emits only for touched legacy-only workspaces absent
+from projection, and emits the default register only when required and absent.
+Ensure-create is fill-if-absent: reducers retain early field registers before
+creation, then ensure fills `created` and missing registers without overwriting
+existing values. This must be order-independent because producer and per-writer
+floors make minting below prior clocks impossible in general. Reflection mirrors
+the projection's effective default. With active workspaces exactly one active
+legacy row is default; with zero, `list` returns the global ID as a
+deterministic non-throwing placeholder until lazy repair or creation. A
+near-unreachable cross-owner UUID collision fails reflection rather than
+mutating another owner.
+
+Runner workspace names must already equal shared normalized form: non-empty
+after trim, at most 100 characters, and not case-insensitively `global`.
+Immutable invalid values fail the whole batch with 400; values are never
+trimmed. Duplicate names remain allowed for legitimate CRDT convergence.
+Envelope, checkpoint, conditional backfill, and reflection share one
+transaction. The runner-local producer remains deferred and local
+`ownsOperation` stays closed. Rejected or stalled runner pushes retain their
+outbox data and use capped backoff, preventing both loss and a tight livelock.
+Replica pull currently trusts the authenticated engine response; scope and
+writer assertions on that pull path arrive with the trust plane.
 
 A full-scale real-store probe created 100 distinct maximum 32 KiB prompts with
 commands ten minutes apart. The ASCII bank completed with zero capacity

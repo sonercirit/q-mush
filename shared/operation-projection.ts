@@ -192,7 +192,7 @@ const reduceWorkspace = (
         ? current
         : createNamedEntity(current, operation)
       : operation.kind === "workspace.name.set"
-        ? current.created === undefined || current.deleted !== undefined
+        ? current.deleted !== undefined
           ? current
           : namedPayloadWrite(current, operation)
         : deleteNamedEntity(operation, current);

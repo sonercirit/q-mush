@@ -15,6 +15,7 @@ import { isOperationProtocolError } from "../shared/operation-core.ts";
 import {
   DEFAULT_WORKSPACE_NAME,
   GLOBAL_WORKSPACE_ID,
+  normalizeWorkspaceName,
   type WorkspaceList,
   type WorkspaceSummary,
 } from "../shared/workspace-model.ts";
@@ -33,8 +34,6 @@ import {
   setWorkspaceDefault,
 } from "./workspace-default.ts";
 import { ownedWorkspaceExists } from "./workspace-query.ts";
-
-const WORKSPACE_NAME_MAXIMUM_LENGTH = 100;
 
 function activeWorkspaceCondition(
   userId: string,
@@ -66,15 +65,6 @@ function workspaceSelection() {
     isDefault: workspaces.isDefault,
     name: workspaces.name,
   };
-}
-
-function normalizeWorkspaceName(name: string): string | undefined {
-  const normalized = name.trim();
-  return normalized.length > 0 &&
-    normalized.length <= WORKSPACE_NAME_MAXIMUM_LENGTH &&
-    normalized.toLocaleLowerCase() !== GLOBAL_WORKSPACE_ID
-    ? normalized
-    : undefined;
 }
 
 type WorkspaceRemovalResult =
@@ -180,12 +170,10 @@ export function createWorkspaceStore(
         .orderBy(asc(workspaces.createdAt), asc(workspaces.id))
         .all();
       const defaultWorkspace = entries.find(({ isDefault }) => isDefault);
-
-      if (defaultWorkspace === undefined) {
-        throw new Error("The user has no default workspace");
-      }
-
-      return { defaultWorkspaceId: defaultWorkspace.id, workspaces: entries };
+      return {
+        defaultWorkspaceId: defaultWorkspace?.id ?? GLOBAL_WORKSPACE_ID,
+        workspaces: entries,
+      };
     },
 
     rename(

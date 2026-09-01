@@ -28,6 +28,7 @@ const workspaceOperation = (
   payload: unknown,
   parents: Readonly<Record<string, bigint>> = {},
   clock = operationNow,
+  id = reflectedId,
 ): Operation =>
   createOperation({
     operationId: `runner-${sequence.toString()}`,
@@ -36,7 +37,7 @@ const workspaceOperation = (
     sequence,
     clock: { physicalMs: clock, logical: Number(sequence), writerId: runnerId },
     parents,
-    entity: { accountId: ownerId, id: reflectedId, type: "workspaces" },
+    entity: { accountId: ownerId, id, type: "workspaces" },
     kind,
     payload,
   });
@@ -93,7 +94,17 @@ const projectionWorkspace = (database: TestDatabase) =>
   checkpoint(database)?.projection.workspaces.find(
     ({ id }) => id === reflectedId,
   );
-const seedDefault = (): string => TEST_WORKSPACE_ID;
+const insertLegacyReflectedWorkspace = (database: TestDatabase): void => {
+  insertWorkspace(database, {
+    id: reflectedId,
+    name: "Legacy",
+    now: TEST_NOW,
+    userId: ownerId,
+  });
+};
+const close = (database: TestDatabase): void => {
+  database.$client.close();
+};
 const expectListedWorkspace = (database: TestDatabase, name: string): void => {
   expect(
     createWorkspaceStore(database).list(ownerId).workspaces,
@@ -103,22 +114,22 @@ const expectListedWorkspace = (database: TestDatabase, name: string): void => {
     name,
   });
 };
+const expectWorkspacePushStatus = async (
+  push: ReturnType<typeof setup>["push"],
+  operation: Operation,
+  status: number,
+): Promise<void> => {
+  expect((await push([operation])).status).toBe(status);
+};
 const expectPush = async (
   push: ReturnType<typeof setup>["push"],
   operation: Operation,
-) => {
-  expect((await push([operation])).status).toBe(200);
-};
+) => expectWorkspacePushStatus(push, operation, 200);
 
 test("runner create rename and delete are visible through workspace listing with audit soft-delete", async () => {
-  const context = setup();
-  const { database, push } = context;
-  seedDefault();
-
-  await expectPush(
-    push,
-    workspaceOperation(1n, "workspace.create", { name: "One" }),
-  );
+  const { database, push } = setup();
+  const create = workspaceOperation(1n, "workspace.create", { name: "One" });
+  await expectPush(push, create);
   expectListedWorkspace(database, "One");
   expect(reflectedRow(database)).toMatchObject({
     createdById: ownerId,
@@ -165,12 +176,7 @@ test("runner create rename and delete are visible through workspace listing with
 
 test("runner rename first-touch backfills a legacy workspace and preserves later engine commands", async () => {
   const { database, push } = setup();
-  insertWorkspace(database, {
-    id: reflectedId,
-    name: "Legacy",
-    now: TEST_NOW,
-    userId: ownerId,
-  });
+  insertLegacyReflectedWorkspace(database);
 
   await expectPush(
     push,
@@ -197,7 +203,6 @@ test("runner rename first-touch backfills a legacy workspace and preserves later
 
 test("mixed reflectable and unsupported batch fails atomically before all persistence", async () => {
   const { database, push } = setup();
-  seedDefault();
   const store = createOperationStore({ database });
   const checkpointBefore = store.loadCheckpoint(ownerId, "non-session");
   const envelopesBefore = store.readEncodedEnvelopes(
@@ -251,7 +256,85 @@ test("legacy reflection failure rolls back envelope checkpoint and projection", 
     store.readEncodedEnvelopes(ownerId, "non-session", {}, 10).envelopes,
   ).toEqual([]);
   expect(reflectedRow(database)).toBeUndefined();
+  close(database);
+});
+
+const runPriorClockProbe = () => {
+  const context = setup();
+  insertLegacyReflectedWorkspace(context.database);
+  return context;
+};
+
+test("prior engine clock cannot erase an older runner rename of a legacy-only workspace", async () => {
+  const { database, push } = runPriorClockProbe();
+  expect(
+    createWorkspaceStore(database).rename(
+      ownerId,
+      TEST_WORKSPACE_ID,
+      "Engine default",
+      operationNow,
+    ),
+  ).toBeDefined();
+  await expectWorkspacePushStatus(
+    push,
+    workspaceOperation(
+      1n,
+      "workspace.name.set",
+      { value: "Runner wins" },
+      {},
+      operationNow - 100,
+    ),
+    200,
+  );
+  expect(projectionWorkspace(database)?.name?.value).toBe("Runner wins");
+  expect(reflectedRow(database)?.name).toBe("Runner wins");
   database.$client.close();
+});
+
+test("runner deleting the default deterministically reassigns a surviving default", async () => {
+  const { database, push } = setup();
+  expect(
+    createWorkspaceStore(database, () => reflectedId).create(
+      ownerId,
+      "Survivor",
+      TEST_NOW + 1,
+    ),
+  ).toBeDefined();
+  await expectWorkspacePushStatus(
+    push,
+    workspaceOperation(
+      1n,
+      "workspace.delete",
+      {},
+      {},
+      operationNow,
+      TEST_WORKSPACE_ID,
+    ),
+    200,
+  );
+  const listed = createWorkspaceStore(database).list(ownerId);
+  expect(listed.defaultWorkspaceId).toBe(reflectedId);
+  expect(listed.workspaces.filter(({ isDefault }) => isDefault)).toHaveLength(
+    1,
+  );
+  close(database);
+});
+
+test("runner workspace names fail closed without normalization while duplicates converge", async () => {
+  for (const name of ["", "   ", "x".repeat(101), "GLOBAL"]) {
+    const { database, push } = setup();
+    const response = await push([
+      workspaceOperation(1n, "workspace.create", { name }),
+    ]);
+    expect(response.status).toBe(400);
+    expect(reflectedRow(database)).toBeUndefined();
+    database.$client.close();
+  }
+  const { database, push } = setup();
+  const valid = workspaceOperation(1n, "workspace.create", { name: "Default" });
+  await expectPush(push, valid);
+  expect(reflectedRow(database)).toMatchObject({ name: "Default" });
+  close(database);
 });
 
 const convergedResult = async (runnerFirst: boolean) => {

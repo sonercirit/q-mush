@@ -42,7 +42,7 @@ export function identityAndCredentialTables() {
     (table) => [
       index("workspaces_user_id_index").on(table.userId, table.id),
       index("workspaces_user_deletion_index").on(table.userId, table.isDeleted),
-      uniqueIndex("workspaces_user_active_name_unique")
+      index("workspaces_user_active_name_index")
         .on(table.userId, table.name)
         .where(sql`NOT ${table.isDeleted}`),
       activeDefaultIndex("workspaces_user_default_unique")(table),

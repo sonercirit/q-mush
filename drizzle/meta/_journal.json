@@ -309,6 +309,13 @@
       "when": 1788189367619,
       "tag": "0043_cooing_talisman",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "6",
+      "when": 1788299816134,
+      "tag": "0044_wide_gargoyle",
+      "breakpoints": true
     }
   ]
 }
