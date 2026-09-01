@@ -249,6 +249,53 @@ test("operation intake retained capacity ignores folded envelope history", () =>
   expectStoredEnvelopeCount(database, MAX_OWNER_PARTITION_OPERATIONS + 1);
 });
 
+test("operation intake keeps replay bounded after a dormant writer is fully folded", () => {
+  const { intake } = setup({ ownerPartitionOperations: 20 });
+  const drift = 300_000;
+  apply(
+    intake,
+    [entityTestOperation("device", 1n, {}, "device", 2)],
+    drift + 2,
+  );
+  let accountParent = 0n;
+  for (let index = 1; index <= 300; index += 1) {
+    const sequence = BigInt(index);
+    const result = apply(
+      intake,
+      [
+        entityTestOperation(
+          "account",
+          sequence,
+          accountParent === 0n ? {} : { account: accountParent },
+          `account-${String(index)}`,
+          index + 2,
+        ),
+      ],
+      drift + index + 1,
+    );
+    expect(
+      decodeOperationCheckpoint(
+        result.encodedCheckpoint,
+        operationEntityProjectionCodec,
+      ).replayCount,
+    ).toBeLessThanOrEqual(2);
+    accountParent = sequence;
+  }
+});
+
+test("operation intake admits the exact old drift edge after folding", () => {
+  const { intake } = setup();
+  const now = 600_000;
+  apply(intake, [entityTestOperation("first", 1n, {}, "first", 1)], 1);
+  expect(() =>
+    apply(
+      intake,
+      [entityTestOperation("edge", 1n, {}, "edge", now - 300_000)],
+      now,
+    ),
+  ).not.toThrow();
+});
+
 test("operation intake rejects owner-partition history above its capacity", () => {
   const { intake } = setup({ ownerPartitionOperations: 2 });
   apply(intake, operationsOfLength(2), 2);

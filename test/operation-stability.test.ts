@@ -42,17 +42,17 @@ describe("operation stability", () => {
     expect(foldedSuccessor.frontier).toEqual(unfoldedSuccessor.frontier);
   });
 
-  test("refuses clocks above the frontier writer minimum", () => {
+  test("folds through frontier writer heads when the trusted cap permits it", () => {
     const state = operationIdState([
       operation("a", 1n, {}, "a", 10),
       operation("b", 1n, {}, "b", 20),
     ]);
     const folded = stabilizeForWriter(state, 99, "z");
-    expect(folded.replayCount).toBe(1);
-    expect(folded.stableClock?.physicalMs).toBe(10);
+    expect(folded.replayCount).toBe(0);
+    expect(folded.stableClock?.physicalMs).toBe(20);
   });
 
-  test("dormant device writer pins fold-liveness while account writer advances", () => {
+  test("dormant fully folded writer does not pin fold-liveness while account writer advances", () => {
     const device = singleWriterArrayState("device", 10);
     const folded = stabilizeForWriter(device, 10, "device");
     const accountOne = applyOperation(
@@ -65,10 +65,20 @@ describe("operation stability", () => {
       operation("account", 2n, { account: 1n }, "two", 30),
       appendOperationId,
     );
-    const pinned = stabilizeForWriter(accountTwo, 99, "boundary");
-    expect(pinned).toBe(accountTwo);
-    expect(pinned.stableClock?.physicalMs).toBe(10);
-    expect(pinned.replayCount).toBe(2);
+    const live = stabilizeForWriter(accountTwo, 99, "boundary");
+    expect(live.stableClock?.physicalMs).toBe(30);
+    expect(live.replayCount).toBe(0);
+    expect(live.replayHead).toBeUndefined();
+  });
+
+  test("a boundary below stableClock is an identity no-op", () => {
+    const folded = stabilizeForWriter(singleWriterArrayState("a", 10), 10, "a");
+    const advanced = applyOperation(
+      folded,
+      operation("a", 2n, { a: 1n }, "two", 20),
+      appendOperationId,
+    );
+    expect(stabilizeForWriter(advanced, 9, "boundary")).toBe(advanced);
   });
 
   test("pending clocks are strict fold caps", () => {
