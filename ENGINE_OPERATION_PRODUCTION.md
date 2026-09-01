@@ -12,17 +12,21 @@ required.
 Prompt body's 32 KiB input plus worst-case JSON escaping requires the 256 KiB
 envelope cap. POST batches, pull pages, and runner pushes are capped at 4 MiB;
 synchronization POST bodies are additionally bounded at 5 MiB while streaming,
-before authentication and JSON parsing. The checkpoint cap is 32 MiB: a folded
-100-prompt bank with worst-case NUL escaping measures about 19.5 MiB including
-names/write metadata, leaving about 12 MiB for replay. Checkpoints encode one
-projection and reconstruct the current projection from retained replay, avoiding
-duplicate projection storage without changing decoded state. Oversized
-replay-driven bursts fail closed and can self-heal after the five-minute
-stability fold; envelope deletion still awaits durable receipts. A
-projection-driven failure requires deleting an entity to release its retained
-payload, so prompt deletion clears retired name/body writes while preserving its
-remove-wins tombstone. The 32 MiB cap makes that failure unreachable for every
-legacy-admissible 100-prompt bank.
+before authentication and JSON parsing. This deliberately buffers up to about 5
+MiB before authentication, replacing the previous unbounded post-auth buffering.
+The checkpoint cap is 32 MiB: a folded 100-prompt bank with worst-case NUL
+escaping measures about 19.5 MiB including names/write metadata, leaving about
+12 MiB for replay. Checkpoints encode one projection and reconstruct the current
+projection from retained replay, avoiding duplicate projection storage without
+changing decoded state. Oversized replay-driven bursts fail closed and can
+self-heal after the five-minute stability fold; envelope deletion still awaits
+durable receipts. A projection-driven failure requires deleting an entity to
+release its retained payload, so prompt deletion clears retired name/body writes
+while preserving its remove-wins tombstone. The 32 MiB cap makes that failure
+unreachable for every legacy-admissible 100-prompt bank. The cap bounds stored
+checkpoint bytes in the alias form, not decoded memory: decoding materializes
+both base and current projections, so the worst-case bank used about 40
+MB—roughly twice its honest full form—and decoded RAM has no separate cap.
 
 The producer mints beyond stored account-writer sequences, dominates checkpoint
 clocks, and chains command parents/clocks. A backward wall-clock command can
@@ -45,5 +49,6 @@ bytes of headroom.
 
 The earlier 1.06/0.70 ms claim was invalid. Its probe repeatedly renamed one
 workspace, so LWW projection size stayed tiny. Although the exact scenario
-retained about 503 envelopes, it still measured a one-workspace projection—not
-an unfolded 500-operation/500-entity account.
+retained about 503 envelopes, it still measured a two-workspace projection—the
+backfilled legacy default plus the created workspace—not an unfolded
+500-operation/500-entity account.

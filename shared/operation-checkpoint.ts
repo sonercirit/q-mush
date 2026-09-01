@@ -431,13 +431,18 @@ export const decodeOperationCheckpoint = <TProjection>(
     });
   }
   const replayHead = decodeReplay(state["replayHead"]);
+  const projectionAlias = isBaseProjectionAlias(state["projection"]);
+  const replayProjection = codec.replay;
+  if (projectionAlias && replayProjection === undefined)
+    throw new Error("Invalid operation checkpoint projection alias");
   try {
-    projection = isBaseProjectionAlias(state["projection"])
-      ? (codec.replay?.(
-          baseProjection,
-          replayOperationsOldestFirst(replayHead),
-        ) ?? baseProjection)
-      : codec.decode(state["projection"]);
+    projection =
+      projectionAlias && replayProjection !== undefined
+        ? replayProjection(
+            baseProjection,
+            replayOperationsOldestFirst(replayHead),
+          )
+        : codec.decode(state["projection"]);
   } catch (error) {
     throw new Error("Invalid operation checkpoint projection", {
       cause: error,
