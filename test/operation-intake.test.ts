@@ -249,6 +249,72 @@ test("operation intake retained capacity ignores folded envelope history", () =>
   expectStoredEnvelopeCount(database, MAX_OWNER_PARTITION_OPERATIONS + 1);
 });
 
+test("operation intake keeps replay bounded after a dormant writer is fully folded", () => {
+  const { intake } = setup({ ownerPartitionOperations: 20 });
+  const drift = 300_000;
+  apply(
+    intake,
+    [entityTestOperation("device", 1n, {}, "device", 2)],
+    drift + 2,
+  );
+  let accountParent = 0n;
+  for (let index = 1; index <= 300; index += 1) {
+    const sequence = BigInt(index);
+    const result = apply(
+      intake,
+      [
+        entityTestOperation(
+          "account",
+          sequence,
+          accountParent === 0n ? {} : { account: accountParent },
+          `account-${String(index)}`,
+          index + 2,
+        ),
+      ],
+      drift + index + 1,
+    );
+    expect(
+      decodeOperationCheckpoint(
+        result.encodedCheckpoint,
+        operationEntityProjectionCodec,
+      ).replayCount,
+    ).toBeLessThanOrEqual(2);
+    accountParent = sequence;
+  }
+});
+
+test("operation intake admits the exact old drift edge after folding", () => {
+  const { intake } = setup();
+  const now = 600_000;
+  apply(
+    intake,
+    [entityTestOperation("folded-writer", 1n, {}, "folded", now - 300_000 - 1)],
+    now - 300_000 - 1,
+  );
+  const folded = apply(intake, [], now);
+  const foldedCheckpoint = decodeOperationCheckpoint(
+    folded.encodedCheckpoint,
+    operationEntityProjectionCodec,
+  );
+  expect(foldedCheckpoint.stableClock).toBeDefined();
+  expect(foldedCheckpoint.stableClock?.physicalMs).toBe(now - 300_000 - 1);
+
+  let admitted: ReturnType<typeof apply> | undefined;
+  expect(() => {
+    admitted = apply(
+      intake,
+      [entityTestOperation("edge-writer", 1n, {}, "edge", now - 300_000)],
+      now,
+    );
+  }).not.toThrow();
+  expect(
+    decodeOperationCheckpoint(
+      admitted?.encodedCheckpoint ?? "",
+      operationEntityProjectionCodec,
+    ).stableClock,
+  ).toEqual(foldedCheckpoint.stableClock);
+});
+
 test("operation intake rejects owner-partition history above its capacity", () => {
   const { intake } = setup({ ownerPartitionOperations: 2 });
   apply(intake, operationsOfLength(2), 2);

@@ -25,16 +25,10 @@ const replayHead = (
   for (const operation of operations) head = { operation, previous: head };
   return head;
 };
-const earlierClock = (
-  left: HybridTimestamp,
-  right: HybridTimestamp,
-): HybridTimestamp => (compareClocks(left, right) <= 0 ? left : right);
-
 /**
- * Folds only a clock-ordered prefix bounded by the caller's trusted cap, every
- * frontier writer's latest operation, and every pending clock. A frontier
- * writer absent from retained replay was folded previously, so stableClock is
- * its conservative stand-in and pins this and later folds.
+ * Folds only a clock-ordered prefix bounded by the caller's trusted cap and
+ * every pending clock. The caller must prove that no operation at or below the
+ * cap can arrive later; frontier writer heads are deliberately not fold caps.
  */
 export const stabilizeOperationApplyState = <TProjection>(
   state: OperationApplyState<TProjection>,
@@ -43,19 +37,9 @@ export const stabilizeOperationApplyState = <TProjection>(
 ): OperationApplyState<TProjection> => {
   const replay = replayOperationsOldestFirst(state.replayHead);
   if (replay.length === 0) return state;
-  const latestByWriter = new Map<string, HybridTimestamp>();
-  for (const operation of replay)
-    if (operation.sequence === state.frontier[operation.writerId])
-      latestByWriter.set(operation.writerId, operation.clock);
-  let cap = boundaryClock;
-  for (const writerId of Object.keys(state.frontier)) {
-    const writerClock = latestByWriter.get(writerId) ?? state.stableClock;
-    if (writerClock === undefined) return state;
-    cap = earlierClock(cap, writerClock);
-  }
   const foldCount = replay.findIndex(
     (operation) =>
-      compareClocks(operation.clock, cap) > 0 ||
+      compareClocks(operation.clock, boundaryClock) > 0 ||
       state.pending.some(
         (pending) => compareClocks(operation.clock, pending.clock) >= 0,
       ),

@@ -29,35 +29,37 @@
   repeated replay or pending operation-ID or writer-sequence identities,
   including byte-identical duplicates, and rejects negative sequence, parent,
   and frontier values while preserving signed bigint operation payloads.
-  Stability compaction folds replay prefixes proven safe by frontier, drift, and
-  pending-clock bounds. Current transport bounds and producer posture are in
-  `ENGINE_OPERATION_PRODUCTION.md`. The route also fails closed at 2,000
-  retained replay-plus-pending operations per owner/partition or a 4 MiB
-  checkpoint (HTTP 507). With 4 KiB payloads an uncompacted checkpoint reaches 4
-  MiB near 300 operations; folding resolves it once entries age and become
-  covered. Envelope deletion remains deferred until subscriber receipts can
-  bound replicated scope. Writer identity is currently forced to the
-  authenticated account ID; whether device keys should introduce per-device
-  writer IDs remains open for that later slice. Identity fingerprints remain
-  plain enumerable checkpoint data: live state stores the serializable balanced
-  identity tree; checkpoint encoding (or `materializeApplied`) creates the flat
-  record on demand. Steady-state admission is expected O(log n) per operation
-  and O(n log n) overall. Unready operations maintain a per-state identity treap
-  for incremental O(log n) checks and bounded admission; operation intake and
-  synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after which
-  admission fails rather than silently wedging, while a ready dependency may
-  enter a full buffer to drain it; operation-ID and writer-sequence equivocation
-  is rejected. Durable checkpoints consist of `frontier`, `pending`,
-  `projection`, `applied`, `replayHead`, `replayCount`, `replayLastClock`,
-  `baseProjection`, and `baseFrontier`; none of the replay fields is optional.
-  Decoding fails closed unless replay count/head clock, global canonical clock
-  order, per-writer sequence contiguity from the base frontier, replay-parent
-  coverage by the final derived frontier, own-writer parents strictly below
-  their operation sequence in replay and pending state, derived frontier,
-  applied identities, and pending identities are mutually consistent, including
-  pending-against-pending operation-ID and writer-sequence checks. HLC
-  components are non-negative safe integers. Frontier/parent access is
-  own-property-safe, including `__proto__`; canonical identity explicitly
+  Stability compaction folds replay prefixes proven safe by trusted caller drift
+  boundaries and pending-clock bounds. Engine intake's symmetric drift check
+  makes future admissions strictly newer than its boundary; runner replicas use
+  only engine-published boundaries after frontier coverage. Current transport
+  bounds and producer posture are in `ENGINE_OPERATION_PRODUCTION.md`. The route
+  also fails closed at 2,000 retained replay-plus-pending operations per
+  owner/partition or a 4 MiB checkpoint (HTTP 507). With 4 KiB payloads an
+  uncompacted checkpoint reaches 4 MiB near 300 operations; folding resolves it
+  once entries age and become covered. Envelope deletion remains deferred until
+  subscriber receipts can bound replicated scope. Writer identity is currently
+  forced to the authenticated account ID; whether device keys should introduce
+  per-device writer IDs remains open for that later slice. Identity fingerprints
+  remain plain enumerable checkpoint data: live state stores the serializable
+  balanced identity tree; checkpoint encoding (or `materializeApplied`) creates
+  the flat record on demand. Steady-state admission is expected O(log n) per
+  operation and O(n log n) overall. Unready operations maintain a per-state
+  identity treap for incremental O(log n) checks and bounded admission;
+  operation intake and synchronization batches share `MAX_OPERATION_BATCH_SIZE`
+  (512), after which admission fails rather than silently wedging, while a ready
+  dependency may enter a full buffer to drain it; operation-ID and
+  writer-sequence equivocation is rejected. Durable checkpoints consist of
+  `frontier`, `pending`, `projection`, `applied`, `replayHead`, `replayCount`,
+  `replayLastClock`, `baseProjection`, and `baseFrontier`; none of the replay
+  fields is optional. Decoding fails closed unless replay count/head clock,
+  global canonical clock order, per-writer sequence contiguity from the base
+  frontier, replay-parent coverage by the final derived frontier, own-writer
+  parents strictly below their operation sequence in replay and pending state,
+  derived frontier, applied identities, and pending identities are mutually
+  consistent, including pending-against-pending operation-ID and writer-sequence
+  checks. HLC components are non-negative safe integers. Frontier/parent access
+  is own-property-safe, including `__proto__`; canonical identity explicitly
   preserves `undefined` object-property and dense array-element presence, while
   operation validation rejects sparse arrays, negative zero, extra array/Date
   own properties, non-enumerable or symbol object properties, and every accessor
@@ -160,19 +162,17 @@
 - Checkpoints now carry `stableClock`; decoding accepts the legacy exact
   nine-field form as unstable and the exact ten-field form, while rejecting
   clocks inconsistent with the folded base, replay, or pending set. The engine
-  folds only a clock-ordered replay prefix at/below every frontier writer's
-  latest operation clock, with fully folded writers conservatively represented
-  by the prior `stableClock`; strictly before every pending clock; and with
-  `physicalMs < now - 5 minutes`. Subtracting one from the integral drift cutoff
-  makes that last strict condition an inclusive HLC cap. Intake's strict
-  per-writer sequence/clock advance and authenticated drift bound ensure future
-  admissions are strictly above the result. Retained replay and pending clocks
-  are likewise strictly above it. A dormant fully folded writer can therefore
-  pin stability indefinitely; whether future device writer identity needs a
-  retirement protocol remains open. Engine wall time is not monotonic-clamped:
-  after a backward step, a newly drift-valid operation may still be at/below the
-  prior stable clock and permanently stall its writer head; monotonic engine
-  admission time remains an open requirement.
+  folds only a clock-ordered replay prefix at or below its trusted boundary and
+  strictly before every pending clock, with `physicalMs < now - 5 minutes`.
+  Subtracting one from the integral drift cutoff makes that strict condition an
+  inclusive HLC cap. Intake's symmetric drift check ensures any future admission
+  is strictly above the boundary, while the producer also mints above stable,
+  replay, and pending clocks. Stable clocks are monotone: backward boundaries
+  are no-ops. Retained replay and pending clocks are strictly above the result,
+  and fully folded dormant writers no longer pin later folds. Engine wall time
+  is not monotonic-clamped: after a backward step, a newly drift-valid operation
+  may still be at/below the prior stable clock and permanently stall its writer
+  head; monotonic engine admission time remains an open requirement.
 - The engine persists JSON `stable_clock` and decimal-string `stable_frontier`
   columns beside the checkpoint and publishes them on pull pages without blob
   decoding. A runner folds against the published clock only after its applied
