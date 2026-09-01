@@ -1,16 +1,17 @@
 import { isOperationProtocolError } from "../shared/operation-core.ts";
 import { createApiError } from "./http.ts";
 
-export const operationProtocolErrorResponse = (
+export const handleOperationProtocolError = (
   error: unknown,
-): Response | undefined => {
-  if (!isOperationProtocolError(error)) return undefined;
-  return createApiError(
-    "operation_failed",
-    error.operationError === "capacity"
-      ? 507
-      : error.operationError === "conflict"
-        ? 409
-        : 400,
-  );
-};
+  otherwise: () => Response,
+): Response =>
+  isOperationProtocolError(error)
+    ? createApiError(
+        "operation_failed",
+        error.operationError === "capacity"
+          ? 507
+          : error.operationError === "conflict"
+            ? 409
+            : 400,
+      )
+    : otherwise();

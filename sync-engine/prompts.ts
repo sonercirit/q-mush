@@ -16,7 +16,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
-import { operationProtocolErrorResponse } from "./operation-error-response.ts";
+import { handleOperationProtocolError } from "./operation-error-response.ts";
 import { createPromptStore, isPromptStoreErrorKind } from "./prompt-store.ts";
 
 interface PromptDependencies {
@@ -37,6 +37,7 @@ export interface PromptIntegration {
 const PROMPT_REQUEST_MAXIMUM_BYTES =
   PROMPT_BODY_MAXIMUM_BYTES + PROMPT_NAME_MAXIMUM_LENGTH * 6 + 1_024;
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/u;
+const storageUnavailable = () => createApiError("storage_unavailable", 500);
 
 function hasJsonContentType(request: Request): boolean {
   const contentType = request.headers.get("content-type");
@@ -167,9 +168,7 @@ export function createDrizzlePromptIntegration(
         return createApiError("prompt_changed", 412);
       if (isPromptStoreErrorKind(error, "prompt_limit"))
         return createApiError("prompt_limit_reached", 409);
-      const operationResponse = operationProtocolErrorResponse(error);
-      if (operationResponse !== undefined) return operationResponse;
-      return createApiError("storage_unavailable", 500);
+      return handleOperationProtocolError(error, storageUnavailable);
     }
   };
 
@@ -196,11 +195,9 @@ export function createDrizzlePromptIntegration(
                 ? createNoContentResponse()
                 : createApiError("not_found", 404);
             } catch (error) {
-              const operationResponse = operationProtocolErrorResponse(error);
-              if (operationResponse !== undefined) return operationResponse;
-              return isPromptStoreErrorKind(error, "prompt_changed")
-                ? createApiError("prompt_changed", 412)
-                : createApiError("storage_unavailable", 500);
+              if (isPromptStoreErrorKind(error, "prompt_changed"))
+                return createApiError("prompt_changed", 412);
+              return handleOperationProtocolError(error, storageUnavailable);
             }
           },
           GET: () => promptResponse(store.get(userId, promptId)),

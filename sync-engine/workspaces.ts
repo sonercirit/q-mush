@@ -9,7 +9,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
-import { operationProtocolErrorResponse } from "./operation-error-response.ts";
+import { handleOperationProtocolError } from "./operation-error-response.ts";
 import {
   optionalResultResponse,
   withParsedUserInput,
@@ -34,6 +34,7 @@ export function createWorkspaceIntegration(options: {
   readonly now?: () => number;
   readonly store: WorkspaceStore;
 }): WorkspaceIntegration {
+  const storageUnavailable = () => createApiError("storage_unavailable", 500);
   const now = options.now ?? Date.now;
 
   const writeWorkspace = (
@@ -47,9 +48,9 @@ export function createWorkspaceIntegration(options: {
       try {
         return optionalResultResponse(write(userId, name), present, error, 409);
       } catch (writeError) {
-        const response = operationProtocolErrorResponse(writeError);
-        if (response !== undefined) return response;
-        throw writeError;
+        return handleOperationProtocolError(writeError, () =>
+          createApiError(error, 409),
+        );
       }
     });
 
@@ -98,9 +99,7 @@ export function createWorkspaceIntegration(options: {
         try {
           result = options.store.remove(user.id, workspaceId, now());
         } catch (error) {
-          const response = operationProtocolErrorResponse(error);
-          if (response !== undefined) return response;
-          throw error;
+          return handleOperationProtocolError(error, storageUnavailable);
         }
         const responses: Record<typeof result, () => Response> = {
           last_workspace: () => createApiError("last_workspace", 409),
@@ -120,9 +119,7 @@ export function createWorkspaceIntegration(options: {
             ? createNoContentResponse()
             : createApiError("not_found", 404);
         } catch (error) {
-          const response = operationProtocolErrorResponse(error);
-          if (response !== undefined) return response;
-          throw error;
+          return handleOperationProtocolError(error, storageUnavailable);
         }
       });
     },

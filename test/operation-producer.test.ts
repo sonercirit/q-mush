@@ -4,23 +4,24 @@ import {
   decodeOperationCheckpoint,
   decodeOperationEnvelope,
 } from "../shared/operation-checkpoint";
-import { compareClocks, createOperation } from "../shared/operation-core";
+import { compareClocks } from "../shared/operation-core";
 import { operationEntityProjectionCodec } from "../shared/operation-projection";
 import { createOperationIntake } from "../sync-engine/operation-intake";
 import {
   createOperationProducer,
-  type OperationProducerIntent,
+  operationAccountIntent,
+  operationEntityIntent,
 } from "../sync-engine/operation-producer";
 import { createOperationStore } from "../sync-engine/operation-store";
-import { createOperationDatabaseHarness } from "./operation-store-test-support";
+import { promptBodySet } from "./operation-producer-intent-test-support";
+import {
+  operationDatabase,
+  producerOperation,
+  producerPrompt,
+  producerWorkspace,
+} from "./operation-producer-test-support";
 
 const ownerId = "owner-1";
-const workspace = (id: string, name: string): OperationProducerIntent => ({
-  type: "entity",
-  entity: { type: "workspaces", id },
-  kind: "workspace.create",
-  payload: { name },
-});
 const projection = (store: ReturnType<typeof createOperationStore>) =>
   decodeOperationCheckpoint(
     store.loadCheckpoint(ownerId, "non-session") ?? "",
@@ -28,19 +29,8 @@ const projection = (store: ReturnType<typeof createOperationStore>) =>
   ).projection;
 
 test("producer mints past a stored future sequence and chains clocks and parents", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
-  const future = createOperation({
-    operationId: "future",
-    schemaVersion: 1,
-    writerId: ownerId,
-    sequence: 50n,
-    clock: { physicalMs: 10_000, logical: 7, writerId: ownerId },
-    parents: {},
-    entity: { type: "workspaces", id: "future", accountId: ownerId },
-    kind: "workspace.create",
-    payload: { name: "future" },
-  });
+  const { harness, database } = operationDatabase();
+  const future = producerOperation(ownerId, "future", 50n, 10_000, 7);
   createOperationIntake({ database }).apply(
     ownerId,
     "non-session",
@@ -50,7 +40,7 @@ test("producer mints past a stored future sequence and chains clocks and parents
   );
   const produced = createOperationProducer({ database }).produce(
     ownerId,
-    [workspace("a", "A"), workspace("b", "B")],
+    [producerWorkspace("a", "A"), producerWorkspace("b", "B")],
     9_000,
   );
   expect(produced.map(({ sequence }) => sequence)).toEqual([51n, 52n]);
@@ -71,64 +61,48 @@ test("producer mints past a stored future sequence and chains clocks and parents
 });
 
 test("producer parent chaining prevents manufactured prompt body conflicts", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
-  const producer = createOperationProducer({ database });
+  const resources = operationDatabase();
+  const producer = createOperationProducer({ database: resources.database });
+  const initialPrompt = producerPrompt("prompt", "old");
+  const createdOperations = producer.produce(ownerId, [initialPrompt], 1_000);
+  expect(createdOperations).toHaveLength(1);
   producer.produce(
     ownerId,
-    [
-      {
-        type: "entity",
-        entity: { type: "prompts", id: "prompt" },
-        kind: "prompt.create",
-        payload: { name: "P", body: "old" },
-      },
-    ],
-    1_000,
-  );
-  producer.produce(
-    ownerId,
-    [
-      {
-        type: "entity",
-        entity: { type: "prompts", id: "prompt" },
-        kind: "prompt.body.set",
-        payload: { value: "new" },
-        legacy: { name: "P", body: "old" },
-      },
-    ],
+    [promptBodySet("middle", "old"), promptBodySet("new", "middle")],
     1_001,
   );
-  const prompt = projection(createOperationStore({ database })).prompts[0];
+  const prompt = decodeOperationCheckpoint(
+    createOperationStore({ database: resources.database }).loadCheckpoint(
+      ownerId,
+      "non-session",
+    ) ?? "",
+    operationEntityProjectionCodec,
+  ).projection.prompts[0];
   expect(prompt?.body?.value).toBe("new");
   expect(prompt?.bodyConflicts).toEqual([]);
-  harness.close();
+  resources.harness.close();
 });
 
 test("producer backfills register and entities while deletes remain create-free", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   const producer = createOperationProducer({ database });
   producer.produce(
     ownerId,
     [
-      {
-        type: "account.ensure",
-        defaultWorkspace: { id: "default", name: "Default" },
-      },
-      {
-        type: "entity",
-        entity: { type: "prompts", id: "legacy-prompt" },
-        kind: "prompt.name.set",
-        payload: { value: "New" },
-        legacy: { name: "Old", body: "Body" },
-      },
-      {
-        type: "entity",
-        entity: { type: "workspaces", id: "deleted-only" },
-        kind: "workspace.delete",
-        payload: {},
-      },
+      operationAccountIntent({ id: "default", name: "Default" }),
+      operationEntityIntent(
+        "prompts",
+        "legacy-prompt",
+        "prompt.name.set",
+        { value: "New" },
+        { name: "Old", body: "Body" },
+      ),
+      operationEntityIntent(
+        "workspaces",
+        "deleted-only",
+        "workspace.delete",
+        {},
+      ),
     ],
     1_000,
   );
@@ -151,8 +125,7 @@ test("producer backfills register and entities while deletes remain create-free"
 });
 
 test("producer failure rolls back its caller transaction", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   const intake = createOperationIntake({
     database,
     limits: { ownerPartitionOperations: 1 },
@@ -160,19 +133,7 @@ test("producer failure rolls back its caller transaction", () => {
   intake.apply(
     ownerId,
     "non-session",
-    [
-      createOperation({
-        operationId: "first",
-        schemaVersion: 1,
-        writerId: ownerId,
-        sequence: 1n,
-        clock: { physicalMs: Date.now(), logical: 0, writerId: ownerId },
-        parents: {},
-        entity: { type: "workspaces", id: "first", accountId: ownerId },
-        kind: "workspace.create",
-        payload: { name: "first" },
-      }),
-    ],
+    [producerOperation(ownerId, "first", 1n, Date.now())],
     ownerId,
     Date.now(),
   );
@@ -181,7 +142,11 @@ test("producer failure rolls back its caller transaction", () => {
     limits: { ownerPartitionOperations: 1 },
   });
   expect(() =>
-    producer.produce(ownerId, [workspace("second", "Second")], Date.now()),
+    producer.produce(
+      ownerId,
+      [producerWorkspace("second", "Second")],
+      Date.now(),
+    ),
   ).toThrow(/capacity/i);
   expect(
     createOperationStore({ database }).countEnvelopes(ownerId, "non-session"),
@@ -190,19 +155,11 @@ test("producer failure rolls back its caller transaction", () => {
 });
 
 test("producer rejects an encoded operation beyond the envelope bound", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   expect(() =>
     createOperationProducer({ database }).produce(
       ownerId,
-      [
-        {
-          type: "entity",
-          entity: { type: "prompts", id: "prompt" },
-          kind: "prompt.create",
-          payload: { name: "P", body: "\0".repeat(44_000) },
-        },
-      ],
+      [producerPrompt("prompt", "\0".repeat(44_000))],
       1_000,
     ),
   ).toThrow(/too large/i);
@@ -210,11 +167,10 @@ test("producer rejects an encoded operation beyond the envelope bound", () => {
 });
 
 test("producer envelopes decode canonically", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   const operation = createOperationProducer({ database }).produce(
     ownerId,
-    [workspace("a", "A")],
+    [producerWorkspace("a", "A")],
     1_000,
   )[0];
   const encoded = createOperationStore({ database }).readEncodedEnvelopes(

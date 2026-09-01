@@ -1,7 +1,7 @@
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { prompts, workspaces } from "../shared/database/schema.ts";
+import { prompts } from "../shared/database/schema.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import {
   PROMPT_MAXIMUM_COUNT,
@@ -9,9 +9,9 @@ import {
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
+import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
 import {
   createOperationProducer,
-  operationAccountIntent,
   operationEntityIntent,
 } from "./operation-producer.ts";
 import {
@@ -164,14 +164,6 @@ export function createPromptStore(
   maximumCount = PROMPT_MAXIMUM_COUNT,
 ): PromptStore {
   const producer = createOperationProducer({ database });
-  const ensureAccount = (userId: string) => {
-    const current = database
-      .select({ id: workspaces.id, name: workspaces.name })
-      .from(workspaces)
-      .where(and(eq(workspaces.userId, userId), eq(workspaces.isDefault, true)))
-      .get();
-    return operationAccountIntent(current ?? null);
-  };
   const throwIfChanged = (
     userId: string,
     promptId: string,
@@ -232,7 +224,7 @@ export function createPromptStore(
           producer.produce(
             userId,
             [
-              ensureAccount(userId),
+              legacyDefaultOperationIntent(database, userId),
               operationEntityIntent("prompts", inserted.id, "prompt.create", {
                 name: input.name,
                 body: input.body,
@@ -282,7 +274,7 @@ export function createPromptStore(
           producer.produce(
             userId,
             [
-              ensureAccount(userId),
+              legacyDefaultOperationIntent(database, userId),
               operationEntityIntent("prompts", promptId, "prompt.delete", {}),
             ],
             now,
@@ -350,7 +342,7 @@ export function createPromptStore(
             if (intents.length > 0)
               producer.produce(
                 userId,
-                [ensureAccount(userId), ...intents],
+                [legacyDefaultOperationIntent(database, userId), ...intents],
                 now,
               );
           }

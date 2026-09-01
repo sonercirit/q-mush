@@ -20,21 +20,21 @@ import {
 } from "../shared/workspace-model.ts";
 
 import { activeCredentialWorkspaceCondition } from "./credential-workspace-query.ts";
+import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
 import {
   createOperationProducer,
-  operationAccountIntent,
   operationEntityIntent,
 } from "./operation-producer.ts";
+import { insertWorkspaceWithOperation } from "./workspace-command-create.ts";
 import {
   defaultWorkspaceCondition,
   setWorkspaceDefault,
 } from "./workspace-default.ts";
 import { ownedWorkspaceExists } from "./workspace-query.ts";
-import { insertWorkspace } from "./workspace-write.ts";
 
 const WORKSPACE_NAME_MAXIMUM_LENGTH = 100;
 
-function activeWorkspaceCondition(
+export function activeWorkspaceCondition(
   userId: string,
   workspaceId?: string,
 ): SQL | undefined {
@@ -43,6 +43,19 @@ function activeWorkspaceCondition(
     not(workspaces.isDeleted),
     workspaceId === undefined ? undefined : eq(workspaces.id, workspaceId),
   );
+}
+
+function activeWorkspaceName(
+  database: Pick<AppDatabase, "query">,
+  userId: string,
+  workspaceId: string,
+): string | undefined {
+  return database.query.workspaces
+    .findFirst({
+      columns: { name: true },
+      where: activeWorkspaceCondition(userId, workspaceId),
+    })
+    .sync()?.name;
 }
 
 function workspaceSelection() {
@@ -108,14 +121,6 @@ export function createWorkspaceStore(
   generateId: IdGenerator = createUuidV7,
 ): WorkspaceStore {
   const producer = createOperationProducer({ database });
-  const legacyDefault = (userId: string) => {
-    const current = store.defaultForUser(userId);
-    return current === undefined
-      ? null
-      : { id: current.id, name: current.name };
-  };
-  const ensureAccount = (userId: string) =>
-    operationAccountIntent(legacyDefault(userId));
   const store: WorkspaceStore = {
     create(
       userId: string,
@@ -123,25 +128,10 @@ export function createWorkspaceStore(
       now: number,
     ): WorkspaceSummary | undefined {
       return normalizedWorkspaceName(name, (normalizedName) => {
-        const id = generateId(now);
-        return database.transaction((transaction) => {
-          const created = insertWorkspace(transaction, {
-            id,
-            name: normalizedName,
-            now,
-            userId,
-          });
-          producer.produce(
-            userId,
-            [
-              ensureAccount(userId),
-              operationEntityIntent("workspaces", id, "workspace.create", {
-                name: normalizedName,
-              }),
-            ],
-            now,
-          );
-          return created;
+        return insertWorkspaceWithOperation(database, generateId, {
+          name: normalizedName,
+          now,
+          userId,
         });
       });
     },
@@ -152,32 +142,11 @@ export function createWorkspaceStore(
         return existing;
       }
 
-      const id = generateId(now);
-
-      return database.transaction((transaction) => {
-        const created = insertWorkspace(transaction, {
-          id,
-          isDefault: true,
-          name: DEFAULT_WORKSPACE_NAME,
-          now,
-          userId,
-        });
-        producer.produce(
-          userId,
-          [
-            operationEntityIntent("workspaces", id, "workspace.create", {
-              name: DEFAULT_WORKSPACE_NAME,
-            }),
-            operationEntityIntent(
-              "users",
-              userId,
-              "user.default-workspace.set",
-              { defaultWorkspaceId: id },
-            ),
-          ],
-          now,
-        );
-        return created;
+      return insertWorkspaceWithOperation(database, generateId, {
+        isDefault: true,
+        name: DEFAULT_WORKSPACE_NAME,
+        now,
+        userId,
       });
     },
 
@@ -223,28 +192,28 @@ export function createWorkspaceStore(
       }
       return normalizedWorkspaceName(name, (normalizedName) =>
         database.transaction((transaction) => {
-          const current = transaction
-            .select({ name: workspaces.name })
-            .from(workspaces)
-            .where(activeWorkspaceCondition(userId, workspaceId))
-            .get();
+          const currentName = activeWorkspaceName(
+            transaction,
+            userId,
+            workspaceId,
+          );
           const [updated] = transaction
             .update(workspaces)
             .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
             .where(activeWorkspaceCondition(userId, workspaceId))
             .returning(workspaceSelection())
             .all();
-          if (updated !== undefined && current !== undefined)
+          if (updated !== undefined && currentName !== undefined)
             producer.produce(
               userId,
               [
-                ensureAccount(userId),
+                legacyDefaultOperationIntent(database, userId),
                 operationEntityIntent(
                   "workspaces",
                   workspaceId,
                   "workspace.name.set",
                   { value: normalizedName },
-                  { name: current.name },
+                  { name: currentName },
                 ),
               ],
               now,
@@ -374,7 +343,7 @@ export function createWorkspaceStore(
                 ),
               ]
             : [
-                ensureAccount(userId),
+                legacyDefaultOperationIntent(database, userId),
                 operationEntityIntent(
                   "workspaces",
                   workspaceId,
@@ -394,12 +363,12 @@ export function createWorkspaceStore(
       }
 
       return database.transaction((transaction) => {
-        const target = transaction
-          .select({ name: workspaces.name })
-          .from(workspaces)
-          .where(activeWorkspaceCondition(userId, workspaceId))
-          .get();
-        if (target === undefined) {
+        const targetName = activeWorkspaceName(
+          transaction,
+          userId,
+          workspaceId,
+        );
+        if (targetName === undefined) {
           return false;
         }
         transaction
@@ -416,8 +385,8 @@ export function createWorkspaceStore(
               "workspaces",
               workspaceId,
               "workspace.create",
-              { name: target.name },
-              { name: target.name },
+              { name: targetName },
+              { name: targetName },
             ),
             operationEntityIntent(
               "users",

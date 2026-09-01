@@ -4,24 +4,17 @@ import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
 import { MAX_OPERATION_SYNC_BATCH_BYTES } from "../shared/operation-core";
 import { createOperationStore } from "../sync-engine/operation-store";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
-import { entityTestOperation } from "./operation-entity-test-support";
-import { createOperationDatabaseHarness } from "./operation-store-test-support";
+import {
+  largeEntityEnvelope,
+  operationDatabase,
+} from "./operation-producer-test-support";
 
 const ownerId = "owner-1";
-const encoded = (sequence: bigint, payloadBytes: number) =>
-  encodeOperationEnvelope(
-    entityTestOperation(
-      ownerId,
-      sequence,
-      sequence === 1n ? {} : { [ownerId]: sequence - 1n },
-      "x".repeat(payloadBytes),
-      Date.now(),
-    ),
-  );
+const encoded = (sequence: bigint, bytes: number) =>
+  encodeOperationEnvelope(largeEntityEnvelope(ownerId, sequence, bytes));
 
 test("synchronization POST rejects a batch above the byte cap", async () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   const handler = createOperationSynchronization(database, {
     authenticatedUser: () => ({
       id: ownerId,
@@ -30,37 +23,29 @@ test("synchronization POST rejects a batch above the byte cap", async () => {
     }),
   });
   const envelope = encoded(1n, 240_000);
-  const response = await handler(
-    new Request("http://localhost/api/operations/synchronize", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        ownerId,
-        partition: "non-session",
-        envelopes: Array(18).fill(envelope),
-      }),
+  const request = new Request("http://localhost/operations", {
+    body: JSON.stringify({
+      ownerId,
+      partition: "non-session",
+      envelopes: Array.from({ length: 18 }, () => envelope),
     }),
-  );
+    headers: { "content-type": "application/json" },
+    method: "POST",
+  });
+  const response = await handler(request);
   expect(response.status).toBe(400);
   harness.close();
 });
 
 test("operation store byte-caps pull pages and resumes with hasMore", () => {
-  const harness = createOperationDatabaseHarness();
-  const { database } = harness.setup();
+  const { harness, database } = operationDatabase();
   const store = createOperationStore({ database });
   const now = Date.now();
   for (let index = 1; index <= 20; index += 1) {
     const sequence = BigInt(index);
     store.appendEnvelope(
       ownerId,
-      entityTestOperation(
-        ownerId,
-        sequence,
-        sequence === 1n ? {} : { [ownerId]: sequence - 1n },
-        "x".repeat(240_000),
-        now + index,
-      ),
+      largeEntityEnvelope(ownerId, sequence, 240_000, now + index),
       ownerId,
       now,
     );
