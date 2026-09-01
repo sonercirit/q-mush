@@ -188,9 +188,7 @@ const reduceWorkspace = (
   const current = workspaceRecord(projection, operation.entity.id);
   const next: WorkspaceProjection =
     operation.kind === "workspace.create"
-      ? current.deleted !== undefined
-        ? current
-        : createNamedEntity(current, operation)
+      ? createNamedEntity(current, operation)
       : operation.kind === "workspace.name.set"
         ? current.deleted !== undefined
           ? current

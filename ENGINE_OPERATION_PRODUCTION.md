@@ -55,10 +55,16 @@ Backfill is conditional: it emits only for touched legacy-only workspaces absent
 from projection, and emits the default register only when required and absent.
 Ensure-create is fill-if-absent: reducers retain early field registers before
 creation, then ensure fills `created` and missing registers without overwriting
-existing values. This must be order-independent because producer and per-writer
-floors make minting below prior clocks impossible in general. Reflection mirrors
-the projection's effective default. With active workspaces exactly one active
-legacy row is default; with zero, `list` returns the global ID as a
+existing values. This includes delete-before-ensure: ensure records creation and
+the legacy name while preserving the remove-wins tombstone, so reflection can
+soft-delete rather than lose the entity identity. Checkpoint round trips
+preserve both intermediate arrival orders. This must be order-independent
+because producer and per-writer floors make minting below prior clocks
+impossible in general. Reflection mirrors the projection's effective default.
+Before assigning that default, reflection clears `is_default` on every owner
+row, then sets the selected row while applying projection rows; this statement
+order is required by the partial unique index. With active workspaces exactly
+one active legacy row is default; with zero, `list` returns the global ID as a
 deterministic non-throwing placeholder until lazy repair or creation. A
 near-unreachable cross-owner UUID collision fails reflection rather than
 mutating another owner.

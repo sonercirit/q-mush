@@ -132,6 +132,11 @@ export const reflectRunnerWorkspaceOperations = (
   const defaultId = active.some(({ id }) => id === projectedDefault)
     ? projectedDefault
     : (active[0]?.id ?? null);
+  database
+    .update(workspaces)
+    .set({ isDefault: false })
+    .where(and(eq(workspaces.userId, ownerId), eq(workspaces.isDefault, true)))
+    .run();
   for (const projected of projection.workspaces) {
     if (projected.created === undefined || projected.name === undefined)
       continue;

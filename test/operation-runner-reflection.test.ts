@@ -22,13 +22,13 @@ const runnerId = "reflection-runner";
 const endpoint = `http://localhost${OPERATION_SYNCHRONIZATION_PATH}`;
 const reflectedId = "workspace-reflected";
 const operationNow = Date.now();
-const workspaceOperation = (
+const runnerOperation = (
   sequence: bigint,
-  kind: "workspace.create" | "workspace.delete" | "workspace.name.set",
+  kind: string,
   payload: unknown,
-  parents: Readonly<Record<string, bigint>> = {},
-  clock = operationNow,
-  id = reflectedId,
+  entity: Operation["entity"],
+  parents: Readonly<Record<string, bigint>>,
+  clock: number,
 ): Operation =>
   createOperation({
     operationId: `runner-${sequence.toString()}`,
@@ -37,10 +37,40 @@ const workspaceOperation = (
     sequence,
     clock: { physicalMs: clock, logical: Number(sequence), writerId: runnerId },
     parents,
-    entity: { accountId: ownerId, id, type: "workspaces" },
+    entity,
     kind,
     payload,
   });
+const workspaceOperation = (
+  sequence: bigint,
+  kind: "workspace.create" | "workspace.delete" | "workspace.name.set",
+  payload: unknown,
+  parents: Readonly<Record<string, bigint>> = {},
+  clock = operationNow,
+  id = reflectedId,
+): Operation =>
+  runnerOperation(
+    sequence,
+    kind,
+    payload,
+    { accountId: ownerId, id, type: "workspaces" },
+    parents,
+    clock,
+  );
+const userDefaultOperation = (
+  sequence: bigint,
+  workspaceId: string,
+  parents: Readonly<Record<string, bigint>>,
+  clock = operationNow,
+): Operation =>
+  runnerOperation(
+    sequence,
+    "user.default-workspace.set",
+    { defaultWorkspaceId: workspaceId },
+    { accountId: ownerId, id: ownerId, type: "users" },
+    parents,
+    clock,
+  );
 const promptOperation = (): Operation =>
   createOperation({
     operationId: "prompt-1",
@@ -104,6 +134,18 @@ const insertLegacyReflectedWorkspace = (database: TestDatabase): void => {
 };
 const close = (database: TestDatabase): void => {
   database.$client.close();
+};
+const expectDefault = (
+  database: TestDatabase,
+  id: string,
+  name?: string,
+): void => {
+  const listed = createWorkspaceStore(database).list(ownerId);
+  expect(listed.defaultWorkspaceId).toBe(id);
+  const defaults = listed.workspaces.filter((workspace) => workspace.isDefault);
+  expect(defaults).toHaveLength(1);
+  expect(defaults[0]?.id).toBe(id);
+  if (name !== undefined) expect(defaults[0]?.name).toBe(name);
 };
 const expectListedWorkspace = (database: TestDatabase, name: string): void => {
   expect(
@@ -291,32 +333,112 @@ test("prior engine clock cannot erase an older runner rename of a legacy-only wo
   database.$client.close();
 });
 
-test("runner deleting the default deterministically reassigns a surviving default", async () => {
-  const { database, push } = setup();
+test("runner delete of a legacy-only workspace retains identity and soft-deletes the row", async () => {
+  const context = setup();
+  const database = context.database;
+  insertLegacyReflectedWorkspace(database);
+
+  const response = await context.push([
+    workspaceOperation(1n, "workspace.delete", {}, {}, operationNow - 100),
+  ]);
+  expect(response.status).toBe(200);
+
+  expect(reflectedRow(database)).toMatchObject({ isDeleted: true });
   expect(
-    createWorkspaceStore(database, () => reflectedId).create(
-      ownerId,
-      "Survivor",
-      TEST_NOW + 1,
-    ),
-  ).toBeDefined();
-  await expectWorkspacePushStatus(
+    createWorkspaceStore(database)
+      .list(ownerId)
+      .workspaces.some((workspace) => workspace.id === reflectedId),
+  ).toBe(false);
+  const projected = projectionWorkspace(database);
+  expect(projected?.created).toBeDefined();
+  expect(projected?.deleted).toBeDefined();
+  expect(projected?.name?.value).toBe("Legacy");
+  close(database);
+});
+
+test("runner-created survivor becomes default when runner deletes the engine default", async () => {
+  const { database, push } = setup();
+  const survivorId = "000-runner-created-survivor";
+  await expectPush(
     push,
     workspaceOperation(
       1n,
-      "workspace.delete",
-      {},
+      "workspace.create",
+      { name: "Survivor" },
       {},
       operationNow,
+      survivorId,
+    ),
+  );
+  await expectWorkspacePushStatus(
+    push,
+    workspaceOperation(
+      2n,
+      "workspace.delete",
+      {},
+      { [runnerId]: 1n },
+      operationNow + 1,
       TEST_WORKSPACE_ID,
     ),
     200,
   );
-  const listed = createWorkspaceStore(database).list(ownerId);
-  expect(listed.defaultWorkspaceId).toBe(reflectedId);
-  expect(listed.workspaces.filter(({ isDefault }) => isDefault)).toHaveLength(
-    1,
+
+  expectDefault(database, survivorId, "Survivor");
+  close(database);
+});
+
+test("runner deleting the default deterministically reassigns a surviving default", async () => {
+  const { database, push } = setup();
+  const workspaces = createWorkspaceStore(database, () => reflectedId);
+  expect(workspaces.create(ownerId, "Survivor", TEST_NOW + 1)).toBeDefined();
+  const deletion = workspaceOperation(
+    1n,
+    "workspace.delete",
+    {},
+    {},
+    operationNow,
+    TEST_WORKSPACE_ID,
   );
+  expect((await push([deletion])).status).toBe(200);
+  const listed = createWorkspaceStore(database).list(ownerId);
+  const defaultCount = listed.workspaces.reduce(
+    (count, workspace) => count + Number(workspace.isDefault),
+    0,
+  );
+  expect(listed.defaultWorkspaceId).toBe(reflectedId);
+  expect(defaultCount).toBe(1);
+  close(database);
+});
+
+test("projected default register selects a non-first surviving workspace", async () => {
+  const { database, push } = setup();
+  const secondId = "workspace-second-survivor";
+  expect(
+    (
+      await push([
+        workspaceOperation(1n, "workspace.create", { name: "First" }),
+        workspaceOperation(
+          2n,
+          "workspace.create",
+          { name: "Second" },
+          { [runnerId]: 1n },
+          operationNow,
+          secondId,
+        ),
+      ])
+    ).status,
+  ).toBe(200);
+  await expectPush(
+    push,
+    userDefaultOperation(
+      3n,
+      secondId,
+      { [runnerId]: 2n },
+      operationNow + 10_000,
+    ),
+  );
+
+  expectDefault(database, secondId, "Second");
   close(database);
 });
 
