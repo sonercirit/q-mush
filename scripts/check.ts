@@ -6,7 +6,7 @@ import { listProjectFiles } from "./project-files";
 const CACHE_DIRECTORY = "data/check-cache";
 const WARM_BUDGET_SECONDS = 5;
 const COLD_BUDGET_SECONDS = 60;
-const LINT_SHARD_COUNT = 4;
+const LINT_SHARD_COUNT = 6;
 const FORMAT_SHARD_COUNT = 4;
 const LINT_EXTENSIONS = new Set([
   ".cjs",
@@ -152,11 +152,11 @@ const tasks: readonly Task[] = [
     ),
     name: "format",
   },
-  { commands: [["bun", "run", "typecheck"]], name: "typecheck" },
+  { commands: [["node_modules/.bin/tsc", "--noEmit"]], name: "typecheck" },
   { commands: [["bun", "run", "knip"]], name: "knip" },
-  { commands: [["bun", "run", "cpd"]], name: "cpd" },
+  { commands: [["bun", "scripts/cpd.ts"]], name: "cpd" },
   {
-    commands: [["bun", "run", "repository-check"]],
+    commands: [["bun", "scripts/repository-check.ts"]],
     name: "repository-check",
   },
 ];
