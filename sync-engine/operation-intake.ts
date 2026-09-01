@@ -3,7 +3,6 @@ import { createUuidV7, type IdGenerator } from "../shared/ids";
 import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
-  type OperationCheckpointProjection,
 } from "../shared/operation-checkpoint";
 import {
   MAX_OPERATION_BATCH_SIZE,
@@ -19,6 +18,11 @@ import {
   applyOperationIntakeBatch,
   initialOperationApplyState,
 } from "../shared/operation-intake-core";
+import {
+  initialOperationEntityProjection,
+  operationEntityProjectionCodec,
+  reduceOperationEntityProjection,
+} from "../shared/operation-projection";
 import {
   engineStabilityBoundaryClock,
   stabilizeOperationApplyState,
@@ -54,10 +58,6 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
       ownerId: string,
       partition: OperationPartition,
       operations: readonly Operation[],
-      reducer: (
-        projection: OperationCheckpointProjection,
-        operation: Operation,
-      ) => OperationCheckpointProjection,
       actorId: string,
       now: number,
     ): OperationIntakeResult {
@@ -70,8 +70,11 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
         const encoded = store.loadCheckpoint(ownerId, partition);
         let state =
           encoded === undefined
-            ? initialOperationApplyState<OperationCheckpointProjection>([])
-            : decodeOperationCheckpoint(encoded);
+            ? initialOperationApplyState(initialOperationEntityProjection)
+            : decodeOperationCheckpoint(
+                encoded,
+                operationEntityProjectionCodec,
+              );
         const candidates = operations.flatMap((operation) => {
           if (operation.partition !== partition)
             throw operationProtocolError(
@@ -96,11 +99,15 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           append: (_encoded, snapshot) => {
             store.appendEnvelope(ownerId, snapshot, actorId, now);
           },
-          reducer,
+          reducer: reduceOperationEntityProjection,
         });
         const boundary = engineStabilityBoundaryClock(now);
         if (boundary !== undefined)
-          state = stabilizeOperationApplyState(state, boundary, reducer);
+          state = stabilizeOperationApplyState(
+            state,
+            boundary,
+            reduceOperationEntityProjection,
+          );
         if (
           state.replayCount + state.pending.length >
           ownerPartitionOperationLimit
@@ -109,7 +116,10 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
             "capacity",
             "Operation history capacity reached",
           );
-        const encodedCheckpoint = encodeOperationCheckpoint(state);
+        const encodedCheckpoint = encodeOperationCheckpoint(
+          state,
+          operationEntityProjectionCodec,
+        );
         if (
           new TextEncoder().encode(encodedCheckpoint).byteLength >
           checkpointByteLimit

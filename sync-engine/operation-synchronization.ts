@@ -169,7 +169,6 @@ export const createOperationSynchronization = (
         ownerId,
         parsed.partition,
         operations,
-        (projection, operation) => [...projection, operation.operationId],
         ownerId,
         now,
       );

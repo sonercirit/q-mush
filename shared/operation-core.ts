@@ -4,6 +4,7 @@ import {
   freezeOperationValue,
   snapshotOperationValue,
 } from "./operation-value";
+import { assertExactObjectKeys, nullPrototypeRecord } from "./validation";
 
 export interface OperationProtocolError extends Error {
   readonly operationError: "invalid" | "conflict" | "capacity";
@@ -64,14 +65,13 @@ const exactOperationKeys = (
   value: object,
   expected: readonly string[],
 ): void => {
-  const keys = Object.keys(value);
-  if (
-    keys.length !== expected.length ||
-    expected.some((key) => !Object.hasOwn(value, key))
-  )
-    throw new Error("Operation values must contain exact keys");
+  assertExactObjectKeys(
+    value,
+    expected,
+    "Operation values must contain exact keys",
+  );
 };
-const inputKeys = [
+export const operationInputKeys = [
   "operationId",
   "schemaVersion",
   "writerId",
@@ -82,6 +82,11 @@ const inputKeys = [
   "kind",
   "payload",
 ] as const;
+
+export const operationEntityKeys = (entity: object): readonly string[] =>
+  Object.hasOwn(entity, "workspaceId")
+    ? ["type", "id", "accountId", "workspaceId"]
+    : ["type", "id", "accountId"];
 
 function validateAndSnapshotOperation<TPayload>(
   input: OperationInput<TPayload>,
@@ -99,15 +104,12 @@ function validateAndSnapshotOperation<TPayload>(
   const hasPartition = Object.hasOwn(snapshot, "partition");
   exactOperationKeys(
     snapshot,
-    includesPartition || hasPartition ? [...inputKeys, "partition"] : inputKeys,
+    includesPartition || hasPartition
+      ? [...operationInputKeys, "partition"]
+      : operationInputKeys,
   );
   exactOperationKeys(snapshot.clock, ["physicalMs", "logical", "writerId"]);
-  exactOperationKeys(
-    snapshot.entity,
-    Object.hasOwn(snapshot.entity, "workspaceId")
-      ? ["type", "id", "accountId", "workspaceId"]
-      : ["type", "id", "accountId"],
-  );
+  exactOperationKeys(snapshot.entity, operationEntityKeys(snapshot.entity));
   if (!Number.isInteger(snapshot.schemaVersion) || snapshot.schemaVersion < 1)
     throw new Error("schemaVersion must be positive");
   if (snapshot.sequence < 1n) throw new Error("sequence must be positive");
@@ -298,13 +300,30 @@ const addApplied = (
   return next;
 };
 
+/** Canonically orders clock-bearing records by HLC. */
+export const replayOperationsNewestFirst = (
+  head: ReplayEntry | undefined,
+): Operation[] => {
+  const operations: Operation[] = [];
+  for (let entry = head; entry !== undefined; entry = entry.previous)
+    operations.push(entry.operation);
+  return operations;
+};
+
+export const replayOperationsOldestFirst = (
+  head: ReplayEntry | undefined,
+): Operation[] => replayOperationsNewestFirst(head).reverse();
+
+export const sortByClock = <T extends { readonly clock: HybridTimestamp }>(
+  items: readonly T[],
+): T[] =>
+  [...items].sort((left, right) => compareClocks(left.clock, right.clock));
+
 const orderedReady = (
   operations: readonly Operation[],
   frontier: CausalFrontier,
 ): Operation[] =>
-  operations
-    .filter((item) => isReady(item, frontier))
-    .sort((left, right) => compareClocks(left.clock, right.clock));
+  sortByClock(operations.filter((item) => isReady(item, frontier)));
 const reducerOperationCopy = (operation: Operation): Operation =>
   freezeOperationValue(snapshotOperationValue(operation));
 export const reduceOperationSequence = <TProjection>(
@@ -350,11 +369,8 @@ const validateWriterClocks = (operations: readonly Operation[]): void => {
 };
 export const validateOperationWriterClocks = validateWriterClocks;
 
-const nullPrototypeBigintRecord = (): Record<string, bigint> => {
-  const record: Record<string, bigint> = {};
-  Object.setPrototypeOf(record, null);
-  return record;
-};
+export const nullPrototypeBigintRecord = (): Record<string, bigint> =>
+  nullPrototypeRecord<bigint>();
 
 export const advanceOperationFrontier = (
   initial: CausalFrontier,
@@ -492,9 +508,7 @@ export const applyOperation = <TProjection>(
       for (let entry = replayHead; entry !== undefined; entry = entry.previous)
         replayHistory.push(entry.operation);
       replayHistory.reverse();
-      const replay = [...replayHistory, ...ready].sort((left, right) =>
-        compareClocks(left.clock, right.clock),
-      );
+      const replay = sortByClock([...replayHistory, ...ready]);
       projection = reduceOperationSequence(baseProjection, replay, reducer);
       frontier = advanceOperationFrontier(baseFrontier, replay);
       const appended = appendReplay(undefined, 0, replay);

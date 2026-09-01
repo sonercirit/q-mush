@@ -1,17 +1,32 @@
 import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
+  type OperationProjectionCodec,
 } from "../shared/operation-checkpoint";
 import type { OperationApplyState } from "../shared/operation-core";
+
+export const stringArrayProjectionCodec: OperationProjectionCodec<
+  readonly string[]
+> = {
+  encode: (projection) => projection,
+  decode: (value) => {
+    if (
+      !Array.isArray(value) ||
+      !value.every((item) => typeof item === "string")
+    )
+      throw new Error("Invalid string projection");
+    return value;
+  },
+};
 
 export const expectCheckpointRejection = (
   state: OperationApplyState<readonly string[]>,
   pattern: RegExp,
 ): void => {
-  const encoded = encodeOperationCheckpoint(state);
+  const encoded = encodeOperationCheckpoint(state, stringArrayProjectionCodec);
   let error: unknown;
   try {
-    decodeOperationCheckpoint(encoded);
+    decodeOperationCheckpoint(encoded, stringArrayProjectionCodec);
   } catch (caught) {
     error = caught;
   }

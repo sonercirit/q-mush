@@ -11,6 +11,7 @@ import {
   testOperation,
   testSessionOperation,
 } from "./operation-core-test-support.ts";
+import { expectWorkspaceName } from "./operation-intake-test-support.ts";
 import { applyAndCompactRunnerOperation } from "./runner-operation-stability-test-support.ts";
 import {
   applyRunnerEnvelope,
@@ -30,7 +31,7 @@ const withStore = (
 const withLimitedRunnerStore = (run: (store: Store) => void): void => {
   withRunnerOperationStore(
     (database) =>
-      createRunnerOperationStore(database, { checkpointBytes: 2_500 }),
+      createRunnerOperationStore(database, { checkpointBytes: 3_200 }),
     run,
   );
 };
@@ -134,9 +135,56 @@ test("treats duplicate envelopes as idempotent", () => {
     const duplicate = envelope(1n);
     remote(store, Array(3).fill(duplicate));
     expectStates(store, ["accepted"]);
-    expect(store.state(runnerOwnerId, "non-session").projection).toEqual([
-      "owner-1-1",
-    ]);
+    expect(
+      store.state(runnerOwnerId, "non-session").projection.workspaces[0]?.name
+        ?.value,
+    ).toBe("value-1");
+  });
+});
+
+test("runner rejects a mismatched user register identity", () => {
+  withStore((store) => {
+    const base = decodeOperationEnvelope(envelope(1n));
+    const mismatched = encodeOperationEnvelope({
+      ...base,
+      entity: {
+        type: "users",
+        id: "another-user-row",
+        accountId: runnerOwnerId,
+      },
+      kind: "user.default-workspace.set",
+      payload: { defaultWorkspaceId: null },
+    });
+    remote(store, [mismatched]);
+    expect(rows(store)).toHaveLength(1);
+    expect(rows(store)[0]?.rejectionReason).toMatch(/match account/);
+    expectRunnerOperationState(store, { stalled: true });
+    expectNonSessionFrontier(store, {});
+  });
+});
+
+test("unknown session kind quarantines once and stalls across redelivery", () => {
+  withStore((store) => {
+    const sessionOperation = testSessionOperation(
+      runnerOwnerId,
+      1n,
+      "session-value",
+    );
+    const encoded = encodeOperationEnvelope({
+      ...sessionOperation,
+      entity: { ...sessionOperation.entity, accountId: runnerOwnerId },
+    });
+    for (let delivery = 0; delivery < 3; delivery += 1)
+      remoteSession(store, [encoded]);
+    const quarantined = store.inspect(runnerOwnerId, "session");
+    expect(quarantined).toHaveLength(1);
+    expect(quarantined[0]).toMatchObject({ verificationState: "rejected" });
+    expect(quarantined[0]?.rejectionReason).toMatch(/unsupported|entity/);
+    expect(quarantined[0]?.rejectionReason?.length).toBeLessThanOrEqual(400);
+    expect(store.state(runnerOwnerId, "session")).toMatchObject({
+      frontier: {},
+      stalled: true,
+    });
   });
 });
 
@@ -147,20 +195,6 @@ test("durably quarantines distinct poisons and applies the valid prefix", () => 
     expect(store.state("owner-1", "non-session")).toMatchObject({
       frontier: { "owner-1": 1n },
       stalled: true,
-    });
-    const sessionOperation = testSessionOperation(
-      "owner-1",
-      1n,
-      "session-value",
-    );
-    remoteSession(store, [
-      encodeOperationEnvelope({
-        ...sessionOperation,
-        entity: { ...sessionOperation.entity, accountId: "owner-1" },
-      }),
-    ]);
-    expect(store.state("owner-1", "session").frontier).toEqual({
-      "owner-1": 1n,
     });
   });
 });
@@ -199,7 +233,7 @@ test("does not advance or retain later operations across a rejected identity", (
       expect.objectContaining({ verificationState: "rejected" }),
     ]);
     const state = store.state("owner-1", "non-session");
-    expect(state.projection).toEqual(["owner-1-1"]);
+    expectWorkspaceName(state.projection, "value-1");
     expect(state.pending).toEqual([]);
     expect(state.frontier).toEqual({ "owner-1": 1n });
     expect(state.stalled).toBe(true);

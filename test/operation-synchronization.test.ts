@@ -15,7 +15,7 @@ import { isRecord } from "../shared/validation";
 import { type OperationIntakeLimits } from "../sync-engine/operation-intake";
 import { createOperationStore } from "../sync-engine/operation-store";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization";
-import { testOperation } from "./operation-core-test-support";
+import { entityTestOperation } from "./operation-entity-test-support";
 import { createOperationDatabaseHarness } from "./operation-store-test-support";
 
 const harness = createOperationDatabaseHarness();
@@ -50,7 +50,7 @@ const body = (
 const OWNED_OPERATION_CLOCK_BASE_MS = Date.now();
 const ownedOperation = (sequence = 1n) => {
   const sequenceNumber = Number(sequence);
-  const operation = testOperation(
+  const operation = entityTestOperation(
     "owner-1",
     sequence,
     {},
@@ -105,9 +105,11 @@ const expectSynchronizationStatus = async (
 ) => {
   expect(await synchronizationStatus([envelope])).toBe(expected);
 };
+const synchronizationReadStatus = async (frontier: unknown) =>
+  (await handler("owner-1")(readRequest(frontier))).status;
 const oversizedFrontierStatus = async (
   frontier: Readonly<Record<string, string>>,
-) => (await handler("owner-1")(readRequest(frontier))).status;
+) => synchronizationReadStatus(frontier);
 const decodedWriterIds = (value: unknown): readonly string[] => {
   if (!isRecord(value)) throw new Error("Expected response record");
   const envelopes = value["envelopes"];
@@ -211,6 +213,21 @@ test("operation synchronization rejects an operation for another account", async
     entity: { ...operation.entity, accountId: "owner-2" },
   };
   expect(await operationStatus(crossAccount)).toBe(403);
+});
+
+test("operation synchronization rejects a mismatched user register identity", async () => {
+  const operation = ownedOperation();
+  const mismatchedUser = {
+    ...operation,
+    entity: {
+      type: "users",
+      id: "another-user-row",
+      accountId: operation.entity.accountId,
+    },
+    kind: "user.default-workspace.set",
+    payload: { defaultWorkspaceId: null },
+  };
+  expect(await operationStatus(mismatchedUser)).toBe(400);
 });
 
 test("operation synchronization rejects another writer identity", async () => {
@@ -329,7 +346,7 @@ test("operation synchronization maps identity equivocation to conflict", async (
   const first = encodeOperationEnvelope(operation);
   const changed = encodeOperationEnvelope({
     ...operation,
-    payload: { value: "changed" },
+    payload: { name: "changed" },
   });
   expect(await synchronizationStatus([first, changed])).toBe(409);
 });
@@ -383,6 +400,10 @@ test("operation synchronization bounds frontier writers and components", async (
   expect(
     await oversizedFrontierStatus({ writer: "1".repeat(16 * 1024 + 1) }),
   ).toBe(400);
+});
+
+test("operation synchronization returns 400 for object frontier sequences", async () => {
+  expect(await synchronizationReadStatus({ a: { toString: "x" } })).toBe(400);
 });
 
 test("operation synchronization rejects invalid read scope and frontier syntax", async () => {

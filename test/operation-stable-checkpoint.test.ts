@@ -7,6 +7,7 @@ import {
 import {
   expectCheckpointRejection,
   mapTaggedCheckpointEntries,
+  stringArrayProjectionCodec,
   taggedCheckpointEntries,
 } from "./operation-checkpoint-test-support";
 import {
@@ -37,9 +38,15 @@ describe("stable checkpoint codec", () => {
   const stableState = stableArrayState;
 
   test("round trips the tenth stableClock field", () => {
-    const encoded = encodeOperationCheckpoint(stableState());
+    const encoded = encodeOperationCheckpoint(
+      stableState(),
+      stringArrayProjectionCodec,
+    );
     expect(decodeTagged(encoded)).toHaveLength(10);
-    expect(decodeOperationCheckpoint(encoded).stableClock).toEqual({
+    expect(
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec)
+        .stableClock,
+    ).toEqual({
       physicalMs: 10,
       logical: 0,
       writerId: "a",
@@ -48,27 +55,39 @@ describe("stable checkpoint codec", () => {
 
   test("accepts legacy nine-field checkpoints as unstable", () => {
     const encoded = withoutStableClock(
-      encodeOperationCheckpoint(testApplyState<readonly string[]>([])),
+      encodeOperationCheckpoint(
+        testApplyState<readonly string[]>([]),
+        stringArrayProjectionCodec,
+      ),
     );
     expect(decodeTagged(encoded)).toHaveLength(9);
-    expect(decodeOperationCheckpoint(encoded).stableClock).toBeUndefined();
+    expect(
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec)
+        .stableClock,
+    ).toBeUndefined();
   });
 
   test("rejects malformed stable clocks and field counts", () => {
     const state = stableState();
     expect(() =>
       decodeOperationCheckpoint(
-        encodeOperationCheckpoint({
-          ...state,
-          stableClock: stabilityClock(-1, "a"),
-        }),
+        encodeOperationCheckpoint(
+          {
+            ...state,
+            stableClock: stabilityClock(-1, "a"),
+          },
+          stringArrayProjectionCodec,
+        ),
+        stringArrayProjectionCodec,
       ),
     ).toThrow(/clock/);
     const encoded = mapTaggedCheckpointEntries(
-      encodeOperationCheckpoint(state),
+      encodeOperationCheckpoint(state, stringArrayProjectionCodec),
       (entries) => [...entries, ["extra", ["primitive", null]]],
     );
-    expect(() => decodeOperationCheckpoint(encoded)).toThrow(/fields/);
+    expect(() =>
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec),
+    ).toThrow(/fields/);
   });
 
   test("requires stableClock exactly with a nonempty base frontier", () => {

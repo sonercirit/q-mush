@@ -12,6 +12,7 @@ import {
   encodeOperationCheckpoint,
 } from "../shared/operation-checkpoint";
 import { createOperationStore } from "../sync-engine/operation-store";
+import { stringArrayProjectionCodec } from "./operation-checkpoint-test-support";
 import {
   testApplyState,
   testOperation,
@@ -56,7 +57,10 @@ type Partition = "non-session" | "session";
 const checkpointState = (projection: readonly string[]) =>
   testApplyState<readonly string[]>(projection);
 const checkpoint = (projection: readonly string[]) =>
-  encodeOperationCheckpoint(checkpointState(projection));
+  encodeOperationCheckpoint(
+    checkpointState(projection),
+    stringArrayProjectionCodec,
+  );
 const append = (
   store: Store,
   ownerId: string,
@@ -131,8 +135,10 @@ const loadedProjection = (
   ownerId: string,
   partition: Partition,
 ) =>
-  decodeOperationCheckpoint(store.loadCheckpoint(ownerId, partition) ?? "")
-    .projection;
+  decodeOperationCheckpoint(
+    store.loadCheckpoint(ownerId, partition) ?? "",
+    stringArrayProjectionCodec,
+  ).projection;
 afterEach(harness.close);
 
 test("operation envelopes append idempotently and reject equivocation", () => {

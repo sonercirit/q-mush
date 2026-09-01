@@ -3,8 +3,12 @@ import {
   compareClocks,
   createOperation,
   materializeApplied,
+  nullPrototypeBigintRecord,
+  operationEntityKeys,
   operationFingerprint,
   operationIdentityKeys,
+  operationInputKeys,
+  replayOperationsNewestFirst,
   restoreAppliedIdentityIndex,
   validateOperationWriterClocks,
   type HybridTimestamp,
@@ -14,24 +18,18 @@ import {
   type ReplayEntry,
 } from "./operation-core";
 import { freezeOperationValue } from "./operation-value";
+import { assertExactObjectKeys, isRecord } from "./validation";
 
 type EncodedCheckpointValue = readonly [string, unknown];
-const isCheckpointObject = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === "object" && !Array.isArray(value);
 const checkpointObject = (value: unknown): Record<string, unknown> => {
-  if (!isCheckpointObject(value)) throw new Error("Invalid checkpoint object");
+  if (!isRecord(value)) throw new Error("Invalid checkpoint object");
   return value;
 };
 const exactCheckpointKeys = (
   value: Record<string, unknown>,
   keys: readonly string[],
 ): void => {
-  const actual = Object.keys(value);
-  if (
-    actual.length !== keys.length ||
-    keys.some((key) => !Object.hasOwn(value, key))
-  )
-    throw new Error("Invalid checkpoint fields");
+  assertExactObjectKeys(value, keys, "Invalid checkpoint fields");
 };
 const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
   const root: { value?: EncodedCheckpointValue } = {};
@@ -54,7 +52,7 @@ const encodeCheckpointValue = (value: unknown): EncodedCheckpointValue => {
           value: item[index],
           assign: (encoded) => (body[index] = encoded),
         });
-    } else if (isCheckpointObject(item)) {
+    } else if (isRecord(item)) {
       const body: [string, EncodedCheckpointValue][] = [];
       task.assign(["object", body]);
       const entries = Object.entries(item);
@@ -157,22 +155,9 @@ const decodeOperation = (
   deferOwnWriterParentValidation = false,
 ): Operation => {
   const item = checkpointObject(value);
-  exactCheckpointKeys(item, [
-    "operationId",
-    "schemaVersion",
-    "partition",
-    "writerId",
-    "sequence",
-    "clock",
-    "parents",
-    "entity",
-    "kind",
-    "payload",
-  ]);
+  exactCheckpointKeys(item, [...operationInputKeys, "partition"]);
   const entity = checkpointObject(item["entity"]);
-  const entityKeys = Object.hasOwn(entity, "workspaceId")
-    ? ["type", "id", "accountId", "workspaceId"]
-    : ["type", "id", "accountId"];
+  const entityKeys = operationEntityKeys(entity);
   exactCheckpointKeys(entity, entityKeys);
   const workspaceId = entity["workspaceId"];
   if (
@@ -247,21 +232,21 @@ export const encodeOperationEnvelope = (operation: Operation): string =>
 export const decodeOperationEnvelope = (encoded: string): Operation =>
   decodeOperation(decodeEncoded(encoded, "operation envelope"));
 
-export type OperationCheckpointProjection = readonly string[];
+export interface OperationProjectionCodec<TProjection> {
+  readonly encode: (projection: TProjection) => unknown;
+  readonly decode: (value: unknown) => TProjection;
+}
 
-const replayOperations = (head: ReplayEntry | undefined): Operation[] => {
-  const replay: Operation[] = [];
-  for (let entry = head; entry !== undefined; entry = entry.previous)
-    replay.push(entry.operation);
-  return replay;
-};
-export const encodeOperationCheckpoint = (
-  state: OperationApplyState<OperationCheckpointProjection>,
+export const encodeOperationCheckpoint = <TProjection>(
+  state: OperationApplyState<TProjection>,
+  codec: OperationProjectionCodec<TProjection>,
 ): string => {
-  const replay = replayOperations(state.replayHead);
+  const replay = replayOperationsNewestFirst(state.replayHead);
   return JSON.stringify(
     encodeCheckpointValue({
       ...state,
+      projection: codec.encode(state.projection),
+      baseProjection: codec.encode(state.baseProjection),
       applied: materializeApplied(state.applied),
       replayHead: replay,
     }),
@@ -276,15 +261,10 @@ const clocksEqual = (
     : left.physicalMs === right?.physicalMs &&
       left.logical === right.logical &&
       left.writerId === right.writerId;
-const nullPrototypeBigintRecord = (): Record<string, bigint> => {
-  const record: Record<string, bigint> = {};
-  Object.setPrototypeOf(record, null);
-  return record;
-};
-const validateCheckpointConsistency = (
-  state: OperationApplyState<OperationCheckpointProjection>,
+const validateCheckpointConsistency = <TProjection>(
+  state: OperationApplyState<TProjection>,
 ): void => {
-  const replay = replayOperations(state.replayHead);
+  const replay = replayOperationsNewestFirst(state.replayHead);
   if (
     (state.stableClock === undefined) !==
     (Object.keys(state.baseFrontier).length === 0)
@@ -394,9 +374,10 @@ const validateCheckpointConsistency = (
       throw new Error("Invalid operation checkpoint pending identity");
   }
 };
-export const decodeOperationCheckpoint = (
+export const decodeOperationCheckpoint = <TProjection>(
   encoded: string,
-): OperationApplyState<OperationCheckpointProjection> => {
+  codec: OperationProjectionCodec<TProjection>,
+): OperationApplyState<TProjection> => {
   const decoded = decodeEncoded(encoded, "operation checkpoint");
   const state = checkpointObject(decoded);
   const checkpointKeys = [
@@ -422,20 +403,28 @@ export const decodeOperationCheckpoint = (
     Number(state["replayCount"]) < 0
   )
     throw new Error("Invalid operation checkpoint");
-  const validProjection = (
-    value: unknown,
-  ): value is OperationCheckpointProjection =>
-    Array.isArray(value) && value.every((item) => typeof item === "string");
-  if (!validProjection(state["projection"]))
-    throw new Error("Invalid operation checkpoint projection");
-  if (!validProjection(state["baseProjection"]))
-    throw new Error("Invalid operation checkpoint base projection");
-  const result: OperationApplyState<OperationCheckpointProjection> = {
+  let projection: TProjection;
+  let baseProjection: TProjection;
+  try {
+    projection = codec.decode(state["projection"]);
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint projection", {
+      cause: error,
+    });
+  }
+  try {
+    baseProjection = codec.decode(state["baseProjection"]);
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint base projection", {
+      cause: error,
+    });
+  }
+  const result: OperationApplyState<TProjection> = {
     frontier: nonNegativeBigintCheckpointRecord(state["frontier"]),
     pending: state["pending"].map((operation) =>
       decodeOperation(operation, true),
     ),
-    projection: state["projection"],
+    projection,
     applied: restoreAppliedIdentityIndex(
       stringCheckpointRecord(state["applied"]),
     ),
@@ -445,7 +434,7 @@ export const decodeOperationCheckpoint = (
       state["replayLastClock"] === undefined
         ? undefined
         : decodeClock(state["replayLastClock"]),
-    baseProjection: state["baseProjection"],
+    baseProjection,
     baseFrontier: nonNegativeBigintCheckpointRecord(state["baseFrontier"]),
     stableClock:
       legacy || state["stableClock"] === undefined

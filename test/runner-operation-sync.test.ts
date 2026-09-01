@@ -9,12 +9,13 @@ import {
   encodeOperationEnvelope,
 } from "../shared/operation-checkpoint.ts";
 import type { OperationPartition } from "../shared/operation-core.ts";
+import { operationEntityProjectionCodec } from "../shared/operation-projection.ts";
 import { createOperationStore } from "../sync-engine/operation-store.ts";
 import { createOperationSynchronization } from "../sync-engine/operation-synchronization.ts";
 import { testOperation } from "./operation-core-test-support.ts";
 import { createOperationDatabaseHarness } from "./operation-store-test-support.ts";
 
-type HarnessOutboxStall = NonNullable<
+type OutboxStall = NonNullable<
   ReturnType<
     ReturnType<typeof createRunnerOperationStore>["state"]
   >["outboxStalls"]
@@ -23,7 +24,7 @@ interface HarnessState {
   frontier: Readonly<Record<string, bigint>>;
   pending: readonly string[];
   stalled: boolean;
-  outboxStalls: readonly HarnessOutboxStall[];
+  outboxStalls: readonly OutboxStall[];
 }
 const harness = (initial: Partial<HarnessState> = {}) => {
   const state: HarnessState = {
@@ -145,9 +146,6 @@ interface EngineRunnerContext {
   readonly handler: ReturnType<typeof createOperationSynchronization>;
   readonly store: ReturnType<typeof createRunnerOperationStore>;
 }
-interface PermanentHeadContext extends EngineRunnerContext {
-  readonly now: number;
-}
 const withEngineAndRunner = async (
   run: (context: EngineRunnerContext) => Promise<void>,
 ) => {
@@ -164,20 +162,23 @@ const withEngineAndRunner = async (
     engine.close();
   }
 };
-const permanentHeadTest = (
+const engineRunnerTest = (
   name: string,
-  run: (context: PermanentHeadContext) => Promise<void>,
-) => {
-  test(name, () =>
-    withEngineAndRunner((context) => run({ ...context, now: Date.now() })),
-  );
+  run: (
+    context: EngineRunnerContext & { readonly now: number },
+  ) => Promise<void>,
+): void => {
+  test(name, async () => {
+    await withEngineAndRunner((context) =>
+      run({ ...context, now: Date.now() }),
+    );
+  });
 };
 const pendingForNonSession = (
   store: ReturnType<typeof createRunnerOperationStore>,
 ) => store.pending("self", "non-session");
-const noEnvelopes: readonly string[] = [];
-const emptyPage = () =>
-  Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
+const noEnvelopes: string[] = [];
+const page = () => Promise.resolve({ envelopes: noEnvelopes, hasMore: false });
 const ownedEngineOperation = <
   Operation extends ReturnType<typeof testOperation>,
 >(
@@ -199,10 +200,10 @@ const ownedEngineEnvelope = (
   );
 const engineOwnedEnvelope = () =>
   ownedEngineEnvelope(1n, {}, "local", Date.now());
-const resolvedWrite = () => Promise.resolve(undefined);
+const resolvedWrite = () => Promise.resolve();
 const emptyTransport = (
   writeBatch: Parameters<typeof synchronizeRunnerOperations>[1]["writeBatch"],
-) => ({ writeBatch, readPage: emptyPage });
+) => ({ writeBatch, readPage: page });
 const engineTransport = (
   handler: ReturnType<typeof createOperationSynchronization>,
   beforeWrite: (batch: readonly string[]) => void | Promise<void>,
@@ -214,7 +215,7 @@ const engineTransport = (
     await beforeWrite(batch);
     await postToEngine(handler, partition, batch);
   },
-  readPage: emptyPage,
+  readPage: page,
 });
 
 const recordingEngineTransport = (
@@ -232,31 +233,22 @@ const expectError = (value: unknown): Error => {
 };
 const captureError = async (promise: Promise<unknown>): Promise<Error> =>
   expectError(await promise.catch((reason: unknown) => reason));
-const runnerTransport = () =>
-  createRunnerOperationTransport("http://engine.test", "token");
+const transport = createRunnerOperationTransport("http://e", "t");
+const signal = () => new AbortController().signal;
 const readRunnerPage = () =>
-  runnerTransport().readPage({
+  transport.readPage({
     frontier: {},
     partition: "non-session",
-    signal: new AbortController().signal,
+    signal: signal(),
   });
 const writeEncoded = () =>
-  runnerTransport().writeBatch(
-    "non-session",
-    ["encoded"],
-    new AbortController().signal,
-  );
-const rejectedStall = (
-  operationId: string,
-  writerId: string,
-): HarnessOutboxStall => ({
+  transport.writeBatch("non-session", ["encoded"], signal());
+const rejectedStall = (operationId: string, writerId: string): OutboxStall => ({
   operationId,
   queuedBehind: 0,
   reason: "rejected",
   writerId,
 });
-const captureSynchronizationError = (replica: ReturnType<typeof harness>) =>
-  captureError(runSynchronization(replica, emptyTransport(resolvedWrite)));
 const expectOutboxRetained = (
   replica: ReturnType<typeof harness>,
   expected: readonly string[],
@@ -264,6 +256,14 @@ const expectOutboxRetained = (
   expect(replica.state.pending).toEqual(expected);
   expect(replica.events).toEqual([]);
 };
+
+const malformedPage = (stableClock: unknown, stableFrontier: unknown) =>
+  Response.json({
+    envelopes: [],
+    hasMore: false,
+    stableClock,
+    stableFrontier,
+  });
 
 test("transport defaults absent stability and rejects malformed stability", async () => {
   const fetchMock = vi.spyOn(globalThis, "fetch");
@@ -275,15 +275,13 @@ test("transport defaults absent stability and rejects malformed stability", asyn
       stableClock: null,
       stableFrontier: null,
     });
-    fetchMock.mockResolvedValueOnce(
-      Response.json({
-        envelopes: [],
-        hasMore: false,
-        stableClock: { physicalMs: -1, logical: 0, writerId: "a" },
-        stableFrontier: { a: "1" },
-      }),
-    );
-    await expect(readRunnerPage()).rejects.toThrow(/stability/);
+    for (const [clock, frontier] of [
+      [{ physicalMs: -1, logical: 0, writerId: "a" }, { a: "1" }],
+      [{ physicalMs: 1, logical: 0, writerId: "a" }, { a: { toString: "x" } }],
+    ] as const) {
+      fetchMock.mockResolvedValueOnce(malformedPage(clock, frontier));
+      await expect(readRunnerPage()).rejects.toThrow(/stability/);
+    }
   } finally {
     fetchMock.mockRestore();
   }
@@ -342,7 +340,11 @@ test("bounds reported stall identities while retaining total depth", async () =>
       ),
     ),
   });
-  const message = (await captureSynchronizationError(replica)).message;
+  const message = (
+    await captureError(
+      runSynchronization(replica, emptyTransport(resolvedWrite)),
+    )
+  ).message;
   expect(message).toContain(`${longOperationId.slice(0, 64)}…`);
   expect(message).not.toContain(longOperationId.slice(0, 66));
   expect(message).toContain("operation-001");
@@ -385,7 +387,7 @@ test("continues the other partition after one partition fails", async () => {
         partitions.push(partition);
         return partition === "non-session"
           ? Promise.reject(new Error("poisoned partition"))
-          : emptyPage();
+          : page();
       },
       writeBatch: resolvedWrite,
     }),
@@ -412,7 +414,7 @@ test("a durably stalled partition leaves its frontier fixed while its peer compl
   expect(replica.state.frontier).toEqual({});
 });
 
-permanentHeadTest(
+engineRunnerTest(
   "a permanent head poison never pushes or acknowledges causal successors",
   async ({ engineDatabase, handler, now, store }) => {
     const encoded = [
@@ -441,7 +443,7 @@ permanentHeadTest(
   },
 );
 
-permanentHeadTest(
+engineRunnerTest(
   "a permanent head bounds retries and drains all successors in order after repair",
   async ({ engineDatabase, handler, now, store }) => {
     const encoded = Array.from({ length: 9 }, (_, index) => {
@@ -493,6 +495,7 @@ permanentHeadTest(
         "owner-1",
         "non-session",
       ) ?? "",
+      operationEntityProjectionCodec,
     );
     expect(checkpoint.frontier).toEqual({ "owner-1": 9n });
     expect(checkpoint.pending).toEqual([]);
@@ -513,7 +516,7 @@ test("a batch 400 stalls only rejected singles, retains them, and continues pull
           : Promise.resolve(),
       readPage: ({ partition }) => {
         pulls.push(partition);
-        return emptyPage();
+        return page();
       },
     }),
   ).rejects.toThrow("outbox stalled");
@@ -565,7 +568,7 @@ test("re-pushes idempotently after engine commit and a dropped local acknowledge
     };
     const transport = {
       writeBatch: pushAfterCommit,
-      readPage: emptyPage,
+      readPage: page,
     };
     const synchronize = () => synchronizeStore(context.store, transport);
     await expect(synchronize()).rejects.toThrow("ack dropped");
@@ -583,7 +586,7 @@ test("acknowledges pushed outbox only after transport success", async () => {
     successful.store,
     {
       writeBatch: () => Promise.resolve(),
-      readPage: emptyPage,
+      readPage: page,
     },
     new AbortController().signal,
   );
@@ -597,7 +600,7 @@ test("acknowledges pushed outbox only after transport success", async () => {
       replica.store,
       {
         writeBatch: () => Promise.reject(offline),
-        readPage: emptyPage,
+        readPage: page,
       },
       new AbortController().signal,
     ),

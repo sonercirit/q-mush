@@ -1,6 +1,42 @@
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
+import { utf8ByteLength } from "./utf8";
+
+export const nullPrototypeRecord = <T>(): Record<string, T> => {
+  const record: Record<string, T> = {};
+  Object.setPrototypeOf(record, null);
+  return record;
+};
+
+export const isBoundedSafeRecordKey = (
+  value: unknown,
+  maximumBytes: number,
+): value is string =>
+  hasSafeRecordKey(value) && utf8ByteLength(value) <= maximumBytes;
+
+export const hasSafeRecordKey = (value: unknown): value is string =>
+  typeof value === "string" &&
+  value.length > 0 &&
+  value !== "__proto__" &&
+  value !== "prototype" &&
+  value !== "constructor";
+
+export const assertExactObjectKeys = (
+  value: object,
+  keys: readonly string[],
+  message: string,
+): void => {
+  if (!exactObjectKeys(value, keys)) throw new Error(message);
+};
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+export const exactObjectKeys = (
+  value: unknown,
+  keys: readonly string[],
+): value is Record<string, unknown> =>
+  isRecord(value) &&
+  Object.keys(value).length === keys.length &&
+  keys.every((key) => Object.hasOwn(value, key));
 
 export function requireRecord(
   value: unknown,
@@ -20,10 +56,11 @@ export function readFiniteNumber(value: unknown): number | undefined {
     : undefined;
 }
 
+export const isNonNegativeSafeInteger = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+
 export function readNonNegativeSafeInteger(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
-    ? value
-    : undefined;
+  return isNonNegativeSafeInteger(value) ? value : undefined;
 }
 
 export function readPositiveSafeInteger(value: unknown): number | null {

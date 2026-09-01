@@ -2,7 +2,7 @@ import { Database } from "bun:sqlite";
 import type { createRunnerOperationStore } from "../runner/runner-operation-store.ts";
 import { encodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
 import type { CausalFrontier } from "../shared/operation-core.ts";
-import { testOperation } from "./operation-core-test-support.ts";
+import { entityTestOperation } from "./operation-entity-test-support";
 
 export type RunnerOperationTestStore = ReturnType<
   typeof createRunnerOperationStore
@@ -10,7 +10,7 @@ export type RunnerOperationTestStore = ReturnType<
 export const runnerOwnerId = "owner-1";
 
 export const ownedRunnerOperation = (
-  operation: ReturnType<typeof testOperation>,
+  operation: ReturnType<typeof entityTestOperation>,
 ) => ({
   ...operation,
   entity: { ...operation.entity, accountId: runnerOwnerId },
@@ -21,7 +21,7 @@ export const runnerEnvelope = (
 ) =>
   encodeOperationEnvelope(
     ownedRunnerOperation(
-      testOperation(runnerOwnerId, sequence, {}, value, Number(sequence)),
+      entityTestOperation(runnerOwnerId, sequence, {}, value, Number(sequence)),
     ),
   );
 export const applyRunnerEnvelope = (

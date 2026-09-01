@@ -4,6 +4,7 @@ import {
   compareClocks,
   MAX_REMOTE_CLOCK_DRIFT_MS,
   reduceOperationSequence,
+  replayOperationsOldestFirst,
   type CausalFrontier,
   type HybridTimestamp,
   type Operation,
@@ -17,13 +18,6 @@ export interface OperationStabilityBoundary {
   readonly stableFrontier: CausalFrontier | null;
 }
 
-const replayOldestFirst = (head: ReplayEntry | undefined): Operation[] => {
-  const operations: Operation[] = [];
-  for (let entry = head; entry !== undefined; entry = entry.previous)
-    operations.push(entry.operation);
-  operations.reverse();
-  return operations;
-};
 const replayHead = (
   operations: readonly Operation[],
 ): ReplayEntry | undefined => {
@@ -47,7 +41,7 @@ export const stabilizeOperationApplyState = <TProjection>(
   boundaryClock: HybridTimestamp,
   reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
-  const replay = replayOldestFirst(state.replayHead);
+  const replay = replayOperationsOldestFirst(state.replayHead);
   if (replay.length === 0) return state;
   const latestByWriter = new Map<string, HybridTimestamp>();
   for (const operation of replay)

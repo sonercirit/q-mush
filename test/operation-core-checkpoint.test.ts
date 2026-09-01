@@ -18,6 +18,7 @@ import {
   type Operation,
   type OperationApplyState,
 } from "../shared/operation-core";
+import { stringArrayProjectionCodec } from "./operation-checkpoint-test-support";
 
 const operation = testOperation;
 const arrayState = () => testApplyState<readonly string[]>([]);
@@ -55,7 +56,10 @@ const requireEntry = (value: unknown, field: string): unknown[] => {
 const roundTrip = (
   state: OperationApplyState<readonly string[]>,
 ): OperationApplyState<readonly string[]> =>
-  decodeOperationCheckpoint(encodeOperationCheckpoint(state));
+  decodeOperationCheckpoint(
+    encodeOperationCheckpoint(state, stringArrayProjectionCodec),
+    stringArrayProjectionCodec,
+  );
 
 describe("operation checkpoints", () => {
   test("rejects encoded prototype object entries without prototype mutation", () => {
@@ -63,7 +67,9 @@ describe("operation checkpoints", () => {
       "object",
       [["__proto__", ["primitive", "value"]]],
     ]);
-    expect(() => decodeOperationCheckpoint(encoded)).toThrow(/checkpoint/);
+    expect(() =>
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec),
+    ).toThrow(/checkpoint/);
   });
 
   test("does not apply an operation below a decoded base frontier", () => {
@@ -104,13 +110,19 @@ describe("operation checkpoints", () => {
 
   test("does not admit a decoded checkpoint with duplicate reducer effects", () => {
     const pending = sequentialOperation("a", 2);
-    const encoded = encodeOperationCheckpoint({
-      ...arrayState(),
-      pending: [pending, pending],
-    });
+    const encoded = encodeOperationCheckpoint(
+      {
+        ...arrayState(),
+        pending: [pending, pending],
+      },
+      stringArrayProjectionCodec,
+    );
     let reducerCalls = 0;
     expect(() => {
-      const restored = decodeOperationCheckpoint(encoded);
+      const restored = decodeOperationCheckpoint(
+        encoded,
+        stringArrayProjectionCodec,
+      );
       applyOperation(restored, sequentialOperation("a", 1), (projection) => {
         reducerCalls += 1;
         return projection;
@@ -201,8 +213,13 @@ describe("operation checkpoints", () => {
     });
     expect(replayProjection).not.toBe(retained);
     expect(resorted.projection.join(",")).toBe("b-1,a-1");
-    const encoded = encodeOperationCheckpoint(resorted);
-    expect(() => decodeOperationCheckpoint(encoded)).not.toThrow();
+    const encoded = encodeOperationCheckpoint(
+      resorted,
+      stringArrayProjectionCodec,
+    );
+    expect(() =>
+      decodeOperationCheckpoint(encoded, stringArrayProjectionCodec),
+    ).not.toThrow();
   });
 
   test("replays twice from the stable base with an order-sensitive reducer", () => {
@@ -231,7 +248,9 @@ describe("operation checkpoints", () => {
 
   test("rejects malformed and extra checkpoint fields at every level", () => {
     const state = applyAll([sequentialOperation("a", 1)]);
-    const decoded: unknown = JSON.parse(encodeOperationCheckpoint(state));
+    const decoded: unknown = JSON.parse(
+      encodeOperationCheckpoint(state, stringArrayProjectionCodec),
+    );
     const decodedArray = requireArray(decoded);
     const objectEntries = requireArray(decodedArray[1]);
     const change = (field: string, replacement: unknown) => [
@@ -248,7 +267,7 @@ describe("operation checkpoints", () => {
       append,
     );
     const pendingDecoded: unknown = JSON.parse(
-      encodeOperationCheckpoint(pendingState),
+      encodeOperationCheckpoint(pendingState, stringArrayProjectionCodec),
     );
     const pendingOperationEntries = (value: unknown): unknown[] => {
       const rootEntries = requireArray(requireArray(value)[1]);
@@ -325,9 +344,12 @@ describe("operation checkpoints", () => {
       mutations.push(copy);
     }
     for (const mutation of mutations)
-      expect(() => decodeOperationCheckpoint(JSON.stringify(mutation))).toThrow(
-        /Invalid/,
-      );
+      expect(() =>
+        decodeOperationCheckpoint(
+          JSON.stringify(mutation),
+          stringArrayProjectionCodec,
+        ),
+      ).toThrow(/Invalid/);
   });
 
   test("preserves Date payload fingerprints through production checkpoints", () => {
