@@ -10,6 +10,7 @@ import {
 import {
   decodeOperationCheckpoint,
   encodeOperationCheckpoint,
+  type OperationProjectionCodec,
 } from "../shared/operation-checkpoint";
 import {
   applyOperation,
@@ -23,6 +24,12 @@ import { stringArrayProjectionCodec } from "./operation-checkpoint-test-support"
 const operation = testOperation;
 const arrayState = () => testApplyState<readonly string[]>([]);
 const append = appendOperationId;
+const replayingStringArrayProjectionCodec: OperationProjectionCodec<
+  readonly string[]
+> = {
+  ...stringArrayProjectionCodec,
+  replay: (base, operations) => operations.reduce(append, base),
+};
 const applyAll = (
   items: readonly Operation[],
   state = arrayState(),
@@ -62,6 +69,21 @@ const roundTrip = (
   );
 
 describe("operation checkpoints", () => {
+  test("fails closed on an alias without replay support", () => {
+    const state = applyAll([sequentialOperation("alias", 1)]);
+    const aliased = encodeOperationCheckpoint(
+      state,
+      replayingStringArrayProjectionCodec,
+    );
+    expect(() =>
+      decodeOperationCheckpoint(aliased, stringArrayProjectionCodec),
+    ).toThrow(/projection alias/);
+    const full = encodeOperationCheckpoint(state, stringArrayProjectionCodec);
+    expect(
+      decodeOperationCheckpoint(full, stringArrayProjectionCodec).projection,
+    ).toEqual(state.projection);
+  });
+
   test("rejects encoded prototype object entries without prototype mutation", () => {
     const encoded = JSON.stringify([
       "object",

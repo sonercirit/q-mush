@@ -11,6 +11,7 @@ import {
 } from "../shared/database/schema.ts";
 import { defaultValues } from "../shared/default-store.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { isOperationProtocolError } from "../shared/operation-core.ts";
 import {
   DEFAULT_WORKSPACE_NAME,
   GLOBAL_WORKSPACE_ID,
@@ -18,13 +19,20 @@ import {
   type WorkspaceSummary,
 } from "../shared/workspace-model.ts";
 
+import { commandOperationProducer } from "./command-operation-producer.ts";
 import { activeCredentialWorkspaceCondition } from "./credential-workspace-query.ts";
+import type { OperationIntakeLimits } from "./operation-intake.ts";
+import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
+import {
+  operationEntityEnsureIntent,
+  operationEntityIntent,
+} from "./operation-producer.ts";
+import { insertWorkspaceWithOperation } from "./workspace-command-create.ts";
 import {
   defaultWorkspaceCondition,
   setWorkspaceDefault,
 } from "./workspace-default.ts";
 import { ownedWorkspaceExists } from "./workspace-query.ts";
-import { insertWorkspace } from "./workspace-write.ts";
 
 const WORKSPACE_NAME_MAXIMUM_LENGTH = 100;
 
@@ -37,6 +45,19 @@ function activeWorkspaceCondition(
     not(workspaces.isDeleted),
     workspaceId === undefined ? undefined : eq(workspaces.id, workspaceId),
   );
+}
+
+function activeWorkspaceName(
+  database: Pick<AppDatabase, "query">,
+  userId: string,
+  workspaceId: string,
+): string | undefined {
+  return database.query.workspaces
+    .findFirst({
+      columns: { name: true },
+      where: activeWorkspaceCondition(userId, workspaceId),
+    })
+    .sync()?.name;
 }
 
 function workspaceSelection() {
@@ -67,7 +88,8 @@ function normalizedWorkspaceName(
   if (normalizedName === undefined) return undefined;
   try {
     return action(normalizedName);
-  } catch {
+  } catch (error) {
+    if (isOperationProtocolError(error)) throw error;
     return undefined;
   }
 }
@@ -99,7 +121,9 @@ export interface WorkspaceStore {
 export function createWorkspaceStore(
   database: AppDatabase,
   generateId: IdGenerator = createUuidV7,
+  operationLimits?: OperationIntakeLimits,
 ): WorkspaceStore {
+  const producer = commandOperationProducer(database, operationLimits);
   const store: WorkspaceStore = {
     create(
       userId: string,
@@ -108,7 +132,7 @@ export function createWorkspaceStore(
     ): WorkspaceSummary | undefined {
       return normalizedWorkspaceName(name, (normalizedName) => {
         const id = generateId(now);
-        return insertWorkspace(database, {
+        return insertWorkspaceWithOperation(database, producer, {
           id,
           name: normalizedName,
           now,
@@ -124,8 +148,7 @@ export function createWorkspaceStore(
       }
 
       const id = generateId(now);
-
-      return insertWorkspace(database, {
+      return insertWorkspaceWithOperation(database, producer, {
         id,
         isDefault: true,
         name: DEFAULT_WORKSPACE_NAME,
@@ -174,15 +197,39 @@ export function createWorkspaceStore(
       if (workspaceId === GLOBAL_WORKSPACE_ID) {
         return undefined;
       }
-      return normalizedWorkspaceName(name, (normalizedName) => {
-        const [updated] = database
-          .update(workspaces)
-          .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
-          .where(activeWorkspaceCondition(userId, workspaceId))
-          .returning(workspaceSelection())
-          .all();
-        return updated;
-      });
+      return normalizedWorkspaceName(name, (normalizedName) =>
+        database.transaction((transaction) => {
+          const currentName = activeWorkspaceName(
+            transaction,
+            userId,
+            workspaceId,
+          );
+          const [updated] = transaction
+            .update(workspaces)
+            .set({ name: normalizedName, ...updatedAuditFields(userId, now) })
+            .where(activeWorkspaceCondition(userId, workspaceId))
+            .returning(workspaceSelection())
+            .all();
+          if (updated !== undefined && currentName !== undefined)
+            producer.produce(
+              userId,
+              normalizedName === currentName
+                ? [legacyDefaultOperationIntent(database, userId)]
+                : [
+                    legacyDefaultOperationIntent(database, userId),
+                    operationEntityIntent(
+                      "workspaces",
+                      workspaceId,
+                      "workspace.name.set",
+                      { value: normalizedName },
+                      { name: currentName },
+                    ),
+                  ],
+              now,
+            );
+          return updated;
+        }),
+      );
     },
 
     remove(
@@ -205,7 +252,7 @@ export function createWorkspaceStore(
         }
 
         const replacement = transaction
-          .select({ id: workspaces.id })
+          .select({ id: workspaces.id, name: workspaces.name })
           .from(workspaces)
           .where(
             and(
@@ -280,6 +327,37 @@ export function createWorkspaceStore(
         if (workspace.isDefault) {
           setWorkspaceDefault(transaction, replacement.id, userId, now);
         }
+        producer.produce(
+          userId,
+          workspace.isDefault
+            ? [
+                operationEntityIntent(
+                  "workspaces",
+                  workspaceId,
+                  "workspace.delete",
+                  {},
+                ),
+                operationEntityEnsureIntent("workspaces", replacement.id, {
+                  name: replacement.name,
+                }),
+                operationEntityIntent(
+                  "users",
+                  userId,
+                  "user.default-workspace.set",
+                  { defaultWorkspaceId: replacement.id },
+                ),
+              ]
+            : [
+                legacyDefaultOperationIntent(database, userId),
+                operationEntityIntent(
+                  "workspaces",
+                  workspaceId,
+                  "workspace.delete",
+                  {},
+                ),
+              ],
+          now,
+        );
         return "removed";
       });
     },
@@ -290,7 +368,12 @@ export function createWorkspaceStore(
       }
 
       return database.transaction((transaction) => {
-        if (!ownedWorkspaceExists(transaction, userId, workspaceId)) {
+        const targetName = activeWorkspaceName(
+          transaction,
+          userId,
+          workspaceId,
+        );
+        if (targetName === undefined) {
           return false;
         }
         transaction
@@ -300,6 +383,21 @@ export function createWorkspaceStore(
           .run();
 
         setWorkspaceDefault(transaction, workspaceId, userId, now);
+        producer.produce(
+          userId,
+          [
+            operationEntityEnsureIntent("workspaces", workspaceId, {
+              name: targetName,
+            }),
+            operationEntityIntent(
+              "users",
+              userId,
+              "user.default-workspace.set",
+              { defaultWorkspaceId: workspaceId },
+            ),
+          ],
+          now,
+        );
         return true;
       });
     },

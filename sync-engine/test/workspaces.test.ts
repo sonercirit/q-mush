@@ -52,4 +52,20 @@ describe("workspace API", () => {
     expect(integration.defaultForUser(TEST_USER_ID)?.name).toBe("Default");
     database.$client.close();
   });
+
+  test("maps operation capacity failures to 507", async () => {
+    const database = createAuthenticatedTestDatabase();
+    const integration = createWorkspaceIntegration({
+      auth: createTestAuth(database),
+      now: () => TEST_NOW,
+      store: createWorkspaceStore(database, () => WORKSPACE_ID, {
+        ownerPartitionOperations: 0,
+      }),
+    });
+    const response = await integration.collection(
+      createAuthenticatedRequest(WORKSPACES_PATH, { name: "Full" }, "POST"),
+    );
+    expect(response.status).toBe(507);
+    database.$client.close();
+  });
 });

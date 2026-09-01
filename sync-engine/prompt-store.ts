@@ -9,6 +9,10 @@ import {
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
+import { commandOperationProducer } from "./command-operation-producer.ts";
+import type { OperationIntakeLimits } from "./operation-intake.ts";
+import { legacyDefaultOperationIntent } from "./operation-producer-backfill.ts";
+import { operationEntityIntent } from "./operation-producer.ts";
 import {
   PROMPT_STATE_SELECTION,
   promptStateCondition,
@@ -157,7 +161,9 @@ export function createPromptStore(
   database: AppDatabase,
   generateId: IdGenerator = createUuidV7,
   maximumCount = PROMPT_MAXIMUM_COUNT,
+  operationLimits?: OperationIntakeLimits,
 ): PromptStore {
+  const producer = commandOperationProducer(database, operationLimits);
   const throwIfChanged = (
     userId: string,
     promptId: string,
@@ -214,7 +220,19 @@ export function createPromptStore(
             })
             .returning(promptSelection())
             .get();
-          return presentPrompt(inserted);
+          const presented = presentPrompt(inserted);
+          producer.produce(
+            userId,
+            [
+              legacyDefaultOperationIntent(database, userId),
+              operationEntityIntent("prompts", inserted.id, "prompt.create", {
+                name: input.name,
+                body: input.body,
+              }),
+            ],
+            now,
+          );
+          return presented;
         });
       } catch (error) {
         return rethrowPromptWriteError(error);
@@ -240,51 +258,96 @@ export function createPromptStore(
         .all()
         .map(presentPrompt),
 
-    remove: (userId, promptId, now, revision) => {
-      const changed = changedOwnedPrompt(userId, promptId, revision);
-      const removed = database
-        .update(prompts)
-        .set({
-          ...softDeletedAuditFields(userId, now),
-          revision: changed.revision,
-        })
-        .where(changed.condition)
-        .returning({ id: prompts.id })
-        .all();
-      if (removed.length > 0) {
-        return true;
-      }
-      throwIfChanged(userId, promptId, revision);
-      return false;
-    },
-
-    update: (userId, promptId, input, now, revision) => {
-      try {
+    remove: (userId, promptId, now, revision) =>
+      database.transaction(() => {
         const changed = changedOwnedPrompt(userId, promptId, revision);
-        const normalizedName = promptNameKey(input.name);
-        const duplicateId = storedPromptId([
-          database,
-          promptNameCondition(userId, normalizedName),
-        ]);
-        if (duplicateId !== undefined && duplicateId !== promptId) {
-          throw createPromptStoreError("duplicate_prompt_name");
-        }
-        const [stored] = database
+        const removed = database
           .update(prompts)
           .set({
-            ...updatedAuditFields(userId, now),
-            body: input.body,
-            name: input.name,
-            normalizedName,
+            ...softDeletedAuditFields(userId, now),
             revision: changed.revision,
           })
           .where(changed.condition)
-          .returning(promptSelection())
+          .returning({ id: prompts.id })
           .all();
-        if (stored === undefined) {
-          throwIfChanged(userId, promptId, revision);
+        if (removed.length > 0) {
+          producer.produce(
+            userId,
+            [
+              legacyDefaultOperationIntent(database, userId),
+              operationEntityIntent("prompts", promptId, "prompt.delete", {}),
+            ],
+            now,
+          );
+          return true;
         }
-        return stored === undefined ? undefined : presentPrompt(stored);
+        throwIfChanged(userId, promptId, revision);
+        return false;
+      }),
+
+    update: (userId, promptId, input, now, revision) => {
+      try {
+        return database.transaction(() => {
+          const previous = database
+            .select({ body: prompts.body, name: prompts.name })
+            .from(prompts)
+            .where(currentPromptCondition(userId, promptId, revision))
+            .get();
+          const changed = changedOwnedPrompt(userId, promptId, revision);
+          const normalizedName = promptNameKey(input.name);
+          const duplicateId = storedPromptId([
+            database,
+            promptNameCondition(userId, normalizedName),
+          ]);
+          if (duplicateId !== undefined && duplicateId !== promptId) {
+            throw createPromptStoreError("duplicate_prompt_name");
+          }
+          const [stored] = database
+            .update(prompts)
+            .set({
+              ...updatedAuditFields(userId, now),
+              body: input.body,
+              name: input.name,
+              normalizedName,
+              revision: changed.revision,
+            })
+            .where(changed.condition)
+            .returning(promptSelection())
+            .all();
+          if (stored === undefined) {
+            throwIfChanged(userId, promptId, revision);
+          }
+          if (stored !== undefined && previous !== undefined) {
+            const intents = [];
+            if (input.name !== previous.name)
+              intents.push(
+                operationEntityIntent(
+                  "prompts",
+                  promptId,
+                  "prompt.name.set",
+                  { value: input.name },
+                  previous,
+                ),
+              );
+            if (input.body !== previous.body)
+              intents.push(
+                operationEntityIntent(
+                  "prompts",
+                  promptId,
+                  "prompt.body.set",
+                  { value: input.body },
+                  previous,
+                ),
+              );
+            if (intents.length > 0)
+              producer.produce(
+                userId,
+                [legacyDefaultOperationIntent(database, userId), ...intents],
+                now,
+              );
+          }
+          return stored === undefined ? undefined : presentPrompt(stored);
+        });
       } catch (error) {
         return rethrowPromptWriteError(error);
       }

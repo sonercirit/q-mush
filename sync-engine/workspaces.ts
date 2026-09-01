@@ -9,6 +9,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
+import { handleOperationProtocolError } from "./operation-error-response.ts";
 import {
   optionalResultResponse,
   withParsedUserInput,
@@ -33,6 +34,7 @@ export function createWorkspaceIntegration(options: {
   readonly now?: () => number;
   readonly store: WorkspaceStore;
 }): WorkspaceIntegration {
+  const storageUnavailable = () => createApiError("storage_unavailable", 500);
   const now = options.now ?? Date.now;
 
   const writeWorkspace = (
@@ -42,9 +44,15 @@ export function createWorkspaceIntegration(options: {
     present: (workspace: WorkspaceSummary) => Response,
     error: string,
   ): Promise<Response> =>
-    withParsedUserInput(request, user, readWorkspaceName, (userId, name) =>
-      optionalResultResponse(write(userId, name), present, error, 409),
-    );
+    withParsedUserInput(request, user, readWorkspaceName, (userId, name) => {
+      try {
+        return optionalResultResponse(write(userId, name), present, error, 409);
+      } catch (writeError) {
+        return handleOperationProtocolError(writeError, () =>
+          createApiError(error, 409),
+        );
+      }
+    });
 
   const collectionForUser = async (
     request: Request,
@@ -87,7 +95,12 @@ export function createWorkspaceIntegration(options: {
         if (request.method !== "DELETE") {
           return createMethodNotAllowedResponse("PATCH, DELETE");
         }
-        const result = options.store.remove(user.id, workspaceId, now());
+        let result: ReturnType<WorkspaceStore["remove"]>;
+        try {
+          result = options.store.remove(user.id, workspaceId, now());
+        } catch (error) {
+          return handleOperationProtocolError(error, storageUnavailable);
+        }
         const responses: Record<typeof result, () => Response> = {
           last_workspace: () => createApiError("last_workspace", 409),
           not_found: () => createApiError("not_found", 404),
@@ -100,11 +113,15 @@ export function createWorkspaceIntegration(options: {
       if (request.method !== "POST") {
         return createMethodNotAllowedResponse("POST");
       }
-      return withAuthenticatedUser(options.auth, request, (user) =>
-        options.store.setDefault(user.id, workspaceId, now())
-          ? createNoContentResponse()
-          : createApiError("not_found", 404),
-      );
+      return withAuthenticatedUser(options.auth, request, (user) => {
+        try {
+          return options.store.setDefault(user.id, workspaceId, now())
+            ? createNoContentResponse()
+            : createApiError("not_found", 404);
+        } catch (error) {
+          return handleOperationProtocolError(error, storageUnavailable);
+        }
+      });
     },
   };
 }

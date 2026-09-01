@@ -198,6 +198,15 @@ const reduceWorkspace = (
         : deleteNamedEntity(operation, current);
   return updateWorkspaces(projection, next);
 };
+const deletePrompt = (
+  operation: Operation,
+  current: PromptProjection,
+): PromptProjection => ({
+  ...deleteNamedEntity(operation, current),
+  name: undefined,
+  body: undefined,
+  bodyConflicts: [],
+});
 const reducePrompt = (
   projection: OperationEntityProjection,
   operation: Operation,
@@ -214,7 +223,7 @@ const reducePrompt = (
     return updatePrompts(projection, next);
   }
   if (operation.kind === "prompt.delete") {
-    return updatePrompts(projection, deleteNamedEntity(operation, current));
+    return updatePrompts(projection, deletePrompt(operation, current));
   }
   if (current.created === undefined || current.deleted !== undefined)
     return projection;
@@ -399,4 +408,6 @@ export const operationEntityProjectionCodec: OperationProjectionCodec<OperationE
   {
     encode: encodeOperationEntityProjection,
     decode: decodeOperationEntityProjection,
+    replay: (base, operations) =>
+      operations.reduce(reduceOperationEntityProjection, base),
   };

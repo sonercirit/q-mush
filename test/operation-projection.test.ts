@@ -276,8 +276,9 @@ describe("typed operation projection", () => {
     ]) {
       const prompt = project(items).prompts[0];
       expect(prompt?.deleted).toBeDefined();
-      expect(prompt?.name?.value).toBe("first");
-      expect(prompt?.body?.value).toBe("body");
+      expect(prompt?.name).toBeUndefined();
+      expect(prompt?.body).toBeUndefined();
+      expect(prompt?.bodyConflicts).toEqual([]);
     }
   });
 

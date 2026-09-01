@@ -9,6 +9,7 @@ import {
   operationIdentityKeys,
   operationInputKeys,
   replayOperationsNewestFirst,
+  replayOperationsOldestFirst,
   restoreAppliedIdentityIndex,
   validateOperationWriterClocks,
   type HybridTimestamp,
@@ -235,18 +236,35 @@ export const decodeOperationEnvelope = (encoded: string): Operation =>
 export interface OperationProjectionCodec<TProjection> {
   readonly encode: (projection: TProjection) => unknown;
   readonly decode: (value: unknown) => TProjection;
+  /** Reconstructs the current projection from its base and retained replay. */
+  readonly replay?: (
+    base: TProjection,
+    operations: readonly Operation[],
+  ) => TProjection;
 }
+
+const BASE_PROJECTION_ALIAS_KEY = "operationCheckpointProjectionAlias";
+const baseProjectionAlias = { [BASE_PROJECTION_ALIAS_KEY]: true } as const;
+const isBaseProjectionAlias = (value: unknown): boolean =>
+  isRecord(value) &&
+  Object.keys(value).length === 1 &&
+  value[BASE_PROJECTION_ALIAS_KEY] === true;
 
 export const encodeOperationCheckpoint = <TProjection>(
   state: OperationApplyState<TProjection>,
   codec: OperationProjectionCodec<TProjection>,
 ): string => {
   const replay = replayOperationsNewestFirst(state.replayHead);
+  const projection =
+    codec.replay !== undefined && state.pending.length === 0
+      ? baseProjectionAlias
+      : codec.encode(state.projection);
+  const baseProjection = codec.encode(state.baseProjection);
   return JSON.stringify(
     encodeCheckpointValue({
       ...state,
-      projection: codec.encode(state.projection),
-      baseProjection: codec.encode(state.baseProjection),
+      projection,
+      baseProjection,
       applied: materializeApplied(state.applied),
       replayHead: replay,
     }),
@@ -406,16 +424,27 @@ export const decodeOperationCheckpoint = <TProjection>(
   let projection: TProjection;
   let baseProjection: TProjection;
   try {
-    projection = codec.decode(state["projection"]);
-  } catch (error) {
-    throw new Error("Invalid operation checkpoint projection", {
-      cause: error,
-    });
-  }
-  try {
     baseProjection = codec.decode(state["baseProjection"]);
   } catch (error) {
     throw new Error("Invalid operation checkpoint base projection", {
+      cause: error,
+    });
+  }
+  const replayHead = decodeReplay(state["replayHead"]);
+  const projectionAlias = isBaseProjectionAlias(state["projection"]);
+  const replayProjection = codec.replay;
+  if (projectionAlias && replayProjection === undefined)
+    throw new Error("Invalid operation checkpoint projection alias");
+  try {
+    projection =
+      projectionAlias && replayProjection !== undefined
+        ? replayProjection(
+            baseProjection,
+            replayOperationsOldestFirst(replayHead),
+          )
+        : codec.decode(state["projection"]);
+  } catch (error) {
+    throw new Error("Invalid operation checkpoint projection", {
       cause: error,
     });
   }
@@ -428,7 +457,7 @@ export const decodeOperationCheckpoint = <TProjection>(
     applied: restoreAppliedIdentityIndex(
       stringCheckpointRecord(state["applied"]),
     ),
-    replayHead: decodeReplay(state["replayHead"]),
+    replayHead,
     replayCount: Number(state["replayCount"]),
     replayLastClock:
       state["replayLastClock"] === undefined

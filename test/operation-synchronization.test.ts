@@ -7,6 +7,7 @@ import {
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_CHECKPOINT_BYTES,
   MAX_OPERATION_ENVELOPE_BYTES,
+  MAX_OPERATION_SYNC_BATCH_BYTES,
   MAX_OWNER_PARTITION_OPERATIONS,
   MAX_REMOTE_CLOCK_DRIFT_MS,
 } from "../shared/operation-core";
@@ -188,12 +189,14 @@ test("operation synchronization pins protocol request limits", () => {
     batchSize: MAX_OPERATION_BATCH_SIZE,
     checkpointBytes: MAX_OPERATION_CHECKPOINT_BYTES,
     envelopeBytes: MAX_OPERATION_ENVELOPE_BYTES,
+    syncBatchBytes: MAX_OPERATION_SYNC_BATCH_BYTES,
     ownerPartitionOperations: MAX_OWNER_PARTITION_OPERATIONS,
     remoteClockDriftMs: MAX_REMOTE_CLOCK_DRIFT_MS,
   }).toEqual({
     batchSize: 512,
-    checkpointBytes: 4_194_304,
-    envelopeBytes: 16_384,
+    checkpointBytes: 33_554_432,
+    envelopeBytes: 262_144,
+    syncBatchBytes: 4_194_304,
     ownerPartitionOperations: 2_000,
     remoteClockDriftMs: 300_000,
   });
