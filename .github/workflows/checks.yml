@@ -23,68 +23,52 @@ jobs:
       matrix:
         include:
           - {
-              name: Tests (shard 1/16),
-              command: "bun run test:unit --shard=1/16",
+              name: Tests (shard 1/12),
+              command: "bun run test:unit --shard=1/12",
             }
           - {
-              name: Tests (shard 2/16),
-              command: "bun run test:unit --shard=2/16",
+              name: Tests (shard 2/12),
+              command: "bun run test:unit --shard=2/12",
             }
           - {
-              name: Tests (shard 3/16),
-              command: "bun run test:unit --shard=3/16",
+              name: Tests (shard 3/12),
+              command: "bun run test:unit --shard=3/12",
             }
           - {
-              name: Tests (shard 4/16),
-              command: "bun run test:unit --shard=4/16",
+              name: Tests (shard 4/12),
+              command: "bun run test:unit --shard=4/12",
             }
           - {
-              name: Tests (shard 5/16),
-              command: "bun run test:unit --shard=5/16",
+              name: Tests (shard 5/12),
+              command: "bun run test:unit --shard=5/12",
             }
           - {
-              name: Tests (shard 6/16),
-              command: "bun run test:unit --shard=6/16",
+              name: Tests (shard 6/12),
+              command: "bun run test:unit --shard=6/12",
             }
           - {
-              name: Tests (shard 7/16),
-              command: "bun run test:unit --shard=7/16",
+              name: Tests (shard 7/12),
+              command: "bun run test:unit --shard=7/12",
             }
           - {
-              name: Tests (shard 8/16),
-              command: "bun run test:unit --shard=8/16",
+              name: Tests (shard 8/12),
+              command: "bun run test:unit --shard=8/12",
             }
           - {
-              name: Tests (shard 9/16),
-              command: "bun run test:unit --shard=9/16",
+              name: Tests (shard 9/12),
+              command: "bun run test:unit --shard=9/12",
             }
           - {
-              name: Tests (shard 10/16),
-              command: "bun run test:unit --shard=10/16",
+              name: Tests (shard 10/12),
+              command: "bun run test:unit --shard=10/12",
             }
           - {
-              name: Tests (shard 11/16),
-              command: "bun run test:unit --shard=11/16",
+              name: Tests (shard 11/12),
+              command: "bun run test:unit --shard=11/12",
             }
           - {
-              name: Tests (shard 12/16),
-              command: "bun run test:unit --shard=12/16",
-            }
-          - {
-              name: Tests (shard 13/16),
-              command: "bun run test:unit --shard=13/16",
-            }
-          - {
-              name: Tests (shard 14/16),
-              command: "bun run test:unit --shard=14/16",
-            }
-          - {
-              name: Tests (shard 15/16),
-              command: "bun run test:unit --shard=15/16",
-            }
-          - {
-              name: Tests (shard 16/16),
-              command: "bun run test:unit --shard=16/16",
+              name: Tests (shard 12/12),
+              command: "bun run test:unit --shard=12/12",
             }
           - {
               name: Real-browser regressions,
