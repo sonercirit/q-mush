@@ -1,10 +1,12 @@
 import { decodeOperationEnvelope } from "../shared/operation-checkpoint.ts";
-import type {
-  CausalFrontier,
-  HybridTimestamp,
-  OperationPartition,
+import {
+  MAX_OPERATION_SYNC_BATCH_BYTES,
+  type CausalFrontier,
+  type HybridTimestamp,
+  type OperationPartition,
 } from "../shared/operation-core.ts";
 import type { OperationStabilityBoundary } from "../shared/operation-stability.ts";
+import { utf8ByteLength } from "../shared/utf8.ts";
 import type { RunnerOperationCompactionRequest } from "./runner-operation-store.ts";
 import { isOperationSynchronizationBadRequest } from "./runner-operation-transport.ts";
 
@@ -133,6 +135,26 @@ const pushSinglyAfterBadRequest = async (
   }
   return stalled;
 };
+const byteBoundedBatches = (envelopes: readonly string[]): string[][] => {
+  const batches: string[][] = [];
+  let current: string[] = [];
+  let bytes = 0;
+  for (const envelope of envelopes) {
+    const envelopeBytes = utf8ByteLength(envelope);
+    if (
+      current.length > 0 &&
+      bytes + envelopeBytes > MAX_OPERATION_SYNC_BATCH_BYTES
+    ) {
+      batches.push(current);
+      current = [];
+      bytes = 0;
+    }
+    current.push(envelope);
+    bytes += envelopeBytes;
+  }
+  if (current.length > 0) batches.push(current);
+  return batches;
+};
 const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   const { partition, store } = request;
   const pending = store.pending(ownerAlias, partition);
@@ -164,7 +186,8 @@ const pushOutbox = async (request: PartitionRequest): Promise<boolean> => {
   });
   if (pushable.length === 0) return remainsStalled;
   try {
-    await acceptedPush(request, pushable);
+    for (const batch of byteBoundedBatches(pushable))
+      await acceptedPush(request, batch);
     return remainsStalled;
   } catch (error) {
     if (!isOperationSynchronizationBadRequest(error)) throw error;

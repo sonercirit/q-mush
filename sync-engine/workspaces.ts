@@ -1,4 +1,5 @@
 import { isRecord, type AuthenticatedUser } from "../shared/auth-model.ts";
+import { isOperationProtocolError } from "../shared/operation-core.ts";
 import type { WorkspaceSummary } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
@@ -22,6 +23,18 @@ function readWorkspaceName(value: unknown): string | undefined {
   return value["name"];
 }
 
+function operationErrorResponse(error: unknown): Response | undefined {
+  if (!isOperationProtocolError(error)) return undefined;
+  return createApiError(
+    "operation_failed",
+    error.operationError === "capacity"
+      ? 507
+      : error.operationError === "conflict"
+        ? 409
+        : 400,
+  );
+}
+
 export interface WorkspaceIntegration extends CollectionItemIntegration {
   setDefault(request: Request, workspaceId: string): Response;
   exists(userId: string, workspaceId: string): boolean;
@@ -42,9 +55,15 @@ export function createWorkspaceIntegration(options: {
     present: (workspace: WorkspaceSummary) => Response,
     error: string,
   ): Promise<Response> =>
-    withParsedUserInput(request, user, readWorkspaceName, (userId, name) =>
-      optionalResultResponse(write(userId, name), present, error, 409),
-    );
+    withParsedUserInput(request, user, readWorkspaceName, (userId, name) => {
+      try {
+        return optionalResultResponse(write(userId, name), present, error, 409);
+      } catch (writeError) {
+        const response = operationErrorResponse(writeError);
+        if (response !== undefined) return response;
+        throw writeError;
+      }
+    });
 
   const collectionForUser = async (
     request: Request,
@@ -87,7 +106,14 @@ export function createWorkspaceIntegration(options: {
         if (request.method !== "DELETE") {
           return createMethodNotAllowedResponse("PATCH, DELETE");
         }
-        const result = options.store.remove(user.id, workspaceId, now());
+        let result: ReturnType<WorkspaceStore["remove"]>;
+        try {
+          result = options.store.remove(user.id, workspaceId, now());
+        } catch (error) {
+          const response = operationErrorResponse(error);
+          if (response !== undefined) return response;
+          throw error;
+        }
         const responses: Record<typeof result, () => Response> = {
           last_workspace: () => createApiError("last_workspace", 409),
           not_found: () => createApiError("not_found", 404),
@@ -100,11 +126,17 @@ export function createWorkspaceIntegration(options: {
       if (request.method !== "POST") {
         return createMethodNotAllowedResponse("POST");
       }
-      return withAuthenticatedUser(options.auth, request, (user) =>
-        options.store.setDefault(user.id, workspaceId, now())
-          ? createNoContentResponse()
-          : createApiError("not_found", 404),
-      );
+      return withAuthenticatedUser(options.auth, request, (user) => {
+        try {
+          return options.store.setDefault(user.id, workspaceId, now())
+            ? createNoContentResponse()
+            : createApiError("not_found", 404);
+        } catch (error) {
+          const response = operationErrorResponse(error);
+          if (response !== undefined) return response;
+          throw error;
+        }
+      });
     },
   };
 }

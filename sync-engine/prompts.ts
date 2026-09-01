@@ -1,6 +1,7 @@
 import { isRecord } from "../shared/auth-model.ts";
 import { createDatabase, type AppDatabase } from "../shared/database.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
+import { isOperationProtocolError } from "../shared/operation-core.ts";
 import {
   normalizePromptInput,
   PROMPT_BODY_MAXIMUM_BYTES,
@@ -17,6 +18,18 @@ import {
   createNoContentResponse,
 } from "./http.ts";
 import { createPromptStore, isPromptStoreErrorKind } from "./prompt-store.ts";
+
+const operationErrorResponse = (error: unknown): Response | undefined => {
+  if (!isOperationProtocolError(error)) return undefined;
+  return createApiError(
+    "operation_failed",
+    error.operationError === "capacity"
+      ? 507
+      : error.operationError === "conflict"
+        ? 409
+        : 400,
+  );
+};
 
 interface PromptDependencies {
   readonly database?: AppDatabase;
@@ -166,6 +179,8 @@ export function createDrizzlePromptIntegration(
         return createApiError("prompt_changed", 412);
       if (isPromptStoreErrorKind(error, "prompt_limit"))
         return createApiError("prompt_limit_reached", 409);
+      const operationResponse = operationErrorResponse(error);
+      if (operationResponse !== undefined) return operationResponse;
       return createApiError("storage_unavailable", 500);
     }
   };
@@ -193,6 +208,8 @@ export function createDrizzlePromptIntegration(
                 ? createNoContentResponse()
                 : createApiError("not_found", 404);
             } catch (error) {
+              const operationResponse = operationErrorResponse(error);
+              if (operationResponse !== undefined) return operationResponse;
               return isPromptStoreErrorKind(error, "prompt_changed")
                 ? createApiError("prompt_changed", 412)
                 : createApiError("storage_unavailable", 500);

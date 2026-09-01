@@ -4,6 +4,7 @@ import {
   isOperationProtocolError,
   MAX_OPERATION_BATCH_SIZE,
   MAX_OPERATION_ENVELOPE_BYTES,
+  MAX_OPERATION_SYNC_BATCH_BYTES,
   operationProtocolError,
   type OperationPartition,
 } from "../shared/operation-core";
@@ -11,6 +12,7 @@ import {
   parseSynchronizationFrontier,
   prepareSynchronizationFrontier,
 } from "../shared/operation-intake-core";
+import { utf8ByteLength } from "../shared/utf8";
 import type { GoogleAuth } from "./auth";
 import { parseRecordJsonForMethod } from "./http";
 import {
@@ -75,11 +77,15 @@ const parseRequest = (
     scope === undefined ||
     !Array.isArray(envelopes) ||
     envelopes.length > MAX_OPERATION_BATCH_SIZE ||
+    envelopes.reduce<number>(
+      (total, value: unknown) =>
+        total + (typeof value === "string" ? utf8ByteLength(value) : 0),
+      0,
+    ) > MAX_OPERATION_SYNC_BATCH_BYTES ||
     !envelopes.every(
       (value) =>
         typeof value === "string" &&
-        new TextEncoder().encode(value).byteLength <=
-          MAX_OPERATION_ENVELOPE_BYTES,
+        utf8ByteLength(value) <= MAX_OPERATION_ENVELOPE_BYTES,
     )
   )
     return undefined;

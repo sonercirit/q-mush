@@ -1,7 +1,7 @@
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { softDeletedAuditFields, updatedAuditFields } from "../shared/audit.ts";
 import type { AppDatabase } from "../shared/database.ts";
-import { prompts } from "../shared/database/schema.ts";
+import { prompts, workspaces } from "../shared/database/schema.ts";
 import { createUuidV7, type IdGenerator } from "../shared/ids.ts";
 import {
   PROMPT_MAXIMUM_COUNT,
@@ -9,6 +9,10 @@ import {
   type Prompt,
   type PromptInput,
 } from "../shared/prompt-model.ts";
+import {
+  createOperationProducer,
+  operationEntityIntent,
+} from "./operation-producer.ts";
 import {
   PROMPT_STATE_SELECTION,
   promptStateCondition,
@@ -158,6 +162,18 @@ export function createPromptStore(
   generateId: IdGenerator = createUuidV7,
   maximumCount = PROMPT_MAXIMUM_COUNT,
 ): PromptStore {
+  const producer = createOperationProducer({ database });
+  const ensureAccount = (userId: string) => {
+    const current = database
+      .select({ id: workspaces.id, name: workspaces.name })
+      .from(workspaces)
+      .where(and(eq(workspaces.userId, userId), eq(workspaces.isDefault, true)))
+      .get();
+    return {
+      type: "account.ensure" as const,
+      defaultWorkspace: current ?? null,
+    };
+  };
   const throwIfChanged = (
     userId: string,
     promptId: string,
@@ -214,7 +230,19 @@ export function createPromptStore(
             })
             .returning(promptSelection())
             .get();
-          return presentPrompt(inserted);
+          const presented = presentPrompt(inserted);
+          producer.produce(
+            userId,
+            [
+              ensureAccount(userId),
+              operationEntityIntent("prompts", inserted.id, "prompt.create", {
+                name: input.name,
+                body: input.body,
+              }),
+            ],
+            now,
+          );
+          return presented;
         });
       } catch (error) {
         return rethrowPromptWriteError(error);
@@ -240,51 +268,96 @@ export function createPromptStore(
         .all()
         .map(presentPrompt),
 
-    remove: (userId, promptId, now, revision) => {
-      const changed = changedOwnedPrompt(userId, promptId, revision);
-      const removed = database
-        .update(prompts)
-        .set({
-          ...softDeletedAuditFields(userId, now),
-          revision: changed.revision,
-        })
-        .where(changed.condition)
-        .returning({ id: prompts.id })
-        .all();
-      if (removed.length > 0) {
-        return true;
-      }
-      throwIfChanged(userId, promptId, revision);
-      return false;
-    },
-
-    update: (userId, promptId, input, now, revision) => {
-      try {
+    remove: (userId, promptId, now, revision) =>
+      database.transaction(() => {
         const changed = changedOwnedPrompt(userId, promptId, revision);
-        const normalizedName = promptNameKey(input.name);
-        const duplicateId = storedPromptId([
-          database,
-          promptNameCondition(userId, normalizedName),
-        ]);
-        if (duplicateId !== undefined && duplicateId !== promptId) {
-          throw createPromptStoreError("duplicate_prompt_name");
-        }
-        const [stored] = database
+        const removed = database
           .update(prompts)
           .set({
-            ...updatedAuditFields(userId, now),
-            body: input.body,
-            name: input.name,
-            normalizedName,
+            ...softDeletedAuditFields(userId, now),
             revision: changed.revision,
           })
           .where(changed.condition)
-          .returning(promptSelection())
+          .returning({ id: prompts.id })
           .all();
-        if (stored === undefined) {
-          throwIfChanged(userId, promptId, revision);
+        if (removed.length > 0) {
+          producer.produce(
+            userId,
+            [
+              ensureAccount(userId),
+              operationEntityIntent("prompts", promptId, "prompt.delete", {}),
+            ],
+            now,
+          );
+          return true;
         }
-        return stored === undefined ? undefined : presentPrompt(stored);
+        throwIfChanged(userId, promptId, revision);
+        return false;
+      }),
+
+    update: (userId, promptId, input, now, revision) => {
+      try {
+        return database.transaction(() => {
+          const previous = database
+            .select({ body: prompts.body, name: prompts.name })
+            .from(prompts)
+            .where(currentPromptCondition(userId, promptId, revision))
+            .get();
+          const changed = changedOwnedPrompt(userId, promptId, revision);
+          const normalizedName = promptNameKey(input.name);
+          const duplicateId = storedPromptId([
+            database,
+            promptNameCondition(userId, normalizedName),
+          ]);
+          if (duplicateId !== undefined && duplicateId !== promptId) {
+            throw createPromptStoreError("duplicate_prompt_name");
+          }
+          const [stored] = database
+            .update(prompts)
+            .set({
+              ...updatedAuditFields(userId, now),
+              body: input.body,
+              name: input.name,
+              normalizedName,
+              revision: changed.revision,
+            })
+            .where(changed.condition)
+            .returning(promptSelection())
+            .all();
+          if (stored === undefined) {
+            throwIfChanged(userId, promptId, revision);
+          }
+          if (stored !== undefined && previous !== undefined) {
+            const intents = [];
+            if (input.name !== previous.name)
+              intents.push(
+                operationEntityIntent(
+                  "prompts",
+                  promptId,
+                  "prompt.name.set",
+                  { value: input.name },
+                  previous,
+                ),
+              );
+            if (input.body !== previous.body)
+              intents.push(
+                operationEntityIntent(
+                  "prompts",
+                  promptId,
+                  "prompt.body.set",
+                  { value: input.body },
+                  previous,
+                ),
+              );
+            if (intents.length > 0)
+              producer.produce(
+                userId,
+                [ensureAccount(userId), ...intents],
+                now,
+              );
+          }
+          return stored === undefined ? undefined : presentPrompt(stored);
+        });
       } catch (error) {
         return rethrowPromptWriteError(error);
       }

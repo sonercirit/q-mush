@@ -226,8 +226,13 @@ export interface OperationApplyState<TProjection> {
   readonly baseFrontier: CausalFrontier;
   readonly stableClock: HybridTimestamp | undefined;
 }
-/** Live intake bounds until subscriber stability permits safe compaction. */
-export const MAX_OPERATION_ENVELOPE_BYTES = 16 * 1024;
+/**
+ * Prompt bodies admit 32 KiB before JSON encoding; worst-case `\uXXXX` escaping
+ * expands a valid body to about 197 KiB, so envelopes need 256 KiB.
+ */
+export const MAX_OPERATION_ENVELOPE_BYTES = 256 * 1024;
+/** Bounds synchronization request and page payloads independently of count. */
+export const MAX_OPERATION_SYNC_BATCH_BYTES = 4 * 1024 * 1024;
 export const MAX_OWNER_PARTITION_OPERATIONS = 2_000;
 export const MAX_OPERATION_CHECKPOINT_BYTES = 4 * 1024 * 1024;
 /** @public batch admission bound shared with synchronization. */

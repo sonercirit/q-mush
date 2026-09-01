@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt, notInArray, or } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, notInArray, or } from "drizzle-orm";
 import { createdAuditFields, updatedAuditFields } from "../shared/audit";
 import type { AppDatabase } from "../shared/database";
 import {
@@ -8,6 +8,7 @@ import {
 import { createUuidV7, type IdGenerator } from "../shared/ids";
 import { encodeOperationEnvelope } from "../shared/operation-checkpoint";
 import {
+  MAX_OPERATION_SYNC_BATCH_BYTES,
   operationFingerprint,
   operationProtocolError,
   operationSequenceOrder,
@@ -16,6 +17,7 @@ import {
   type OperationPartition,
 } from "../shared/operation-core";
 import { prepareSynchronizationFrontier } from "../shared/operation-intake-core";
+import { utf8ByteLength } from "../shared/utf8";
 
 interface OperationStoreResources {
   readonly database: AppDatabase;
@@ -179,8 +181,19 @@ export function createOperationStore(resources: OperationStoreResources) {
     ): EncodedOperationEnvelopePage {
       const limit = parameters[3];
       const rows = buildOperationEnvelopeQuery(database, ...parameters).all();
-      const envelopes = rows.slice(0, limit).map(({ encoded }) => encoded);
-      return { envelopes, hasMore: rows.length > limit };
+      const envelopes: string[] = [];
+      let bytes = 0;
+      for (const { encoded } of rows.slice(0, limit)) {
+        const nextBytes = utf8ByteLength(encoded);
+        if (
+          envelopes.length > 0 &&
+          bytes + nextBytes > MAX_OPERATION_SYNC_BATCH_BYTES
+        )
+          break;
+        envelopes.push(encoded);
+        bytes += nextBytes;
+      }
+      return { envelopes, hasMore: rows.length > envelopes.length };
     },
     countEnvelopes(ownerId: string, partition: OperationPartition): number {
       return (
@@ -190,6 +203,25 @@ export function createOperationStore(resources: OperationStoreResources) {
           .where(activeEnvelopeScope(ownerId, partition))
           .get()?.value ?? 0
       );
+    },
+    maximumWriterSequence(
+      ownerId: string,
+      partition: OperationPartition,
+      writerId: string,
+    ): bigint {
+      const sequence = database
+        .select({ sequence: operationEnvelopes.sequence })
+        .from(operationEnvelopes)
+        .where(
+          and(
+            activeEnvelopeScope(ownerId, partition),
+            eq(operationEnvelopes.writerId, writerId),
+          ),
+        )
+        .orderBy(desc(operationEnvelopes.sequenceOrder))
+        .limit(1)
+        .get()?.sequence;
+      return sequence === undefined ? 0n : BigInt(sequence);
     },
     loadCheckpoint(ownerId: string, partition: OperationPartition) {
       return checkpointRow(ownerId, partition)?.encoded;
