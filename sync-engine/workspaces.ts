@@ -1,5 +1,4 @@
 import { isRecord, type AuthenticatedUser } from "../shared/auth-model.ts";
-import { isOperationProtocolError } from "../shared/operation-core.ts";
 import type { WorkspaceSummary } from "../shared/workspace-model.ts";
 import type { GoogleAuth } from "./auth.ts";
 import { withAuthenticatedUser } from "./authenticated-request.ts";
@@ -10,6 +9,7 @@ import {
   createMethodNotAllowedResponse,
   createNoContentResponse,
 } from "./http.ts";
+import { operationProtocolErrorResponse } from "./operation-error-response.ts";
 import {
   optionalResultResponse,
   withParsedUserInput,
@@ -21,18 +21,6 @@ function readWorkspaceName(value: unknown): string | undefined {
     return undefined;
   }
   return value["name"];
-}
-
-function operationErrorResponse(error: unknown): Response | undefined {
-  if (!isOperationProtocolError(error)) return undefined;
-  return createApiError(
-    "operation_failed",
-    error.operationError === "capacity"
-      ? 507
-      : error.operationError === "conflict"
-        ? 409
-        : 400,
-  );
 }
 
 export interface WorkspaceIntegration extends CollectionItemIntegration {
@@ -59,7 +47,7 @@ export function createWorkspaceIntegration(options: {
       try {
         return optionalResultResponse(write(userId, name), present, error, 409);
       } catch (writeError) {
-        const response = operationErrorResponse(writeError);
+        const response = operationProtocolErrorResponse(writeError);
         if (response !== undefined) return response;
         throw writeError;
       }
@@ -110,7 +98,7 @@ export function createWorkspaceIntegration(options: {
         try {
           result = options.store.remove(user.id, workspaceId, now());
         } catch (error) {
-          const response = operationErrorResponse(error);
+          const response = operationProtocolErrorResponse(error);
           if (response !== undefined) return response;
           throw error;
         }
@@ -132,7 +120,7 @@ export function createWorkspaceIntegration(options: {
             ? createNoContentResponse()
             : createApiError("not_found", 404);
         } catch (error) {
-          const response = operationErrorResponse(error);
+          const response = operationProtocolErrorResponse(error);
           if (response !== undefined) return response;
           throw error;
         }

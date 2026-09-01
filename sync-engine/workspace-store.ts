@@ -22,6 +22,7 @@ import {
 import { activeCredentialWorkspaceCondition } from "./credential-workspace-query.ts";
 import {
   createOperationProducer,
+  operationAccountIntent,
   operationEntityIntent,
 } from "./operation-producer.ts";
 import {
@@ -113,10 +114,8 @@ export function createWorkspaceStore(
       ? null
       : { id: current.id, name: current.name };
   };
-  const ensureAccount = (userId: string) => ({
-    type: "account.ensure" as const,
-    defaultWorkspace: legacyDefault(userId),
-  });
+  const ensureAccount = (userId: string) =>
+    operationAccountIntent(legacyDefault(userId));
   const store: WorkspaceStore = {
     create(
       userId: string,

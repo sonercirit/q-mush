@@ -11,6 +11,7 @@ import {
 } from "../shared/prompt-model.ts";
 import {
   createOperationProducer,
+  operationAccountIntent,
   operationEntityIntent,
 } from "./operation-producer.ts";
 import {
@@ -169,10 +170,7 @@ export function createPromptStore(
       .from(workspaces)
       .where(and(eq(workspaces.userId, userId), eq(workspaces.isDefault, true)))
       .get();
-    return {
-      type: "account.ensure" as const,
-      defaultWorkspace: current ?? null,
-    };
+    return operationAccountIntent(current ?? null);
   };
   const throwIfChanged = (
     userId: string,

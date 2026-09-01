@@ -59,8 +59,12 @@ test("producer mints past a stored future sequence and chains clocks and parents
     logical: 8,
     writerId: ownerId,
   });
+  expect(produced).toHaveLength(2);
+  const firstClock = produced[0]?.clock;
+  expect(firstClock).toBeDefined();
+  if (firstClock === undefined) throw new Error("Missing first produced clock");
   expect(
-    compareClocks(produced[1]?.clock ?? produced[0]!.clock, produced[0]!.clock),
+    compareClocks(produced[1]?.clock ?? firstClock, firstClock),
   ).toBeGreaterThan(0);
   expect(produced[1]?.parents[ownerId]).toBe(51n);
   harness.close();
@@ -140,12 +144,9 @@ test("producer backfills register and entities while deletes remain create-free"
     name: { value: "New" },
     body: { value: "Body" },
   });
-  expect(
-    value.workspaces.find(({ id }) => id === "deleted-only"),
-  ).toMatchObject({
-    created: undefined,
-    deleted: expect.anything(),
-  });
+  const deletedOnly = value.workspaces.find(({ id }) => id === "deleted-only");
+  expect(deletedOnly?.created).toBeUndefined();
+  expect(deletedOnly?.deleted).toBeDefined();
   harness.close();
 });
 

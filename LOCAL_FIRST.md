@@ -30,22 +30,20 @@
   including byte-identical duplicates, and rejects negative sequence, parent,
   and frontier values while preserving signed bigint operation payloads.
   Stability compaction folds replay prefixes proven safe by frontier, drift, and
-  pending-clock bounds. The route fails closed at 16 KiB per encoded envelope,
-  2,000 retained replay-plus-pending operations per owner/partition, or a 4 MiB
-  checkpoint (HTTP 507). Limits apply after buffering/parsing JSON; stage 2 has
-  no request-byte cap. Reads allow 256 envelopes × 16 KiB; escaping can double
-  JSON size. A separate cap needs paging measurement or double serialization.
-  With 4 KiB payloads an uncompacted checkpoint reaches 4 MiB near 300
-  operations; folding resolves it once entries age and become covered. Envelope
-  deletion remains deferred until subscriber receipts can bound replicated
-  scope. Writer identity is currently forced to the authenticated account ID;
-  whether device keys should introduce per-device writer IDs remains open for
-  that later slice. Identity fingerprints remain plain enumerable checkpoint
-  data: live state stores the serializable balanced identity tree; checkpoint
-  encoding (or `materializeApplied`) creates the flat record on demand.
-  Steady-state admission is expected O(log n) per operation and O(n log n)
-  overall. Unready operations maintain a per-state identity treap for
-  incremental O(log n) checks and bounded admission; operation intake and
+  pending-clock bounds. Current transport bounds and producer posture are in
+  `ENGINE_OPERATION_PRODUCTION.md`. The route also fails closed at 2,000
+  retained replay-plus-pending operations per owner/partition or a 4 MiB
+  checkpoint (HTTP 507). With 4 KiB payloads an uncompacted checkpoint reaches 4
+  MiB near 300 operations; folding resolves it once entries age and become
+  covered. Envelope deletion remains deferred until subscriber receipts can
+  bound replicated scope. Writer identity is currently forced to the
+  authenticated account ID; whether device keys should introduce per-device
+  writer IDs remains open for that later slice. Identity fingerprints remain
+  plain enumerable checkpoint data: live state stores the serializable balanced
+  identity tree; checkpoint encoding (or `materializeApplied`) creates the flat
+  record on demand. Steady-state admission is expected O(log n) per operation
+  and O(n log n) overall. Unready operations maintain a per-state identity treap
+  for incremental O(log n) checks and bounded admission; operation intake and
   synchronization batches share `MAX_OPERATION_BATCH_SIZE` (512), after which
   admission fails rather than silently wedging, while a ready dependency may
   enter a full buffer to drain it; operation-ID and writer-sequence equivocation
@@ -146,6 +144,8 @@
   account. Synchronization parses sequence values only after a string type
   check. Projection uses immutable create identity, LWW fields, remove-wins
   deletion, canonical prompt conflicts, causal discard, and default repair.
+  Engine command production details, bounds, backfill posture, and measurements
+  are recorded in `ENGINE_OPERATION_PRODUCTION.md`.
 - No old production string checkpoint can exist: there is no local producer,
   engine checkpoints need non-empty POST intake, the runner outbox is empty, and
   runner checkpoints need non-empty pull pages. No data or database migration is
