@@ -80,8 +80,14 @@ export function createRealtimeConnection(
   const requestFrame =
     options.requestFrame ??
     ((callback) => window.requestAnimationFrame(callback));
-  const clearTimeout = options.clearTimeout ?? window.clearTimeout;
-  const setTimeout = options.setTimeout ?? window.setTimeout;
+  const clearTimeout =
+    options.clearTimeout ??
+    ((handle) => {
+      window.clearTimeout(handle);
+    });
+  const setTimeout =
+    options.setTimeout ??
+    ((callback, milliseconds) => window.setTimeout(callback, milliseconds));
   const selected = options.selectedSession ?? noSelectedSession;
   const toolSync = options.toolSync ?? createToolSyncTracker();
   let instanceId: string | undefined;

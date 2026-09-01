@@ -7,6 +7,7 @@ export default {
     "solid/favicon.svg!",
     "solid/styles.css!",
     "scripts/cpd.ts!",
+    "scripts/dependency-age-check.ts!",
     "scripts/dev.ts!",
     "scripts/migrate-database.ts!",
     "scripts/repository-check.ts!",

@@ -74,6 +74,18 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check dependency release ages
+        if:
+          ${{ github.event_name == 'push' || github.event.pull_request.base.sha
+          != '' }}
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "push" ]]; then
+            git diff --quiet HEAD^ HEAD -- bun.lock || bun run dependency-age
+          elif ! git diff --quiet "${{ github.event.pull_request.base.sha }}"...HEAD -- bun.lock; then
+            bun run dependency-age
+          fi
+
       - name: Run repository and static checks
         run: bun run check
 

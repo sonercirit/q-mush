@@ -33,12 +33,12 @@ interface BraveSearchDependencies {
 type BraveSearchArguments = JsonRecord;
 
 export interface BraveSearchExecutor {
-  execute(
+  execute: (
     userId: string,
     workspaceId: string,
     arguments_: BraveSearchArguments,
     signal?: AbortSignal,
-  ): Promise<string>;
+  ) => Promise<string>;
 }
 
 export interface BraveSearchSkill extends BraveSearchExecutor {

@@ -22,6 +22,8 @@
   missing rule. If evidence overturns a finding, fix code and stale records;
   act, don't ask. Never commit secrets, artifacts, or env files.
 - Keep workflows local-first: check narrow, then broad, then failures.
+- Adopt dependency versions only after they have been published for seven days;
+  lockfile-changing CI enforces the release-age delay.
 
 ## Setup, Commands
 
