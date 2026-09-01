@@ -15,13 +15,24 @@ concurrency:
 
 jobs:
   tests:
-    name: Tests (shard ${{ matrix.shard }}/4)
+    name: ${{ matrix.name }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2, 3, 4]
+        include:
+          - name: Tests (shard 1/4)
+            command: bun run test:unit --shard=1/4
+          - name: Tests (shard 2/4)
+            command: bun run test:unit --shard=2/4
+          - name: Tests (shard 3/4)
+            command: bun run test:unit --shard=3/4
+          - name: Tests (shard 4/4)
+            command: bun run test:unit --shard=4/4
+          - name: Real-browser regressions
+            command: bun run test:browser
+            browser: true
 
     steps:
       - name: Check out repository
@@ -41,33 +52,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Run test shard
-        run: bun run test:unit --shard=${{ matrix.shard }}/4
-
-  browser-tests:
-    name: Real-browser regressions
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Check out repository
-        uses: actions/checkout@v7
-
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: 1.4.0
-
-      - name: Restore Bun package cache
-        uses: actions/cache@v5
-        with:
-          path: ~/.cache/.bun/install/cache
-          key: ${{ runner.os }}-bun-1.4.0-${{ hashFiles('bun.lock') }}
-
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Run tests
+        if: ${{ !matrix.browser }}
+        run: ${{ matrix.command }}
 
       - name: Restore Playwright Chromium
+        if: ${{ matrix.browser }}
         id: playwright-cache
         uses: actions/cache@v5
         with:
@@ -75,10 +65,13 @@ jobs:
           key: ${{ runner.os }}-playwright-1.62.1
 
       - name: Install browser test dependencies
-        if: ${{ steps.playwright-cache.outputs.cache-hit != 'true' }}
+        if:
+          ${{ matrix.browser && steps.playwright-cache.outputs.cache-hit !=
+          'true' }}
         run: bunx playwright install --with-deps chromium
 
       - name: Run real-browser regressions
+        if: ${{ matrix.browser }}
         run: bun run test:browser
 
   static-checks:
@@ -156,7 +149,7 @@ jobs:
 
   aggregate:
     name: Tests and static checks
-    needs: [tests, browser-tests, static-checks, build]
+    needs: [tests, static-checks, build]
     if: ${{ always() }}
     runs-on: ubuntu-latest
 
@@ -164,7 +157,6 @@ jobs:
       - name: Require every check leg to succeed
         run: |
           if [[ "${{ needs.tests.result }}" != "success" || \
-                "${{ needs.browser-tests.result }}" != "success" || \
                 "${{ needs.static-checks.result }}" != "success" || \
                 "${{ needs.build.result }}" != "success" ]]; then
             exit 1
