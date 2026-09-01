@@ -147,7 +147,7 @@ jobs:
           node_modules/.bin/prettier --check . & pids+=("$!")
           node_modules/.bin/tsc --noEmit & pids+=("$!")
           bun scripts/repository-check.ts & pids+=("$!")
-          bun run knip & pids+=("$!")
+          bun run knip:production && bun run knip:test & pids+=("$!")
           bun scripts/cpd.ts & pids+=("$!")
           for pid in "${pids[@]}"; do wait "$pid" || statuses+=("$?"); done
           (( ${#statuses[@]} == 0 ))
