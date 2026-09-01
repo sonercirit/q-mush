@@ -160,19 +160,19 @@
 ## Operation stability compaction
 
 - Checkpoints now carry `stableClock`; decoding accepts the legacy exact
-  ten-field form, while rejecting clocks inconsistent with the folded base,
-  replay, or pending set. The engine folds only a clock-ordered replay prefix at
-  or below its trusted boundary and strictly before every pending clock, with
-  `physicalMs < now - 5 minutes`. Subtracting one from the integral drift cutoff
-  makes that strict condition an inclusive HLC cap. Intake's symmetric drift
-  check ensures any future admission is strictly above the boundary, while the
-  producer also mints above stable, replay, and pending clocks. Stable clocks
-  are monotone: backward boundaries are no-ops. Retained replay and pending
-  clocks are strictly above the result, and fully folded dormant writers no
-  longer pin later folds. Engine wall time is not monotonic-clamped: after a
-  backward step, after a backward step, a newly drift-valid operation may still
-  be at/below the prior stable clock and permanently stall its writer head;
-  monotonic engine admission time remains an open requirement.
+  nine-field form as unstable and the exact ten-field form, while rejecting
+  clocks inconsistent with the folded base, replay, or pending set. The engine
+  folds only a clock-ordered replay prefix at or below its trusted boundary and
+  strictly before every pending clock, with `physicalMs < now - 5 minutes`.
+  Subtracting one from the integral drift cutoff makes that strict condition an
+  inclusive HLC cap. Intake's symmetric drift check ensures any future admission
+  is strictly above the boundary, while the producer also mints above stable,
+  replay, and pending clocks. Stable clocks are monotone: backward boundaries
+  are no-ops. Retained replay and pending clocks are strictly above the result,
+  and fully folded dormant writers no longer pin later folds. Engine wall time
+  is not monotonic-clamped: after a backward step, a newly drift-valid operation
+  may still be at/below the prior stable clock and permanently stall its writer
+  head; monotonic engine admission time remains an open requirement.
 - The engine persists JSON `stable_clock` and decimal-string `stable_frontier`
   columns beside the checkpoint and publishes them on pull pages without blob
   decoding. A runner folds against the published clock only after its applied

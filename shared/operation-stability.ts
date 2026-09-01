@@ -35,11 +35,6 @@ export const stabilizeOperationApplyState = <TProjection>(
   boundaryClock: HybridTimestamp,
   reducer: OperationReducer<TProjection>,
 ): OperationApplyState<TProjection> => {
-  if (
-    state.stableClock !== undefined &&
-    compareClocks(boundaryClock, state.stableClock) <= 0
-  )
-    return state;
   const replay = replayOperationsOldestFirst(state.replayHead);
   if (replay.length === 0) return state;
   const foldCount = replay.findIndex(
