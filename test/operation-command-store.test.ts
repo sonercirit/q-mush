@@ -29,6 +29,13 @@ const projection = (database: CommandTestDatabase) =>
     ) ?? "",
     operationEntityProjectionCodec,
   ).projection;
+const workspaceCommandStore = () => {
+  const resources = commandStoreResources();
+  return {
+    ...resources,
+    store: createWorkspaceStore(resources.database, resources.generateId),
+  };
+};
 
 test("first real store command backfills the legacy default register", () => {
   const { database, generateId } = commandStoreResources();
@@ -47,8 +54,7 @@ test("first real store command backfills the legacy default register", () => {
 });
 
 test("real workspace store emits register, backfill, repair, and nonredundant default operations", () => {
-  const { database, generateId } = commandStoreResources();
-  const store = createWorkspaceStore(database, generateId);
+  const { database, store } = workspaceCommandStore();
   const first = store.createDefault(TEST_USER_ID, TEST_NOW);
   const second = store.create(TEST_USER_ID, "Second", TEST_NOW + 1);
   expect(second).toBeDefined();
@@ -74,6 +80,24 @@ test("real workspace store emits register, backfill, repair, and nonredundant de
     "user.default-workspace.set",
     "workspace.delete",
   ]);
+  database.$client.close();
+});
+
+test("workspace rename emits no operation when the normalized name is unchanged", () => {
+  const { database, store } = workspaceCommandStore();
+  store.createDefault(TEST_USER_ID, TEST_NOW);
+  const workspace = store.create(TEST_USER_ID, "Stable", TEST_NOW + 1);
+  expect(workspace).toBeDefined();
+  const before = operations(database).length;
+  expect(
+    store.rename(
+      TEST_USER_ID,
+      workspace?.id ?? "",
+      ` ${workspace?.name ?? ""} `,
+      TEST_NOW + 2,
+    ),
+  ).toBeDefined();
+  expect(operations(database)).toHaveLength(before);
   database.$client.close();
 });
 
@@ -124,6 +148,40 @@ test("real prompt store emits changed fields only and delete", () => {
       .slice(afterCreate)
       .map(({ kind }) => kind),
   ).toEqual(["prompt.name.set", "prompt.body.set", "prompt.delete"]);
+  database.$client.close();
+});
+
+test("prompt projection capacity fails closed and deletion permits creation", () => {
+  const { database, generateId } = commandStoreResources();
+  const store = createPromptStore(database, generateId, 3, {
+    checkpointBytes: 28_000,
+  });
+  const body = "\0".repeat(1_000);
+  const first = store.create(TEST_USER_ID, { name: "First", body }, TEST_NOW);
+  const failed = () =>
+    store.create(
+      TEST_USER_ID,
+      { name: "Too large", body },
+      TEST_NOW + 10 * 60_000,
+    );
+  expect(failed).toThrow(/capacity/i);
+  expect(store.list(TEST_USER_ID)).toMatchObject([{ name: "First" }]);
+  expect(
+    store.remove(
+      TEST_USER_ID,
+      first.id,
+      TEST_NOW + 20 * 60_000,
+      first.revision,
+    ),
+  ).toBe(true);
+  const replacement = () =>
+    store.create(
+      TEST_USER_ID,
+      { name: "Replacement", body },
+      TEST_NOW + 30 * 60_000,
+    );
+  expect(replacement).not.toThrow();
+  expect(store.list(TEST_USER_ID)).toMatchObject([{ name: "Replacement" }]);
   database.$client.close();
 });
 

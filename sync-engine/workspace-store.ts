@@ -131,16 +131,13 @@ export function createWorkspaceStore(
       now: number,
     ): WorkspaceSummary | undefined {
       return normalizedWorkspaceName(name, (normalizedName) => {
-        return insertWorkspaceWithOperation(
-          database,
-          generateId,
-          {
-            name: normalizedName,
-            now,
-            userId,
-          },
-          operationLimits,
-        );
+        const id = generateId(now);
+        return insertWorkspaceWithOperation(database, producer, {
+          id,
+          name: normalizedName,
+          now,
+          userId,
+        });
       });
     },
 
@@ -150,17 +147,14 @@ export function createWorkspaceStore(
         return existing;
       }
 
-      return insertWorkspaceWithOperation(
-        database,
-        generateId,
-        {
-          isDefault: true,
-          name: DEFAULT_WORKSPACE_NAME,
-          now,
-          userId,
-        },
-        operationLimits,
-      );
+      const id = generateId(now);
+      return insertWorkspaceWithOperation(database, producer, {
+        id,
+        isDefault: true,
+        name: DEFAULT_WORKSPACE_NAME,
+        now,
+        userId,
+      });
     },
 
     defaultForUser(userId: string): WorkspaceSummary | undefined {
@@ -219,16 +213,18 @@ export function createWorkspaceStore(
           if (updated !== undefined && currentName !== undefined)
             producer.produce(
               userId,
-              [
-                legacyDefaultOperationIntent(database, userId),
-                operationEntityIntent(
-                  "workspaces",
-                  workspaceId,
-                  "workspace.name.set",
-                  { value: normalizedName },
-                  { name: currentName },
-                ),
-              ],
+              normalizedName === currentName
+                ? [legacyDefaultOperationIntent(database, userId)]
+                : [
+                    legacyDefaultOperationIntent(database, userId),
+                    operationEntityIntent(
+                      "workspaces",
+                      workspaceId,
+                      "workspace.name.set",
+                      { value: normalizedName },
+                      { name: currentName },
+                    ),
+                  ],
               now,
             );
           return updated;

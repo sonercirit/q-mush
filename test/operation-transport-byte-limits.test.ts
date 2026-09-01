@@ -37,6 +37,32 @@ test("synchronization POST rejects a batch above the byte cap", async () => {
   harness.close();
 });
 
+test("synchronization rejects an oversized raw body before JSON parsing", async () => {
+  const { harness, database } = operationDatabase();
+  let authenticationCalls = 0;
+  const handler = createOperationSynchronization(database, {
+    authenticatedUser: () => {
+      authenticationCalls += 1;
+      return {
+        id: ownerId,
+        email: "a@example.test",
+        name: "A",
+      };
+    },
+  });
+  const raw = `{"unterminated":"${"x".repeat(MAX_OPERATION_SYNC_BATCH_BYTES + 1024 * 1024)}`;
+  const response = await handler(
+    new Request("http://localhost/operations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: raw,
+    }),
+  );
+  expect(response.status).toBe(400);
+  expect(authenticationCalls).toBe(0);
+  harness.close();
+});
+
 test("operation store byte-caps pull pages and resumes with hasMore", () => {
   const { harness, database } = operationDatabase();
   const store = createOperationStore({ database });

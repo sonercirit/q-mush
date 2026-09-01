@@ -22,6 +22,39 @@ import {
 import { createOperationStore } from "./operation-store";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
+const MAX_OPERATION_SYNC_REQUEST_BYTES =
+  MAX_OPERATION_SYNC_BATCH_BYTES + 1024 * 1024;
+const invalidRequest = (): Response =>
+  Response.json({ error: "Invalid request" }, { status: 400 });
+const readBoundedRequest = async (
+  request: Request,
+): Promise<Request | Response> => {
+  if (request.method !== "POST") return request;
+  const declared = Number(request.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_OPERATION_SYNC_REQUEST_BYTES)
+    return invalidRequest();
+  const reader = request.body?.getReader();
+  if (reader === undefined) return request;
+  const chunks: Uint8Array[] = [];
+  let bytes = 0;
+  let item = await reader.read();
+  while (!item.done) {
+    bytes += item.value.byteLength;
+    if (bytes > MAX_OPERATION_SYNC_REQUEST_BYTES) {
+      await reader.cancel();
+      return invalidRequest();
+    }
+    chunks.push(item.value);
+    item = await reader.read();
+  }
+  const body = new Uint8Array(bytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    body.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new Request(request, { body });
+};
 interface SynchronizationRequest {
   readonly ownerId: string;
   readonly partition: OperationPartition;
@@ -107,6 +140,9 @@ export const createOperationSynchronization = (
   );
   const store = createOperationStore({ database });
   return async (request: Request): Promise<Response> => {
+    const bounded = await readBoundedRequest(request);
+    if (bounded instanceof Response) return bounded;
+    request = bounded;
     const browserUser = googleAuth.authenticatedUser(request);
     const runnerUser = runnerAuth?.runnerAccount(request);
     if (browserUser === null && runnerUser === undefined)
@@ -127,8 +163,7 @@ export const createOperationSynchronization = (
       parseSynchronizationRequest,
     );
     if (parsed instanceof Response) return parsed;
-    if (parsed === undefined)
-      return Response.json({ error: "Invalid request" }, { status: 400 });
+    if (parsed === undefined) return invalidRequest();
     // Runner credentials deliberately take precedence when both auth mechanisms
     // are present, so runner owner alias semantics cannot become browser scope.
     const ownerId =

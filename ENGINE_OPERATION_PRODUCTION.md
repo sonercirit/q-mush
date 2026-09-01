@@ -10,10 +10,19 @@ legacy `createdAt`; the explicit register then wins. No schema/data migration is
 required.
 
 Prompt body's 32 KiB input plus worst-case JSON escaping requires the 256 KiB
-envelope cap. POST batches, pull pages, and runner pushes are capped at 4 MiB,
-with at least one envelope per page/batch. Oversized bursts fail closed and can
-self-heal after the five-minute stability fold; envelope deletion still awaits
-durable receipts.
+envelope cap. POST batches, pull pages, and runner pushes are capped at 4 MiB;
+synchronization POST bodies are additionally bounded at 5 MiB while streaming,
+before authentication and JSON parsing. The checkpoint cap is 32 MiB: a folded
+100-prompt bank with worst-case NUL escaping measures about 19.5 MiB including
+names/write metadata, leaving about 12 MiB for replay. Checkpoints encode one
+projection and reconstruct the current projection from retained replay, avoiding
+duplicate projection storage without changing decoded state. Oversized
+replay-driven bursts fail closed and can self-heal after the five-minute
+stability fold; envelope deletion still awaits durable receipts. A
+projection-driven failure requires deleting an entity to release its retained
+payload, so prompt deletion clears retired name/body writes while preserving its
+remove-wins tombstone. The 32 MiB cap makes that failure unreachable for every
+legacy-admissible 100-prompt bank.
 
 The producer mints beyond stored account-writer sequences, dominates checkpoint
 clocks, and chains command parents/clocks. A backward wall-clock command can
@@ -26,9 +35,15 @@ Folding removes replay history but not projection/checkpoint size: command cost
 remains O(projection + checkpoint bytes) and therefore grows with total account
 entity count.
 
+A full-scale real-store probe created 100 distinct maximum 32 KiB prompts with
+commands ten minutes apart. The ASCII bank completed with zero capacity
+failures; the command at full state took 35.96 ms and the final checkpoint was
+3,506,230 bytes. Repeating with worst-case NUL bodies also completed all 100
+with zero capacity failures; the command at full state took 217.28 ms and the
+final encoded checkpoint was 20,447,286 bytes, below 32 MiB with 13,107,146
+bytes of headroom.
+
 The earlier 1.06/0.70 ms claim was invalid. Its probe repeatedly renamed one
-workspace, so LWW projection size stayed constant; because each command advanced
-`now` by only 1 ms, the producer's five-minute stability boundary continuously
-folded nearly all prior replay as the loop ran. It measured a one-workspace,
-already-compacted checkpoint—not an unfolded 500-operation burst or a 500-entity
-account.
+workspace, so LWW projection size stayed tiny. Although the exact scenario
+retained about 503 envelopes, it still measured a one-workspace projection—not
+an unfolded 500-operation/500-entity account.

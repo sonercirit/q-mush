@@ -190,11 +190,15 @@ export const createOperationProducer = (
           ? initialOperationApplyState(initialOperationEntityProjection)
           : decodeOperationCheckpoint(encoded, operationEntityProjectionCodec);
       let projection = state.projection;
+      const storedMaximum = store.maximumWriterSequence(
+        ownerId,
+        "non-session",
+        ownerId,
+      );
       let sequence =
-        (state.frontier[ownerId] ?? 0n) >
-        store.maximumWriterSequence(ownerId, "non-session", ownerId)
+        (state.frontier[ownerId] ?? 0n) > storedMaximum
           ? (state.frontier[ownerId] ?? 0n) + 1n
-          : store.maximumWriterSequence(ownerId, "non-session", ownerId) + 1n;
+          : storedMaximum + 1n;
       let floor = clockFloor(
         state.stableClock,
         replayOperationsNewestFirst(state.replayHead),

@@ -194,7 +194,7 @@ test("operation synchronization pins protocol request limits", () => {
     remoteClockDriftMs: MAX_REMOTE_CLOCK_DRIFT_MS,
   }).toEqual({
     batchSize: 512,
-    checkpointBytes: 4_194_304,
+    checkpointBytes: 33_554_432,
     envelopeBytes: 262_144,
     syncBatchBytes: 4_194_304,
     ownerPartitionOperations: 2_000,
