@@ -34,7 +34,7 @@ import { ownedWorkspaceExists } from "./workspace-query.ts";
 
 const WORKSPACE_NAME_MAXIMUM_LENGTH = 100;
 
-export function activeWorkspaceCondition(
+function activeWorkspaceCondition(
   userId: string,
   workspaceId?: string,
 ): SQL | undefined {
