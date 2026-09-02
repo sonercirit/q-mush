@@ -108,23 +108,10 @@ function scopeLintCommands(files: readonly string[]): Command[] {
   const filesFor = (...names: readonly string[]): string[] =>
     names.flatMap((name) => scopes.get(name) ?? []);
   const syncEngineFiles = filesFor("sync-engine");
-  const syncEngineShards = balancedShards(syncEngineFiles, 2);
-  const firstSyncEngineShard = syncEngineShards[0];
-  const secondSyncEngineShard = syncEngineShards[1];
-  if (
-    firstSyncEngineShard === undefined ||
-    secondSyncEngineShard === undefined
-  ) {
-    throw new Error("Could not create sync-engine lint shards.");
-  }
+  const syncEngineShards = balancedShards(syncEngineFiles, 3);
   return [
-    eslintScopeCommand(
-      "tsconfig.eslint-sync-engine.json",
-      firstSyncEngineShard,
-    ),
-    eslintScopeCommand(
-      "tsconfig.eslint-sync-engine.json",
-      secondSyncEngineShard,
+    ...syncEngineShards.map((shard) =>
+      eslintScopeCommand("tsconfig.eslint-sync-engine.json", shard),
     ),
     eslintScopeCommand("tsconfig.eslint-solid.json", filesFor("solid")),
     eslintScopeCommand(
