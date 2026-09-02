@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "runner/**/*.ts",
+    "runner/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx",
+    "shared/**/*.ts",
+    "shared/**/*.tsx"
+  ]
+}

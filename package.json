@@ -5,7 +5,7 @@
   "private": true,
   "scripts": {
     "build": "vite build",
-    "check": "bun run --parallel --no-exit-on-error --filter '*' repository-check format:check typecheck lint knip cpd",
+    "check": "bun run scripts/check.ts",
     "cpd": "bun run scripts/cpd.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "bun run scripts/migrate-database.ts",

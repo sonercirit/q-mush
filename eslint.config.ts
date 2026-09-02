@@ -9,6 +9,7 @@ import { configs } from "typescript-eslint";
 
 const gitignorePath = fileURLToPath(new URL(".gitignore", import.meta.url));
 const ROOT_DIRECTORY = dirname(gitignorePath);
+const ESLINT_TSCONFIG = process.env["Q_MUSH_ESLINT_TSCONFIG"];
 const ALLOWED_SIDE_EFFECT_IMPORTS = new Set(["./styles.css", "../styles.css"]);
 const APPLICATION_WORKSPACES = new Set([
   "runner",
@@ -278,10 +279,17 @@ export default defineConfig(
   configs.stylisticTypeChecked,
   {
     languageOptions: {
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
+      parserOptions:
+        ESLINT_TSCONFIG === undefined
+          ? {
+              projectService: true,
+              tsconfigRootDir: import.meta.dirname,
+            }
+          : {
+              project: [ESLINT_TSCONFIG],
+              projectService: false,
+              tsconfigRootDir: import.meta.dirname,
+            },
     },
     linterOptions: {
       noInlineConfig: true,

@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "solid/**/*.ts",
+    "solid/**/*.tsx",
+    "shared/**/*.ts",
+    "shared/**/*.tsx"
+  ]
+}
