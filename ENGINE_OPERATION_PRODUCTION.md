@@ -42,20 +42,44 @@ Workspace-create latency measured 87.33–96.05 ms after an unfolded
 across three development-runner runs. Folding removes replay history but not
 projection/checkpoint size: command cost remains O(projection + checkpoint
 bytes) and therefore grows with total account entity count. Runner-authored
-operations are now admissible. Fold liveness no longer depends on retained
-per-writer heads: shared compaction trusts the caller's cap, retains strict
-pending-clock caps, and rejects backward/no-op boundaries. Engine intake's
-symmetric drift bound proves that after boundary(now), every later admission is
-strictly newer; its producer also mints above stable/replay/pending clocks. The
-runner uses only engine-published stability after its frontier covers the
-published frontier, preserving old-clock admissions during writer-ordered
-catch-up. A dormant fully folded device writer therefore cannot pin an active
-account writer's replay. The runner-local producer and projection-to-legacy
-application remain deliberately deferred; the local `ownsOperation` gate stays
-closed. Rejected or stalled runner pushes retain their outbox data and use
-capped backoff, preventing both loss and a tight livelock. Replica pull
-currently trusts the authenticated engine response; scope and writer assertions
-on that pull path arrive with the trust plane.
+workspace operations and the `users` default-workspace register are admissible
+and reflected during intake; every other runner-authored entity kind fails
+closed before persistence. Fold liveness no longer depends on retained
+per-writer heads: shared compaction retains strict pending-clock caps and
+rejects backward/no-op boundaries. Engine intake's symmetric drift bound makes
+every post-boundary admission newer; its producer mints above stable, replay,
+and pending clocks. Per-writer heads remain independent, so a dormant fully
+folded device writer cannot pin an active account writer's replay.
+
+Backfill is conditional: it emits only for touched legacy-only workspaces absent
+from projection, and emits the default register only when required and absent.
+Ensure-create is fill-if-absent: reducers retain early field registers before
+creation, then ensure fills `created` and missing registers without overwriting
+existing values. This includes delete-before-ensure: ensure records creation and
+the legacy name while preserving the remove-wins tombstone, so reflection can
+soft-delete rather than lose the entity identity. Checkpoint round trips
+preserve both intermediate arrival orders. This must be order-independent
+because producer and per-writer floors make minting below prior clocks
+impossible in general. Reflection mirrors the projection's effective default.
+Before assigning that default, reflection clears `is_default` on every owner
+row, then sets the selected row while applying projection rows; this statement
+order is required by the partial unique index. With active workspaces exactly
+one active legacy row is default; with zero, `list` returns the global ID as a
+deterministic non-throwing placeholder until lazy repair or creation. A
+near-unreachable cross-owner UUID collision fails reflection rather than
+mutating another owner.
+
+Runner workspace names must already equal shared normalized form: non-empty
+after trim, at most 100 characters, and not case-insensitively `global`.
+Immutable invalid values fail the whole batch with 400; values are never
+trimmed. Duplicate names remain allowed for legitimate CRDT convergence. Engine
+and UI paths identify, select, and key workspaces by ID, never by name.
+Envelope, checkpoint, conditional backfill, and reflection share one
+transaction. The runner-local producer remains deferred and local
+`ownsOperation` stays closed. Rejected or stalled runner pushes retain their
+outbox data and use capped backoff, preventing both loss and a tight livelock.
+Replica pull currently trusts the authenticated engine response; scope and
+writer assertions on that pull path arrive with the trust plane.
 
 A full-scale real-store probe created 100 distinct maximum 32 KiB prompts with
 commands ten minutes apart. The ASCII bank completed with zero capacity

@@ -22,6 +22,7 @@ import {
   initialOperationEntityProjection,
   operationEntityProjectionCodec,
   reduceOperationEntityProjection,
+  type OperationEntityProjection,
 } from "../shared/operation-projection";
 import {
   engineStabilityBoundaryClock,
@@ -41,6 +42,7 @@ interface OperationIntakeResources {
 interface OperationIntakeResult {
   readonly frontier: CausalFrontier;
   readonly encodedCheckpoint: string;
+  readonly projection: OperationEntityProjection;
 }
 
 export const createOperationIntake = (resources: OperationIntakeResources) => {
@@ -136,7 +138,11 @@ export const createOperationIntake = (resources: OperationIntakeResources) => {
           now,
           state,
         );
-        return { frontier: state.frontier, encodedCheckpoint };
+        return {
+          frontier: state.frontier,
+          encodedCheckpoint,
+          projection: state.projection,
+        };
       });
     },
   };

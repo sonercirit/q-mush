@@ -226,15 +226,34 @@ describe("typed operation projection", () => {
       "creator",
       2,
     );
-    const deleteFirstProjections = [
-      project([deleteBeforeCreate, createAfterDelete]),
-      project([createAfterDelete, deleteBeforeCreate]),
+    const deleteFirstStates = [
+      applyOperationList(
+        [deleteBeforeCreate, createAfterDelete],
+        testApplyState(initialOperationEntityProjection),
+        reduceOperationEntityProjection,
+      ),
+      applyOperationList(
+        [createAfterDelete, deleteBeforeCreate],
+        testApplyState(initialOperationEntityProjection),
+        reduceOperationEntityProjection,
+      ),
     ];
-    const deletedFirst = deleteFirstProjections[0]?.workspaces[0];
-    expect(deletedFirst?.created).toBeUndefined();
+    const deletedFirst = deleteFirstStates[0]?.projection.workspaces[0];
+    expect(deletedFirst?.created?.operationId).toBe(
+      createAfterDelete.operationId,
+    );
     expect(deletedFirst?.deleted).toBeDefined();
-    expect(deletedFirst?.name).toBeUndefined();
-    expect(deleteFirstProjections[1]).toEqual(deleteFirstProjections[0]);
+    expect(deletedFirst?.name?.value).toBe("must-not-resurrect");
+    expect(deleteFirstStates[1]?.projection).toEqual(
+      deleteFirstStates[0]?.projection,
+    );
+    for (const state of deleteFirstStates) {
+      const roundTrip = decodeOperationCheckpoint(
+        encodeOperationCheckpoint(state, operationEntityProjectionCodec),
+        operationEntityProjectionCodec,
+      );
+      expect(roundTrip.projection).toEqual(state.projection);
+    }
   });
 
   test("remove-wins blocks prompt name and body writes after deletion", () => {

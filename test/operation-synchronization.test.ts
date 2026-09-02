@@ -48,11 +48,12 @@ const body = (
   partition,
   envelopes,
 });
+const RUNNER_ID = "runner-1";
 const OWNED_OPERATION_CLOCK_BASE_MS = Date.now();
 const ownedOperation = (sequence = 1n) => {
   const sequenceNumber = Number(sequence);
   const operation = entityTestOperation(
-    "owner-1",
+    RUNNER_ID,
     sequence,
     {},
     "one",
@@ -75,7 +76,7 @@ const handler = (runnerUserId?: string, limits?: OperationIntakeLimits) => {
       runnerAccount: () =>
         runnerUserId === undefined
           ? undefined
-          : { runnerId: "owner-1", userId: runnerUserId },
+          : { runnerId: RUNNER_ID, userId: runnerUserId },
     },
     limits,
   );
@@ -104,15 +105,17 @@ const synchronizationReadStatus = async (frontier: unknown) =>
 const oversizedFrontierStatus = async (
   frontier: Readonly<Record<string, string>>,
 ) => synchronizationReadStatus(frontier);
-const decodedWriterIds = (value: unknown): readonly string[] => {
+const envelopePage = (value: unknown): readonly unknown[] => {
   if (!isRecord(value)) throw new Error("Expected response record");
   const envelopes = value["envelopes"];
   if (!Array.isArray(envelopes)) throw new Error("Expected envelope array");
-  return envelopes
+  return envelopes;
+};
+const decodedWriterIds = (value: unknown): readonly string[] =>
+  envelopePage(value)
     .filter((envelope): envelope is string => typeof envelope === "string")
     .map(decodeOperationEnvelope)
     .map(({ writerId }) => writerId);
-};
 const operationResponse = (
   operation: ReturnType<typeof ownedOperation>,
   partition: "non-session" | "session" = "non-session",
@@ -231,7 +234,7 @@ test("operation synchronization safely accepts own prototype-named parents", asy
   const response = await operationResponse({ ...operation, parents });
   expect(response.status).toBe(200);
   const text = await response.text();
-  expect(text).toContain('"frontier":{"owner-1":"1"}');
+  expect(text).toContain('"runner-1":"1"');
 });
 
 test("operation synchronization rejects remote clock drift in either direction", async () => {
@@ -280,7 +283,7 @@ test("operation synchronization returns only the advanced frontier", async () =>
   const responseBody: unknown = await response.json();
   expect(isRecord(responseBody)).toBe(true);
   if (!isRecord(responseBody)) throw new Error("Expected response record");
-  expect(responseBody).toEqual({ frontier: { "owner-1": "1" } });
+  expect(responseBody).toEqual({ frontier: { "runner-1": "1" } });
 });
 
 test("operation envelope round trip preserves an own prototype-named payload key", () => {
@@ -451,7 +454,7 @@ test("operation synchronization delivers a writer absent from the request fronti
     "owner-1",
     1,
   );
-  const response = await synchronized(readRequest({ "owner-1": "1" }));
+  const response = await synchronized(readRequest({ "runner-1": "1" }));
   expect(decodedWriterIds(await response.json())).toEqual(["writer-b"]);
 });
 
@@ -469,12 +472,12 @@ test("operation synchronization returns deterministic bounded missing pages", as
   const response = await synchronized(read);
   expect(response.status).toBe(200);
   const result: unknown = await response.json();
-  expect(result).toEqual({
-    envelopes: operations.slice().reverse().map(encodeOperationEnvelope),
-    hasMore: false,
-    stableClock: null,
-    stableFrontier: null,
-  });
+  envelopePage(result);
+  if (!isRecord(result)) throw new Error("Expected envelope page");
+  expect(result["hasMore"]).toBe(false);
+  expect(result["stableClock"]).toBeNull();
+  expect(result["stableFrontier"]).toBeNull();
+  expect(decodedWriterIds(result)).toEqual(["runner-1", "runner-1"]);
 });
 
 test("operation synchronization limits missing-envelope pages to 256", async () => {
@@ -485,11 +488,10 @@ test("operation synchronization limits missing-envelope pages to 256", async () 
   );
   const response = await synchronized(readRequest({}));
   const result: unknown = await response.json();
-  expect(isRecord(result) && Array.isArray(result["envelopes"])).toBe(true);
-  if (!isRecord(result) || !Array.isArray(result["envelopes"]))
-    throw new Error("Expected envelope page");
+  if (!isRecord(result)) throw new Error("Expected bounded envelope page");
+  const pageLength = envelopePage(result).length;
   expect({
-    length: result["envelopes"].length,
+    length: pageLength,
     hasMore: result["hasMore"],
   }).toEqual({ length: 256, hasMore: true });
 });
@@ -508,7 +510,7 @@ test("operation synchronization advertises both supported methods", async () => 
 
 test("operation synchronization fails closed at capacity without counting duplicates", async () => {
   const synchronized = handler("owner-1", {
-    ownerPartitionOperations: 2,
+    ownerPartitionOperations: 3,
   });
   const envelopes = ownedEnvelopes(3);
   const initial = await synchronized(

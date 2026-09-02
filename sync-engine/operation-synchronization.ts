@@ -19,6 +19,11 @@ import {
   type OperationIntakeLimits,
 } from "./operation-intake";
 import { createOperationStore } from "./operation-store";
+import {
+  assertReflectableRunnerOperations,
+  backfillRunnerWorkspaceOperations,
+  reflectRunnerWorkspaceOperations,
+} from "./runner-operation-reflection";
 import type { RunnerAccountIdentity } from "./runners";
 
 const MAX_ENVELOPE_PAGE_SIZE = 256;
@@ -197,13 +202,32 @@ export const createOperationSynchronization = (
         )
       )
         return new Response("Forbidden", { status: 403 });
-      const result = intake.apply(
-        ownerId,
-        parsed.partition,
-        operations,
-        ownerId,
-        now,
-      );
+      assertReflectableRunnerOperations(operations);
+      const result =
+        operations.length === 0
+          ? intake.apply(ownerId, parsed.partition, operations, ownerId, now)
+          : database.transaction(() => {
+              backfillRunnerWorkspaceOperations(
+                database,
+                ownerId,
+                operations,
+                now,
+              );
+              const applied = intake.apply(
+                ownerId,
+                parsed.partition,
+                operations,
+                ownerId,
+                now,
+              );
+              reflectRunnerWorkspaceOperations(
+                database,
+                ownerId,
+                applied.projection,
+                now,
+              );
+              return applied;
+            });
       return Response.json({
         frontier: prepareSynchronizationFrontier(result.frontier),
       });

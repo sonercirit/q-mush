@@ -91,7 +91,11 @@ test("operation identity equivocation is independent per device writer", async (
     runnerAccount: () => ({ runnerId: "runner-2", userId: accountId }),
   });
   expect(
-    (await otherDevice(request("POST", "self", [encoded("runner-2")]))).status,
+    (
+      await otherDevice(
+        request("POST", "self", [encoded("runner-2", 1n, "other")]),
+      )
+    ).status,
   ).toBe(200);
   expect((await send([encoded(runnerId, 1n, "equivocation")])).status).toBe(
     409,
