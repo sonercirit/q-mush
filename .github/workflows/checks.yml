@@ -74,6 +74,32 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      - name: Check dependency release ages
+        shell: bash
+        env:
+          BASE_SHA:
+            ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          check_age=true
+          zero_sha=0000000000000000000000000000000000000000
+          if [[ -n "$BASE_SHA" && "$BASE_SHA" != "$zero_sha" ]]; then
+            git fetch --no-tags --depth=1 origin "$BASE_SHA" || true
+            if git rev-parse --verify --quiet "$BASE_SHA^{commit}" >/dev/null; then
+              if git diff --quiet "$BASE_SHA" HEAD -- bun.lock; then
+                check_age=false
+              elif [[ $? -gt 1 ]]; then
+                echo "Could not compare bun.lock; running dependency age check."
+              fi
+            else
+              echo "Could not resolve comparison commit; running dependency age check."
+            fi
+          else
+            echo "No usable comparison commit; running dependency age check."
+          fi
+          if [[ "$check_age" == true ]]; then
+            bun run dependency-age
+          fi
+
       - name: Run repository and static checks
         run: bun run check
 

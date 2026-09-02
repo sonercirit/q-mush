@@ -38,11 +38,11 @@ interface AgentSkillsOptions {
   readonly braveSearch:
     | BraveSearchExecutor
     | {
-        execute(
+        execute: (
           userId: string,
           arguments_: JsonRecord,
           signal?: AbortSignal,
-        ): Promise<string>;
+        ) => Promise<string>;
       };
   readonly currentTools?:
     (() => readonly AgentSessionToolName[] | undefined) | undefined;

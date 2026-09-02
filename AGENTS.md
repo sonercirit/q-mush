@@ -22,6 +22,8 @@
   missing rule. If evidence overturns a finding, fix code and stale records;
   act, don't ask. Never commit secrets, artifacts, or env files.
 - Keep workflows local-first: check narrow, then broad, then failures.
+- Adopt dependency versions only after they have been published for seven days;
+  lockfile-changing CI enforces the release-age delay.
 
 ## Setup, Commands
 
@@ -283,5 +285,9 @@
   gets a session whose group is signaled on stop/timeout. Write/edit
   cancellation after mutation is best-effort. Outside compaction, provider
   replay has no timeout.
+- Bun 1.4.0's async runtime transpiler can segfault in Vitest forks at
+  `RuntimeTranspilerStore::run_from_js_thread`; test scripts set
+  `BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1`. Re-evaluate after adopting a
+  stable Bun newer than 1.4.0 that has been published for at least seven days.
 - Pin Playwright 1.62.1/Vitest 4.1.10: probes couple to Playwright `<launching>`
   and Vitest launch.

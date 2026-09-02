@@ -264,7 +264,7 @@ test("package and CI structurally use the guarded browser launcher", async () =>
     "Update the browser launch monkey patch before Vitest",
   ).toBe("4.1.10");
   expect(configuration.scripts.get("test:browser")).toBe(
-    "bun run --no-orphans scripts/test-browser.ts",
+    "BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1 bun run --no-orphans scripts/test-browser.ts",
   );
   expect(configuration.scripts.get("test")).toBe(
     "bun run test:unit && bun run test:browser",
