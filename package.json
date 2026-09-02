@@ -22,9 +22,9 @@
     "lint:fix": "eslint . --fix --max-warnings 0",
     "repository-check": "bun run scripts/repository-check.ts",
     "test": "bun run test:unit && bun run test:browser",
-    "test:browser": "bun run --no-orphans scripts/test-browser.ts",
-    "test:unit": "bun run --bun vitest run",
-    "test:watch": "bun run --bun vitest",
+    "test:browser": "BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1 bun run --no-orphans scripts/test-browser.ts",
+    "test:unit": "BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1 bun run --bun vitest run",
+    "test:watch": "BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1 bun run --bun vitest",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

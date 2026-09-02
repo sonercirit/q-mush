@@ -285,5 +285,9 @@
   gets a session whose group is signaled on stop/timeout. Write/edit
   cancellation after mutation is best-effort. Outside compaction, provider
   replay has no timeout.
+- Bun 1.4.0's async runtime transpiler can segfault in Vitest forks at
+  `RuntimeTranspilerStore::run_from_js_thread`; test scripts set
+  `BUN_FEATURE_FLAG_DISABLE_ASYNC_TRANSPILER=1`. Re-evaluate after adopting a
+  stable Bun newer than 1.4.0 that has been published for at least seven days.
 - Pin Playwright 1.62.1/Vitest 4.1.10: probes couple to Playwright `<launching>`
   and Vitest launch.
