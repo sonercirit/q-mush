@@ -72,7 +72,8 @@ mutating another owner.
 Runner workspace names must already equal shared normalized form: non-empty
 after trim, at most 100 characters, and not case-insensitively `global`.
 Immutable invalid values fail the whole batch with 400; values are never
-trimmed. Duplicate names remain allowed for legitimate CRDT convergence.
+trimmed. Duplicate names remain allowed for legitimate CRDT convergence. Engine
+and UI paths identify, select, and key workspaces by ID, never by name.
 Envelope, checkpoint, conditional backfill, and reflection share one
 transaction. The runner-local producer remains deferred and local
 `ownsOperation` stays closed. Rejected or stalled runner pushes retain their

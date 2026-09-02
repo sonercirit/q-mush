@@ -118,7 +118,6 @@ export const backfillRunnerWorkspaceOperations = (
 export const reflectRunnerWorkspaceOperations = (
   database: AppDatabase,
   ownerId: string,
-  _operations: readonly Operation[],
   projection: OperationEntityProjection,
   now: number,
 ): void => {

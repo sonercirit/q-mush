@@ -223,7 +223,6 @@ export const createOperationSynchronization = (
               reflectRunnerWorkspaceOperations(
                 database,
                 ownerId,
-                operations,
                 applied.projection,
                 now,
               );
