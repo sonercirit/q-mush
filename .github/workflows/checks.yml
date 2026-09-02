@@ -143,6 +143,7 @@ jobs:
               scopes: "runner-scripts test-root",
             }
           - { name: Consolidated static checks, kind: consolidated }
+          - { name: Knip project graphs, kind: knip }
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
@@ -201,10 +202,12 @@ jobs:
           node_modules/.bin/prettier --check . & pids+=("$!")
           node_modules/.bin/tsc --noEmit & pids+=("$!")
           bun scripts/repository-check.ts & pids+=("$!")
-          bun run knip:production && bun run knip:test & pids+=("$!")
           bun scripts/cpd.ts & pids+=("$!")
           for pid in "${pids[@]}"; do wait "$pid" || statuses+=("$?"); done
           (( ${#statuses[@]} == 0 ))
+      - name: Run both Knip project graphs
+        if: ${{ matrix.kind == 'knip' }}
+        run: bun run knip:production && bun run knip:test
 
   build:
     name: Build and tracked whitespace
