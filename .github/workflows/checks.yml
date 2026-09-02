@@ -23,44 +23,52 @@ jobs:
       matrix:
         include:
           - {
-              name: Tests (shard 1/10),
-              command: "bun run test:unit --shard=1/10",
+              name: Tests (shard 1/12),
+              command: "bun run test:unit --shard=1/12",
             }
           - {
-              name: Tests (shard 2/10),
-              command: "bun run test:unit --shard=2/10",
+              name: Tests (shard 2/12),
+              command: "bun run test:unit --shard=2/12",
             }
           - {
-              name: Tests (shard 3/10),
-              command: "bun run test:unit --shard=3/10",
+              name: Tests (shard 3/12),
+              command: "bun run test:unit --shard=3/12",
             }
           - {
-              name: Tests (shard 4/10),
-              command: "bun run test:unit --shard=4/10",
+              name: Tests (shard 4/12),
+              command: "bun run test:unit --shard=4/12",
             }
           - {
-              name: Tests (shard 5/10),
-              command: "bun run test:unit --shard=5/10",
+              name: Tests (shard 5/12),
+              command: "bun run test:unit --shard=5/12",
             }
           - {
-              name: Tests (shard 6/10),
-              command: "bun run test:unit --shard=6/10",
+              name: Tests (shard 6/12),
+              command: "bun run test:unit --shard=6/12",
             }
           - {
-              name: Tests (shard 7/10),
-              command: "bun run test:unit --shard=7/10",
+              name: Tests (shard 7/12),
+              command: "bun run test:unit --shard=7/12",
             }
           - {
-              name: Tests (shard 8/10),
-              command: "bun run test:unit --shard=8/10",
+              name: Tests (shard 8/12),
+              command: "bun run test:unit --shard=8/12",
             }
           - {
-              name: Tests (shard 9/10),
-              command: "bun run test:unit --shard=9/10",
+              name: Tests (shard 9/12),
+              command: "bun run test:unit --shard=9/12",
             }
           - {
-              name: Tests (shard 10/10),
-              command: "bun run test:unit --shard=10/10",
+              name: Tests (shard 10/12),
+              command: "bun run test:unit --shard=10/12",
+            }
+          - {
+              name: Tests (shard 11/12),
+              command: "bun run test:unit --shard=11/12",
+            }
+          - {
+              name: Tests (shard 12/12),
+              command: "bun run test:unit --shard=12/12",
             }
           - {
               name: Real-browser regressions,
@@ -111,9 +119,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { name: Lint (shard 1/3), kind: lint, shard: 0 }
-          - { name: Lint (shard 2/3), kind: lint, shard: 1 }
-          - { name: Lint (shard 3/3), kind: lint, shard: 2 }
+          - {
+              name: Lint (sync-engine scope),
+              kind: lint,
+              scopes: "sync-engine",
+            }
+          - {
+              name: Lint (solid and shared scopes),
+              kind: lint,
+              scopes: "solid shared",
+            }
+          - {
+              name: Lint (runner/scripts/test/root scopes),
+              kind: lint,
+              scopes: "runner-scripts test-root",
+            }
           - { name: Consolidated static checks, kind: consolidated }
     steps:
       - name: Check out repository
@@ -134,12 +154,38 @@ jobs:
       - name: Run lint shard
         if: ${{ matrix.kind == 'lint' }}
         env:
-          SHARD: ${{ matrix.shard }}
+          SCOPES: ${{ matrix.scopes }}
         run: |
-          mapfile -d '' files < <(git ls-files -z '*.cjs' '*.cts' '*.js' '*.mjs' '*.mts' '*.ts' '*.tsx')
-          shard=()
-          for ((index=SHARD; index<${#files[@]}; index+=3)); do shard+=("${files[index]}"); done
-          bunx eslint --max-warnings 0 "${shard[@]}"
+          declare -A configs=(
+            [sync-engine]=tsconfig.eslint-sync-engine.json
+            [solid]=tsconfig.eslint-solid.json
+            [shared]=tsconfig.eslint-shared.json
+            [runner-scripts]=tsconfig.eslint-runner-scripts.json
+            [test-root]=tsconfig.eslint-test-root.json
+          )
+          declare -A patterns=(
+            [sync-engine]='sync-engine'
+            [solid]='solid'
+            [shared]='shared'
+            [runner-scripts]='runner scripts'
+            [test-root]='test root'
+          )
+          mapfile -d '' all < <(git ls-files -z '*.cjs' '*.cts' '*.js' '*.mjs' '*.mts' '*.ts' '*.tsx')
+          for scope in $SCOPES; do
+            files=()
+            for file in "${all[@]}"; do
+              top=${file%%/*}
+              [[ $file != */* ]] && top=root
+              for selected in ${patterns[$scope]}; do
+                [[ $top == "$selected" ]] && files+=("$file")
+              done
+            done
+            Q_MUSH_ESLINT_TSCONFIG=${configs[$scope]} bunx eslint --max-warnings 0 "${files[@]}" &
+            pids+=("$!")
+          done
+          statuses=()
+          for pid in "${pids[@]}"; do wait "$pid" || statuses+=("$?"); done
+          (( ${#statuses[@]} == 0 ))
       - name: Run consolidated static checks in parallel
         if: ${{ matrix.kind == 'consolidated' }}
         run: |

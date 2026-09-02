@@ -6,8 +6,8 @@ import { listProjectFiles } from "./project-files";
 const CACHE_DIRECTORY = "data/check-cache";
 const WARM_BUDGET_SECONDS = 5;
 const COLD_BUDGET_SECONDS = 60;
-const LINT_SHARD_COUNT = 6;
 const FORMAT_SHARD_COUNT = 4;
+const LIGHT_TASK_DELAY_MILLISECONDS = 25_000;
 const LINT_EXTENSIONS = new Set([
   ".cjs",
   ".cts",
@@ -21,6 +21,7 @@ const LINT_EXTENSIONS = new Set([
 type Command = [string, ...string[]];
 interface Task {
   readonly commands: readonly Command[];
+  readonly delayMilliseconds?: number;
   readonly name: string;
 }
 interface TaskResult {
@@ -78,6 +79,66 @@ function commandsForFiles(
   return shards.map((files) => [executable, ...argumentsBeforeFiles, ...files]);
 }
 
+function eslintScopeCommand(
+  tsconfig: string,
+  scopeFiles: readonly string[],
+): Command {
+  return [
+    "/usr/bin/env",
+    `Q_MUSH_ESLINT_TSCONFIG=${tsconfig}`,
+    "bun",
+    "node_modules/.bin/eslint",
+    "--max-warnings",
+    "0",
+    ...scopeFiles,
+  ];
+}
+
+function lintScope(path: string): string {
+  const separator = path.indexOf("/");
+  return separator === -1 ? "root" : path.slice(0, separator);
+}
+
+function scopeLintCommands(files: readonly string[]): Command[] {
+  const scopes = new Map<string, string[]>();
+  for (const file of files) {
+    const scope = lintScope(file);
+    scopes.set(scope, [...(scopes.get(scope) ?? []), file]);
+  }
+  const filesFor = (...names: readonly string[]): string[] =>
+    names.flatMap((name) => scopes.get(name) ?? []);
+  const syncEngineFiles = filesFor("sync-engine");
+  const syncEngineShards = balancedShards(syncEngineFiles, 2);
+  const firstSyncEngineShard = syncEngineShards[0];
+  const secondSyncEngineShard = syncEngineShards[1];
+  if (
+    firstSyncEngineShard === undefined ||
+    secondSyncEngineShard === undefined
+  ) {
+    throw new Error("Could not create sync-engine lint shards.");
+  }
+  return [
+    eslintScopeCommand(
+      "tsconfig.eslint-sync-engine.json",
+      firstSyncEngineShard,
+    ),
+    eslintScopeCommand(
+      "tsconfig.eslint-sync-engine.json",
+      secondSyncEngineShard,
+    ),
+    eslintScopeCommand("tsconfig.eslint-solid.json", filesFor("solid")),
+    eslintScopeCommand(
+      "tsconfig.eslint-runner-scripts.json",
+      filesFor("runner", "scripts"),
+    ),
+    eslintScopeCommand("tsconfig.eslint-shared.json", filesFor("shared")),
+    eslintScopeCommand(
+      "tsconfig.eslint-test-root.json",
+      filesFor("test", "root"),
+    ),
+  ];
+}
+
 async function cacheHit(name: string, hash: string): Promise<boolean> {
   const file = Bun.file(`${CACHE_DIRECTORY}/${name}`);
   return (await file.exists()) && (await file.text()).trim() === hash;
@@ -107,6 +168,9 @@ async function runTask(task: Task, hash: string): Promise<TaskResult> {
     };
   }
 
+  if (task.delayMilliseconds !== undefined) {
+    await Bun.sleep(task.delayMilliseconds);
+  }
   console.log(
     `[check] ${task.name}: cache miss; running ${String(task.commands.length)} process(es)`,
   );
@@ -134,14 +198,9 @@ const files = await listProjectFiles(
 const hash = await contentHash(files);
 const lintFiles = files.filter((path) => LINT_EXTENSIONS.has(extname(path)));
 const allShards = balancedShards(files, FORMAT_SHARD_COUNT);
-const lintShards = balancedShards(lintFiles, LINT_SHARD_COUNT);
 const tasks: readonly Task[] = [
   {
-    commands: commandsForFiles(
-      "node_modules/.bin/eslint",
-      ["--max-warnings", "0"],
-      lintShards,
-    ),
+    commands: scopeLintCommands(lintFiles),
     name: "lint",
   },
   {
@@ -150,13 +209,23 @@ const tasks: readonly Task[] = [
       ["--check", "--ignore-unknown"],
       allShards,
     ),
+    delayMilliseconds: LIGHT_TASK_DELAY_MILLISECONDS,
     name: "format",
   },
   { commands: [["node_modules/.bin/tsc", "--noEmit"]], name: "typecheck" },
-  { commands: [["bun", "run", "knip"]], name: "knip" },
-  { commands: [["bun", "scripts/cpd.ts"]], name: "cpd" },
+  {
+    commands: [["bun", "run", "knip"]],
+    delayMilliseconds: LIGHT_TASK_DELAY_MILLISECONDS,
+    name: "knip",
+  },
+  {
+    commands: [["bun", "scripts/cpd.ts"]],
+    delayMilliseconds: LIGHT_TASK_DELAY_MILLISECONDS,
+    name: "cpd",
+  },
   {
     commands: [["bun", "scripts/repository-check.ts"]],
+    delayMilliseconds: LIGHT_TASK_DELAY_MILLISECONDS,
     name: "repository-check",
   },
 ];

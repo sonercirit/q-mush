@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "test/**/*.ts",
+    "test/**/*.tsx",
+    "runner/**/*.ts",
+    "runner/**/*.tsx",
+    "scripts/**/*.ts",
+    "scripts/**/*.tsx",
+    "shared/**/*.ts",
+    "shared/**/*.tsx",
+    "solid/**/*.ts",
+    "solid/**/*.tsx",
+    "sync-engine/**/*.ts",
+    "sync-engine/**/*.tsx",
+    "*.ts"
+  ]
+}
